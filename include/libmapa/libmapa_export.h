@@ -1,0 +1,14 @@
+#ifndef LIBMAPA_LIBMAPA_EXPORT_H_
+#define LIBMAPA_LIBMAPA_EXPORT_H_
+
+#include <QtGlobal>
+
+#if defined(LIBMAPA_STATIC)
+#  define LIBMAPA_EXPORT
+#elif defined(LIBMAPA_BUILD)
+#  define LIBMAPA_EXPORT Q_DECL_EXPORT
+#else
+#  define LIBMAPA_EXPORT Q_DECL_IMPORT
+#endif
+
+#endif // LIBMAPA_LIBMAPA_EXPORT_H_

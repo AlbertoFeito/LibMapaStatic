@@ -1,0 +1,44 @@
+# --- Compilacion -------------------------------------------------------
+build/
+build-*/
+bin/
+*.o
+*.a
+*.so
+*.dll
+*.exe
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*_autogen/
+Testing/
+.qmake.stash
+*.pro.user*
+
+# --- Datos: NO van al repositorio --------------------------------------
+# Las bases de teselas pesan gigabytes y son datos, no codigo.
+*.sqlitedb
+*.db
+*.sig
+Recursos/
+
+# datasets.json lleva rutas locales de cada maquina.
+# En el repositorio esta datasets.example.json.
+datasets.json
+
+# --- Salidas de las herramientas ---------------------------------------
+informe.txt
+bench*.txt
+*.png
+!docs/*.png
+
+# --- QCustomPlot: GPLv3, ver third_party/qcustomplot/LEEME.md ----------
+third_party/qcustomplot/qcustomplot.h
+third_party/qcustomplot/qcustomplot.cpp
+
+# --- Editores ----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~

@@ -1,0 +1,159 @@
+#ifndef LIBMAPA_MAPWIDGET_H_
+#define LIBMAPA_MAPWIDGET_H_
+
+#include "libmapa/MapTypes.h"
+#include "libmapa/libmapa_export.h"
+
+#include <QGeoCoordinate>
+#include <QPointF>
+#include <QString>
+#include <QWidget>
+#include <memory>
+
+namespace libmapa {
+
+//! Ajustes de arranque del widget.
+struct MapConfig
+{
+    /*!
+     * \brief Ruta al datasets.json generado por probe_db.
+     *
+     * Ahi estan las convenciones de cada BD: el mapeo de zoom, el esquema del
+     * eje Y, el nivel de fondo garantizado y el relleno tipico. Nada de eso
+     * se cablea en el codigo.
+     */
+    QString datasetsFile;
+
+    QString initialLayerId;                    //!< Vacio = el primero del JSON.
+    QGeoCoordinate initialCenter{23.1136, -82.3666};
+    int initialZoom = 10;
+
+    int cacheMiB = 128;         //!< Memoria para teselas ya decodificadas.
+    int debounceMs = 80;        //!< Agrupacion de peticiones al arrastrar.
+
+    //! Color de las zonas sin ninguna tesela. Azul mar por defecto: las BD no
+    //! guardan teselas de oceano abierto y ese color ES el mapa correcto.
+    QColor noDataColor = QColor(0x9d, 0xd3, 0xdf);
+};
+
+/*!
+ * \brief Widget de mapa embebible.
+ *
+ * Se usa asi, y esto es todo lo que hace falta:
+ *
+ *     libmapa::MapConfig cfg;
+ *     cfg.datasetsFile = QDir::currentPath() + "/datasets.json";
+ *
+ *     auto *mapa = new libmapa::MapWidget(cfg, this);
+ *     ui->contenedor->layout()->addWidget(mapa);
+ *
+ *     connect(ui->btnSat, &QPushButton::clicked, mapa, [mapa]{
+ *         mapa->setBaseLayerId("satelital");
+ *     });
+ *
+ * El motor de dibujo es QCustomPlot, pero NO aparece en esta cabecera. En el
+ * codigo original, cmapaplot.h hacia #include "qcustomplot.h" y CMapaPlot
+ * heredaba publicamente de QCustomPlot: cualquier proyecto que usara la
+ * libreria se tragaba 300 KB de cabecera y veia doscientos metodos que no
+ * deberia tocar. Aqui QCustomPlot queda dentro del PIMPL.
+ *
+ * Quien quiera acceso directo al QCustomPlot interno para dibujar sus propias
+ * capas puede pedirlo con customPlot(), pero es una salida de emergencia
+ * explicita, no la via normal.
+ */
+class LIBMAPA_EXPORT MapWidget : public QWidget
+{
+    Q_OBJECT
+    Q_PROPERTY(QString baseLayerId READ baseLayerId WRITE setBaseLayerId
+                   NOTIFY baseLayerChanged)
+    Q_PROPERTY(int zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
+
+public:
+    explicit MapWidget(const MapConfig &config, QWidget *parent = nullptr);
+    ~MapWidget() override;
+
+    //! false si no se pudo abrir ninguna base de datos de mapas.
+    bool isReady() const;
+    QString lastError() const;
+
+    // --- Capa base -------------------------------------------------------
+    QVector<BaseLayerInfo> availableBaseLayers() const;
+    QString baseLayerId() const;
+    bool setBaseLayerId(const QString &id);
+
+    // --- Navegacion ------------------------------------------------------
+    QGeoCoordinate center() const;
+    void setCenter(const QGeoCoordinate &center);
+
+    int zoom() const;
+    void setZoom(int zoom);
+    int minZoom() const;
+    int maxZoom() const;
+
+    void zoomIn();
+    void zoomOut();
+    void fitBounds(const QGeoCoordinate &northWest,
+                   const QGeoCoordinate &southEast);
+
+    //! Extension visible ahora mismo.
+    QGeoCoordinate visibleNorthWest() const;
+    QGeoCoordinate visibleSouthEast() const;
+
+    // --- Herramientas ----------------------------------------------------
+    MapTool activeTool() const;
+    void setActiveTool(MapTool tool);
+
+    // --- Diagnostico -----------------------------------------------------
+    //! Porcentaje de la pantalla resuelto con teselas propias (no ancestros).
+    double exactCoverage() const;
+    void setDebugGridVisible(bool visible);
+
+    /*!
+     * \brief Geografico -> coordenadas de los ejes del QCustomPlot interno.
+     *
+     * IMPRESCINDIBLE para cualquier overlay dibujado con coordenadas de eje
+     * (QCPCurve, QCPItemEllipse, QCPItemLine...). El eje X va en grados de
+     * longitud, pero el Y NO va en grados de latitud: va en "grados de
+     * Mercator", porque el eje de QCustomPlot es lineal y la proyeccion no lo
+     * es. Pasarle la latitud directamente deforma el mapa: a 23 grados el
+     * desfase es de 0.64 y a 60 de 15.5.
+     *
+     *     QCPItemEllipse *punto = new QCPItemEllipse(plot);
+     *     const QPointF c = mapa->toAxisCoords(coordenada);
+     *     punto->topLeft->setCoords(c.x() - r, c.y() + r);
+     *     punto->bottomRight->setCoords(c.x() + r, c.y() - r);
+     */
+    QPointF toAxisCoords(const QGeoCoordinate &position) const;
+    QGeoCoordinate fromAxisCoords(const QPointF &axisPoint) const;
+
+    /*!
+     * \brief QCustomPlot interno, para dibujar capas propias.
+     *
+     * Devuelve QWidget* a proposito: quien lo necesite hara el cast y
+     * asumira la dependencia en SU codigo, sin imponersela a los demas.
+     */
+    QWidget *customPlot() const;
+
+signals:
+    void baseLayerChanged(const QString &id);
+    void zoomChanged(int zoom);
+    void centerChanged(const QGeoCoordinate &center);
+    void mouseMoved(const QGeoCoordinate &position);
+    void clicked(const QGeoCoordinate &position, Qt::MouseButton button);
+    void measurementFinished(const libmapa::Measurement &measurement);
+    void areaSelected(const QGeoCoordinate &northWest,
+                      const QGeoCoordinate &southEast);
+    void pointPicked(const QGeoCoordinate &position);
+    void errorOccurred(const QString &message);
+
+protected:
+    void resizeEvent(QResizeEvent *event) override;   //!< Firma correcta (F-18)
+
+private:
+    class Impl;
+    std::unique_ptr<Impl> d;
+};
+
+} // namespace libmapa
+
+#endif // LIBMAPA_MAPWIDGET_H_

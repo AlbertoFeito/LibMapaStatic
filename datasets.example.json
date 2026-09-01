@@ -1,0 +1,57 @@
+{
+    "_comentario": [
+        "EJEMPLO. Copia este fichero a datasets.json y ajusta 'filePath'.",
+        "Genera el tuyo con:",
+        "  probe_db --id osm --file Recursos/Cuba_OSM_CID3.sqlitedb \\",
+        "           --id satelital --file Recursos/Cuba_Satelital_CID3.sqlitedb \\",
+        "           --ref-bbox 23.3,-85.0,19.7,-74.0",
+        "Las rutas relativas se resuelven respecto a la ubicacion de este fichero."
+    ],
+    "version": 1,
+    "datasets": [
+        {
+            "id": "osm",
+            "displayName": "Open Street Map",
+            "filePath": "Recursos/Cuba_OSM_CID3.sqlitedb",
+            "tableName": "tiles",
+            "zFactor": 1,
+            "zOffset": 1,
+            "minZoom": 3,
+            "maxZoom": 16,
+            "recommendedMaxZoom": 15,
+            "typicalFill": 1.0,
+            "scheme": "XYZ",
+            "sValue": 2686452,
+            "hasSColumn": true,
+            "tileSize": 256,
+            "colZ": "z",
+            "colX": "x",
+            "colY": "y",
+            "colS": "s",
+            "colImage": "image",
+            "baseZoom": 3
+        },
+        {
+            "id": "satelital",
+            "displayName": "Satelital",
+            "filePath": "Recursos/Cuba_Satelital_CID3.sqlitedb",
+            "tableName": "tiles",
+            "zFactor": -1,
+            "zOffset": 17,
+            "minZoom": 1,
+            "maxZoom": 18,
+            "recommendedMaxZoom": 16,
+            "typicalFill": 0.32,
+            "scheme": "XYZ",
+            "sValue": 0,
+            "hasSColumn": true,
+            "tileSize": 256,
+            "colZ": "z",
+            "colX": "x",
+            "colY": "y",
+            "colS": "s",
+            "colImage": "image",
+            "baseZoom": 1
+        }
+    ]
+}
