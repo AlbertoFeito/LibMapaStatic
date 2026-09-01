@@ -12,14 +12,15 @@ the Free Software Foundation, either version 3 of the License, or
 
 Incluirlo aquí obligaría a que todo el repositorio fuese GPLv3, y a que
 cualquier aplicación que enlace con esta librería publique su código fuente.
-Si eso no encaja con cómo se va a distribuir EstacionTerrena3, hay dos
-caminos:
 
-- Comprar la **licencia comercial** de QCustomPlot en qcustomplot.com.
-- Mantener el proyecto bajo GPLv3 conscientemente.
+**Decisión tomada:** este proyecto se distribuye bajo **GPLv3** (ver el fichero
+`LICENSE` en la raíz), la misma licencia que QCustomPlot. Aun así, QCustomPlot
+no se versiona aquí: se enlaza desde tu propia copia, para no arrastrar su
+código en el repositorio y para que quede claro de dónde sale.
 
-En cualquier caso, la decisión es del autor del proyecto, no algo que deba
-quedar decidido de tapadillo por copiar un fichero.
+Si en el futuro GPLv3 no encajara con cómo se distribuye EstacionTerrena3, la
+alternativa es comprar la **licencia comercial** de QCustomPlot en
+qcustomplot.com y relicenciar este proyecto en consecuencia.
 
 ## Cómo añadirlo
 

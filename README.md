@@ -121,7 +121,21 @@ Hasta la fase 5 inclusive, los datos vectoriales todavía no se dibujan: el
 
 ## Licencia
 
-**Sin definir todavía.** Depende de cómo se resuelva lo de QCustomPlot: si se
-usa su versión GPL v3, este proyecto tendrá que ser GPLv3 también. Mientras no
-haya un fichero `LICENSE`, el código queda como «todos los derechos
-reservados».
+Este proyecto se distribuye bajo la **GNU General Public License v3.0 (GPLv3)**,
+la misma licencia que usa [QCustomPlot](https://www.qcustomplot.com/), el motor
+de dibujo del que depende el widget. El texto completo está en el fichero
+[`LICENSE`](LICENSE).
+
+```
+Copyright (C) 2026 Alberto Feito
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+```
+
+QCustomPlot en sí **no se incluye** en el repositorio (ver
+[`third_party/qcustomplot/LEEME.md`](third_party/qcustomplot/LEEME.md)); se
+enlaza desde tu propia copia. El núcleo (`libmapa_core`), sus tests y las
+herramientas que no usan el widget siguen compilando sin él.
