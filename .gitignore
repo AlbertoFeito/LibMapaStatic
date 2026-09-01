@@ -42,3 +42,4 @@ third_party/qcustomplot/qcustomplot.cpp
 .idea/
 *.swp
 *~
+b/
