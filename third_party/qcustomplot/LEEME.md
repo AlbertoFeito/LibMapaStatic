@@ -33,7 +33,7 @@ third_party/qcustomplot/qcustomplot.cpp
 O apunta a la copia que ya tenga tu proyecto:
 
 ```
-cmake -DLIBMAPA_QCP_DIR=D:/2025/veliz/EstacionTerrena3/qcustomplot ...
+cmake -DLIBMAPA_QCP_DIR=D:/ruta/a/tu/qcustomplot ...
 ```
 
 También sirve la variable de entorno `QCUSTOMPLOT_DIR`.
