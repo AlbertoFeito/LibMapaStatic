@@ -1,0 +1,87 @@
+Database: [Cuba_Satelital_CID3]
+    Connection: read-write
+    File name: D:\2024\Proyectos\EstacionTierra2024\EstacionTierra2\build\Recursos\Cuba_Satelital_CID3.sqlitedb
+    File size: 3604923392 bytes
+    Page size: 1024
+    Encoding: UTF-8
+    Auto vacuum: 0
+    Tables: 4
+    Views: 0
+    Virtual Tables: 0
+------------------------------------------------------------
+Table [android_metadata]
+    Fields: 1
+        [locale]: text
+    Indexes: 0
+    Triggers: 0
+    Table constraints: 
+        Primary Key: 
+            Fields: 
+            On Conflict: 
+        Foreign Keys: 0
+        Unique constraints: 0
+        Check constraints: 0
+Table [android_metadata] end
+------------------------------------------------------------
+Table [info]
+    Fields: 5
+        [minzoom]: integer
+        [maxzoom]: integer
+        [tilenumbering]: TEXT
+        [timecolumn]: TEXT
+        [expireminutes]: TEXT
+    Indexes: 0
+    Triggers: 0
+    Table constraints: 
+        Primary Key: 
+            Fields: 
+            On Conflict: 
+        Foreign Keys: 0
+        Unique constraints: 0
+        Check constraints: 0
+Table [info] end
+------------------------------------------------------------
+Table [sqlite_master]
+    Fields: 5
+        [type]: TEXT
+        [name]: TEXT
+        [tbl_name]: TEXT
+        [rootpage]: INTEGER
+        [sql]: TEXT
+    Indexes: 0
+    Triggers: 0
+    Table constraints: 
+        Primary Key: 
+            Fields: 
+            On Conflict: 
+        Foreign Keys: 0
+        Unique constraints: 0
+        Check constraints: 0
+Table [sqlite_master] end
+------------------------------------------------------------
+Table [tiles]
+    Fields: 7
+        [version]: integer
+        [z]: integer
+        [x]: integer
+        [y]: integer
+        [s]: integer
+        [image]: blob
+            NOT NULL
+        [time]: integer
+    Indexes: 1
+        [IND]
+            [x] 
+            [y] 
+            [z] 
+            [s] 
+    Triggers: 0
+    Table constraints: 
+        Primary Key: 
+            Fields: [version];[z];[x];[y]
+            On Conflict: 
+        Foreign Keys: 0
+        Unique constraints: 0
+        Check constraints: 0
+Table [tiles] end
+------------------------------------------------------------
