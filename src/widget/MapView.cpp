@@ -6,6 +6,7 @@
 #include "geo/WebMercator.h"
 #include "geo/WebMercator.h"
 
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QResizeEvent>
 #include <QWheelEvent>
@@ -48,6 +49,17 @@ MapView::MapView(TileService *service, QWidget *parent)
              QCustomPlot::limAbove);
     m_tileLayer = new TileLayer(this, service);
     m_tileLayer->setLayer(QStringLiteral("tiles"));
+
+    // Capa de entidades ESTATICAS, encima de las teselas. Los objetivos en
+    // movimiento tendran la suya propia: si compartieran capa, cada
+    // actualizacion de posicion obligaria a redibujar todas las zonas.
+    addLayer(QStringLiteral("features"), layer(QStringLiteral("tiles")),
+             QCustomPlot::limAbove);
+    m_model = new OverlayModel(this);
+    m_featureLayer = new FeatureLayer(this, m_model);
+    m_featureLayer->setLayer(QStringLiteral("features"));
+    m_featureLayer->setAxisMapper(
+        [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
 
     if (service) {
         connect(service, &TileService::tilesReady,
@@ -381,6 +393,121 @@ void MapView::handleMeasureClick(const QGeoCoordinate &donde)
     replot(QCustomPlot::rpQueuedReplot);
 }
 
+bool MapView::cancelDrawing()
+{
+    if (!m_drafting)
+        return false;
+    m_drafting = false;
+    m_draft = MapFeature();
+    m_featureLayer->setDraft(nullptr);
+    emit drawingCancelled();
+    return true;
+}
+
+qint64 MapView::finishDrawing()
+{
+    if (!m_drafting)
+        return -1;
+
+    MapFeature f = m_draft;
+    m_drafting = false;
+    m_draft = MapFeature();
+    m_featureLayer->setDraft(nullptr);
+
+    // Si el usuario cierra con menos vertices de los necesarios, se descarta
+    // en vez de crear una geometria degenerada.
+    if (!f.isValid()) {
+        emit drawingCancelled();
+        return -1;
+    }
+
+    const qint64 id = m_model->addFeature(f);
+    if (id > 0)
+        emit featureCreated(id);
+    return id;
+}
+
+void MapView::keyPressEvent(QKeyEvent *event)
+{
+    switch (event->key()) {
+    case Qt::Key_Escape:
+        if (cancelDrawing()) {
+            event->accept();
+            return;
+        }
+        if (m_model->selectedId() >= 0) {
+            m_model->clearSelection();
+            event->accept();
+            return;
+        }
+        break;
+
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+        if (m_drafting) {
+            finishDrawing();
+            event->accept();
+            return;
+        }
+        break;
+
+    case Qt::Key_Delete:
+    case Qt::Key_Backspace:
+        if (m_drafting && !m_draft.geometry.isEmpty()) {
+            // Deshace el ultimo vertice puesto.
+            m_draft.geometry.removeLast();
+            if (m_draft.geometry.isEmpty())
+                cancelDrawing();
+            else
+                m_featureLayer->setDraft(&m_draft);
+            event->accept();
+            return;
+        }
+        if (m_tool == MapTool::EditFeature && m_model->selectedId() >= 0) {
+            m_model->removeFeature(m_model->selectedId());
+            event->accept();
+            return;
+        }
+        break;
+
+    default:
+        break;
+    }
+    QCustomPlot::keyPressEvent(event);
+}
+
+void MapView::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    const QGeoCoordinate donde = coordinateAt(event->pos());
+
+    if (m_drafting) {
+        // El doble clic cierra el trazado. El primer clic del doble ya anadio
+        // su vertice, asi que no se anade otro encima.
+        finishDrawing();
+        event->accept();
+        return;
+    }
+
+    if (m_tool == MapTool::EditFeature) {
+        // Doble clic sobre un lado: inserta un vertice ahi.
+        const qint64 id = m_featureLayer->featureAt(event->pos());
+        if (id >= 0) {
+            const auto f = m_model->feature(id);
+            if (f && f->kind != GeometryKind::Point) {
+                const int tras = m_featureLayer->segmentAt(*f, event->pos());
+                if (tras >= 0) {
+                    m_model->insertVertex(id, tras + 1, donde);
+                    m_model->setSelected(id);
+                    event->accept();
+                    return;
+                }
+            }
+        }
+    }
+
+    QCustomPlot::mouseDoubleClickEvent(event);
+}
+
 void MapView::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
@@ -420,6 +547,60 @@ void MapView::mousePressEvent(QMouseEvent *event)
             emit pointPicked(coordinateAt(event->pos()));
             break;
 
+        case MapTool::DrawPoint: {
+            MapFeature f;
+            f.kind = GeometryKind::Point;
+            f.layerId = m_activeLayer;
+            f.type = m_draftType;
+            f.style = m_draftStyle;
+            f.geometry = {coordinateAt(event->pos())};
+            const qint64 id = m_model->addFeature(f);
+            if (id > 0)
+                emit featureCreated(id);
+            break;
+        }
+
+        case MapTool::DrawPolyline:
+        case MapTool::DrawPolygon:
+            if (!m_drafting) {
+                m_drafting = true;
+                m_draft = MapFeature();
+                m_draft.kind = (m_tool == MapTool::DrawPolygon)
+                                   ? GeometryKind::Polygon
+                                   : GeometryKind::Polyline;
+                m_draft.layerId = m_activeLayer;
+                m_draft.type = m_draftType;
+                m_draft.style = m_draftStyle;
+            }
+            m_draft.geometry.append(coordinateAt(event->pos()));
+            m_featureLayer->setDraft(&m_draft);
+            break;
+
+        case MapTool::EditFeature: {
+            const qint64 seleccionada = m_model->selectedId();
+
+            // Primero se mira si hay un tirador de vertice bajo el cursor:
+            // tiene prioridad sobre la propia entidad, porque los tiradores
+            // caen encima de ella.
+            if (seleccionada >= 0) {
+                const int v = m_featureLayer->vertexAt(seleccionada, event->pos());
+                if (v >= 0) {
+                    m_editVertex = v;
+                    m_lastEditPos = coordinateAt(event->pos());
+                    break;
+                }
+            }
+
+            const qint64 id = m_featureLayer->featureAt(event->pos());
+            m_model->setSelected(id);
+            if (id >= 0) {
+                emit featureClicked(id, coordinateAt(event->pos()));
+                m_movingFeature = true;
+                m_lastEditPos = coordinateAt(event->pos());
+            }
+            break;
+        }
+
         default:
             break;
         }
@@ -431,6 +612,29 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
 {
     const QGeoCoordinate bajo = coordinateAt(event->pos());
     emit mouseMovedTo(bajo);
+
+    // Edicion en curso: tiene prioridad sobre el desplazamiento del mapa.
+    if (m_tool == MapTool::EditFeature
+        && (m_editVertex >= 0 || m_movingFeature)) {
+        const qint64 id = m_model->selectedId();
+        if (id >= 0 && m_lastEditPos.isValid() && bajo.isValid()) {
+            if (m_editVertex >= 0) {
+                m_model->moveVertex(id, m_editVertex, bajo);
+            } else {
+                m_model->moveFeature(id,
+                                     bajo.latitude() - m_lastEditPos.latitude(),
+                                     bajo.longitude() - m_lastEditPos.longitude());
+            }
+            m_lastEditPos = bajo;
+        }
+        event->accept();
+        return;
+    }
+
+    // Mientras se traza, el lado siguiente sigue al raton.
+    if (m_drafting) {
+        m_featureLayer->setDraftCursor(event->pos(), true);
+    }
 
     if (m_dragging) {
         // El desplazamiento se calcula en el eje PROYECTADO, no en latitud:
@@ -476,6 +680,14 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
 {
     const QGeoCoordinate donde = coordinateAt(event->pos());
 
+    if (m_editVertex >= 0 || m_movingFeature) {
+        m_editVertex = -1;
+        m_movingFeature = false;
+        m_lastEditPos = QGeoCoordinate();
+        event->accept();
+        return;
+    }
+
     if (m_dragging) {
         m_dragging = false;
         unsetCursor();
@@ -515,6 +727,8 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
             emit mapClicked(donde, event->button());
             break;
         }
+    } else if (event->button() == Qt::RightButton && m_drafting) {
+        finishDrawing();
     } else {
         emit mapClicked(donde, event->button());
     }
@@ -524,12 +738,22 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
 
 void MapView::setActiveTool(MapTool tool)
 {
+    // Cambiar de herramienta abandona lo que hubiera a medias: dejarlo vivo
+    // haria que un trazado reapareciera al volver a la herramienta.
+    cancelDrawing();
+    m_editVertex = -1;
+    m_movingFeature = false;
+    m_lastEditPos = QGeoCoordinate();
+
     m_tool = tool;
     m_toolFirstPointSet = false;
     if (m_measureLine) m_measureLine->setVisible(false);
     if (m_areaRect)    m_areaRect->setVisible(false);
 
-    setCursor(tool == MapTool::None ? Qt::ArrowCursor : Qt::CrossCursor);
+    setCursor(tool == MapTool::None ? Qt::ArrowCursor
+              : tool == MapTool::EditFeature ? Qt::PointingHandCursor
+                                             : Qt::CrossCursor);
+    setFocusPolicy(Qt::StrongFocus);   // hace falta para recibir Escape y Supr
     replot(QCustomPlot::rpQueuedReplot);
 }
 

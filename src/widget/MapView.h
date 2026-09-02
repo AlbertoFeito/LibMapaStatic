@@ -5,6 +5,8 @@
 
 #include "libmapa/MapTypes.h"
 #include "tiles/TileService.h"
+#include "widget/FeatureLayer.h"
+#include "widget/OverlayModel.h"
 #include "widget/TileLayer.h"
 
 #include <QGeoCoordinate>
@@ -37,6 +39,8 @@ public:
     ~MapView() override;
 
     TileLayer *tileLayer() const { return m_tileLayer; }
+    FeatureLayer *featureLayer() const { return m_featureLayer; }
+    OverlayModel *overlayModel() const { return m_model; }
 
     QGeoCoordinate center() const;
     void setCenter(const QGeoCoordinate &center);
@@ -91,8 +95,28 @@ public:
     //! Pide al servicio las teselas del viewport actual.
     void requestVisibleTiles();
 
+    //! Capa donde se crean las entidades nuevas.
+    void setActiveFeatureLayer(const QString &id) { m_activeLayer = id; }
+    QString activeFeatureLayer() const { return m_activeLayer; }
+
+    //! Estilo de las entidades que se creen a partir de ahora.
+    void setDraftStyle(const FeatureStyle &style) { m_draftStyle = style; }
+    FeatureStyle draftStyle() const { return m_draftStyle; }
+
+    //! Tipo de dominio que se pone a las entidades nuevas.
+    void setDraftType(const QString &type) { m_draftType = type; }
+
+    //! Cancela el trazado en curso. Devuelve false si no habia ninguno.
+    bool cancelDrawing();
+    //! Cierra el trazado en curso y crea la entidad. -1 si no era valida.
+    qint64 finishDrawing();
+    bool isDrawing() const { return m_drafting; }
+
 signals:
     void zoomChanged(int zoom);
+    void featureCreated(qint64 id);
+    void featureClicked(qint64 id, const QGeoCoordinate &position);
+    void drawingCancelled();
     void centerChanged(const QGeoCoordinate &center);
     void mouseMovedTo(const QGeoCoordinate &position);
     void mapClicked(const QGeoCoordinate &position, Qt::MouseButton button);
@@ -103,6 +127,8 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -137,6 +163,8 @@ private:
 
     TileService *m_service = nullptr;
     TileLayer *m_tileLayer = nullptr;
+    OverlayModel *m_model = nullptr;
+    FeatureLayer *m_featureLayer = nullptr;
 
     int m_zoom = 10;
     QGeoCoordinate m_center{23.1136, -82.3666};
@@ -150,6 +178,20 @@ private:
     bool m_toolFirstPointSet = false;
     QGeoCoordinate m_toolFirstPoint;
     QCPItemLine *m_measureLine = nullptr;
+
+    // --- Trazado y edicion de entidades ---------------------------------
+    QString m_activeLayer = QStringLiteral("default");
+    QString m_draftType;
+    FeatureStyle m_draftStyle;
+
+    MapFeature m_draft;
+    bool m_drafting = false;
+
+    //! Vertice que se esta arrastrando, o -1.
+    int m_editVertex = -1;
+    //! Se esta moviendo la entidad entera.
+    bool m_movingFeature = false;
+    QGeoCoordinate m_lastEditPos;
     QCPItemEllipse *m_measureStart = nullptr;
     QCPItemRect *m_areaRect = nullptr;
 };

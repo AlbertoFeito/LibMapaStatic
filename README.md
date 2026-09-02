@@ -9,7 +9,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 
 - Qt 5.14+ o Qt 6, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
-- 10 tests (9 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 11 tests (9 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 
 ## Uso
 
@@ -100,7 +100,7 @@ src/
   db/                conexiones SQLite, esquema, repositorio vectorial
   tiles/             lectura, caché, planificación y carga de teselas
   widget/            MapView y capa de teselas sobre QCustomPlot
-tests/               10 tests (9 sin QCustomPlot)
+tests/               11 tests (9 sin QCustomPlot)
 tools/               herramientas de línea de comandos
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 ```
@@ -114,10 +114,12 @@ docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 | 3 | Motor asíncrono: hilo propio, cancelación, respaldo de tesela padre |
 | 4 | `MapWidget`: navegación, capas, medición, zoom a área |
 | 5 | Datos vectoriales: esquema relacional y repositorio |
-| 6 | *Pendiente*: overlays de puntos, vehículos, polígonos y rutas sobre el mapa |
+| 6 | Entidades: puntos, polilíneas y polígonos, con capas y edición interactiva |
+| 7 | *Pendiente*: objetivos en movimiento, y rutas aéreas |
 
-Hasta la fase 5 inclusive, los datos vectoriales todavía no se dibujan: el
-`MapWidget` aún no expone `addPoint()` ni `addVehicle()`. Eso llega en la 6.
+Las entidades se dibujan y se editan con el ratón, pero todavía **no se
+guardan solas**: enlazar el `MapWidget` con el `VectorRepository` queda
+pendiente, igual que deshacer/rehacer.
 
 ## Licencia
 

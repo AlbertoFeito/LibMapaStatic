@@ -1507,3 +1507,89 @@ Tres cosas que merece la pena mirar ahí:
 Renombra `Recursos/puntosBD.sig`, arranca `EstacionTerrena3` y guarda un punto
 nuevo. Si al reiniciar no está, es el fallo del DDL: las tablas nunca llegan a
 crearse y la aplicación solo funciona sobre ficheros heredados.
+
+---
+
+## 27. Fase 6 — Entidades sobre el mapa
+
+### El modelo: geometría más atributos, no una clase por concepto
+
+En el código original había `CPunto`, `CVehiculo`, `CAvion` y `CBarco`, con
+herencia, porque el dominio decía que eran cuatro cosas distintas. Acabó en un
+`CBarco` con unos cincuenta getters de AIS que `CAvion` heredaba sin poder
+usar, y en una jerarquía que había que tocar cada vez que aparecía un concepto
+nuevo.
+
+`MapFeature` tiene **tres geometrías** (`Point`, `Polyline`, `Polygon`) más un
+`type` que es una etiqueta libre y un `QVariantMap attributes`. La librería no
+interpreta ninguno de los dos:
+
+```cpp
+zona.type = "zona_prohibida";
+zona.attributes["techo_m"] = 120;
+zona.attributes["vigencia"] = "2026-09-01";
+```
+
+Un concepto nuevo del dominio no obliga a tocar la librería ni a migrar nada.
+
+### El reparto
+
+**Dentro de la librería:** dibujar geometrías, detectar qué hay bajo el
+cursor, crear y editar, capas con visibilidad y orden, conversión de
+coordenadas.
+
+**Fuera, en la aplicación:** qué significa cada tipo, las reglas de
+validación, el catálogo de iconos, y de dónde salen los datos.
+
+### Estático y dinámico van en capas separadas
+
+`FeatureLayer` dibuja a un pixmap y lo reutiliza mientras nada cambie. Es lo
+que permitirá que los objetivos en movimiento, en su propia capa, no obliguen
+a redibujar las zonas: con 500 objetivos y 50 zonas, compartir capa
+significaría redibujarlo todo decenas de veces por segundo.
+
+El trazo en curso se pinta **fuera** del pixmap, porque cambia con cada
+movimiento del ratón.
+
+### Herramientas interactivas
+
+| Herramienta | |
+|---|---|
+| `DrawPoint` | un clic crea un punto |
+| `DrawPolyline` / `DrawPolygon` | clic a clic; doble clic o clic derecho cierra |
+| `EditFeature` | clic selecciona, arrastrar un tirador mueve el vértice, arrastrar el interior mueve la figura, doble clic sobre un lado inserta un vértice |
+
+Teclado: `Esc` cancela, `Retroceso` deshace el último vértice, `Supr` borra la
+entidad seleccionada, `Intro` cierra el trazado.
+
+Detalles que importan:
+
+- **La geometría en curso no entra en el modelo** hasta que se cierra. Si
+  entrara, cancelar obligaría a limpiarla.
+- **Los tiradores tienen prioridad** sobre la entidad al pulsar, porque caen
+  encima de ella.
+- **Cambiar de herramienta descarta el trazo a medias.** Dejarlo vivo hacía
+  que reapareciera al volver a la herramienta.
+- **El resalte y el radio de los puntos van en píxeles**, no en grados: no se
+  deforman con el zoom ni con la latitud.
+- `removeVertex` se niega a dejar un polígono con dos vértices, y
+  `moveFeature` rechaza el desplazamiento **entero** si sacaría la geometría
+  del mundo — el mismo `QGeoCoordinate` devolviendo NaN que colgaba la
+  aplicación al arrastrar en zoom 3.
+
+### Verificación
+
+`tst_overlaymodel` prueba el modelo sin ventanas (19 casos). `tst_mapwidget`
+simula pulsaciones y arrastres reales (35 casos): trazar un polígono clic a
+clic, arrastrar un vértice concreto y comprobar que los demás no se mueven,
+desplazar la figura entera y comprobar que todos los vértices se desplazan lo
+mismo.
+
+`render_map --features` dibuja un ejemplo completo a PNG.
+
+**Estado: 11 tests, 0 avisos, Qt5 y Qt6.**
+
+### Pendiente
+
+Deshacer y rehacer, enlace con el `VectorRepository` para guardar y cargar, y
+la capa dinámica de objetivos en movimiento.

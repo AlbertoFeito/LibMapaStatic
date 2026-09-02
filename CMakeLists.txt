@@ -139,11 +139,16 @@ if(LIBMAPA_HAVE_QCP)
         ${LIBMAPA_QCP_DIR}/qcustomplot.cpp
         src/widget/TileLayer.cpp
         src/widget/TileLayer.h
+        src/widget/OverlayModel.cpp
+        src/widget/OverlayModel.h
+        src/widget/FeatureLayer.cpp
+        src/widget/FeatureLayer.h
         src/widget/MapView.cpp
         src/widget/MapView.h
         src/widget/MapWidget.cpp
         include/libmapa/MapWidget.h
         include/libmapa/MapTypes.h
+        include/libmapa/MapFeature.h
     )
 
     target_include_directories(libmapa_widget
@@ -237,6 +242,14 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_vectorrepository)
 
     if(LIBMAPA_HAVE_QCP)
+        add_executable(tst_overlaymodel tests/tst_overlaymodel.cpp)
+        target_link_libraries(tst_overlaymodel
+            PRIVATE libmapa_widget Qt${QT_VERSION_MAJOR}::Test)
+        target_include_directories(tst_overlaymodel
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_include_directories(tst_overlaymodel SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
+        add_test(NAME tst_overlaymodel COMMAND tst_overlaymodel)
+
         add_executable(tst_mapwidget tests/tst_mapwidget.cpp)
         target_link_libraries(tst_mapwidget
             PRIVATE libmapa_widget Qt${QT_VERSION_MAJOR}::Test)

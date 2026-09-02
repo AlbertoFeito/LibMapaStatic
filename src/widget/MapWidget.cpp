@@ -126,6 +126,15 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
                 emit baseLayerChanged(id);
             });
 
+    OverlayModel *modelo = d->view->overlayModel();
+    connect(modelo, &OverlayModel::featureAdded, this, &MapWidget::featureAdded);
+    connect(modelo, &OverlayModel::featureUpdated, this, &MapWidget::featureUpdated);
+    connect(modelo, &OverlayModel::featureRemoved, this, &MapWidget::featureRemoved);
+    connect(modelo, &OverlayModel::selectionChanged, this, &MapWidget::featureSelected);
+    connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
+    connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
+    connect(d->view, &MapView::drawingCancelled, this, &MapWidget::drawingCancelled);
+
     d->view->setZoom(config.initialZoom);
     d->view->setCenter(config.initialCenter);
     d->ready = true;
@@ -230,6 +239,134 @@ QGeoCoordinate MapWidget::visibleSouthEast() const
     return d->view ? d->view->visibleSouthEast() : QGeoCoordinate();
 }
 
+// ------------------------------------------------------ capas y entidades --
+
+bool MapWidget::addFeatureLayer(const QString &id, const QString &displayName,
+                                int zOrder)
+{
+    return d->view ? d->view->overlayModel()->addLayer(id, displayName, zOrder)
+                   : false;
+}
+
+bool MapWidget::removeFeatureLayer(const QString &id)
+{
+    return d->view ? d->view->overlayModel()->removeLayer(id) : false;
+}
+
+QVector<LayerInfo> MapWidget::featureLayers() const
+{
+    return d->view ? d->view->overlayModel()->layers() : QVector<LayerInfo>();
+}
+
+bool MapWidget::setFeatureLayerVisible(const QString &id, bool visible)
+{
+    return d->view ? d->view->overlayModel()->setLayerVisible(id, visible)
+                   : false;
+}
+
+bool MapWidget::setFeatureLayerZOrder(const QString &id, int zOrder)
+{
+    return d->view ? d->view->overlayModel()->setLayerZOrder(id, zOrder) : false;
+}
+
+qint64 MapWidget::addFeature(const MapFeature &feature)
+{
+    return d->view ? d->view->overlayModel()->addFeature(feature) : -1;
+}
+
+bool MapWidget::updateFeature(const MapFeature &feature)
+{
+    return d->view ? d->view->overlayModel()->updateFeature(feature) : false;
+}
+
+bool MapWidget::removeFeature(qint64 id)
+{
+    return d->view ? d->view->overlayModel()->removeFeature(id) : false;
+}
+
+void MapWidget::clearFeatureLayer(const QString &layerId)
+{
+    if (d->view)
+        d->view->overlayModel()->clearLayer(layerId);
+}
+
+void MapWidget::clearFeatures()
+{
+    if (d->view)
+        d->view->overlayModel()->clear();
+}
+
+std::optional<MapFeature> MapWidget::feature(qint64 id) const
+{
+    return d->view ? d->view->overlayModel()->feature(id)
+                   : std::optional<MapFeature>();
+}
+
+QVector<MapFeature> MapWidget::features() const
+{
+    return d->view ? d->view->overlayModel()->features() : QVector<MapFeature>();
+}
+
+QVector<MapFeature> MapWidget::featuresInLayer(const QString &layerId) const
+{
+    return d->view ? d->view->overlayModel()->featuresInLayer(layerId)
+                   : QVector<MapFeature>();
+}
+
+QVector<MapFeature> MapWidget::featuresOfType(const QString &type) const
+{
+    return d->view ? d->view->overlayModel()->featuresOfType(type)
+                   : QVector<MapFeature>();
+}
+
+int MapWidget::featureCount() const
+{
+    return d->view ? d->view->overlayModel()->count() : 0;
+}
+
+bool MapWidget::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
+{
+    return d->view ? d->view->overlayModel()->moveVertex(id, index, to) : false;
+}
+
+bool MapWidget::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
+{
+    return d->view ? d->view->overlayModel()->insertVertex(id, index, at) : false;
+}
+
+bool MapWidget::removeVertex(qint64 id, int index)
+{
+    return d->view ? d->view->overlayModel()->removeVertex(id, index) : false;
+}
+
+bool MapWidget::moveFeature(qint64 id, double dLat, double dLon)
+{
+    return d->view ? d->view->overlayModel()->moveFeature(id, dLat, dLon) : false;
+}
+
+qint64 MapWidget::selectedFeature() const
+{
+    return d->view ? d->view->overlayModel()->selectedId() : -1;
+}
+
+void MapWidget::selectFeature(qint64 id)
+{
+    if (d->view)
+        d->view->overlayModel()->setSelected(id);
+}
+
+void MapWidget::clearSelection()
+{
+    if (d->view)
+        d->view->overlayModel()->clearSelection();
+}
+
+qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx) const
+{
+    d->syncGeometry();
+    return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx) : -1;
+}
+
 MapTool MapWidget::activeTool() const
 {
     return d->view ? d->view->activeTool() : MapTool::None;
@@ -240,6 +377,49 @@ void MapWidget::setActiveTool(MapTool tool)
     d->syncGeometry();
     if (d->view)
         d->view->setActiveTool(tool);
+}
+
+void MapWidget::setActiveFeatureLayer(const QString &id)
+{
+    if (d->view) {
+        // La capa se crea si no existe: asi no hay que declararla antes de
+        // empezar a dibujar en ella.
+        if (!d->view->overlayModel()->hasLayer(id))
+            d->view->overlayModel()->addLayer(id);
+        d->view->setActiveFeatureLayer(id);
+    }
+}
+
+QString MapWidget::activeFeatureLayer() const
+{
+    return d->view ? d->view->activeFeatureLayer() : QString();
+}
+
+void MapWidget::setDraftStyle(const FeatureStyle &style)
+{
+    if (d->view)
+        d->view->setDraftStyle(style);
+}
+
+void MapWidget::setDraftType(const QString &type)
+{
+    if (d->view)
+        d->view->setDraftType(type);
+}
+
+bool MapWidget::isDrawing() const
+{
+    return d->view && d->view->isDrawing();
+}
+
+qint64 MapWidget::finishDrawing()
+{
+    return d->view ? d->view->finishDrawing() : -1;
+}
+
+bool MapWidget::cancelDrawing()
+{
+    return d->view && d->view->cancelDrawing();
 }
 
 double MapWidget::exactCoverage() const

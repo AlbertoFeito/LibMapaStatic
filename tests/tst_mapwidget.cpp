@@ -76,6 +76,16 @@ private slots:
      *  raton se mueve unos pixeles y la marca caia mas abajo del clic. */
     void toolsAnchorOnPressNotOnRelease();
 
+    // --- Herramientas interactivas de entidades --------------------------
+    void drawsAPointWithOneClick();
+    void drawsAPolygonClickByClick();
+    void escapeCancelsTheDrawing();
+    void backspaceUndoesTheLastVertex();
+    void selectsAndDragsAVertex();
+    void movesAWholeFeature();
+    void deleteRemovesTheSelectedFeature();
+    void switchingToolDiscardsTheDraft();
+
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
 
@@ -1125,6 +1135,264 @@ void TstMapWidget::toolsAnchorOnPressNotOnRelease()
     const QGeoCoordinate no = area.first().at(0).value<QGeoCoordinate>();
     QVERIFY2(qAbs(no.latitude() - esperado.latitude()) < 1e-9,
              "La esquina del area no coincide con el punto pulsado");
+}
+
+//! Simula pulsar y soltar en un punto.
+static void clic(MapView *v, const QPoint &p,
+                 Qt::MouseButton boton = Qt::LeftButton)
+{
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, p, boton, boton);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, p, boton,
+                                    Qt::NoButton);
+    QCoreApplication::sendEvent(v, &pulsa);
+    QCoreApplication::sendEvent(v, &suelta);
+}
+
+void TstMapWidget::drawsAPointWithOneClick()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+    w.setCenter(QGeoCoordinate(23.1136, -82.3666));
+
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    w.setActiveFeatureLayer(QStringLiteral("puntos"));
+    w.setDraftType(QStringLiteral("punto_interes"));
+    w.setActiveTool(MapTool::DrawPoint);
+
+    QSignalSpy creadas(&w, &MapWidget::featureCreated);
+
+    const QPoint donde(400, 300);
+    const QGeoCoordinate esperado = v->coordinateAt(donde);
+    clic(v, donde);
+
+    QCOMPARE(creadas.count(), 1);
+    QCOMPARE(w.featureCount(), 1);
+
+    const auto f = w.features().first();
+    QCOMPARE(f.kind, GeometryKind::Point);
+    QCOMPARE(f.layerId, QStringLiteral("puntos"));
+    QCOMPARE(f.type, QStringLiteral("punto_interes"));
+    // Anclado donde se pulso, no donde se solto.
+    QVERIFY(qAbs(f.position().latitude() - esperado.latitude()) < 1e-9);
+    QVERIFY(qAbs(f.position().longitude() - esperado.longitude()) < 1e-9);
+}
+
+void TstMapWidget::drawsAPolygonClickByClick()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    w.setActiveFeatureLayer(QStringLiteral("zonas"));
+    w.setActiveTool(MapTool::DrawPolygon);
+
+    const QVector<QPoint> vertices{{200, 200}, {500, 200}, {500, 450}, {250, 420}};
+    for (const QPoint &p : vertices) {
+        clic(v, p);
+        QVERIFY(w.isDrawing());
+        // Mientras se traza NO entra en el modelo: si el usuario cancela, no
+        // hay que limpiar nada.
+        QCOMPARE(w.featureCount(), 0);
+    }
+
+    const qint64 id = w.finishDrawing();
+    QVERIFY(id > 0);
+    QVERIFY(!w.isDrawing());
+    QCOMPARE(w.featureCount(), 1);
+
+    const auto f = w.feature(id);
+    QVERIFY(f.has_value());
+    QCOMPARE(f->kind, GeometryKind::Polygon);
+    QCOMPARE(f->geometry.size(), 4);
+    QCOMPARE(f->layerId, QStringLiteral("zonas"));
+
+    // Cada vertice donde se pincho.
+    for (int i = 0; i < vertices.size(); ++i) {
+        const QGeoCoordinate esperado = v->coordinateAt(vertices[i]);
+        QVERIFY(qAbs(f->geometry[i].latitude() - esperado.latitude()) < 1e-9);
+    }
+}
+
+void TstMapWidget::escapeCancelsTheDrawing()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    w.setActiveTool(MapTool::DrawPolygon);
+
+    QSignalSpy canceladas(&w, &MapWidget::drawingCancelled);
+
+    clic(v, QPoint(200, 200));
+    clic(v, QPoint(400, 200));
+    QVERIFY(w.isDrawing());
+
+    QKeyEvent esc(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QCoreApplication::sendEvent(v, &esc);
+
+    QVERIFY(!w.isDrawing());
+    QCOMPARE(canceladas.count(), 1);
+    QCOMPARE(w.featureCount(), 0);
+}
+
+void TstMapWidget::backspaceUndoesTheLastVertex()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    w.setActiveTool(MapTool::DrawPolygon);
+
+    for (const QPoint &p : {QPoint(200, 200), QPoint(400, 200),
+                            QPoint(400, 400), QPoint(200, 400)})
+        clic(v, p);
+
+    QKeyEvent supr(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+    QCoreApplication::sendEvent(v, &supr);
+    QVERIFY(w.isDrawing());
+
+    const qint64 id = w.finishDrawing();
+    QVERIFY(id > 0);
+    // Se quito el ultimo vertice: quedan tres.
+    QCOMPARE(w.feature(id)->geometry.size(), 3);
+}
+
+void TstMapWidget::selectsAndDragsAVertex()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+
+    // Se traza un poligono y despues se edita.
+    w.setActiveTool(MapTool::DrawPolygon);
+    const QVector<QPoint> vertices{{200, 200}, {500, 200}, {500, 450}};
+    for (const QPoint &p : vertices)
+        clic(v, p);
+    const qint64 id = w.finishDrawing();
+    QVERIFY(id > 0);
+
+    w.setActiveTool(MapTool::EditFeature);
+
+    // Un clic dentro lo selecciona.
+    clic(v, QPoint(400, 300));
+    QCOMPARE(w.selectedFeature(), id);
+
+    // Ahora se arrastra el tirador del segundo vertice.
+    const QPoint desde = vertices[1];
+    const QPoint hasta(560, 260);
+    const QGeoCoordinate destino = v->coordinateAt(hasta);
+
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, desde,
+                                   Qt::LeftButton, Qt::LeftButton);
+    QMouseEvent mueve = mouseEvent(QEvent::MouseMove, hasta,
+                                   Qt::NoButton, Qt::LeftButton);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, hasta,
+                                    Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(v, &pulsa);
+    QCoreApplication::sendEvent(v, &mueve);
+    QCoreApplication::sendEvent(v, &suelta);
+
+    const auto f = w.feature(id);
+    QVERIFY(qAbs(f->geometry[1].latitude() - destino.latitude()) < 1e-6);
+    QVERIFY(qAbs(f->geometry[1].longitude() - destino.longitude()) < 1e-6);
+
+    // Los otros vertices no se movieron.
+    const QGeoCoordinate primero = v->coordinateAt(vertices[0]);
+    QVERIFY(qAbs(f->geometry[0].latitude() - primero.latitude()) < 1e-6);
+}
+
+void TstMapWidget::movesAWholeFeature()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+
+    w.setActiveTool(MapTool::DrawPolygon);
+    for (const QPoint &p : {QPoint(200, 200), QPoint(500, 200), QPoint(500, 450)})
+        clic(v, p);
+    const qint64 id = w.finishDrawing();
+
+    const auto antes = w.feature(id)->geometry;
+
+    w.setActiveTool(MapTool::EditFeature);
+    // Se pulsa en el interior, lejos de cualquier tirador.
+    const QPoint dentro(400, 300);
+    const QPoint hasta(430, 330);
+
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, dentro,
+                                   Qt::LeftButton, Qt::LeftButton);
+    QMouseEvent mueve = mouseEvent(QEvent::MouseMove, hasta,
+                                   Qt::NoButton, Qt::LeftButton);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, hasta,
+                                    Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(v, &pulsa);
+    QCoreApplication::sendEvent(v, &mueve);
+    QCoreApplication::sendEvent(v, &suelta);
+
+    const auto despues = w.feature(id)->geometry;
+    QCOMPARE(despues.size(), antes.size());
+
+    // TODOS los vertices se desplazaron lo mismo: la figura no se deforma.
+    const double dLat = despues[0].latitude() - antes[0].latitude();
+    const double dLon = despues[0].longitude() - antes[0].longitude();
+    QVERIFY(qAbs(dLat) > 1e-9);
+    for (int i = 1; i < antes.size(); ++i) {
+        QVERIFY(qAbs((despues[i].latitude() - antes[i].latitude()) - dLat) < 1e-9);
+        QVERIFY(qAbs((despues[i].longitude() - antes[i].longitude()) - dLon) < 1e-9);
+    }
+}
+
+void TstMapWidget::deleteRemovesTheSelectedFeature()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+
+    w.setActiveTool(MapTool::DrawPoint);
+    clic(v, QPoint(400, 300));
+    QCOMPARE(w.featureCount(), 1);
+    const qint64 id = w.features().first().id;
+
+    w.setActiveTool(MapTool::EditFeature);
+    clic(v, QPoint(400, 300));
+    QCOMPARE(w.selectedFeature(), id);
+
+    QKeyEvent supr(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+    QCoreApplication::sendEvent(v, &supr);
+
+    QCOMPARE(w.featureCount(), 0);
+    QCOMPARE(w.selectedFeature(), qint64(-1));
+}
+
+void TstMapWidget::switchingToolDiscardsTheDraft()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+
+    w.setActiveTool(MapTool::DrawPolygon);
+    clic(v, QPoint(200, 200));
+    clic(v, QPoint(400, 200));
+    QVERIFY(w.isDrawing());
+
+    // Cambiar de herramienta abandona lo que hubiera a medias. Si no, el
+    // trazado reaparecia al volver a la herramienta.
+    w.setActiveTool(MapTool::None);
+    QVERIFY(!w.isDrawing());
+    QCOMPARE(w.featureCount(), 0);
+
+    w.setActiveTool(MapTool::DrawPolygon);
+    QVERIFY(!w.isDrawing());
 }
 
 QTEST_MAIN(TstMapWidget)

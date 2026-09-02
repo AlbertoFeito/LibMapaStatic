@@ -12,6 +12,7 @@
 
 #include "libmapa/MapWidget.h"
 #include "widget/MapView.h"
+#include "libmapa/MapFeature.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -55,10 +56,12 @@ int main(int argc, char *argv[])
         QStringLiteral("ms"), QStringLiteral("5000"));
     QCommandLineOption oGrid(QStringLiteral("grid"),
         QStringLiteral("Dibujar la rejilla de teselas con z/x/y"));
+    QCommandLineOption oFeatures(QStringLiteral("features"),
+        QStringLiteral("Anadir entidades de ejemplo: puntos, area y trazado"));
 
     p.addOption(oDatasets); p.addOption(oOut); p.addOption(oLayer);
     p.addOption(oCenter); p.addOption(oZoom); p.addOption(oSize);
-    p.addOption(oWait); p.addOption(oGrid);
+    p.addOption(oWait); p.addOption(oGrid); p.addOption(oFeatures);
     p.process(app);
 
     const QStringList c = p.value(oCenter).split(QLatin1Char(','));
@@ -88,6 +91,77 @@ int main(int argc, char *argv[])
     }
 
     mapa.resize(s[0].toInt(), s[1].toInt());
+
+    if (p.isSet(oFeatures)) {
+        // Entidades de ejemplo alrededor del centro, para comprobar que se
+        // dibujan donde deben y con el estilo pedido.
+        const double lat = cfg.initialCenter.latitude();
+        const double lon = cfg.initialCenter.longitude();
+        const double d = 0.02;
+
+        mapa.addFeatureLayer(QStringLiteral("zonas"),
+                             QStringLiteral("Zonas"), 0);
+        mapa.addFeatureLayer(QStringLiteral("puntos"),
+                             QStringLiteral("Puntos"), 10);
+
+        MapFeature area;
+        area.kind = GeometryKind::Polygon;
+        area.layerId = QStringLiteral("zonas");
+        area.type = QStringLiteral("area_interes");
+        area.name = QStringLiteral("Area de interes");
+        area.geometry = {QGeoCoordinate(lat + d, lon - d),
+                         QGeoCoordinate(lat + d, lon + d),
+                         QGeoCoordinate(lat - d * 0.3, lon + d * 1.4),
+                         QGeoCoordinate(lat - d, lon)};
+        area.style.lineColor = QColor(0x1b, 0x5e, 0x20);
+        area.style.fillColor = QColor(0x4c, 0xaf, 0x50, 70);
+        mapa.addFeature(area);
+
+        MapFeature prohibida;
+        prohibida.kind = GeometryKind::Polygon;
+        prohibida.layerId = QStringLiteral("zonas");
+        prohibida.type = QStringLiteral("zona_prohibida");
+        prohibida.name = QStringLiteral("Zona prohibida");
+        prohibida.geometry = {QGeoCoordinate(lat - d * 1.6, lon - d * 1.6),
+                              QGeoCoordinate(lat - d * 0.6, lon - d * 1.6),
+                              QGeoCoordinate(lat - d * 0.6, lon - d * 0.6),
+                              QGeoCoordinate(lat - d * 1.6, lon - d * 0.6)};
+        prohibida.style.lineColor = QColor(0xd3, 0x2f, 0x2f);
+        prohibida.style.fillColor = QColor(0xd3, 0x2f, 0x2f, 70);
+        prohibida.style.lineStyle = Qt::DashLine;
+        mapa.addFeature(prohibida);
+
+        MapFeature linea;
+        linea.kind = GeometryKind::Polyline;
+        linea.layerId = QStringLiteral("zonas");
+        linea.name = QStringLiteral("Trazado");
+        linea.geometry = {QGeoCoordinate(lat + d * 1.5, lon - d * 1.8),
+                          QGeoCoordinate(lat + d * 0.5, lon - d * 0.9),
+                          QGeoCoordinate(lat + d * 1.2, lon + d * 0.2),
+                          QGeoCoordinate(lat + d * 0.2, lon + d * 1.5)};
+        linea.style.lineColor = QColor(0x15, 0x65, 0xc0);
+        linea.style.lineWidth = 3;
+        mapa.addFeature(linea);
+
+        const char *nombres[] = {"Faro", "Muelle", "Torre"};
+        for (int i = 0; i < 3; ++i) {
+            MapFeature pt;
+            pt.kind = GeometryKind::Point;
+            pt.layerId = QStringLiteral("puntos");
+            pt.type = QStringLiteral("punto_interes");
+            pt.name = QString::fromUtf8(nombres[i]);
+            pt.geometry = {QGeoCoordinate(lat + (i - 1) * d * 0.8,
+                                          lon + d * 0.9)};
+            pt.style.lineColor = QColor(0xf5, 0x7c, 0x00);
+            pt.style.fillColor = QColor(0xff, 0xb7, 0x4d);
+            pt.style.pointRadiusPx = 7;
+            mapa.addFeature(pt);
+        }
+
+        // Una seleccionada, para ver el resalte.
+        if (!mapa.features().isEmpty())
+            mapa.selectFeature(mapa.features().first().id);
+    }
     if (p.isSet(oGrid))
         mapa.setDebugGridVisible(true);
 
@@ -120,6 +194,13 @@ int main(int argc, char *argv[])
     out << "  teselas propias : "
         << QString::number(mapa.exactCoverage() * 100.0, 'f', 1) << " %\n";
     out << "  tiempo de espera: " << t.elapsed() << " ms\n";
+    if (mapa.featureCount() > 0) {
+        out << "  entidades       : " << mapa.featureCount() << " en "
+            << mapa.featureLayers().size() << " capas\n";
+        if (auto *v = qobject_cast<MapView *>(mapa.customPlot()))
+            out << "  dibujadas       : "
+                << v->featureLayer()->lastDrawnCount() << "\n";
+    }
 
     // Diagnostico del dibujo, para poder comprobar sin mirar la imagen.
     if (auto *vista = qobject_cast<MapView *>(plot)) {

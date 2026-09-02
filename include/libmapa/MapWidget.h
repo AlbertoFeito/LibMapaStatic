@@ -1,6 +1,7 @@
 #ifndef LIBMAPA_MAPWIDGET_H_
 #define LIBMAPA_MAPWIDGET_H_
 
+#include "libmapa/MapFeature.h"
 #include "libmapa/MapTypes.h"
 #include "libmapa/libmapa_export.h"
 
@@ -9,6 +10,7 @@
 #include <QString>
 #include <QWidget>
 #include <memory>
+#include <optional>
 
 namespace libmapa {
 
@@ -99,9 +101,68 @@ public:
     QGeoCoordinate visibleNorthWest() const;
     QGeoCoordinate visibleSouthEast() const;
 
+    // --- Capas de entidades ----------------------------------------------
+    /*!
+     * \brief Crea una capa. Si ya existe, no hace nada y devuelve false.
+     *
+     * "Pueden existir varias de cada uno" se resuelve creando las capas que
+     * hagan falta: una para zonas prohibidas, otra para puntos de interes,
+     * otra para areas de vigilancia. La libreria no impone ninguna.
+     */
+    bool addFeatureLayer(const QString &id, const QString &displayName = QString(),
+                         int zOrder = 0);
+    bool removeFeatureLayer(const QString &id);
+    QVector<LayerInfo> featureLayers() const;
+    bool setFeatureLayerVisible(const QString &id, bool visible);
+    bool setFeatureLayerZOrder(const QString &id, int zOrder);
+
+    // --- Entidades -------------------------------------------------------
+    //! Devuelve el identificador asignado, o -1 si la geometria no es valida.
+    qint64 addFeature(const MapFeature &feature);
+    bool updateFeature(const MapFeature &feature);
+    bool removeFeature(qint64 id);
+    void clearFeatureLayer(const QString &layerId);
+    void clearFeatures();
+
+    std::optional<MapFeature> feature(qint64 id) const;
+    QVector<MapFeature> features() const;
+    QVector<MapFeature> featuresInLayer(const QString &layerId) const;
+    //! Filtra por la etiqueta de dominio que puso la aplicacion.
+    QVector<MapFeature> featuresOfType(const QString &type) const;
+    int featureCount() const;
+
+    // --- Edicion de geometria --------------------------------------------
+    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to);
+    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at);
+    bool removeVertex(qint64 id, int index);
+    bool moveFeature(qint64 id, double deltaLat, double deltaLon);
+
+    // --- Seleccion -------------------------------------------------------
+    qint64 selectedFeature() const;
+    void selectFeature(qint64 id);
+    void clearSelection();
+
+    //! Entidad bajo un punto de la pantalla, o -1.
+    qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;
     void setActiveTool(MapTool tool);
+
+    //! Capa donde van las entidades que se creen con el raton.
+    void setActiveFeatureLayer(const QString &id);
+    QString activeFeatureLayer() const;
+
+    //! Estilo y tipo de dominio de las entidades que se creen a partir de ahora.
+    void setDraftStyle(const FeatureStyle &style);
+    void setDraftType(const QString &type);
+
+    //! true mientras hay una geometria a medio trazar.
+    bool isDrawing() const;
+    //! Cierra el trazado en curso. Devuelve el identificador, o -1.
+    qint64 finishDrawing();
+    //! Descarta el trazado en curso.
+    bool cancelDrawing();
 
     // --- Diagnostico -----------------------------------------------------
     //! Porcentaje de la pantalla resuelto con teselas propias (no ancestros).
@@ -136,6 +197,14 @@ public:
 
 signals:
     void baseLayerChanged(const QString &id);
+    void featureAdded(qint64 id);
+    void featureUpdated(qint64 id);
+    void featureRemoved(qint64 id);
+    void featureSelected(qint64 id);      //!< -1 al deseleccionar
+    void featureLayersChanged();
+    //! Emitida al crear una entidad con el raton.
+    void featureCreated(qint64 id);
+    void drawingCancelled();
     void zoomChanged(int zoom);
     void centerChanged(const QGeoCoordinate &center);
     void mouseMoved(const QGeoCoordinate &position);
