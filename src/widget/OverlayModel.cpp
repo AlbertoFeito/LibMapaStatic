@@ -15,6 +15,137 @@ OverlayModel::OverlayModel(QObject *parent)
     m_layers.insert(porDefecto.id, porDefecto);
 }
 
+// ------------------------------------------------------ deshacer/rehacer --
+
+OverlayModel::Snapshot OverlayModel::snapshot() const
+{
+    Snapshot s;
+    s.features = m_features;
+    s.layers = m_layers;
+    s.nextId = m_nextId;
+    return s;
+}
+
+void OverlayModel::restore(const Snapshot &s)
+{
+    m_features = s.features;
+    m_layers = s.layers;
+    m_nextId = s.nextId;
+
+    // La seleccion puede apuntar a algo que ya no existe.
+    if (m_selected >= 0 && !m_features.contains(m_selected)) {
+        m_selected = -1;
+        emit selectionChanged(-1);
+    }
+    emit layersChanged();
+    emit changed();
+}
+
+void OverlayModel::pushUndo()
+{
+    // Dentro de un grupo solo cuenta la instantanea inicial: arrastrar un
+    // vertice genera decenas de moveVertex y debe deshacerse de una vez.
+    if (m_groupDepth > 0)
+        return;
+
+    m_undo.append(snapshot());
+    if (m_undo.size() > m_maxUndo)
+        m_undo.removeFirst();
+
+    // Cualquier cambio nuevo invalida la pila de rehacer.
+    m_redo.clear();
+}
+
+void OverlayModel::beginUndoGroup()
+{
+    if (m_groupDepth == 0) {
+        m_undo.append(snapshot());
+        if (m_undo.size() > m_maxUndo)
+            m_undo.removeFirst();
+        m_redo.clear();
+    }
+    ++m_groupDepth;
+}
+
+void OverlayModel::endUndoGroup()
+{
+    if (m_groupDepth > 0)
+        --m_groupDepth;
+}
+
+bool OverlayModel::undo()
+{
+    if (m_undo.isEmpty())
+        return false;
+    m_redo.append(snapshot());
+    const Snapshot s = m_undo.takeLast();
+    restore(s);
+    return true;
+}
+
+bool OverlayModel::redo()
+{
+    if (m_redo.isEmpty())
+        return false;
+    m_undo.append(snapshot());
+    const Snapshot s = m_redo.takeLast();
+    restore(s);
+    return true;
+}
+
+void OverlayModel::clearUndoHistory()
+{
+    m_undo.clear();
+    m_redo.clear();
+}
+
+void OverlayModel::setContents(const QVector<MapFeature> &features,
+                               const QVector<LayerInfo> &layers)
+{
+    pushUndo();
+
+    m_features.clear();
+    m_layers.clear();
+
+    LayerInfo porDefecto;
+    porDefecto.id = defaultLayerId();
+    porDefecto.displayName = tr("General");
+    m_layers.insert(porDefecto.id, porDefecto);
+
+    for (const LayerInfo &c : layers)
+        if (!c.id.isEmpty())
+            m_layers.insert(c.id, c);
+
+    qint64 maxId = 0;
+    for (MapFeature f : features) {
+        if (!f.isValid())
+            continue;
+        if (f.layerId.isEmpty())
+            f.layerId = defaultLayerId();
+        if (!m_layers.contains(f.layerId)) {
+            LayerInfo c;
+            c.id = f.layerId;
+            c.displayName = f.layerId;
+            m_layers.insert(c.id, c);
+        }
+        if (f.id <= 0)
+            f.id = ++maxId;
+        maxId = qMax(maxId, f.id);
+        m_features.insert(f.id, f);
+    }
+    m_nextId = maxId + 1;
+
+    if (m_selected >= 0 && !m_features.contains(m_selected)) {
+        m_selected = -1;
+        emit selectionChanged(-1);
+    }
+
+    // Una sola senal para toda la carga: con cientos de entidades, emitir una
+    // por cada una dispararia otros tantos repintados.
+    emit layersChanged();
+    emit changed();
+}
+
 // ------------------------------------------------------------------ capas --
 
 bool OverlayModel::addLayer(const QString &id, const QString &displayName,
@@ -138,6 +269,7 @@ qint64 OverlayModel::addFeature(MapFeature feature)
     if (!m_layers.contains(feature.layerId))
         addLayer(feature.layerId);
 
+    pushUndo();
     feature.id = m_nextId++;
     m_features.insert(feature.id, feature);
 
@@ -157,6 +289,7 @@ bool OverlayModel::updateFeature(const MapFeature &feature)
         return false;
     }
 
+    pushUndo();
     MapFeature copia = feature;
     if (copia.layerId.isEmpty())
         copia.layerId = m_features.value(feature.id).layerId;
@@ -171,8 +304,10 @@ bool OverlayModel::updateFeature(const MapFeature &feature)
 
 bool OverlayModel::removeFeature(qint64 id)
 {
-    if (m_features.remove(id) == 0)
+    if (!m_features.contains(id))
         return false;
+    pushUndo();
+    m_features.remove(id);
     if (m_selected == id) {
         m_selected = -1;
         emit selectionChanged(-1);
@@ -189,6 +324,8 @@ void OverlayModel::clearLayer(const QString &layerId)
         if (it.value().layerId == layerId)
             aBorrar.append(it.key());
 
+    if (!aBorrar.isEmpty())
+        pushUndo();
     for (qint64 id : aBorrar)
         m_features.remove(id);
 
@@ -203,6 +340,8 @@ void OverlayModel::clearLayer(const QString &layerId)
 
 void OverlayModel::clear()
 {
+    if (!m_features.isEmpty())
+        pushUndo();
     m_features.clear();
     if (m_selected != -1) {
         m_selected = -1;
@@ -258,6 +397,7 @@ bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
     if (index < 0 || index >= it->geometry.size())
         return false;
 
+    pushUndo();
     it->geometry[index] = to;
     emit featureUpdated(id);
     emit changed();
@@ -274,6 +414,7 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
     if (index < 0 || index > it->geometry.size())
         return false;
 
+    pushUndo();
     it->geometry.insert(index, at);
     emit featureUpdated(id);
     emit changed();
@@ -293,6 +434,7 @@ bool OverlayModel::removeVertex(qint64 id, int index)
     if (it->geometry.size() <= it->minimumVertices())
         return false;
 
+    pushUndo();
     it->geometry.remove(index);
     emit featureUpdated(id);
     emit changed();
@@ -318,6 +460,7 @@ bool OverlayModel::moveFeature(qint64 id, double deltaLat, double deltaLon)
         nueva.append(movido);
     }
 
+    pushUndo();
     it->geometry = nueva;
     emit featureUpdated(id);
     emit changed();

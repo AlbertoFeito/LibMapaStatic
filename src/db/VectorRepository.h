@@ -1,6 +1,8 @@
 #ifndef LIBMAPA_DB_VECTORREPOSITORY_H_
 #define LIBMAPA_DB_VECTORREPOSITORY_H_
 
+#include "libmapa/MapFeature.h"
+#include "libmapa/MapFeature.h"
 #include "libmapa/MapTypes.h"
 
 #include <QObject>
@@ -81,6 +83,29 @@ public:
     bool removePolygon(qint64 id);
     QVector<MapPolygon> loadPolygons() const;
 
+    /*!
+     * \name Entidades de dibujo
+     *
+     * Puntos, poligonos y areas de interes tal y como los maneja el widget.
+     * Una sola tabla para todos: la geometria va aparte y el resto de campos
+     * del dominio en 'atributos', como JSON. Un tipo nuevo de zona no obliga
+     * a migrar el esquema.
+     */
+    //@{
+    //! Guarda o actualiza. Si feature.id es valido y existe, actualiza.
+    std::optional<qint64> saveFeature(const MapFeature &feature);
+    //! Guarda un conjunto entero en UNA transaccion.
+    bool saveFeatures(const QVector<MapFeature> &features);
+    bool removeFeatureRow(qint64 id);
+    QVector<MapFeature> loadFeatures() const;
+    QVector<MapFeature> loadFeaturesInLayer(const QString &layerId) const;
+    //! Borra todas las entidades. Para volcar el estado completo del widget.
+    bool clearFeatures();
+
+    bool saveLayer(const LayerInfo &layer);
+    QVector<LayerInfo> loadLayers() const;
+    //@}
+
     // --- Rutas -----------------------------------------------------------
     std::optional<qint64> insertRoute(const MapRoute &route);
     bool removeRoute(qint64 id);
@@ -90,6 +115,16 @@ signals:
     void errorOccurred(const QString &context, const QString &message);
 
 private:
+    /*!
+     * \brief Escribe una entidad SIN abrir transaccion.
+     *
+     * Existe porque SQLite no admite transacciones anidadas: si saveFeatures
+     * abre una y luego llama a saveFeature, que abre otra, la interior falla.
+     * Cada punto de entrada publico abre la suya y ambos usan esta.
+     */
+    std::optional<qint64> writeFeature(QSqlDatabase &database,
+                                       const MapFeature &feature);
+
     bool migrate();
     bool fail(const QString &context, const QString &message) const;
     QSqlDatabase db() const;

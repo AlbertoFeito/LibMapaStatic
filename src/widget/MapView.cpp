@@ -587,6 +587,9 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 if (v >= 0) {
                     m_editVertex = v;
                     m_lastEditPos = coordinateAt(event->pos());
+                    // Un arrastre genera decenas de moveVertex; deben
+                    // deshacerse de una sola vez.
+                    m_model->beginUndoGroup();
                     break;
                 }
             }
@@ -597,6 +600,7 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 emit featureClicked(id, coordinateAt(event->pos()));
                 m_movingFeature = true;
                 m_lastEditPos = coordinateAt(event->pos());
+                m_model->beginUndoGroup();
             }
             break;
         }
@@ -681,6 +685,7 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
     const QGeoCoordinate donde = coordinateAt(event->pos());
 
     if (m_editVertex >= 0 || m_movingFeature) {
+        m_model->endUndoGroup();
         m_editVertex = -1;
         m_movingFeature = false;
         m_lastEditPos = QGeoCoordinate();

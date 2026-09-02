@@ -137,6 +137,24 @@ public:
     bool removeVertex(qint64 id, int index);
     bool moveFeature(qint64 id, double deltaLat, double deltaLon);
 
+    // --- Deshacer y rehacer ----------------------------------------------
+    bool canUndo() const;
+    bool canRedo() const;
+    bool undo();
+    bool redo();
+    void clearUndoHistory();
+
+    // --- Guardar y cargar ------------------------------------------------
+    /*!
+     * \brief Vuelca todas las entidades y capas a un fichero SQLite.
+     *
+     * El widget NO guarda solo. Los objetivos en movimiento llegan a decenas
+     * por segundo y una escritura en disco por cada actualizacion de posicion
+     * no tiene sentido: cuando guardar lo decide la aplicacion.
+     */
+    bool saveFeaturesTo(const QString &databasePath);
+    bool loadFeaturesFrom(const QString &databasePath);
+
     // --- Seleccion -------------------------------------------------------
     qint64 selectedFeature() const;
     void selectFeature(qint64 id);

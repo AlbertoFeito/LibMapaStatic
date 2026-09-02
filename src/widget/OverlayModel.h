@@ -69,6 +69,40 @@ public:
     bool removeVertex(qint64 id, int index);
     bool moveFeature(qint64 id, double deltaLat, double deltaLon);
 
+    // --- Deshacer y rehacer ----------------------------------------------
+    /*!
+     * \brief Marca el inicio de una accion deshacible.
+     *
+     * Se guarda una instantanea del estado completo. Con centenares de
+     * entidades el coste es despreciable frente a la alternativa: un sistema
+     * de comandos con su inverso para cada operacion, que hay que escribir y
+     * mantener para cada tipo de edicion, y donde un inverso mal calculado
+     * corrompe los datos sin avisar.
+     *
+     * Las operaciones que modifican el modelo la llaman solas. Se expone para
+     * poder agrupar varias en un solo paso: arrastrar un vertice genera
+     * decenas de moveVertex y debe deshacerse de una vez.
+     */
+    void beginUndoGroup();
+    void endUndoGroup();
+
+    bool canUndo() const { return !m_undo.isEmpty(); }
+    bool canRedo() const { return !m_redo.isEmpty(); }
+    bool undo();
+    bool redo();
+    void clearUndoHistory();
+    int undoDepth() const { return static_cast<int>(m_undo.size()); }
+
+    // --- Carga masiva ----------------------------------------------------
+    /*!
+     * \brief Sustituye TODO el contenido de una vez.
+     *
+     * Emite una sola senal 'changed' en vez de una por entidad, que con
+     * cientos de ellas dispararia otros tantos repintados.
+     */
+    void setContents(const QVector<MapFeature> &features,
+                     const QVector<LayerInfo> &layers = {});
+
     // --- Seleccion -------------------------------------------------------
     void setSelected(qint64 id);
     void clearSelection();
@@ -93,6 +127,20 @@ private:
     QHash<QString, LayerInfo> m_layers;
     qint64 m_nextId = 1;
     qint64 m_selected = -1;
+
+    struct Snapshot {
+        QHash<qint64, MapFeature> features;
+        QHash<QString, LayerInfo> layers;
+        qint64 nextId = 1;
+    };
+    Snapshot snapshot() const;
+    void restore(const Snapshot &s);
+    void pushUndo();
+
+    QVector<Snapshot> m_undo;
+    QVector<Snapshot> m_redo;
+    int m_groupDepth = 0;
+    int m_maxUndo = 50;
 };
 
 } // namespace libmapa

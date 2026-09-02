@@ -12,6 +12,10 @@
 #include <QSqlQuery>
 #include <QSqlRecord>
 #include <QThread>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QVariant>
 
 namespace libmapa {
@@ -828,6 +832,238 @@ QVector<MapRoute> VectorRepository::loadRoutes() const
             rp.approachRadiusMeters = qp.value(4).toDouble();
             out[i].points.append(rp);
         }
+    }
+    return out;
+}
+
+// ------------------------------------------------------- entidades dibujo --
+
+std::optional<qint64> VectorRepository::saveFeature(const MapFeature &f)
+{
+    if (!m_open) {
+        fail(QStringLiteral("saveFeature"), tr("Repositorio cerrado"));
+        return std::nullopt;
+    }
+
+    QSqlDatabase database = db();
+    Transaction tx(database);
+    if (!tx.isActive()) {
+        fail(QStringLiteral("saveFeature"), tr("Sin transaccion"));
+        return std::nullopt;
+    }
+
+    const auto id = writeFeature(database, f);
+    if (!id)
+        return std::nullopt;
+    if (!tx.commit()) {
+        fail(QStringLiteral("saveFeature"), database.lastError().text());
+        return std::nullopt;
+    }
+    return id;
+}
+
+std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
+                                                     const MapFeature &f)
+{
+    if (!f.isValid()) {
+        fail(QStringLiteral("writeFeature"),
+             tr("Geometria invalida en '%1'").arg(f.name));
+        return std::nullopt;
+    }
+
+    QSqlQuery q(database);
+    const QString atributos = QString::fromUtf8(
+        QJsonDocument(QJsonObject::fromVariantMap(f.attributes))
+            .toJson(QJsonDocument::Compact));
+
+    q.prepare(QStringLiteral(
+        "INSERT INTO entidad (capa, tipo, geometria, nombre, descripcion,"
+        " color_linea, color_relleno, ancho_linea, estilo_linea, radio_px,"
+        " etiqueta_visible, visible, simbolo, atributos, creado_utc)"
+        " VALUES (:capa,:tipo,:geo,:nom,:desc,:cl,:cr,:anc,:el,:rp,:ev,:vi,"
+        " :sim,:atr,:cu)"));
+    q.bindValue(QStringLiteral(":capa"), text(f.layerId));
+    q.bindValue(QStringLiteral(":tipo"), text(f.type));
+    q.bindValue(QStringLiteral(":geo"), static_cast<int>(f.kind));
+    q.bindValue(QStringLiteral(":nom"), text(f.name));
+    q.bindValue(QStringLiteral(":desc"), text(f.description));
+    q.bindValue(QStringLiteral(":cl"), static_cast<int>(f.style.lineColor.rgba()));
+    q.bindValue(QStringLiteral(":cr"), static_cast<int>(f.style.fillColor.rgba()));
+    q.bindValue(QStringLiteral(":anc"), f.style.lineWidth);
+    q.bindValue(QStringLiteral(":el"), static_cast<int>(f.style.lineStyle));
+    q.bindValue(QStringLiteral(":rp"), f.style.pointRadiusPx);
+    q.bindValue(QStringLiteral(":ev"), f.style.labelVisible ? 1 : 0);
+    q.bindValue(QStringLiteral(":vi"), f.visible ? 1 : 0);
+    q.bindValue(QStringLiteral(":sim"), pixmapToPng(f.style.icon));
+    q.bindValue(QStringLiteral(":atr"), atributos);
+    q.bindValue(QStringLiteral(":cu"), nowUtcMs());
+
+    if (!q.exec()) {
+        fail(QStringLiteral("writeFeature"), q.lastError().text());
+        return std::nullopt;
+    }
+
+    const qint64 id = q.lastInsertId().toLongLong();
+
+    q.prepare(QStringLiteral(
+        "INSERT INTO entidad_vertice (entidad_id, orden, latitud, longitud)"
+        " VALUES (:e,:o,:la,:lo)"));
+    for (int i = 0; i < f.geometry.size(); ++i) {
+        q.bindValue(QStringLiteral(":e"), id);
+        q.bindValue(QStringLiteral(":o"), i);
+        q.bindValue(QStringLiteral(":la"), f.geometry[i].latitude());
+        q.bindValue(QStringLiteral(":lo"), f.geometry[i].longitude());
+        if (!q.exec()) {
+            fail(QStringLiteral("writeFeature/vertice"), q.lastError().text());
+            return std::nullopt;
+        }
+    }
+
+    return id;
+}
+
+bool VectorRepository::saveFeatures(const QVector<MapFeature> &features)
+{
+    if (!m_open)
+        return fail(QStringLiteral("saveFeatures"), tr("Repositorio cerrado"));
+
+    QSqlDatabase database = db();
+    Transaction tx(database);
+    if (!tx.isActive())
+        return fail(QStringLiteral("saveFeatures"), tr("Sin transaccion"));
+
+    for (const MapFeature &f : features) {
+        if (!writeFeature(database, f))
+            return false;      // rollback al salir del scope
+    }
+    return tx.commit();
+}
+
+bool VectorRepository::removeFeatureRow(qint64 id)
+{
+    if (!m_open)
+        return fail(QStringLiteral("removeFeatureRow"), tr("Repositorio cerrado"));
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("DELETE FROM entidad WHERE id=:id"));
+    q.bindValue(QStringLiteral(":id"), id);
+    if (!q.exec())
+        return fail(QStringLiteral("removeFeatureRow"), q.lastError().text());
+    return q.numRowsAffected() > 0;
+}
+
+bool VectorRepository::clearFeatures()
+{
+    if (!m_open)
+        return fail(QStringLiteral("clearFeatures"), tr("Repositorio cerrado"));
+    QSqlQuery q(db());
+    if (!q.exec(QStringLiteral("DELETE FROM entidad")))
+        return fail(QStringLiteral("clearFeatures"), q.lastError().text());
+    return true;
+}
+
+QVector<MapFeature> VectorRepository::loadFeatures() const
+{
+    QVector<MapFeature> out;
+    if (!m_open)
+        return out;
+
+    QSqlQuery q(db());
+    if (!q.exec(QStringLiteral("SELECT * FROM entidad ORDER BY id"))) {
+        fail(QStringLiteral("loadFeatures"), q.lastError().text());
+        return out;
+    }
+
+    QVector<qint64> ids;
+    while (q.next()) {
+        MapFeature f;
+        f.id = field(q, "id").toLongLong();
+        f.layerId = field(q, "capa").toString();
+        f.type = field(q, "tipo").toString();
+        f.kind = static_cast<GeometryKind>(field(q, "geometria").toInt());
+        f.name = field(q, "nombre").toString();
+        f.description = field(q, "descripcion").toString();
+        f.style.lineColor = QColor::fromRgba(
+            static_cast<QRgb>(field(q, "color_linea").toUInt()));
+        f.style.fillColor = QColor::fromRgba(
+            static_cast<QRgb>(field(q, "color_relleno").toUInt()));
+        f.style.lineWidth = field(q, "ancho_linea").toDouble();
+        f.style.lineStyle = static_cast<Qt::PenStyle>(
+            field(q, "estilo_linea").toInt());
+        f.style.pointRadiusPx = field(q, "radio_px").toDouble();
+        f.style.labelVisible = field(q, "etiqueta_visible").toInt() != 0;
+        f.style.icon = pngToPixmap(field(q, "simbolo").toByteArray());
+        f.visible = field(q, "visible").toInt() != 0;
+
+        const QJsonDocument doc = QJsonDocument::fromJson(
+            field(q, "atributos").toString().toUtf8());
+        if (doc.isObject())
+            f.attributes = doc.object().toVariantMap();
+
+        out.append(f);
+        ids.append(f.id);
+    }
+
+    QSqlQuery qv(db());
+    qv.prepare(QStringLiteral(
+        "SELECT latitud, longitud FROM entidad_vertice"
+        " WHERE entidad_id=:e ORDER BY orden"));
+    for (int i = 0; i < out.size(); ++i) {
+        qv.bindValue(QStringLiteral(":e"), ids[i]);
+        if (!qv.exec())
+            continue;
+        while (qv.next())
+            out[i].geometry.append(QGeoCoordinate(qv.value(0).toDouble(),
+                                                  qv.value(1).toDouble()));
+    }
+    return out;
+}
+
+QVector<MapFeature> VectorRepository::loadFeaturesInLayer(const QString &capa) const
+{
+    QVector<MapFeature> out;
+    for (const MapFeature &f : loadFeatures())
+        if (f.layerId == capa)
+            out.append(f);
+    return out;
+}
+
+bool VectorRepository::saveLayer(const LayerInfo &capa)
+{
+    if (!m_open)
+        return fail(QStringLiteral("saveLayer"), tr("Repositorio cerrado"));
+
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO capa (id, nombre, visible, editable, z_orden)"
+        " VALUES (:id,:n,:v,:e,:z)"));
+    q.bindValue(QStringLiteral(":id"), text(capa.id));
+    q.bindValue(QStringLiteral(":n"), text(capa.displayName));
+    q.bindValue(QStringLiteral(":v"), capa.visible ? 1 : 0);
+    q.bindValue(QStringLiteral(":e"), capa.editable ? 1 : 0);
+    q.bindValue(QStringLiteral(":z"), capa.zOrder);
+    if (!q.exec())
+        return fail(QStringLiteral("saveLayer"), q.lastError().text());
+    return true;
+}
+
+QVector<LayerInfo> VectorRepository::loadLayers() const
+{
+    QVector<LayerInfo> out;
+    if (!m_open)
+        return out;
+
+    QSqlQuery q(db());
+    if (!q.exec(QStringLiteral("SELECT * FROM capa ORDER BY z_orden, id")))
+        return out;
+
+    while (q.next()) {
+        LayerInfo c;
+        c.id = field(q, "id").toString();
+        c.displayName = field(q, "nombre").toString();
+        c.visible = field(q, "visible").toInt() != 0;
+        c.editable = field(q, "editable").toInt() != 0;
+        c.zOrder = field(q, "z_orden").toInt();
+        out.append(c);
     }
     return out;
 }
