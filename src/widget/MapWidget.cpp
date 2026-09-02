@@ -2,6 +2,7 @@
 
 #include "core/Logging.h"
 #include "tiles/TileService.h"
+#include "db/VectorRepository.h"
 #include "widget/MapView.h"
 
 #include <QLayout>
@@ -342,6 +343,80 @@ bool MapWidget::removeVertex(qint64 id, int index)
 bool MapWidget::moveFeature(qint64 id, double dLat, double dLon)
 {
     return d->view ? d->view->overlayModel()->moveFeature(id, dLat, dLon) : false;
+}
+
+bool MapWidget::canUndo() const
+{
+    return d->view && d->view->overlayModel()->canUndo();
+}
+
+bool MapWidget::canRedo() const
+{
+    return d->view && d->view->overlayModel()->canRedo();
+}
+
+bool MapWidget::undo()
+{
+    return d->view && d->view->overlayModel()->undo();
+}
+
+bool MapWidget::redo()
+{
+    return d->view && d->view->overlayModel()->redo();
+}
+
+void MapWidget::clearUndoHistory()
+{
+    if (d->view)
+        d->view->overlayModel()->clearUndoHistory();
+}
+
+bool MapWidget::saveFeaturesTo(const QString &databasePath)
+{
+    if (!d->view)
+        return false;
+
+    VectorRepository repo;
+    connect(&repo, &VectorRepository::errorOccurred, this,
+            [this](const QString &ctx, const QString &msg) {
+                emit errorOccurred(QStringLiteral("%1: %2").arg(ctx, msg));
+            });
+
+    if (!repo.open(databasePath)) {
+        emit errorOccurred(repo.lastError());
+        return false;
+    }
+
+    // Se vuelca el estado completo: se borra y se vuelve a escribir. Es lo
+    // que corresponde a "guardar el mapa", y evita tener que llevar la cuenta
+    // de que se anadio, cambio o borro desde la ultima vez.
+    if (!repo.clearFeatures())
+        return false;
+
+    for (const LayerInfo &c : d->view->overlayModel()->layers())
+        repo.saveLayer(c);
+
+    return repo.saveFeatures(d->view->overlayModel()->features());
+}
+
+bool MapWidget::loadFeaturesFrom(const QString &databasePath)
+{
+    if (!d->view)
+        return false;
+
+    VectorRepository repo;
+    connect(&repo, &VectorRepository::errorOccurred, this,
+            [this](const QString &ctx, const QString &msg) {
+                emit errorOccurred(QStringLiteral("%1: %2").arg(ctx, msg));
+            });
+
+    if (!repo.open(databasePath)) {
+        emit errorOccurred(repo.lastError());
+        return false;
+    }
+
+    d->view->overlayModel()->setContents(repo.loadFeatures(), repo.loadLayers());
+    return true;
 }
 
 qint64 MapWidget::selectedFeature() const

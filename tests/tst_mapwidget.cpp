@@ -86,6 +86,11 @@ private slots:
     void deleteRemovesTheSelectedFeature();
     void switchingToolDiscardsTheDraft();
 
+    // --- Deshacer y persistencia -----------------------------------------
+    void undoAndRedoRestoreTheModel();
+    void draggingIsOneUndoStep();
+    void savesAndLoadsFeatures();
+
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
 
@@ -1393,6 +1398,163 @@ void TstMapWidget::switchingToolDiscardsTheDraft()
 
     w.setActiveTool(MapTool::DrawPolygon);
     QVERIFY(!w.isDrawing());
+}
+
+void TstMapWidget::undoAndRedoRestoreTheModel()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+
+    QVERIFY(!w.canUndo());
+
+    w.setActiveTool(MapTool::DrawPoint);
+    clic(v, QPoint(300, 250));
+    clic(v, QPoint(400, 300));
+    QCOMPARE(w.featureCount(), 2);
+    QVERIFY(w.canUndo());
+
+    QVERIFY(w.undo());
+    QCOMPARE(w.featureCount(), 1);
+    QVERIFY(w.canRedo());
+
+    QVERIFY(w.undo());
+    QCOMPARE(w.featureCount(), 0);
+    QVERIFY(!w.canUndo());
+
+    QVERIFY(w.redo());
+    QCOMPARE(w.featureCount(), 1);
+    QVERIFY(w.redo());
+    QCOMPARE(w.featureCount(), 2);
+    QVERIFY(!w.canRedo());
+
+    // Un cambio nuevo invalida la pila de rehacer.
+    QVERIFY(w.undo());
+    clic(v, QPoint(500, 350));
+    QVERIFY(!w.canRedo());
+}
+
+void TstMapWidget::draggingIsOneUndoStep()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+
+    w.setActiveTool(MapTool::DrawPolygon);
+    for (const QPoint &p : {QPoint(200, 200), QPoint(500, 200), QPoint(500, 450)})
+        clic(v, p);
+    const qint64 id = w.finishDrawing();
+    w.clearUndoHistory();
+
+    const auto antes = w.feature(id)->geometry;
+
+    w.setActiveTool(MapTool::EditFeature);
+    clic(v, QPoint(400, 300));
+    w.clearUndoHistory();
+
+    // Arrastre con VARIOS movimientos intermedios.
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, QPoint(500, 200),
+                                   Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(v, &pulsa);
+    for (int i = 1; i <= 10; ++i) {
+        QMouseEvent mueve = mouseEvent(QEvent::MouseMove,
+                                       QPoint(500 + i * 6, 200 + i * 4),
+                                       Qt::NoButton, Qt::LeftButton);
+        QCoreApplication::sendEvent(v, &mueve);
+    }
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, QPoint(560, 240),
+                                    Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(v, &suelta);
+
+    QVERIFY(w.feature(id)->geometry[1].latitude() != antes[1].latitude());
+
+    // Un solo deshacer devuelve el vertice a su sitio: los diez movimientos
+    // intermedios son UN paso, no diez.
+    QVERIFY(w.undo());
+    const auto despues = w.feature(id)->geometry;
+    for (int i = 0; i < antes.size(); ++i) {
+        QVERIFY(qAbs(despues[i].latitude() - antes[i].latitude()) < 1e-9);
+        QVERIFY(qAbs(despues[i].longitude() - antes[i].longitude()) < 1e-9);
+    }
+    QVERIFY(!w.canUndo());
+}
+
+void TstMapWidget::savesAndLoadsFeatures()
+{
+    const QString bd = m_dir.filePath(QStringLiteral("entidades.db"));
+    QFile::remove(bd);
+
+    qint64 idOriginal = -1;
+    {
+        MapWidget w(baseConfig(m_jsonPath));
+        QVERIFY(w.isReady());
+        w.resize(800, 600);
+        w.setZoom(12);
+        auto *v = qobject_cast<MapView *>(w.customPlot());
+
+        w.addFeatureLayer(QStringLiteral("zonas"), QStringLiteral("Zonas"), 5);
+        w.setActiveFeatureLayer(QStringLiteral("zonas"));
+        w.setDraftType(QStringLiteral("zona_prohibida"));
+
+        w.setActiveTool(MapTool::DrawPolygon);
+        for (const QPoint &p : {QPoint(200, 200), QPoint(500, 200),
+                                QPoint(500, 450), QPoint(220, 430)})
+            clic(v, p);
+        idOriginal = w.finishDrawing();
+        QVERIFY(idOriginal > 0);
+
+        // Un punto con atributos del dominio, que la libreria no interpreta.
+        MapFeature pt;
+        pt.kind = GeometryKind::Point;
+        pt.layerId = QStringLiteral("puntos");
+        pt.type = QStringLiteral("punto_interes");
+        pt.name = QStringLiteral("O'Brien \"el rapido\"");
+        pt.geometry = {QGeoCoordinate(23.1, -82.3)};
+        pt.attributes[QStringLiteral("techo_m")] = 120;
+        pt.attributes[QStringLiteral("responsable")] = QStringLiteral("CID3");
+        pt.style.lineColor = QColor(0xf5, 0x7c, 0x00);
+        QVERIFY(w.addFeature(pt) > 0);
+
+        w.setFeatureLayerVisible(QStringLiteral("puntos"), false);
+
+        QVERIFY2(w.saveFeaturesTo(bd), qPrintable(bd));
+    }
+
+    // Widget nuevo: se carga desde cero.
+    MapWidget w2(baseConfig(m_jsonPath));
+    QVERIFY(w2.isReady());
+    w2.resize(800, 600);
+    QVERIFY(w2.loadFeaturesFrom(bd));
+
+    QCOMPARE(w2.featureCount(), 2);
+
+    const auto zonas = w2.featuresInLayer(QStringLiteral("zonas"));
+    QCOMPARE(zonas.size(), 1);
+    QCOMPARE(zonas.first().kind, GeometryKind::Polygon);
+    QCOMPARE(zonas.first().geometry.size(), 4);
+    QCOMPARE(zonas.first().type, QStringLiteral("zona_prohibida"));
+
+    const auto puntos = w2.featuresOfType(QStringLiteral("punto_interes"));
+    QCOMPARE(puntos.size(), 1);
+    // Comillas y apostrofes sobreviven al viaje.
+    QCOMPARE(puntos.first().name, QStringLiteral("O'Brien \"el rapido\""));
+    // Los atributos del dominio tambien.
+    QCOMPARE(puntos.first().attributes.value(QStringLiteral("techo_m")).toInt(), 120);
+    QCOMPARE(puntos.first().attributes.value(QStringLiteral("responsable")).toString(),
+             QStringLiteral("CID3"));
+    QCOMPARE(puntos.first().style.lineColor, QColor(0xf5, 0x7c, 0x00));
+
+    // La visibilidad de la capa se conserva.
+    bool encontrada = false;
+    for (const LayerInfo &c : w2.featureLayers())
+        if (c.id == QStringLiteral("puntos")) {
+            encontrada = true;
+            QVERIFY(!c.visible);
+        }
+    QVERIFY(encontrada);
 }
 
 QTEST_MAIN(TstMapWidget)

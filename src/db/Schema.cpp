@@ -122,6 +122,118 @@ QStringList migrations(int from)
             ") WITHOUT ROWID");
     }
 
+    if (from < 2) {
+        // Entidades genericas de la capa de dibujo. Deliberadamente NO hay
+        // una tabla por concepto del dominio: la geometria va aparte y todo
+        // lo demas en 'atributos', como JSON. Asi un tipo nuevo de zona o de
+        // ruta no obliga a migrar el esquema.
+        sql << QStringLiteral(
+            "CREATE TABLE entidad ("
+            "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  capa        TEXT    NOT NULL,"
+            "  tipo        TEXT    NOT NULL DEFAULT '',"
+            "  geometria   INTEGER NOT NULL,"     // 0 punto 1 polilinea 2 poligono
+            "  nombre      TEXT    NOT NULL DEFAULT '',"
+            "  descripcion TEXT    NOT NULL DEFAULT '',"
+            "  color_linea    INTEGER NOT NULL DEFAULT 0,"
+            "  color_relleno  INTEGER NOT NULL DEFAULT 0,"
+            "  ancho_linea    REAL    NOT NULL DEFAULT 2,"
+            "  estilo_linea   INTEGER NOT NULL DEFAULT 1,"
+            "  radio_px       REAL    NOT NULL DEFAULT 6,"
+            "  etiqueta_visible INTEGER NOT NULL DEFAULT 1,"
+            "  visible     INTEGER NOT NULL DEFAULT 1,"
+            "  simbolo     BLOB,"
+            "  atributos   TEXT    NOT NULL DEFAULT '{}',"
+            "  creado_utc  INTEGER NOT NULL"
+            ")");
+
+        sql << QStringLiteral("CREATE INDEX idx_entidad_capa ON entidad(capa)");
+        sql << QStringLiteral("CREATE INDEX idx_entidad_tipo ON entidad(tipo)");
+
+        sql << QStringLiteral(
+            "CREATE TABLE entidad_vertice ("
+            "  entidad_id INTEGER NOT NULL"
+            "             REFERENCES entidad(id) ON DELETE CASCADE,"
+            "  orden      INTEGER NOT NULL,"
+            "  latitud    REAL NOT NULL,"
+            "  longitud   REAL NOT NULL,"
+            "  PRIMARY KEY (entidad_id, orden)"
+            ") WITHOUT ROWID");
+
+        // Las capas, para conservar visibilidad y orden de dibujo.
+        sql << QStringLiteral(
+            "CREATE TABLE capa ("
+            "  id       TEXT PRIMARY KEY,"
+            "  nombre   TEXT NOT NULL DEFAULT '',"
+            "  visible  INTEGER NOT NULL DEFAULT 1,"
+            "  editable INTEGER NOT NULL DEFAULT 1,"
+            "  z_orden  INTEGER NOT NULL DEFAULT 0"
+            ")");
+    }
+
+    if (from < 2) {
+        // -------------------------------------------------------------
+        // Entidades ESTATICAS: puntos, poligonales y poligonos que el
+        // usuario dibuja y edita.
+        //
+        // Van en tablas propias, separadas de punto/vehiculo/buque_ais.
+        // No es duplicacion: son cosas distintas con ciclos de vida
+        // distintos. Una zona prohibida se dibuja una vez y se edita a
+        // mano; un objetivo AIS se actualiza varias veces por segundo y
+        // arrastra una trayectoria. Meterlos en la misma tabla obligaria
+        // a que cada actualizacion de posicion tocara la misma tabla que
+        // las zonas.
+        // -------------------------------------------------------------
+        sql << QStringLiteral(
+            "CREATE TABLE feature ("
+            "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  capa        TEXT    NOT NULL,"
+            "  geometria   INTEGER NOT NULL,"     // 0 punto 1 polilinea 2 poligono
+            // Etiqueta de dominio. La libreria no la interpreta: la pone y
+            // la filtra la aplicacion.
+            "  tipo        TEXT    NOT NULL DEFAULT '',"
+            "  nombre      TEXT    NOT NULL DEFAULT '',"
+            "  descripcion TEXT    NOT NULL DEFAULT '',"
+            "  color_linea    INTEGER NOT NULL DEFAULT 0,"
+            "  color_relleno  INTEGER NOT NULL DEFAULT 0,"
+            "  ancho_linea    REAL    NOT NULL DEFAULT 2,"
+            "  estilo_linea   INTEGER NOT NULL DEFAULT 1,"
+            "  radio_px       REAL    NOT NULL DEFAULT 6,"
+            "  etiqueta_visible INTEGER NOT NULL DEFAULT 1,"
+            "  visible     INTEGER NOT NULL DEFAULT 1,"
+            "  icono       BLOB,"
+            // Los atributos de dominio se guardan como JSON: son abiertos
+            // por definicion, y una tabla clave-valor obligaria a un JOIN
+            // por atributo sin ganar nada.
+            "  atributos   TEXT    NOT NULL DEFAULT '{}',"
+            "  creado_utc  INTEGER NOT NULL"
+            ")");
+
+        sql << QStringLiteral("CREATE INDEX idx_feature_capa ON feature(capa)");
+        sql << QStringLiteral("CREATE INDEX idx_feature_tipo ON feature(tipo)");
+
+        sql << QStringLiteral(
+            "CREATE TABLE feature_vertice ("
+            "  feature_id INTEGER NOT NULL"
+            "             REFERENCES feature(id) ON DELETE CASCADE,"
+            "  orden      INTEGER NOT NULL,"
+            "  latitud    REAL NOT NULL,"
+            "  longitud   REAL NOT NULL,"
+            "  PRIMARY KEY (feature_id, orden)"
+            ") WITHOUT ROWID");
+
+        // Las capas se guardan aparte: una capa vacia tambien debe
+        // sobrevivir, con su visibilidad y su orden de dibujo.
+        sql << QStringLiteral(
+            "CREATE TABLE feature_capa ("
+            "  id       TEXT PRIMARY KEY,"
+            "  nombre   TEXT NOT NULL DEFAULT '',"
+            "  visible  INTEGER NOT NULL DEFAULT 1,"
+            "  editable INTEGER NOT NULL DEFAULT 1,"
+            "  z_orden  INTEGER NOT NULL DEFAULT 0"
+            ")");
+    }
+
     return sql;
 }
 
