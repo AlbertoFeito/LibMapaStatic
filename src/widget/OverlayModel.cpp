@@ -274,6 +274,7 @@ qint64 OverlayModel::addFeature(MapFeature feature)
     m_features.insert(feature.id, feature);
 
     emit featureAdded(feature.id);
+    emit layersChanged();          // el contador de su capa subio en uno
     emit changed();
     return feature.id;
 }
@@ -313,6 +314,7 @@ bool OverlayModel::removeFeature(qint64 id)
         emit selectionChanged(-1);
     }
     emit featureRemoved(id);
+    emit layersChanged();          // el contador de su capa bajo en uno
     emit changed();
     return true;
 }
@@ -334,19 +336,36 @@ void OverlayModel::clearLayer(const QString &layerId)
             m_selected = -1;
             emit selectionChanged(-1);
         }
+        // Un vaciado es un borrado en lote: se avisa entidad a entidad, igual
+        // que removeFeature, para que quien escuche pueda mantener su lista al
+        // dia sin sondear el modelo. Sin esto, un panel de capas no se enteraba
+        // de "Vaciar" porque solo se emitia changed().
+        for (qint64 id : aBorrar)
+            emit featureRemoved(id);
+        emit layersChanged();      // los contadores por capa cambiaron
         emit changed();
     }
 }
 
 void OverlayModel::clear()
 {
-    if (!m_features.isEmpty())
-        pushUndo();
+    if (m_features.isEmpty())
+        return;
+
+    QVector<qint64> aBorrar;
+    aBorrar.reserve(m_features.size());
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it)
+        aBorrar.append(it.key());
+
+    pushUndo();
     m_features.clear();
     if (m_selected != -1) {
         m_selected = -1;
         emit selectionChanged(-1);
     }
+    for (qint64 id : aBorrar)
+        emit featureRemoved(id);
+    emit layersChanged();          // todos los contadores quedan a cero
     emit changed();
 }
 

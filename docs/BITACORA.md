@@ -1593,3 +1593,51 @@ mismo.
 
 Deshacer y rehacer, enlace con el `VectorRepository` para guardar y cargar, y
 la capa dinámica de objetivos en movimiento.
+
+---
+
+## 28. El demo como banco de pruebas, y el vaciado observable
+
+Sobre la base de la Fase 6 se añadieron **deshacer/rehacer** (instantáneas del
+modelo, agrupables con `beginUndoGroup`/`endUndoGroup`) y **persistencia** en
+SQLite (`MapWidget::saveFeaturesTo`/`loadFeaturesFrom`, sobre `setContents`,
+que emite una sola señal para toda la carga). El `demo` pasó a ejercitar TODA
+esa API: capas, dibujo, edición, propiedades, atributos de dominio, estilo,
+deshacer/rehacer y guardar/cargar.
+
+### El panel se refresca solo, no a mano
+
+El primer banco de pruebas refrescaba el panel llamando a `actualizarPanelCapas()`
+en cada manejador. El patrón es frágil: se le escapaba el botón **"Vaciar"** (no
+refrescaba) y **cualquier edición hecha sobre el mapa** (borrar con `Supr`,
+mover vértices) tampoco, porque no pasaba por un manejador del panel.
+
+Ahora el panel se reconstruye **solo a partir de las señales** del `MapWidget`
+(`featureAdded`, `featureRemoved`, `featureUpdated`, `featureLayersChanged`),
+así que da igual de dónde venga el cambio. Eso destapó un hueco en el modelo:
+`clearLayer()` y `clear()` emitían solo el `changed()` interno, que `MapWidget`
+no reexpone, de modo que un vaciado era **invisible** para cualquier panel.
+
+**Corregido en `OverlayModel`:** un vaciado es un borrado en lote, así que emite
+`featureRemoved` entidad a entidad, igual que `removeFeature`, más `layersChanged`
+para los contadores. `addFeature`/`removeFeature` también emiten `layersChanged`.
+Como `restore()` (deshacer/rehacer) y `setContents()` (cargar) ya emitían
+`layersChanged`, ahora **todas** las rutas refrescan el panel. Las N señales de
+un vaciado o una carga se agrupan en una sola reconstrucción con un `QTimer`.
+`tst_overlaymodel` gana `notifiesObserversOnClear`.
+
+### Guardar/cargar
+
+Rediseñado: se recuerda el **fichero actual** (en el título de la ventana) con
+**Guardar** / **Guardar como…**, y **Abrir** avisa antes de reemplazar el
+trabajo en curso (la carga es deshacible) y reporta los errores. Antes no había
+aviso de fallo ni concepto de fichero abierto.
+
+### Borrado sin choques
+
+`Supr` borra la entidad seleccionada **solo con el panel enfocado**
+(`WidgetWithChildrenShortcut`), para no pisar el `Supr` del editor, que sobre el
+mapa borra vértices. Las herramientas (navegar, medir, zoom, dibujo, editar)
+van en un único grupo excluyente.
+
+**Estado: 11 tests, 0 avisos, compilado y probado en Qt 5.15 y Qt 6.4.**
