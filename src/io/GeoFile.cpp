@@ -17,21 +17,33 @@ bool mismoPunto(const QGeoCoordinate &a, const QGeoCoordinate &b)
     return std::fabs(a.latitude() - b.latitude()) < kEps
         && std::fabs(a.longitude() - b.longitude()) < kEps;
 }
+
+//! Cierra el trazado en curso y lo anade a la lista si tiene algo.
+void cerrar(QVector<GeoPath> &paths, GeoPath &actual)
+{
+    if (actual.points.isEmpty())
+        return;
+    actual.closed = actual.points.size() >= 2
+                 && mismoPunto(actual.points.first(), actual.points.last());
+    paths.append(actual);
+    actual = GeoPath();
+}
 } // namespace
 
-GeoData readGeoFile(const QString &path, QString *error)
+QVector<GeoPath> readGeoFile(const QString &path, QString *error)
 {
-    GeoData data;
+    QVector<GeoPath> paths;
 
     QFile fichero(path);
     if (!fichero.open(QIODevice::ReadOnly | QIODevice::Text)) {
         if (error)
             *error = QStringLiteral("No se pudo abrir %1: %2")
                          .arg(path, fichero.errorString());
-        return data;
+        return paths;
     }
 
     QTextStream in(&fichero);
+    GeoPath actual;
     int nLinea = 0;
     while (!in.atEnd()) {
         const QString linea = in.readLine().trimmed();
@@ -52,9 +64,11 @@ GeoData readGeoFile(const QString &path, QString *error)
             continue;
         }
 
-        // "0.0,0.0" es el terminador del formato, no un vertice.
-        if (lon == 0.0 && lat == 0.0)
-            break;
+        // "0.0,0.0" SEPARA trazados: cierra el actual y empieza otro.
+        if (lon == 0.0 && lat == 0.0) {
+            cerrar(paths, actual);
+            continue;
+        }
 
         const QGeoCoordinate c(lat, lon);     // el fichero trae lon,lat
         if (!c.isValid()) {
@@ -62,18 +76,14 @@ GeoData readGeoFile(const QString &path, QString *error)
                 << "Vertice fuera de rango en la linea" << nLinea << ":" << linea;
             continue;
         }
-        data.points.append(c);
+        actual.points.append(c);
     }
+    // Un ultimo trazado sin "0.0,0.0" al final tambien cuenta.
+    cerrar(paths, actual);
 
-    if (data.points.isEmpty()) {
-        if (error)
-            *error = QStringLiteral("%1 no contiene vertices validos").arg(path);
-        return data;
-    }
-
-    data.closed = data.points.size() >= 2
-               && mismoPunto(data.points.first(), data.points.last());
-    return data;
+    if (paths.isEmpty() && error)
+        *error = QStringLiteral("%1 no contiene trazados validos").arg(path);
+    return paths;
 }
 
 } // namespace libmapa

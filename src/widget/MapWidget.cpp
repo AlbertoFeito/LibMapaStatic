@@ -421,39 +421,56 @@ bool MapWidget::loadFeaturesFrom(const QString &databasePath)
 
 // ------------------------------------------------------------ ficheros .geo --
 
-qint64 MapWidget::loadGeoAsLayer(const QString &path, const QString &layerId,
-                                 const QString &displayName,
-                                 const FeatureStyle &style, QString *error)
+QVector<qint64> MapWidget::loadGeoAsLayer(const QString &path,
+                                          const QString &layerId,
+                                          const QString &displayName,
+                                          const FeatureStyle &style,
+                                          QString *error)
 {
+    QVector<qint64> ids;
     if (!d->view)
-        return -1;
+        return ids;
 
     QString motivo;
-    const GeoData geo = readGeoFile(path, &motivo);
-    if (geo.isEmpty()) {
+    const QVector<GeoPath> trazados = readGeoFile(path, &motivo);
+    if (trazados.isEmpty()) {
         if (error)
             *error = motivo;
         emit errorOccurred(motivo);
-        return -1;
+        return ids;
     }
 
-    MapFeature f;
-    f.layerId = layerId;
-    f.name = displayName.isEmpty() ? layerId : displayName;
-    f.style = style;
-    f.geometry = geo.points;
-    if (geo.closed) {
-        // El anillo repite el primer vertice al final; el poligono no lo
-        // necesita, se cierra solo.
-        if (f.geometry.size() > 1)
-            f.geometry.removeLast();
-        f.kind = GeometryKind::Polygon;
-    } else {
-        f.kind = GeometryKind::Polyline;
-    }
-
+    const QString nombreBase = displayName.isEmpty() ? layerId : displayName;
     addFeatureLayer(layerId, displayName, 0);
-    return addFeature(f);
+
+    int n = 0;
+    for (const GeoPath &t : trazados) {
+        MapFeature f;
+        f.layerId = layerId;
+        f.style = style;
+        f.geometry = t.points;
+
+        if (t.points.size() == 1) {
+            f.kind = GeometryKind::Point;
+        } else if (t.closed && t.points.size() >= 4) {
+            // El anillo repite el primer vertice al final; el poligono se
+            // cierra solo, asi que se quita.
+            f.geometry.removeLast();
+            f.kind = GeometryKind::Polygon;
+        } else {
+            f.kind = GeometryKind::Polyline;
+        }
+
+        // Nombre por trazado cuando hay varios; si es uno solo, el de la capa.
+        f.name = trazados.size() > 1
+                     ? QStringLiteral("%1 %2").arg(nombreBase).arg(++n)
+                     : nombreBase;
+
+        const qint64 id = addFeature(f);
+        if (id > 0)
+            ids.append(id);
+    }
+    return ids;
 }
 
 // ------------------------------------------------------ objetivos moviles --

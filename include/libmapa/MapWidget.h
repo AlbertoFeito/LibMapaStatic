@@ -160,20 +160,23 @@ public:
 
     // --- Ficheros .geo ---------------------------------------------------
     /*!
-     * \brief Carga un fichero .geo como una entidad en una capa nueva.
+     * \brief Carga un fichero .geo en una capa, una entidad por trazado.
      *
-     * El formato .geo es una lista de vertices "longitud,latitud," terminada
-     * en "0.0,0.0". Si el trazo se cierra (el ultimo vertice coincide con el
-     * primero) se crea un poligono; si no, una polilinea. La capa se crea si
-     * no existe.
+     * Un .geo puede llevar VARIOS trazados separados por "0.0,0.0": las aguas
+     * jurisdiccionales son un solo anillo, pero "corredores" son parejas de
+     * lineas y las divisiones administrativas, decenas de polilineas. Cada
+     * trazado se crea como su propia entidad en la misma capa: poligono si
+     * cierra, punto si es un solo vertice, polilinea en los demas casos. La
+     * capa se crea si no existe.
      *
-     * \return el identificador de la entidad creada, o -1 si el fichero no se
-     *         pudo leer (el motivo queda en \a error).
+     * \return los identificadores de las entidades creadas (una por trazado),
+     *         o una lista vacia si el fichero no se pudo leer (el motivo queda
+     *         en \a error).
      */
-    qint64 loadGeoAsLayer(const QString &path, const QString &layerId,
-                          const QString &displayName = QString(),
-                          const FeatureStyle &style = FeatureStyle(),
-                          QString *error = nullptr);
+    QVector<qint64> loadGeoAsLayer(const QString &path, const QString &layerId,
+                                   const QString &displayName = QString(),
+                                   const FeatureStyle &style = FeatureStyle(),
+                                   QString *error = nullptr);
 
     // --- Objetivos moviles (capa dinamica) -------------------------------
     /*!

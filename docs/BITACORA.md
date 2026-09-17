@@ -1652,13 +1652,22 @@ El formato `.geo` es una linea por vertice, `longitud,latitud,` (OJO: la
 longitud primero), terminada en `0.0,0.0`. Un anillo cerrado repite el primer
 vertice al final.
 
-`readGeoFile()` (en el nucleo, `include/libmapa/GeoFile.h`) lo lee a un
-`GeoData { points, closed }`, saltando lineas en blanco o mal formadas y
-avisando por `error` si no se puede abrir. `MapWidget::loadGeoAsLayer()` lo
-convierte en una entidad —**poligono** si el trazo cierra, **polilinea** si
-no— dentro de una capa nueva. El `Aguas.geo` de ejemplo (las aguas
-jurisdiccionales de Cuba) son 140 vertices que cierran: 139 tras quitar el de
-cierre.
+**Un `.geo` puede llevar VARIOS trazados**, separados por `0.0,0.0`: `0.0,0.0`
+es un **separador**, no un simple fin de fichero. Un mismo fichero va desde un
+anillo (las aguas) hasta decenas de polilineas (los `corredores` son parejas de
+lineas; `ejercitos` son 39 divisiones administrativas).
+
+`readGeoFile()` (en el nucleo, `include/libmapa/GeoFile.h`) devuelve **un
+`GeoPath` por trazado** (`{points, closed}`), saltando lineas en blanco o mal
+formadas y avisando por `error` si no se puede abrir.
+`MapWidget::loadGeoAsLayer()` crea una entidad por trazado en la misma capa:
+**poligono** si cierra, **punto** si es un solo vertice, **polilinea** en los
+demas casos; devuelve la lista de identificadores. El `Aguas.geo` (aguas
+jurisdiccionales) es un anillo de 140 vertices (139 tras quitar el de cierre).
+
+El primer intento se paraba en el **primer** `0.0,0.0` y solo cargaba un
+segmento: por eso `corredores` salia con una sola linea. Corregido tratando
+`0.0,0.0` como separador y no como terminador.
 
 ### Objetivos moviles: la capa dinamica
 
@@ -1686,7 +1695,9 @@ API en `MapWidget`: `addTarget`, `updateTarget`, `setTargetLabel`,
 
 ### Verificacion
 
-`tst_geofile` lee el `aguas.geo` real (orden lon/lat, cierre). `tst_targetmodel`
+`tst_geofile` lee el `aguas.geo` real (un anillo), los `corredores` (6
+polilineas) y `ejercitos` (39 segmentos), comprobando que NO se para en el
+primer separador. `tst_targetmodel`
 prueba altas, actualizaciones, poda de la traza y **250 objetivos** con 20
 actualizaciones cada uno. `tst_mapwidget` carga un `.geo` como poligono y
 **dibuja 250 objetivos** forzando el render con `grab()`. El `demo` gana

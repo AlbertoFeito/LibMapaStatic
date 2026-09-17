@@ -10,31 +10,36 @@
 namespace libmapa {
 
 /*!
- * \brief Contenido de un fichero .geo: una lista de vertices.
+ * \brief Un trazado de un fichero .geo: una lista de vertices.
  *
- * El formato .geo es una linea por vertice, "longitud,latitud," (OJO: primero
- * la longitud), y un "0.0,0.0" final como terminador. Un anillo cerrado repite
- * el primer vertice al final; \a closed lo indica.
+ * \a closed indica que el ultimo vertice coincide con el primero (un anillo).
  */
-struct GeoData
+struct GeoPath
 {
     QVector<QGeoCoordinate> points;
-    bool closed = false;        //!< El ultimo vertice coincide con el primero.
+    bool closed = false;
 
     bool isEmpty() const { return points.isEmpty(); }
 };
 
 /*!
- * \brief Lee un fichero .geo.
+ * \brief Lee un fichero .geo, que puede contener VARIOS trazados.
  *
- * Se detiene en el terminador "0.0,0.0" o al final del fichero. Las lineas en
- * blanco o mal formadas se saltan. Si no se puede abrir o no hay vertices
- * validos, devuelve un GeoData vacio y escribe el motivo en \a error.
+ * El formato .geo es una linea por vertice, "longitud,latitud," (OJO: primero
+ * la longitud), y "0.0,0.0" como SEPARADOR entre trazados (no un simple fin de
+ * fichero). Asi un mismo fichero lleva desde un solo anillo (las aguas
+ * jurisdiccionales) hasta decenas de polilineas (corredores, divisiones
+ * administrativas).
  *
- * El orden del fichero es longitud,latitud; aqui se coloca en el
- * QGeoCoordinate como (latitud, longitud), que es lo que espera la libreria.
+ * Devuelve un trazado por cada bloque separado por "0.0,0.0". Las lineas en
+ * blanco o mal formadas se saltan; los bloques vacios tambien. El orden del
+ * fichero es longitud,latitud; aqui se coloca como (latitud, longitud).
+ *
+ * Si no se puede abrir o no hay ningun vertice valido, devuelve una lista
+ * vacia y escribe el motivo en \a error.
  */
-LIBMAPA_EXPORT GeoData readGeoFile(const QString &path, QString *error = nullptr);
+LIBMAPA_EXPORT QVector<GeoPath> readGeoFile(const QString &path,
+                                            QString *error = nullptr);
 
 } // namespace libmapa
 

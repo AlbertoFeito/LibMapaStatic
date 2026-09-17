@@ -95,6 +95,7 @@ private slots:
 
     // --- Fase 7: .geo y objetivos moviles --------------------------------
     void loadsGeoFileAsPolygonLayer();
+    void loadsGeoWithSeveralPolylines();
     void drawsManyMovingTargets();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
@@ -1579,13 +1580,13 @@ void TstMapWidget::loadsGeoFileAsPolygonLayer()
 
     const int antes = w.featureCount();
     QString error;
-    const qint64 id = w.loadGeoAsLayer(ruta, QStringLiteral("aguas"),
-                                       QStringLiteral("Aguas"), FeatureStyle(),
-                                       &error);
-    QVERIFY2(id > 0, qPrintable(error));
+    const QVector<qint64> ids = w.loadGeoAsLayer(ruta, QStringLiteral("aguas"),
+                                                 QStringLiteral("Aguas"),
+                                                 FeatureStyle(), &error);
+    QVERIFY2(ids.size() == 1, qPrintable(error));
     QCOMPARE(w.featureCount(), antes + 1);
 
-    const auto feat = w.feature(id);
+    const auto feat = w.feature(ids.first());
     QVERIFY(feat.has_value());
     QCOMPARE(feat->kind, GeometryKind::Polygon);
     QCOMPARE(feat->geometry.size(), 3);      // se quita el vertice de cierre
@@ -1595,6 +1596,35 @@ void TstMapWidget::loadsGeoFileAsPolygonLayer()
         if (c.id == QStringLiteral("aguas"))
             hayCapa = true;
     QVERIFY(hayCapa);
+}
+
+void TstMapWidget::loadsGeoWithSeveralPolylines()
+{
+    // Un .geo con VARIOS trazados separados por 0,0: dos lineas abiertas. El
+    // lector no debe pararse en el primer separador (era el fallo).
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    const QString ruta = m_dir.filePath(QStringLiteral("corredores.geo"));
+    QFile f(ruta);
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+    QTextStream(&f) << "-81.4,23.0,\n-81.5,21.6,\n0.0,0.0\n"
+                       "-81.2,23.0,\n-81.4,21.5,\n0.0,0.0\n";
+    f.close();
+
+    const int antes = w.featureCount();
+    QString error;
+    const QVector<qint64> ids = w.loadGeoAsLayer(ruta, QStringLiteral("corredores"),
+                                                 QStringLiteral("Corredores"),
+                                                 FeatureStyle(), &error);
+    QVERIFY2(ids.size() == 2, qPrintable(error));       // dos trazados, no uno
+    QCOMPARE(w.featureCount(), antes + 2);
+    for (qint64 id : ids) {
+        const auto feat = w.feature(id);
+        QVERIFY(feat.has_value());
+        QCOMPARE(feat->kind, GeometryKind::Polyline);
+        QCOMPARE(feat->geometry.size(), 2);
+    }
 }
 
 void TstMapWidget::drawsManyMovingTargets()

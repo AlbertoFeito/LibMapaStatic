@@ -858,17 +858,17 @@ private:
         estilo.fillColor = QColor(0x00, 0x69, 0x94, 40);
 
         QString error;
-        const qint64 fid = m_mapa->loadGeoAsLayer(ruta, id,
+        const QVector<qint64> ids = m_mapa->loadGeoAsLayer(ruta, id,
             QFileInfo(ruta).completeBaseName(), estilo, &error);
-        if (fid < 0) {
+        if (ids.isEmpty()) {
             QMessageBox::warning(this, tr("Cargar .geo"),
                 tr("No se pudo cargar:\n%1").arg(error));
             return;
         }
         m_ultimoDir = QFileInfo(ruta).absolutePath();
         m_mapa->setActiveFeatureLayer(id);
-        statusBar()->showMessage(tr("Cargado %1 en la capa '%2'")
-            .arg(QFileInfo(ruta).fileName(), id), 5000);
+        statusBar()->showMessage(tr("Cargados %1 trazados de %2 en la capa '%3'")
+            .arg(ids.size()).arg(QFileInfo(ruta).fileName(), id), 5000);
     }
 
     void alternarSimulacion(bool on)
