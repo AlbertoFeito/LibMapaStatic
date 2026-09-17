@@ -1,7 +1,9 @@
 #ifndef LIBMAPA_MAPWIDGET_H_
 #define LIBMAPA_MAPWIDGET_H_
 
+#include "libmapa/GeoFile.h"
 #include "libmapa/MapFeature.h"
+#include "libmapa/MapTarget.h"
 #include "libmapa/MapTypes.h"
 #include "libmapa/libmapa_export.h"
 
@@ -9,6 +11,7 @@
 #include <QPointF>
 #include <QString>
 #include <QWidget>
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -154,6 +157,51 @@ public:
      */
     bool saveFeaturesTo(const QString &databasePath);
     bool loadFeaturesFrom(const QString &databasePath);
+
+    // --- Ficheros .geo ---------------------------------------------------
+    /*!
+     * \brief Carga un fichero .geo como una entidad en una capa nueva.
+     *
+     * El formato .geo es una lista de vertices "longitud,latitud," terminada
+     * en "0.0,0.0". Si el trazo se cierra (el ultimo vertice coincide con el
+     * primero) se crea un poligono; si no, una polilinea. La capa se crea si
+     * no existe.
+     *
+     * \return el identificador de la entidad creada, o -1 si el fichero no se
+     *         pudo leer (el motivo queda en \a error).
+     */
+    qint64 loadGeoAsLayer(const QString &path, const QString &layerId,
+                          const QString &displayName = QString(),
+                          const FeatureStyle &style = FeatureStyle(),
+                          QString *error = nullptr);
+
+    // --- Objetivos moviles (capa dinamica) -------------------------------
+    /*!
+     * \brief Da de alta o reemplaza un objetivo movil.
+     *
+     * Pensado para cientos de objetivos actualizandose en tiempo real. Van en
+     * una capa propia que se repinta sola sin rehacer teselas ni entidades.
+     * Si \a target.id es < 0 se asigna uno. Devuelve el identificador o -1.
+     */
+    qint64 addTarget(const MapTarget &target);
+
+    //! Via rapida del tiempo real: nueva posicion (y rumbo) de un objetivo ya
+    //! existente, anadiendola a su traza. NaN en el rumbo lo deja como estaba.
+    bool updateTarget(qint64 id, const QGeoCoordinate &position,
+                      double headingDeg = std::numeric_limits<double>::quiet_NaN());
+
+    bool setTargetLabel(qint64 id, const QString &text);
+    bool removeTarget(qint64 id);
+    void clearTargets();
+
+    std::optional<MapTarget> target(qint64 id) const;
+    QVector<MapTarget> targets() const;
+    int targetCount() const;
+
+    //! Longitud maxima de la traza de cada objetivo, en numero de puntos.
+    void setTargetTrailLength(int maxPoints);
+    //! Muestra u oculta la capa de objetivos entera.
+    void setTargetsVisible(bool visible);
 
     // --- Seleccion -------------------------------------------------------
     qint64 selectedFeature() const;

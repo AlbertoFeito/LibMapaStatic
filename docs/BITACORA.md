@@ -1641,3 +1641,56 @@ mapa borra vértices. Las herramientas (navegar, medir, zoom, dibujo, editar)
 van en un único grupo excluyente.
 
 **Estado: 11 tests, 0 avisos, compilado y probado en Qt 5.15 y Qt 6.4.**
+
+---
+
+## 29. Fase 7 — Ficheros .geo y objetivos moviles
+
+### Ficheros .geo como capas
+
+El formato `.geo` es una linea por vertice, `longitud,latitud,` (OJO: la
+longitud primero), terminada en `0.0,0.0`. Un anillo cerrado repite el primer
+vertice al final.
+
+`readGeoFile()` (en el nucleo, `include/libmapa/GeoFile.h`) lo lee a un
+`GeoData { points, closed }`, saltando lineas en blanco o mal formadas y
+avisando por `error` si no se puede abrir. `MapWidget::loadGeoAsLayer()` lo
+convierte en una entidad —**poligono** si el trazo cierra, **polilinea** si
+no— dentro de una capa nueva. El `Aguas.geo` de ejemplo (las aguas
+jurisdiccionales de Cuba) son 140 vertices que cierran: 139 tras quitar el de
+cierre.
+
+### Objetivos moviles: la capa dinamica
+
+La Fase 6 dejaba prevista una capa aparte para lo que se mueve, y aqui esta.
+Tres piezas, separadas igual que las entidades estaticas:
+
+- **`MapTarget`** (publico): posicion, rumbo, velocidad, **etiqueta de texto**,
+  color. La identidad la pone la aplicacion (pista, MMSI...).
+- **`TargetModel`**: guarda los objetivos y su **traza** (las ultimas N
+  posiciones, acotada), sin dibujar. `upsert` da de alta; `update(id, pos,
+  rumbo)` es la via rapida del tiempo real y anade el punto a la traza.
+- **`TargetLayer`**: los dibuja todos en un unico `QCPLayerable` —traza,
+  simbolo orientado por el rumbo y etiqueta con halo—.
+
+Lo que hace que 250+ objetivos vayan fluidos: la capa vive en su propia
+`QCPLayer` en modo **`lmBuffered`**, asi que actualizar posiciones repinta
+**solo esa capa** y recompone, sin rehacer teselas ni entidades estaticas. Y
+los avisos del modelo se **agrupan con un temporizador** (~30 fps): aunque
+lleguen decenas de posiciones por segundo, no se repinta de mas. Fuera de
+pantalla los objetivos se descartan (culling).
+
+API en `MapWidget`: `addTarget`, `updateTarget`, `setTargetLabel`,
+`removeTarget`, `clearTargets`, `target`, `targets`, `targetCount`,
+`setTargetTrailLength`, `setTargetsVisible`.
+
+### Verificacion
+
+`tst_geofile` lee el `aguas.geo` real (orden lon/lat, cierre). `tst_targetmodel`
+prueba altas, actualizaciones, poda de la traza y **250 objetivos** con 20
+actualizaciones cada uno. `tst_mapwidget` carga un `.geo` como poligono y
+**dibuja 250 objetivos** forzando el render con `grab()`. El `demo` gana
+"Cargar .geo..." y un simulador de objetivos (250 por defecto) con traza y
+etiqueta, moviendose en tiempo real.
+
+**Estado: 13 tests, 0 avisos, compilado y probado en Qt 5.15 y Qt 6.4.**

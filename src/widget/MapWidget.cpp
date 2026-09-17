@@ -419,6 +419,102 @@ bool MapWidget::loadFeaturesFrom(const QString &databasePath)
     return true;
 }
 
+// ------------------------------------------------------------ ficheros .geo --
+
+qint64 MapWidget::loadGeoAsLayer(const QString &path, const QString &layerId,
+                                 const QString &displayName,
+                                 const FeatureStyle &style, QString *error)
+{
+    if (!d->view)
+        return -1;
+
+    QString motivo;
+    const GeoData geo = readGeoFile(path, &motivo);
+    if (geo.isEmpty()) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return -1;
+    }
+
+    MapFeature f;
+    f.layerId = layerId;
+    f.name = displayName.isEmpty() ? layerId : displayName;
+    f.style = style;
+    f.geometry = geo.points;
+    if (geo.closed) {
+        // El anillo repite el primer vertice al final; el poligono no lo
+        // necesita, se cierra solo.
+        if (f.geometry.size() > 1)
+            f.geometry.removeLast();
+        f.kind = GeometryKind::Polygon;
+    } else {
+        f.kind = GeometryKind::Polyline;
+    }
+
+    addFeatureLayer(layerId, displayName, 0);
+    return addFeature(f);
+}
+
+// ------------------------------------------------------ objetivos moviles --
+
+qint64 MapWidget::addTarget(const MapTarget &target)
+{
+    return d->view ? d->view->targetModel()->upsert(target) : -1;
+}
+
+bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
+                             double headingDeg)
+{
+    return d->view && d->view->targetModel()->update(id, position, headingDeg);
+}
+
+bool MapWidget::setTargetLabel(qint64 id, const QString &text)
+{
+    return d->view && d->view->targetModel()->setLabel(id, text);
+}
+
+bool MapWidget::removeTarget(qint64 id)
+{
+    return d->view && d->view->targetModel()->remove(id);
+}
+
+void MapWidget::clearTargets()
+{
+    if (d->view)
+        d->view->targetModel()->clear();
+}
+
+std::optional<MapTarget> MapWidget::target(qint64 id) const
+{
+    return d->view ? d->view->targetModel()->target(id)
+                   : std::optional<MapTarget>();
+}
+
+QVector<MapTarget> MapWidget::targets() const
+{
+    return d->view ? d->view->targetModel()->targets() : QVector<MapTarget>();
+}
+
+int MapWidget::targetCount() const
+{
+    return d->view ? d->view->targetModel()->count() : 0;
+}
+
+void MapWidget::setTargetTrailLength(int maxPoints)
+{
+    if (d->view)
+        d->view->targetModel()->setTrailMaxPoints(maxPoints);
+}
+
+void MapWidget::setTargetsVisible(bool visible)
+{
+    if (d->view && d->view->targetLayer()) {
+        d->view->targetLayer()->setVisible(visible);
+        d->view->replot(QCustomPlot::rpQueuedReplot);
+    }
+}
+
 qint64 MapWidget::selectedFeature() const
 {
     return d->view ? d->view->overlayModel()->selectedId() : -1;

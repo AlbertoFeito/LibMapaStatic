@@ -40,7 +40,9 @@
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
+#include <QRandomGenerator>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QTableWidget>
 #include <QTimer>
@@ -48,7 +50,9 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QtMath>
 #include <algorithm>
+#include <cmath>
 
 using namespace libmapa;
 
@@ -94,6 +98,7 @@ public:
 
         construirBarraMapa();
         construirBarraEntidades();
+        construirBarraDatos();
         construirPanel();
         conectarSenales();
         aplicarEstiloAlTrazo();
@@ -190,6 +195,36 @@ private:
             a->setShortcut(QKeySequence(atajo));
         m_grupo->addAction(a);
         return a;
+    }
+
+    //! Barra: cargar ficheros .geo y simular objetivos moviles.
+    void construirBarraDatos()
+    {
+        auto *barra = addToolBar(tr("Datos"));
+        barra->setObjectName(QStringLiteral("barraDatos"));
+        barra->setMovable(false);
+
+        auto *geo = barra->addAction(tr("Cargar .geo..."));
+        geo->setToolTip(tr("Carga un contorno .geo como una capa nueva"));
+        connect(geo, &QAction::triggered, this, &Ventana::cargarGeo);
+
+        barra->addSeparator();
+        barra->addWidget(new QLabel(tr("  Objetivos: ")));
+        m_numObjetivos = new QSpinBox(this);
+        m_numObjetivos->setRange(1, 5000);
+        m_numObjetivos->setValue(250);
+        barra->addWidget(m_numObjetivos);
+
+        m_accSimular = barra->addAction(tr("Simular"));
+        m_accSimular->setCheckable(true);
+        m_accSimular->setToolTip(tr("Crea objetivos moviles con traza y los "
+                                    "actualiza en tiempo real"));
+        connect(m_accSimular, &QAction::toggled, this, &Ventana::alternarSimulacion);
+
+        // Reloj de la simulacion: ~10 pasos por segundo.
+        m_simReloj = new QTimer(this);
+        m_simReloj->setInterval(100);
+        connect(m_simReloj, &QTimer::timeout, this, &Ventana::pasoSimulacion);
     }
 
     // ==================================================== panel ===========
@@ -808,6 +843,116 @@ private:
         setWindowTitle(tr("libmapa - demostracion  -  %1").arg(f));
     }
 
+    // ============================================ datos / simulacion ======
+    void cargarGeo()
+    {
+        const QString ruta = QFileDialog::getOpenFileName(this,
+            tr("Cargar fichero .geo"), dirTrabajo(),
+            tr("Contornos (*.geo);;Todos (*)"));
+        if (ruta.isEmpty())
+            return;
+
+        const QString id = QFileInfo(ruta).completeBaseName().toLower();
+        FeatureStyle estilo;
+        estilo.lineColor = QColor(0x00, 0x69, 0x94);
+        estilo.fillColor = QColor(0x00, 0x69, 0x94, 40);
+
+        QString error;
+        const qint64 fid = m_mapa->loadGeoAsLayer(ruta, id,
+            QFileInfo(ruta).completeBaseName(), estilo, &error);
+        if (fid < 0) {
+            QMessageBox::warning(this, tr("Cargar .geo"),
+                tr("No se pudo cargar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        m_mapa->setActiveFeatureLayer(id);
+        statusBar()->showMessage(tr("Cargado %1 en la capa '%2'")
+            .arg(QFileInfo(ruta).fileName(), id), 5000);
+    }
+
+    void alternarSimulacion(bool on)
+    {
+        if (on) {
+            iniciarSimulacion(m_numObjetivos->value());
+            m_simReloj->start();
+        } else {
+            m_simReloj->stop();
+            m_mapa->clearTargets();
+            m_simIds.clear();
+            m_simVel.clear();
+            statusBar()->showMessage(tr("Simulacion detenida"), 3000);
+        }
+        m_numObjetivos->setEnabled(!on);
+    }
+
+    void iniciarSimulacion(int n)
+    {
+        m_mapa->clearTargets();
+        m_simIds.clear();
+        m_simVel.clear();
+        m_simIds.reserve(n);
+        m_simVel.reserve(n);
+
+        auto *r = QRandomGenerator::global();
+        static const char *tipos[] = { "Buque", "Aereo", "Pesca", "Patrulla" };
+
+        for (int i = 0; i < n; ++i) {
+            // Repartidos por el mar alrededor de Cuba.
+            const double lat = 19.5 + r->bounded(4.5);       // 19.5 .. 24.0
+            const double lon = -85.0 + r->bounded(11.0);     // -85 .. -74
+            const double rumbo = r->bounded(360.0);
+            const double velGrados = 0.002 + r->bounded(0.004);  // por paso
+
+            MapTarget t;
+            t.position = QGeoCoordinate(lat, lon);
+            t.headingDeg = rumbo;
+            t.label = QStringLiteral("%1 %2")
+                          .arg(QLatin1String(tipos[i % 4])).arg(i + 1);
+            t.color = QColor::fromHsv(r->bounded(360), 200, 230);
+            const qint64 id = m_mapa->addTarget(t);
+            m_simIds.append(id);
+
+            const double rad = qDegreesToRadians(rumbo);
+            // Componentes: x = variacion de longitud, y = variacion de latitud.
+            m_simVel.append(QPointF(std::sin(rad) * velGrados,
+                                    std::cos(rad) * velGrados));
+        }
+        statusBar()->showMessage(tr("Simulando %1 objetivos").arg(n), 3000);
+    }
+
+    void pasoSimulacion()
+    {
+        auto *r = QRandomGenerator::global();
+        for (int i = 0; i < m_simIds.size(); ++i) {
+            QPointF &v = m_simVel[i];
+            const auto t = m_mapa->target(m_simIds[i]);
+            if (!t)
+                continue;
+
+            double lat = t->position.latitude() + v.y();
+            double lon = t->position.longitude() + v.x();
+
+            // Rebote contra los limites del area para que no se escapen.
+            if (lat < 19.0 || lat > 24.5) { v.setY(-v.y()); lat = t->position.latitude(); }
+            if (lon < -86.0 || lon > -73.0) { v.setX(-v.x()); lon = t->position.longitude(); }
+
+            // Un pequeno viraje aleatorio de vez en cuando.
+            if (r->bounded(100) < 3) {
+                const double giro = (r->bounded(2.0) - 1.0) * 0.2;
+                const double c = std::cos(giro), s = std::sin(giro);
+                const double nx = v.x() * c - v.y() * s;
+                const double ny = v.x() * s + v.y() * c;
+                v.setX(nx);
+                v.setY(ny);
+            }
+
+            const double rumbo = qRadiansToDegrees(std::atan2(v.x(), v.y()));
+            m_mapa->updateTarget(m_simIds[i], QGeoCoordinate(lat, lon), rumbo);
+        }
+        actualizarEstado();
+    }
+
     // ==================================================== estado ==========
     void actualizarEstado()
     {
@@ -819,12 +964,13 @@ private:
         if (!m_info)
             return;
         m_info->setText(
-            QStringLiteral("  %1  |  zoom %2 de %3  |  %4 %% propias  |  %5 entidades  ")
+            QStringLiteral("  %1  |  zoom %2 de %3  |  %4 %% propias  |  %5 entidades  |  %6 objetivos  ")
             .arg(m_mapa->baseLayerId())
             .arg(m_mapa->zoom())
             .arg(m_mapa->maxZoom())
             .arg(m_mapa->exactCoverage() * 100.0, 0, 'f', 0)
-            .arg(m_mapa->featureCount()));
+            .arg(m_mapa->featureCount())
+            .arg(m_mapa->targetCount()));
     }
 
     // ==================================================== miembros ========
@@ -860,6 +1006,13 @@ private:
     QColor m_colorRelleno = QColor(0xd3, 0x2f, 0x2f, 70);
     QString m_archivoActual;
     QString m_ultimoDir;
+
+    // Simulacion de objetivos moviles.
+    QSpinBox *m_numObjetivos = nullptr;
+    QAction *m_accSimular = nullptr;
+    QTimer *m_simReloj = nullptr;
+    QVector<qint64> m_simIds;
+    QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.
 };
 
 int main(int argc, char *argv[])

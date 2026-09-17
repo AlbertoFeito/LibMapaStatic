@@ -22,11 +22,13 @@ static QMouseEvent mouseEvent(QEvent::Type tipo, const QPoint &pos,
 }
 #include <cmath>
 
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTextStream>
 #include <QtTest>
 
 using namespace libmapa;
@@ -90,6 +92,10 @@ private slots:
     void undoAndRedoRestoreTheModel();
     void draggingIsOneUndoStep();
     void savesAndLoadsFeatures();
+
+    // --- Fase 7: .geo y objetivos moviles --------------------------------
+    void loadsGeoFileAsPolygonLayer();
+    void drawsManyMovingTargets();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -1555,6 +1561,78 @@ void TstMapWidget::savesAndLoadsFeatures()
             QVERIFY(!c.visible);
         }
     QVERIFY(encontrada);
+}
+
+void TstMapWidget::loadsGeoFileAsPolygonLayer()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    // Un .geo cerrado (triangulo): lon,lat por linea, terminador 0,0. El
+    // ultimo vertice repite el primero, como en los ficheros reales.
+    const QString ruta = m_dir.filePath(QStringLiteral("mini.geo"));
+    QFile f(ruta);
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+    QTextStream(&f) << "-82.0,23.0,\n-81.0,23.0,\n-81.5,23.5,\n"
+                       "-82.0,23.0,\n0.0,0.0\n";
+    f.close();
+
+    const int antes = w.featureCount();
+    QString error;
+    const qint64 id = w.loadGeoAsLayer(ruta, QStringLiteral("aguas"),
+                                       QStringLiteral("Aguas"), FeatureStyle(),
+                                       &error);
+    QVERIFY2(id > 0, qPrintable(error));
+    QCOMPARE(w.featureCount(), antes + 1);
+
+    const auto feat = w.feature(id);
+    QVERIFY(feat.has_value());
+    QCOMPARE(feat->kind, GeometryKind::Polygon);
+    QCOMPARE(feat->geometry.size(), 3);      // se quita el vertice de cierre
+
+    bool hayCapa = false;
+    for (const LayerInfo &c : w.featureLayers())
+        if (c.id == QStringLiteral("aguas"))
+            hayCapa = true;
+    QVERIFY(hayCapa);
+}
+
+void TstMapWidget::drawsManyMovingTargets()
+{
+    // El requisito de 250 objetivos simultaneos: se comprueba que la tuberia
+    // de dibujo los pinta sin caerse. grab() fuerza el repintado completo,
+    // que recorre TargetLayer::draw con los 250 objetivos y sus trazas.
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+
+    const int N = 250;
+    QVector<qint64> ids;
+    ids.reserve(N);
+    for (int i = 0; i < N; ++i) {
+        MapTarget t;
+        t.position = QGeoCoordinate(20.0 + i * 0.01, -84.0 + i * 0.004);
+        t.label = QStringLiteral("T%1").arg(i);
+        const qint64 id = w.addTarget(t);
+        QVERIFY(id > 0);
+        ids.append(id);
+    }
+    QCOMPARE(w.targetCount(), N);
+
+    // Varias rondas de actualizacion, como el flujo en tiempo real.
+    for (int paso = 1; paso <= 5; ++paso)
+        for (int i = 0; i < N; ++i)
+            QVERIFY(w.updateTarget(ids[i],
+                QGeoCoordinate(20.0 + i * 0.01 + paso * 0.002, -84.0 + i * 0.004),
+                45.0));
+
+    const QPixmap px = w.grab();       // fuerza el render completo
+    QVERIFY(!px.isNull());
+
+    QVERIFY(w.removeTarget(ids.first()));
+    QCOMPARE(w.targetCount(), N - 1);
+    w.clearTargets();
+    QCOMPARE(w.targetCount(), 0);
 }
 
 QTEST_MAIN(TstMapWidget)

@@ -7,6 +7,8 @@
 #include "tiles/TileService.h"
 #include "widget/FeatureLayer.h"
 #include "widget/OverlayModel.h"
+#include "widget/TargetLayer.h"
+#include "widget/TargetModel.h"
 #include "widget/TileLayer.h"
 
 #include <QGeoCoordinate>
@@ -41,6 +43,8 @@ public:
     TileLayer *tileLayer() const { return m_tileLayer; }
     FeatureLayer *featureLayer() const { return m_featureLayer; }
     OverlayModel *overlayModel() const { return m_model; }
+    TargetModel *targetModel() const { return m_targetModel; }
+    TargetLayer *targetLayer() const { return m_targetLayer; }
 
     QGeoCoordinate center() const;
     void setCenter(const QGeoCoordinate &center);
@@ -165,6 +169,8 @@ private:
     TileLayer *m_tileLayer = nullptr;
     OverlayModel *m_model = nullptr;
     FeatureLayer *m_featureLayer = nullptr;
+    TargetModel *m_targetModel = nullptr;
+    TargetLayer *m_targetLayer = nullptr;
 
     int m_zoom = 10;
     QGeoCoordinate m_center{23.1136, -82.3666};
