@@ -1669,6 +1669,33 @@ El primer intento se paraba en el **primer** `0.0,0.0` y solo cargaba un
 segmento: por eso `corredores` salia con una sola linea. Corregido tratando
 `0.0,0.0` como separador y no como terminador.
 
+### Geometria multi-parte: un fichero, una entidad
+
+Un `.geo` entero es **una sola entidad multi-parte**, no una entidad por
+trazado. `MapFeature` gana `QVector<QVector<QGeoCoordinate>> parts`: vacio =
+una sola parte (se usa `geometry`); con elementos, la entidad es multi-parte y
+todas las partes comparten tipo, estilo, nombre y atributos. `loadGeoAsLayer()`
+crea **un** poligono multi-parte si todos los trazados cierran, o una polilinea
+multi-parte si no.
+
+- **Dibujo y seleccion** recorren `outlines()` (las partes, o `geometry`):
+  `FeatureLayer` pinta y detecta bajo el cursor parte a parte.
+- **Edicion**: mover la entidad entera desplaza todas las partes; editar
+  vertices sueltos se rechaza en multi-parte (no se sabria que parte tocar).
+- **Persistencia**: `entidad_vertice` gana una columna `parte`; guardar escribe
+  una fila por vertice agrupada por parte, y cargar reconstruye las partes. Los
+  ficheros del esquema anterior (sin `parte`) se detectan y se leen como una
+  sola parte.
+
+### Objetivos: etiqueta multilinea y opciones de traza
+
+- La **etiqueta** de un objetivo admite varias lineas (`\n`): un parametro por
+  linea (nombre, rumbo, velocidad...). `TargetLayer` las dibuja apiladas, cada
+  una con su halo.
+- La **traza** tiene opciones: `setTargetTrailLength(n)` con `n < 0` = toda
+  (ilimitada), `0` = sin traza, `n > 0` = las ultimas N (10, 100, 500...). El
+  demo lo expone en un desplegable.
+
 ### Objetivos moviles: la capa dinamica
 
 La Fase 6 dejaba prevista una capa aparte para lo que se mueve, y aqui esta.
@@ -1704,4 +1731,6 @@ actualizaciones cada uno. `tst_mapwidget` carga un `.geo` como poligono y
 "Cargar .geo..." y un simulador de objetivos (250 por defecto) con traza y
 etiqueta, moviendose en tiempo real.
 
-**Estado: 13 tests, 0 avisos, compilado y probado en Qt 5.15 y Qt 6.4.**
+**Estado: 13 tests (incluye `.geo` multi-trazado, entidad multi-parte con
+guardar/cargar, y opciones de traza), 0 avisos, compilado y probado en Qt 5.15
+y Qt 6.4.**

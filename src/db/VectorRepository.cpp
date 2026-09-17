@@ -906,16 +906,23 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     const qint64 id = q.lastInsertId().toLongLong();
 
     q.prepare(QStringLiteral(
-        "INSERT INTO entidad_vertice (entidad_id, orden, latitud, longitud)"
-        " VALUES (:e,:o,:la,:lo)"));
-    for (int i = 0; i < f.geometry.size(); ++i) {
-        q.bindValue(QStringLiteral(":e"), id);
-        q.bindValue(QStringLiteral(":o"), i);
-        q.bindValue(QStringLiteral(":la"), f.geometry[i].latitude());
-        q.bindValue(QStringLiteral(":lo"), f.geometry[i].longitude());
-        if (!q.exec()) {
-            fail(QStringLiteral("writeFeature/vertice"), q.lastError().text());
-            return std::nullopt;
+        "INSERT INTO entidad_vertice (entidad_id, parte, orden, latitud, longitud)"
+        " VALUES (:e,:p,:o,:la,:lo)"));
+    // Una fila por vertice, agrupadas por parte. Las entidades de una sola
+    // parte se guardan como parte 0.
+    const auto partes = f.outlines();
+    for (int p = 0; p < partes.size(); ++p) {
+        const QVector<QGeoCoordinate> &parte = partes[p];
+        for (int i = 0; i < parte.size(); ++i) {
+            q.bindValue(QStringLiteral(":e"), id);
+            q.bindValue(QStringLiteral(":p"), p);
+            q.bindValue(QStringLiteral(":o"), i);
+            q.bindValue(QStringLiteral(":la"), parte[i].latitude());
+            q.bindValue(QStringLiteral(":lo"), parte[i].longitude());
+            if (!q.exec()) {
+                fail(QStringLiteral("writeFeature/vertice"), q.lastError().text());
+                return std::nullopt;
+            }
         }
     }
 
@@ -1003,17 +1010,45 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         ids.append(f.id);
     }
 
+    // 'parte' agrupa los vertices de una geometria multi-parte. Un fichero
+    // guardado con el esquema anterior no tiene esa columna: se detecta si la
+    // consulta con 'parte' falla y se cae a la de una sola parte.
+    bool conParte = true;
+    {
+        QSqlQuery prueba(db());
+        conParte = prueba.exec(QStringLiteral(
+            "SELECT parte FROM entidad_vertice LIMIT 0"));
+    }
+
     QSqlQuery qv(db());
-    qv.prepare(QStringLiteral(
-        "SELECT latitud, longitud FROM entidad_vertice"
-        " WHERE entidad_id=:e ORDER BY orden"));
+    qv.prepare(conParte
+        ? QStringLiteral("SELECT parte, latitud, longitud FROM entidad_vertice"
+                         " WHERE entidad_id=:e ORDER BY parte, orden")
+        : QStringLiteral("SELECT 0 AS parte, latitud, longitud FROM entidad_vertice"
+                         " WHERE entidad_id=:e ORDER BY orden"));
+
     for (int i = 0; i < out.size(); ++i) {
         qv.bindValue(QStringLiteral(":e"), ids[i]);
         if (!qv.exec())
             continue;
-        while (qv.next())
-            out[i].geometry.append(QGeoCoordinate(qv.value(0).toDouble(),
-                                                  qv.value(1).toDouble()));
+
+        QVector<QVector<QGeoCoordinate>> partes;
+        int parteActual = -1;
+        while (qv.next()) {
+            const int parte = qv.value(0).toInt();
+            const QGeoCoordinate c(qv.value(1).toDouble(), qv.value(2).toDouble());
+            if (parte != parteActual) {
+                partes.append(QVector<QGeoCoordinate>());
+                parteActual = parte;
+            }
+            partes.last().append(c);
+        }
+
+        if (partes.isEmpty())
+            continue;
+        out[i].geometry = partes.first();              // la primera parte
+        if (partes.size() > 1)
+            out[i].parts = partes;                     // multi-parte
     }
     return out;
 }

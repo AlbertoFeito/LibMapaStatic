@@ -14,6 +14,7 @@ private slots:
     void assignsIdAndOpensTrail();
     void updateStreamsPositionsIntoTrail();
     void capsTrailLength();
+    void trailOptionsWholeOrNone();
     void updateRejectsUnknownOrInvalid();
     void labelAndRemoveAndClear();
     void scalesToManyTargets();
@@ -77,6 +78,30 @@ void TstTargetModel::capsTrailLength()
     // Reducir el maximo poda de inmediato.
     m.setTrailMaxPoints(2);
     QCOMPARE(m.trail(id).size(), 2);
+}
+
+void TstTargetModel::trailOptionsWholeOrNone()
+{
+    TargetModel m;
+    const qint64 id = m.upsert(objetivo(23.0, -82.0));
+
+    // Toda la traza (ilimitada): se guardan todas las posiciones.
+    m.setTrailMaxPoints(-1);
+    for (int i = 1; i <= 50; ++i)
+        m.update(id, QGeoCoordinate(23.0 + i * 0.001, -82.0));
+    QCOMPARE(m.trail(id).size(), 51);          // inicial + 50
+
+    // Sin traza: se vacia y no crece.
+    m.setTrailMaxPoints(0);
+    QCOMPARE(m.trail(id).size(), 0);
+    m.update(id, QGeoCoordinate(23.1, -82.0));
+    QCOMPARE(m.trail(id).size(), 0);
+
+    // Un tope concreto vuelve a acotar.
+    m.setTrailMaxPoints(10);
+    for (int i = 1; i <= 30; ++i)
+        m.update(id, QGeoCoordinate(23.1 + i * 0.001, -82.0));
+    QCOMPARE(m.trail(id).size(), 10);
 }
 
 void TstTargetModel::updateRejectsUnknownOrInvalid()

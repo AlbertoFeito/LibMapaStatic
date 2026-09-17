@@ -1,7 +1,9 @@
 #include "widget/TargetLayer.h"
 
+#include <QFontMetricsF>
 #include <QPainter>
 #include <QPolygonF>
+#include <QStringList>
 #include <cmath>
 
 namespace libmapa {
@@ -127,17 +129,27 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
     painter->drawPolygon(simbolo);
     painter->restore();
 
-    // --- Etiqueta ----------------------------------------------------------
+    // --- Etiqueta (multilinea: un parametro por linea) ---------------------
     if (t.labelVisible && !t.label.isEmpty()) {
-        const QPointF anchor = pos + QPointF(r + 3.0, r * 0.5);
-        // Un halo claro detras del texto para que se lea sobre el mapa.
-        painter->setPen(QPen(QColor(255, 255, 255, 200)));
-        for (int dx = -1; dx <= 1; ++dx)
-            for (int dy = -1; dy <= 1; ++dy)
-                if (dx || dy)
-                    painter->drawText(anchor + QPointF(dx, dy), t.label);
-        painter->setPen(Qt::black);
-        painter->drawText(anchor, t.label);
+        const QStringList lineas =
+            t.label.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        const QFontMetricsF fm(painter->font());
+        const double h = fm.height();
+        double y = pos.y() + r * 0.5 + fm.ascent();
+        const double x = pos.x() + r + 3.0;
+
+        for (const QString &linea : lineas) {
+            const QPointF a(x, y);
+            // Un halo claro detras del texto para que se lea sobre el mapa.
+            painter->setPen(QPen(QColor(255, 255, 255, 200)));
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dy = -1; dy <= 1; ++dy)
+                    if (dx || dy)
+                        painter->drawText(a + QPointF(dx, dy), linea);
+            painter->setPen(Qt::black);
+            painter->drawText(a, linea);
+            y += h;
+        }
     }
 }
 

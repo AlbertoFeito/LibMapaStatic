@@ -160,23 +160,23 @@ public:
 
     // --- Ficheros .geo ---------------------------------------------------
     /*!
-     * \brief Carga un fichero .geo en una capa, una entidad por trazado.
+     * \brief Carga un fichero .geo como UNA sola entidad multi-parte.
      *
-     * Un .geo puede llevar VARIOS trazados separados por "0.0,0.0": las aguas
-     * jurisdiccionales son un solo anillo, pero "corredores" son parejas de
-     * lineas y las divisiones administrativas, decenas de polilineas. Cada
-     * trazado se crea como su propia entidad en la misma capa: poligono si
-     * cierra, punto si es un solo vertice, polilinea en los demas casos. La
-     * capa se crea si no existe.
+     * Un .geo puede llevar varios trazados separados por "0.0,0.0" (las aguas
+     * jurisdiccionales son un anillo; "corredores" son parejas de lineas; las
+     * divisiones administrativas, decenas de polilineas). Todo el fichero entra
+     * como una unica entidad: si todos los trazados cierran es un poligono
+     * multi-parte, si no una polilinea multi-parte. La capa se crea si no
+     * existe.
      *
-     * \return los identificadores de las entidades creadas (una por trazado),
-     *         o una lista vacia si el fichero no se pudo leer (el motivo queda
-     *         en \a error).
+     * \return el identificador de la entidad creada, o -1 si el fichero no se
+     *         pudo leer o no tenia trazados validos (el motivo queda en
+     *         \a error).
      */
-    QVector<qint64> loadGeoAsLayer(const QString &path, const QString &layerId,
-                                   const QString &displayName = QString(),
-                                   const FeatureStyle &style = FeatureStyle(),
-                                   QString *error = nullptr);
+    qint64 loadGeoAsLayer(const QString &path, const QString &layerId,
+                          const QString &displayName = QString(),
+                          const FeatureStyle &style = FeatureStyle(),
+                          QString *error = nullptr);
 
     // --- Objetivos moviles (capa dinamica) -------------------------------
     /*!
@@ -201,7 +201,8 @@ public:
     QVector<MapTarget> targets() const;
     int targetCount() const;
 
-    //! Longitud maxima de la traza de cada objetivo, en numero de puntos.
+    //! Longitud de la traza de cada objetivo: < 0 = toda (ilimitada),
+    //! 0 = sin traza, > 0 = las ultimas N posiciones (p. ej. 10, 100, 500).
     void setTargetTrailLength(int maxPoints);
     //! Muestra u oculta la capa de objetivos entera.
     void setTargetsVisible(bool visible);

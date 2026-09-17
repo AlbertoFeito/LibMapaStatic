@@ -221,6 +221,22 @@ private:
                                     "actualiza en tiempo real"));
         connect(m_accSimular, &QAction::toggled, this, &Ventana::alternarSimulacion);
 
+        // Opciones de traza: sin traza / N puntos / toda.
+        barra->addWidget(new QLabel(tr("  Traza: ")));
+        m_traza = new QComboBox(this);
+        m_traza->addItem(tr("Sin traza"), 0);
+        m_traza->addItem(tr("10"), 10);
+        m_traza->addItem(tr("100"), 100);
+        m_traza->addItem(tr("500"), 500);
+        m_traza->addItem(tr("Toda"), -1);
+        m_traza->setCurrentIndex(2);            // 100 por defecto
+        barra->addWidget(m_traza);
+        m_mapa->setTargetTrailLength(100);
+        connect(m_traza, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this](int i) {
+                    m_mapa->setTargetTrailLength(m_traza->itemData(i).toInt());
+                });
+
         // Reloj de la simulacion: ~10 pasos por segundo.
         m_simReloj = new QTimer(this);
         m_simReloj->setInterval(100);
@@ -858,17 +874,17 @@ private:
         estilo.fillColor = QColor(0x00, 0x69, 0x94, 40);
 
         QString error;
-        const QVector<qint64> ids = m_mapa->loadGeoAsLayer(ruta, id,
+        const qint64 fid = m_mapa->loadGeoAsLayer(ruta, id,
             QFileInfo(ruta).completeBaseName(), estilo, &error);
-        if (ids.isEmpty()) {
+        if (fid < 0) {
             QMessageBox::warning(this, tr("Cargar .geo"),
                 tr("No se pudo cargar:\n%1").arg(error));
             return;
         }
         m_ultimoDir = QFileInfo(ruta).absolutePath();
         m_mapa->setActiveFeatureLayer(id);
-        statusBar()->showMessage(tr("Cargados %1 trazados de %2 en la capa '%3'")
-            .arg(ids.size()).arg(QFileInfo(ruta).fileName(), id), 5000);
+        statusBar()->showMessage(tr("Cargado %1 como una entidad en la capa '%2'")
+            .arg(QFileInfo(ruta).fileName(), id), 5000);
     }
 
     void alternarSimulacion(bool on)
@@ -904,11 +920,16 @@ private:
             const double rumbo = r->bounded(360.0);
             const double velGrados = 0.002 + r->bounded(0.004);  // por paso
 
+            const int vel = 8 + r->bounded(22);      // nudos (ficticios)
             MapTarget t;
             t.position = QGeoCoordinate(lat, lon);
             t.headingDeg = rumbo;
-            t.label = QStringLiteral("%1 %2")
-                          .arg(QLatin1String(tipos[i % 4])).arg(i + 1);
+            t.speed = vel;
+            // Etiqueta MULTILINEA: un parametro por linea.
+            t.label = QStringLiteral("%1 %2\nRbo %3\nVel %4 kn")
+                          .arg(QLatin1String(tipos[i % 4])).arg(i + 1)
+                          .arg(static_cast<int>(rumbo), 3, 10, QLatin1Char('0'))
+                          .arg(vel);
             t.color = QColor::fromHsv(r->bounded(360), 200, 230);
             const qint64 id = m_mapa->addTarget(t);
             m_simIds.append(id);
@@ -1009,6 +1030,7 @@ private:
 
     // Simulacion de objetivos moviles.
     QSpinBox *m_numObjetivos = nullptr;
+    QComboBox *m_traza = nullptr;
     QAction *m_accSimular = nullptr;
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;

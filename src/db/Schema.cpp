@@ -150,14 +150,17 @@ QStringList migrations(int from)
         sql << QStringLiteral("CREATE INDEX idx_entidad_capa ON entidad(capa)");
         sql << QStringLiteral("CREATE INDEX idx_entidad_tipo ON entidad(tipo)");
 
+        // 'parte' permite geometrias multi-parte (un .geo entero como una sola
+        // entidad). Las de una parte usan parte 0.
         sql << QStringLiteral(
             "CREATE TABLE entidad_vertice ("
             "  entidad_id INTEGER NOT NULL"
             "             REFERENCES entidad(id) ON DELETE CASCADE,"
+            "  parte      INTEGER NOT NULL DEFAULT 0,"
             "  orden      INTEGER NOT NULL,"
             "  latitud    REAL NOT NULL,"
             "  longitud   REAL NOT NULL,"
-            "  PRIMARY KEY (entidad_id, orden)"
+            "  PRIMARY KEY (entidad_id, parte, orden)"
             ") WITHOUT ROWID");
 
         // Las capas, para conservar visibilidad y orden de dibujo.

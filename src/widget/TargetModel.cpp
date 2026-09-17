@@ -12,9 +12,11 @@ TargetModel::TargetModel(QObject *parent)
 
 void TargetModel::podarTraza(Entry &e)
 {
-    if (m_trailMax <= 0) {
+    if (m_trailMax < 0)
+        return;                    // traza ilimitada: se guarda entera
+    if (m_trailMax == 0) {
         e.trail.clear();
-        return;
+        return;                    // sin traza
     }
     // Se recorta por delante: la traza guarda las ultimas m_trailMax posiciones.
     if (e.trail.size() > m_trailMax)
@@ -34,7 +36,7 @@ qint64 TargetModel::upsert(MapTarget target)
     Entry &e = m_targets[target.id];
     e.target = target;
     // La posicion inicial (o la nueva, si ya existia) abre/continua la traza.
-    if (m_trailMax > 0
+    if (m_trailMax != 0
         && (e.trail.isEmpty() || e.trail.last() != target.position)) {
         e.trail.append(target.position);
         podarTraza(e);
@@ -57,7 +59,7 @@ bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
     if (!std::isnan(headingDeg))
         it->target.headingDeg = headingDeg;
 
-    if (m_trailMax > 0 && (it->trail.isEmpty() || it->trail.last() != position)) {
+    if (m_trailMax != 0 && (it->trail.isEmpty() || it->trail.last() != position)) {
         it->trail.append(position);
         podarTraza(*it);
     }
@@ -139,7 +141,8 @@ QVector<QGeoCoordinate> TargetModel::trail(qint64 id) const
 
 void TargetModel::setTrailMaxPoints(int maxPoints)
 {
-    m_trailMax = std::max(0, maxPoints);
+    // < 0 = traza ilimitada (toda); 0 = sin traza; > 0 = ultimas N posiciones.
+    m_trailMax = maxPoints;
     for (Entry &e : m_targets)
         podarTraza(e);
     emit changed();

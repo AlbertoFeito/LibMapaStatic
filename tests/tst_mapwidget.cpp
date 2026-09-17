@@ -96,6 +96,7 @@ private slots:
     // --- Fase 7: .geo y objetivos moviles --------------------------------
     void loadsGeoFileAsPolygonLayer();
     void loadsGeoWithSeveralPolylines();
+    void savesAndLoadsMultiPartFeature();
     void drawsManyMovingTargets();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
@@ -1580,15 +1581,16 @@ void TstMapWidget::loadsGeoFileAsPolygonLayer()
 
     const int antes = w.featureCount();
     QString error;
-    const QVector<qint64> ids = w.loadGeoAsLayer(ruta, QStringLiteral("aguas"),
-                                                 QStringLiteral("Aguas"),
-                                                 FeatureStyle(), &error);
-    QVERIFY2(ids.size() == 1, qPrintable(error));
+    const qint64 id = w.loadGeoAsLayer(ruta, QStringLiteral("aguas"),
+                                       QStringLiteral("Aguas"), FeatureStyle(),
+                                       &error);
+    QVERIFY2(id > 0, qPrintable(error));
     QCOMPARE(w.featureCount(), antes + 1);
 
-    const auto feat = w.feature(ids.first());
+    const auto feat = w.feature(id);
     QVERIFY(feat.has_value());
     QCOMPARE(feat->kind, GeometryKind::Polygon);
+    QVERIFY(!feat->isMultiPart());           // un solo trazado
     QCOMPARE(feat->geometry.size(), 3);      // se quita el vertice de cierre
 
     bool hayCapa = false;
@@ -1600,8 +1602,8 @@ void TstMapWidget::loadsGeoFileAsPolygonLayer()
 
 void TstMapWidget::loadsGeoWithSeveralPolylines()
 {
-    // Un .geo con VARIOS trazados separados por 0,0: dos lineas abiertas. El
-    // lector no debe pararse en el primer separador (era el fallo).
+    // Un .geo con VARIOS trazados (0,0 separa) entra como UNA sola entidad
+    // multi-parte. El lector no debe pararse en el primer separador.
     MapWidget w(baseConfig(m_jsonPath));
     QVERIFY(w.isReady());
 
@@ -1614,17 +1616,53 @@ void TstMapWidget::loadsGeoWithSeveralPolylines()
 
     const int antes = w.featureCount();
     QString error;
-    const QVector<qint64> ids = w.loadGeoAsLayer(ruta, QStringLiteral("corredores"),
-                                                 QStringLiteral("Corredores"),
-                                                 FeatureStyle(), &error);
-    QVERIFY2(ids.size() == 2, qPrintable(error));       // dos trazados, no uno
-    QCOMPARE(w.featureCount(), antes + 2);
-    for (qint64 id : ids) {
-        const auto feat = w.feature(id);
-        QVERIFY(feat.has_value());
-        QCOMPARE(feat->kind, GeometryKind::Polyline);
-        QCOMPARE(feat->geometry.size(), 2);
-    }
+    const qint64 id = w.loadGeoAsLayer(ruta, QStringLiteral("corredores"),
+                                       QStringLiteral("Corredores"),
+                                       FeatureStyle(), &error);
+    QVERIFY2(id > 0, qPrintable(error));
+    QCOMPARE(w.featureCount(), antes + 1);   // UNA entidad, no dos
+
+    const auto feat = w.feature(id);
+    QVERIFY(feat.has_value());
+    QCOMPARE(feat->kind, GeometryKind::Polyline);
+    QVERIFY(feat->isMultiPart());
+    QCOMPARE(feat->parts.size(), 2);         // dos partes
+    QCOMPARE(feat->parts.first().size(), 2);
+}
+
+void TstMapWidget::savesAndLoadsMultiPartFeature()
+{
+    // Una entidad multi-parte tiene que sobrevivir a guardar y cargar.
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    MapFeature f;
+    f.layerId = QStringLiteral("divisiones");
+    f.name = QStringLiteral("Ejercitos");
+    f.kind = GeometryKind::Polyline;
+    f.geometry = { QGeoCoordinate(23.0, -82.0), QGeoCoordinate(23.1, -82.1) };
+    f.parts = {
+        { QGeoCoordinate(23.0, -82.0), QGeoCoordinate(23.1, -82.1) },
+        { QGeoCoordinate(22.0, -80.0), QGeoCoordinate(22.1, -80.1),
+          QGeoCoordinate(22.2, -80.0) }
+    };
+    const qint64 id = w.addFeature(f);
+    QVERIFY(id > 0);
+
+    const QString db = m_dir.filePath(QStringLiteral("multi.db"));
+    QVERIFY(w.saveFeaturesTo(db));
+
+    w.clearFeatures();
+    QCOMPARE(w.featureCount(), 0);
+    QVERIFY(w.loadFeaturesFrom(db));
+    QCOMPARE(w.featureCount(), 1);
+
+    // Se localiza la entidad cargada (el id puede cambiar).
+    const auto cargada = w.features().first();
+    QVERIFY(cargada.isMultiPart());
+    QCOMPARE(cargada.parts.size(), 2);
+    QCOMPARE(cargada.parts.at(0).size(), 2);
+    QCOMPARE(cargada.parts.at(1).size(), 3);
 }
 
 void TstMapWidget::drawsManyMovingTargets()
@@ -1642,7 +1680,7 @@ void TstMapWidget::drawsManyMovingTargets()
     for (int i = 0; i < N; ++i) {
         MapTarget t;
         t.position = QGeoCoordinate(20.0 + i * 0.01, -84.0 + i * 0.004);
-        t.label = QStringLiteral("T%1").arg(i);
+        t.label = QStringLiteral("T%1\nRbo 045\nVel 12").arg(i);  // multilinea
         const qint64 id = w.addTarget(t);
         QVERIFY(id > 0);
         ids.append(id);

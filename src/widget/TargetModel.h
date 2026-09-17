@@ -67,7 +67,8 @@ public:
     //! Acceso directo para la capa de dibujo, sin copiar. No modificar.
     const QHash<qint64, Entry> &entries() const { return m_targets; }
 
-    //! Longitud maxima de la traza, en numero de puntos. 0 = sin traza.
+    //! Longitud maxima de la traza: < 0 = toda (ilimitada), 0 = sin traza,
+    //! > 0 = las ultimas N posiciones.
     int trailMaxPoints() const { return m_trailMax; }
     void setTrailMaxPoints(int maxPoints);
 

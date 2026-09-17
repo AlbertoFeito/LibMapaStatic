@@ -421,15 +421,12 @@ bool MapWidget::loadFeaturesFrom(const QString &databasePath)
 
 // ------------------------------------------------------------ ficheros .geo --
 
-QVector<qint64> MapWidget::loadGeoAsLayer(const QString &path,
-                                          const QString &layerId,
-                                          const QString &displayName,
-                                          const FeatureStyle &style,
-                                          QString *error)
+qint64 MapWidget::loadGeoAsLayer(const QString &path, const QString &layerId,
+                                 const QString &displayName,
+                                 const FeatureStyle &style, QString *error)
 {
-    QVector<qint64> ids;
     if (!d->view)
-        return ids;
+        return -1;
 
     QString motivo;
     const QVector<GeoPath> trazados = readGeoFile(path, &motivo);
@@ -437,40 +434,49 @@ QVector<qint64> MapWidget::loadGeoAsLayer(const QString &path,
         if (error)
             *error = motivo;
         emit errorOccurred(motivo);
-        return ids;
+        return -1;
     }
 
-    const QString nombreBase = displayName.isEmpty() ? layerId : displayName;
-    addFeatureLayer(layerId, displayName, 0);
-
-    int n = 0;
-    for (const GeoPath &t : trazados) {
-        MapFeature f;
-        f.layerId = layerId;
-        f.style = style;
-        f.geometry = t.points;
-
-        if (t.points.size() == 1) {
-            f.kind = GeometryKind::Point;
-        } else if (t.closed && t.points.size() >= 4) {
-            // El anillo repite el primer vertice al final; el poligono se
-            // cierra solo, asi que se quita.
-            f.geometry.removeLast();
-            f.kind = GeometryKind::Polygon;
-        } else {
-            f.kind = GeometryKind::Polyline;
+    // El tipo de la entidad: poligono si TODOS los trazados cierran (y tienen
+    // vertices de sobra), si no polilinea. Todas las partes comparten tipo.
+    bool todosCierran = true;
+    for (const GeoPath &t : trazados)
+        if (!(t.closed && t.points.size() >= 4)) {
+            todosCierran = false;
+            break;
         }
+    const GeometryKind tipo = todosCierran ? GeometryKind::Polygon
+                                           : GeometryKind::Polyline;
 
-        // Nombre por trazado cuando hay varios; si es uno solo, el de la capa.
-        f.name = trazados.size() > 1
-                     ? QStringLiteral("%1 %2").arg(nombreBase).arg(++n)
-                     : nombreBase;
-
-        const qint64 id = addFeature(f);
-        if (id > 0)
-            ids.append(id);
+    // Una parte por trazado. Un poligono no necesita repetir el primer vertice
+    // al final; una polilinea conserva los puntos tal cual (un anillo suelto
+    // dentro de una polilinea se dibuja cerrado por el vertice repetido).
+    QVector<QVector<QGeoCoordinate>> partes;
+    for (const GeoPath &t : trazados) {
+        QVector<QGeoCoordinate> parte = t.points;
+        if (tipo == GeometryKind::Polygon && parte.size() > 1)
+            parte.removeLast();
+        if (parte.size() < (tipo == GeometryKind::Polygon ? 3 : 2))
+            continue;                       // se descartan trazados degenerados
+        partes.append(parte);
     }
-    return ids;
+    if (partes.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("%1 no tiene trazados dibujables").arg(path);
+        return -1;
+    }
+
+    MapFeature f;
+    f.layerId = layerId;
+    f.style = style;
+    f.kind = tipo;
+    f.name = displayName.isEmpty() ? layerId : displayName;
+    f.geometry = partes.first();
+    if (partes.size() > 1)
+        f.parts = partes;                   // entidad multi-parte
+
+    addFeatureLayer(layerId, displayName, 0);
+    return addFeature(f);
 }
 
 // ------------------------------------------------------ objetivos moviles --
