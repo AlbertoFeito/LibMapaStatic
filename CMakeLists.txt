@@ -203,6 +203,14 @@ if(LIBMAPA_BUILD_TOOLS)
     add_executable(vector_db tools/vector_db/main.cpp)
     target_link_libraries(vector_db PRIVATE libmapa_core)
 
+    # Rasteriza vector (.geo/.xyz) a un piramide de teselas SQLite. Necesita
+    # QGuiApplication (QImage/QPainter): en un servidor sin pantalla se ejecuta
+    # con QT_QPA_PLATFORM=offscreen.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Gui)
+    add_executable(geo_to_tiles tools/geo_to_tiles/main.cpp)
+    target_link_libraries(geo_to_tiles PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Gui)
+    target_include_directories(geo_to_tiles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
     if(LIBMAPA_HAVE_QCP)
         add_executable(render_map tools/render_map/main.cpp)
         target_link_libraries(render_map PRIVATE libmapa_widget)

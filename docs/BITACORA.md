@@ -1734,3 +1734,41 @@ etiqueta, moviendose en tiempo real.
 **Estado: 13 tests (incluye `.geo` multi-trazado, entidad multi-parte con
 guardar/cargar, y opciones de traza), 0 avisos, compilado y probado en Qt 5.15
 y Qt 6.4.**
+
+---
+
+## 30. Vector pesado como capa base: `geo_to_tiles`
+
+Un `.geo`/`.xyz` de Cuba con **~381.000 vertices** (uno solo de sus trazados
+tiene 198.238) dibujado como entidad vector arrastra la aplicacion: hay que
+recorrer y pintar cientos de miles de puntos en cada frame. La solucion no es
+optimizar ese dibujo, sino **cambiar de representacion**: rasterizar el vector
+a un **piramide de teselas** y servirlo con el motor de mapa que ya existe,
+igual que OSM o el satelital. Asi solo se pintan los 256x256 visibles, cacheados.
+
+La herramienta `geo_to_tiles` hace esa conversion:
+
+```
+geo_to_tiles --in Cuba.geo --out Cuba_Vector.sqlitedb \
+             --id costas --name "Costas de Cuba" --minzoom 4 --maxzoom 12
+```
+
+- Lee `.geo` (longitud,latitud) y `.xyz` (metros Web Mercator): el formato se
+  detecta por la magnitud. `0.0,0.0` separa trazados.
+- Escribe un SQLite en el formato RMaps/XYZ que la libreria ya consume (tabla
+  `tiles(x,y,z,s,image)`, esquema XYZ, `zFactor=1`), y **imprime el bloque
+  para pegar en `datasets.json`**: la capa aparece como una base mas.
+
+Dos cosas hacen que genere en **segundos** y no en minutos:
+
+1. **Decimado sub-pixel** por zoom: a bajo zoom cientos de miles de vertices
+   colapsan a los pocos que se distinguen.
+2. **Bucketing de segmentos**: cada segmento se reparte a las teselas que
+   cruza su caja, de modo que el trazado gigante de la costa aporta a cada
+   tesela solo su tramo, en vez de redibujarse entero en todas. Sin esto, ese
+   unico trazado de 198k puntos se pintaba completo en cada una de las ~1.300
+   teselas.
+
+El `Cuba.geo` completo (z4-12, 1.373 teselas) se convierte en ~7 segundos.
+
+**Estado: 13 tests + la herramienta `geo_to_tiles`, 0 avisos, Qt 5.15 y Qt 6.4.**
