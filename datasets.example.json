@@ -1,10 +1,16 @@
 {
     "_comentario": [
         "EJEMPLO. Copia este fichero a datasets.json y ajusta 'filePath'.",
-        "Genera el tuyo con:",
+        "Un SOLO datasets.json sirve para el demo y para miapp: cada objeto de",
+        "'datasets' aparece como una capa base en el selector.",
+        "Genera osm/satelital con probe_db (el detecta zFactor/sValue/etc.):",
         "  probe_db --id osm --file Recursos/Cuba_OSM_CID3.sqlitedb \\",
         "           --id satelital --file Recursos/Cuba_Satelital_CID3.sqlitedb \\",
         "           --ref-bbox 23.3,-85.0,19.7,-74.0",
+        "La capa 'costas' es un vector .geo/.xyz rasterizado con geo_to_tiles:",
+        "  geo_to_tiles --in Cuba.geo --out Cuba_Vector.sqlitedb \\",
+        "               --id costas --name 'Costas de Cuba' --minzoom 4 --maxzoom 12",
+        "Esa capa NO usa columna 's' (hasSColumn:false); no le pongas 'sValue'.",
         "Las rutas relativas se resuelven respecto a la ubicacion de este fichero."
     ],
     "version": 1,
@@ -52,6 +58,26 @@
             "colS": "s",
             "colImage": "image",
             "baseZoom": 1
+        },
+        {
+            "id": "costas",
+            "displayName": "Costas de Cuba",
+            "filePath": "Cuba_Vector.sqlitedb",
+            "tableName": "tiles",
+            "zFactor": 1,
+            "zOffset": 0,
+            "minZoom": 4,
+            "maxZoom": 12,
+            "recommendedMaxZoom": 11,
+            "typicalFill": 1.0,
+            "scheme": "XYZ",
+            "hasSColumn": false,
+            "tileSize": 256,
+            "colZ": "z",
+            "colX": "x",
+            "colY": "y",
+            "colImage": "image",
+            "baseZoom": 4
         }
     ]
 }
