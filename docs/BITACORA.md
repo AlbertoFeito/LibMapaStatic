@@ -1771,4 +1771,10 @@ Dos cosas hacen que genere en **segundos** y no en minutos:
 
 El `Cuba.geo` completo (z4-12, 1.373 teselas) se convierte en ~7 segundos.
 
+La DB generada NO usa columna `s` (se declara `hasSColumn:false`): en teselas
+propias no significa nada y arrastraba un error facil —un `sValue` mal copiado
+en `datasets.json` (p. ej. el de `osm`) hacia que la consulta filtrara `AND
+s = <valor>` y **no devolviera ninguna tesela** aunque la fuente abriera bien.
+Sin columna `s`, ese filtro no existe.
+
 **Estado: 13 tests + la herramienta `geo_to_tiles`, 0 avisos, Qt 5.15 y Qt 6.4.**

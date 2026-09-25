@@ -119,11 +119,13 @@ QVector<Path> leer(const QString &ruta, QString *error)
 bool crearEsquema(QSqlDatabase &db, QString *error)
 {
     QSqlQuery q(db);
-    // Formato compatible con el lector RMaps/XYZ de la libreria.
+    // Formato XYZ del lector de la libreria, SIN columna 's': en teselas
+    // generadas no significa nada y arrastra errores (un sValue mal copiado en
+    // datasets.json filtraba todas las filas). Se declara hasSColumn:false.
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tiles ("
-            "  x INTEGER, y INTEGER, z INTEGER, s INTEGER DEFAULT 0,"
-            "  image BLOB, PRIMARY KEY (x, y, z, s))"))) {
+            "  x INTEGER, y INTEGER, z INTEGER,"
+            "  image BLOB, PRIMARY KEY (x, y, z))"))) {
         *error = q.lastError().text();
         return false;
     }
@@ -213,7 +215,7 @@ int main(int argc, char *argv[])
         qint64 total = 0;
         QSqlQuery ins(db);
         ins.prepare(QStringLiteral(
-            "INSERT OR REPLACE INTO tiles (x,y,z,s,image) VALUES (:x,:y,:z,0,:img)"));
+            "INSERT OR REPLACE INTO tiles (x,y,z,image) VALUES (:x,:y,:z,:img)"));
 
         for (int z = minZ; z <= maxZ; ++z) {
             // Rango de teselas que cubre la bbox en este zoom.
@@ -349,8 +351,8 @@ int main(int argc, char *argv[])
         "      \"zFactor\": 1, \"zOffset\": 0,\n"
         "      \"minZoom\": %4, \"maxZoom\": %5, \"recommendedMaxZoom\": %6,\n"
         "      \"typicalFill\": 1.0, \"scheme\": \"XYZ\",\n"
-        "      \"sValue\": 0, \"hasSColumn\": true, \"tileSize\": 256,\n"
-        "      \"colZ\": \"z\", \"colX\": \"x\", \"colY\": \"y\", \"colS\": \"s\",\n"
+        "      \"hasSColumn\": false, \"tileSize\": 256,\n"
+        "      \"colZ\": \"z\", \"colX\": \"x\", \"colY\": \"y\",\n"
         "      \"colImage\": \"image\", \"baseZoom\": %4\n"
         "    }\n")
             .arg(id, name, QFileInfo(out).fileName())
