@@ -339,8 +339,10 @@ int main(int argc, char *argv[])
     }
     QSqlDatabase::removeDatabase(QStringLiteral("gen"));
 
-    // Bloque listo para pegar en datasets.json.
-    const QString rec = QString::number(qMax(minZ, maxZ - 1));
+    // Bloque listo para pegar en datasets.json. recommendedMaxZoom = maxZoom
+    // porque, a diferencia de OSM/satelital, aqui TODOS los niveles se generan
+    // completos: no hay que reservar el ultimo como "a medias".
+    const QString rec = QString::number(maxZ);
     cout << "\n--- Anade esto al array \"datasets\" de tu datasets.json ---\n";
     cout << QStringLiteral(
         "    {\n"
