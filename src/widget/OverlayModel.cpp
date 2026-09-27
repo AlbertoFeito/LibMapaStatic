@@ -274,6 +274,7 @@ qint64 OverlayModel::addFeature(MapFeature feature)
     m_features.insert(feature.id, feature);
 
     emit featureAdded(feature.id);
+    emit layersChanged();          // el contador de su capa subio en uno
     emit changed();
     return feature.id;
 }
@@ -313,6 +314,7 @@ bool OverlayModel::removeFeature(qint64 id)
         emit selectionChanged(-1);
     }
     emit featureRemoved(id);
+    emit layersChanged();          // el contador de su capa bajo en uno
     emit changed();
     return true;
 }
@@ -334,19 +336,36 @@ void OverlayModel::clearLayer(const QString &layerId)
             m_selected = -1;
             emit selectionChanged(-1);
         }
+        // Un vaciado es un borrado en lote: se avisa entidad a entidad, igual
+        // que removeFeature, para que quien escuche pueda mantener su lista al
+        // dia sin sondear el modelo. Sin esto, un panel de capas no se enteraba
+        // de "Vaciar" porque solo se emitia changed().
+        for (qint64 id : aBorrar)
+            emit featureRemoved(id);
+        emit layersChanged();      // los contadores por capa cambiaron
         emit changed();
     }
 }
 
 void OverlayModel::clear()
 {
-    if (!m_features.isEmpty())
-        pushUndo();
+    if (m_features.isEmpty())
+        return;
+
+    QVector<qint64> aBorrar;
+    aBorrar.reserve(m_features.size());
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it)
+        aBorrar.append(it.key());
+
+    pushUndo();
     m_features.clear();
     if (m_selected != -1) {
         m_selected = -1;
         emit selectionChanged(-1);
     }
+    for (qint64 id : aBorrar)
+        emit featureRemoved(id);
+    emit layersChanged();          // todos los contadores quedan a cero
     emit changed();
 }
 
@@ -394,6 +413,10 @@ bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
     auto it = m_features.find(id);
     if (it == m_features.end() || !to.isValid())
         return false;
+    // La edicion de vertices sueltos es de una sola parte: en una entidad
+    // multi-parte (un .geo entero) no se sabria que parte tocar.
+    if (it->isMultiPart())
+        return false;
     if (index < 0 || index >= it->geometry.size())
         return false;
 
@@ -408,6 +431,8 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
 {
     auto it = m_features.find(id);
     if (it == m_features.end() || !at.isValid())
+        return false;
+    if (it->isMultiPart())
         return false;
     if (it->kind == GeometryKind::Point)
         return false;                       // un punto tiene un solo vertice
@@ -425,6 +450,8 @@ bool OverlayModel::removeVertex(qint64 id, int index)
 {
     auto it = m_features.find(id);
     if (it == m_features.end())
+        return false;
+    if (it->isMultiPart())
         return false;
     if (index < 0 || index >= it->geometry.size())
         return false;
@@ -447,21 +474,41 @@ bool OverlayModel::moveFeature(qint64 id, double deltaLat, double deltaLon)
     if (it == m_features.end())
         return false;
 
-    QVector<QGeoCoordinate> nueva;
-    nueva.reserve(it->geometry.size());
-    for (const QGeoCoordinate &c : it->geometry) {
-        const QGeoCoordinate movido(c.latitude() + deltaLat,
-                                    c.longitude() + deltaLon);
-        // Un desplazamiento que saque la geometria del mundo se rechaza
-        // entera, no a medias: QGeoCoordinate se marcaria invalida y
-        // devolveria NaN sin avisar.
-        if (!movido.isValid())
+    // Desplaza TODA la geometria (geometry y, si es multi-parte, cada parte).
+    // Un desplazamiento que saque cualquier vertice del mundo se rechaza
+    // entero, no a medias: QGeoCoordinate se marcaria invalida y devolveria
+    // NaN sin avisar.
+    const auto desplazar =
+        [&](const QVector<QGeoCoordinate> &origen,
+            QVector<QGeoCoordinate> &destino) -> bool {
+        destino.clear();
+        destino.reserve(origen.size());
+        for (const QGeoCoordinate &c : origen) {
+            const QGeoCoordinate movido(c.latitude() + deltaLat,
+                                        c.longitude() + deltaLon);
+            if (!movido.isValid())
+                return false;
+            destino.append(movido);
+        }
+        return true;
+    };
+
+    QVector<QGeoCoordinate> nuevaGeom;
+    if (!desplazar(it->geometry, nuevaGeom))
+        return false;
+
+    QVector<QVector<QGeoCoordinate>> nuevasPartes;
+    nuevasPartes.reserve(it->parts.size());
+    for (const QVector<QGeoCoordinate> &parte : it->parts) {
+        QVector<QGeoCoordinate> movida;
+        if (!desplazar(parte, movida))
             return false;
-        nueva.append(movido);
+        nuevasPartes.append(movida);
     }
 
     pushUndo();
-    it->geometry = nueva;
+    it->geometry = nuevaGeom;
+    it->parts = nuevasPartes;
     emit featureUpdated(id);
     emit changed();
     return true;

@@ -35,6 +35,7 @@ private slots:
     // --- Seleccion y senales ---------------------------------------------
     void tracksSelection();
     void clearsSelectionWhenFeatureIsRemoved();
+    void notifiesObserversOnClear();
     void emitsChangedOnEveryMutation();
 };
 
@@ -348,6 +349,34 @@ void TstOverlayModel::clearsSelectionWhenFeatureIsRemoved()
     // Sin esto quedaria un identificador seleccionado que ya no existe.
     QCOMPARE(m.selectedId(), qint64(-1));
     QCOMPARE(seleccion.count(), 1);
+}
+
+void TstOverlayModel::notifiesObserversOnClear()
+{
+    // Un vaciado tiene que ser observable entidad a entidad, igual que un
+    // borrado individual. Sin esto, un panel de capas no se enteraba de
+    // "Vaciar" (solo se emitia changed()) y quedaba desincronizado.
+    OverlayModel m;
+    m.addFeature(punto(QStringLiteral("A"), 23.0, -82.0, QStringLiteral("zonas")));
+    m.addFeature(punto(QStringLiteral("B"), 23.1, -82.1, QStringLiteral("zonas")));
+    m.addFeature(punto(QStringLiteral("C"), 23.2, -82.2));   // capa por defecto
+
+    QSignalSpy borradas(&m, &OverlayModel::featureRemoved);
+    QSignalSpy capas(&m, &OverlayModel::layersChanged);
+
+    m.clearLayer(QStringLiteral("zonas"));
+    QCOMPARE(borradas.count(), 2);          // una senal por entidad de la capa
+    QVERIFY(capas.count() >= 1);            // los contadores por capa cambiaron
+    QCOMPARE(m.count(), 1);                 // la de la capa por defecto sigue
+
+    m.clear();
+    QCOMPARE(borradas.count(), 3);          // + la unica que quedaba
+    QCOMPARE(m.count(), 0);
+
+    // Vaciar dos veces no vuelve a avisar: no hay nada que borrar.
+    const int antes = static_cast<int>(borradas.count());
+    m.clear();
+    QCOMPARE(borradas.count(), antes);
 }
 
 void TstOverlayModel::emitsChangedOnEveryMutation()

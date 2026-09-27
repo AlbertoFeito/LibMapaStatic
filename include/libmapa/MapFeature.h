@@ -79,8 +79,20 @@ struct MapFeature
     QString name;
     QString description;
 
-    //! Un vertice si es Point; varios si es Polyline o Polygon.
+    //! Un vertice si es Point; varios si es Polyline o Polygon. En una entidad
+    //! multi-parte es la PRIMERA parte (ver \a parts).
     QVector<QGeoCoordinate> geometry;
+
+    /*!
+     * \brief Partes adicionales de una geometria multi-parte.
+     *
+     * Vacio = entidad de una sola parte (se usa \a geometry). Cuando tiene
+     * elementos, la entidad es multi-parte: un fichero .geo entero (varias
+     * polilineas o anillos) puede ser UNA sola entidad. Todas las partes
+     * comparten \a kind, \a style, \a name y \a attributes. \a geometry
+     * coincide con la primera parte.
+     */
+    QVector<QVector<QGeoCoordinate>> parts;
 
     FeatureStyle style;
 
@@ -91,24 +103,46 @@ struct MapFeature
     bool visible = true;
     bool selectable = true;
 
+    bool isMultiPart() const { return !parts.isEmpty(); }
+
+    //! Las partes a dibujar/consultar: \a parts si las hay, si no \a geometry.
+    QVector<QVector<QGeoCoordinate>> outlines() const
+    {
+        if (!parts.isEmpty())
+            return parts;
+        if (geometry.isEmpty())
+            return {};
+        return { geometry };
+    }
+
     QGeoCoordinate position() const
     {
         return geometry.isEmpty() ? QGeoCoordinate() : geometry.first();
     }
 
-    bool isValid() const
+    //! Comprueba una parte suelta contra el tipo de la entidad.
+    bool partIsValid(const QVector<QGeoCoordinate> &p) const
     {
-        if (geometry.isEmpty())
-            return false;
-        for (const QGeoCoordinate &c : geometry)
+        for (const QGeoCoordinate &c : p)
             if (!c.isValid())
                 return false;
         switch (kind) {
-        case GeometryKind::Point:    return geometry.size() == 1;
-        case GeometryKind::Polyline: return geometry.size() >= 2;
-        case GeometryKind::Polygon:  return geometry.size() >= 3;
+        case GeometryKind::Point:    return p.size() == 1;
+        case GeometryKind::Polyline: return p.size() >= 2;
+        case GeometryKind::Polygon:  return p.size() >= 3;
         }
         return false;
+    }
+
+    bool isValid() const
+    {
+        if (!parts.isEmpty()) {
+            for (const QVector<QGeoCoordinate> &p : parts)
+                if (!partIsValid(p))
+                    return false;
+            return true;
+        }
+        return !geometry.isEmpty() && partIsValid(geometry);
     }
 
     //! Numero minimo de vertices para que la geometria siga siendo valida.

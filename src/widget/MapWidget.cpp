@@ -419,6 +419,125 @@ bool MapWidget::loadFeaturesFrom(const QString &databasePath)
     return true;
 }
 
+// ------------------------------------------------------------ ficheros .geo --
+
+qint64 MapWidget::loadGeoAsLayer(const QString &path, const QString &layerId,
+                                 const QString &displayName,
+                                 const FeatureStyle &style, QString *error)
+{
+    if (!d->view)
+        return -1;
+
+    QString motivo;
+    const QVector<GeoPath> trazados = readGeoFile(path, &motivo);
+    if (trazados.isEmpty()) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return -1;
+    }
+
+    // El tipo de la entidad: poligono si TODOS los trazados cierran (y tienen
+    // vertices de sobra), si no polilinea. Todas las partes comparten tipo.
+    bool todosCierran = true;
+    for (const GeoPath &t : trazados)
+        if (!(t.closed && t.points.size() >= 4)) {
+            todosCierran = false;
+            break;
+        }
+    const GeometryKind tipo = todosCierran ? GeometryKind::Polygon
+                                           : GeometryKind::Polyline;
+
+    // Una parte por trazado. Un poligono no necesita repetir el primer vertice
+    // al final; una polilinea conserva los puntos tal cual (un anillo suelto
+    // dentro de una polilinea se dibuja cerrado por el vertice repetido).
+    QVector<QVector<QGeoCoordinate>> partes;
+    for (const GeoPath &t : trazados) {
+        QVector<QGeoCoordinate> parte = t.points;
+        if (tipo == GeometryKind::Polygon && parte.size() > 1)
+            parte.removeLast();
+        if (parte.size() < (tipo == GeometryKind::Polygon ? 3 : 2))
+            continue;                       // se descartan trazados degenerados
+        partes.append(parte);
+    }
+    if (partes.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("%1 no tiene trazados dibujables").arg(path);
+        return -1;
+    }
+
+    MapFeature f;
+    f.layerId = layerId;
+    f.style = style;
+    f.kind = tipo;
+    f.name = displayName.isEmpty() ? layerId : displayName;
+    f.geometry = partes.first();
+    if (partes.size() > 1)
+        f.parts = partes;                   // entidad multi-parte
+
+    addFeatureLayer(layerId, displayName, 0);
+    return addFeature(f);
+}
+
+// ------------------------------------------------------ objetivos moviles --
+
+qint64 MapWidget::addTarget(const MapTarget &target)
+{
+    return d->view ? d->view->targetModel()->upsert(target) : -1;
+}
+
+bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
+                             double headingDeg)
+{
+    return d->view && d->view->targetModel()->update(id, position, headingDeg);
+}
+
+bool MapWidget::setTargetLabel(qint64 id, const QString &text)
+{
+    return d->view && d->view->targetModel()->setLabel(id, text);
+}
+
+bool MapWidget::removeTarget(qint64 id)
+{
+    return d->view && d->view->targetModel()->remove(id);
+}
+
+void MapWidget::clearTargets()
+{
+    if (d->view)
+        d->view->targetModel()->clear();
+}
+
+std::optional<MapTarget> MapWidget::target(qint64 id) const
+{
+    return d->view ? d->view->targetModel()->target(id)
+                   : std::optional<MapTarget>();
+}
+
+QVector<MapTarget> MapWidget::targets() const
+{
+    return d->view ? d->view->targetModel()->targets() : QVector<MapTarget>();
+}
+
+int MapWidget::targetCount() const
+{
+    return d->view ? d->view->targetModel()->count() : 0;
+}
+
+void MapWidget::setTargetTrailLength(int maxPoints)
+{
+    if (d->view)
+        d->view->targetModel()->setTrailMaxPoints(maxPoints);
+}
+
+void MapWidget::setTargetsVisible(bool visible)
+{
+    if (d->view && d->view->targetLayer()) {
+        d->view->targetLayer()->setVisible(visible);
+        d->view->replot(QCustomPlot::rpQueuedReplot);
+    }
+}
+
 qint64 MapWidget::selectedFeature() const
 {
     return d->view ? d->view->overlayModel()->selectedId() : -1;

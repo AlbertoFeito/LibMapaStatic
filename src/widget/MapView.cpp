@@ -61,6 +61,18 @@ MapView::MapView(TileService *service, QWidget *parent)
     m_featureLayer->setAxisMapper(
         [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
 
+    // Capa DINAMICA de objetivos moviles, encima de las entidades. En modo
+    // BUFFERED: actualizar cientos de objetivos repinta solo esta capa y
+    // recompone, sin rehacer teselas ni entidades estaticas.
+    addLayer(QStringLiteral("targets"), layer(QStringLiteral("features")),
+             QCustomPlot::limAbove);
+    layer(QStringLiteral("targets"))->setMode(QCPLayer::lmBuffered);
+    m_targetModel = new TargetModel(this);
+    m_targetLayer = new TargetLayer(this, m_targetModel);
+    m_targetLayer->setLayer(QStringLiteral("targets"));
+    m_targetLayer->setAxisMapper(
+        [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
+
     if (service) {
         connect(service, &TileService::tilesReady,
                 this, &MapView::onTilesReady);

@@ -1593,3 +1593,188 @@ mismo.
 
 Deshacer y rehacer, enlace con el `VectorRepository` para guardar y cargar, y
 la capa dinámica de objetivos en movimiento.
+
+---
+
+## 28. El demo como banco de pruebas, y el vaciado observable
+
+Sobre la base de la Fase 6 se añadieron **deshacer/rehacer** (instantáneas del
+modelo, agrupables con `beginUndoGroup`/`endUndoGroup`) y **persistencia** en
+SQLite (`MapWidget::saveFeaturesTo`/`loadFeaturesFrom`, sobre `setContents`,
+que emite una sola señal para toda la carga). El `demo` pasó a ejercitar TODA
+esa API: capas, dibujo, edición, propiedades, atributos de dominio, estilo,
+deshacer/rehacer y guardar/cargar.
+
+### El panel se refresca solo, no a mano
+
+El primer banco de pruebas refrescaba el panel llamando a `actualizarPanelCapas()`
+en cada manejador. El patrón es frágil: se le escapaba el botón **"Vaciar"** (no
+refrescaba) y **cualquier edición hecha sobre el mapa** (borrar con `Supr`,
+mover vértices) tampoco, porque no pasaba por un manejador del panel.
+
+Ahora el panel se reconstruye **solo a partir de las señales** del `MapWidget`
+(`featureAdded`, `featureRemoved`, `featureUpdated`, `featureLayersChanged`),
+así que da igual de dónde venga el cambio. Eso destapó un hueco en el modelo:
+`clearLayer()` y `clear()` emitían solo el `changed()` interno, que `MapWidget`
+no reexpone, de modo que un vaciado era **invisible** para cualquier panel.
+
+**Corregido en `OverlayModel`:** un vaciado es un borrado en lote, así que emite
+`featureRemoved` entidad a entidad, igual que `removeFeature`, más `layersChanged`
+para los contadores. `addFeature`/`removeFeature` también emiten `layersChanged`.
+Como `restore()` (deshacer/rehacer) y `setContents()` (cargar) ya emitían
+`layersChanged`, ahora **todas** las rutas refrescan el panel. Las N señales de
+un vaciado o una carga se agrupan en una sola reconstrucción con un `QTimer`.
+`tst_overlaymodel` gana `notifiesObserversOnClear`.
+
+### Guardar/cargar
+
+Rediseñado: se recuerda el **fichero actual** (en el título de la ventana) con
+**Guardar** / **Guardar como…**, y **Abrir** avisa antes de reemplazar el
+trabajo en curso (la carga es deshacible) y reporta los errores. Antes no había
+aviso de fallo ni concepto de fichero abierto.
+
+### Borrado sin choques
+
+`Supr` borra la entidad seleccionada **solo con el panel enfocado**
+(`WidgetWithChildrenShortcut`), para no pisar el `Supr` del editor, que sobre el
+mapa borra vértices. Las herramientas (navegar, medir, zoom, dibujo, editar)
+van en un único grupo excluyente.
+
+**Estado: 11 tests, 0 avisos, compilado y probado en Qt 5.15 y Qt 6.4.**
+
+---
+
+## 29. Fase 7 — Ficheros .geo y objetivos moviles
+
+### Ficheros .geo como capas
+
+El formato `.geo` es una linea por vertice, `longitud,latitud,` (OJO: la
+longitud primero), terminada en `0.0,0.0`. Un anillo cerrado repite el primer
+vertice al final.
+
+**Un `.geo` puede llevar VARIOS trazados**, separados por `0.0,0.0`: `0.0,0.0`
+es un **separador**, no un simple fin de fichero. Un mismo fichero va desde un
+anillo (las aguas) hasta decenas de polilineas (los `corredores` son parejas de
+lineas; `ejercitos` son 39 divisiones administrativas).
+
+`readGeoFile()` (en el nucleo, `include/libmapa/GeoFile.h`) devuelve **un
+`GeoPath` por trazado** (`{points, closed}`), saltando lineas en blanco o mal
+formadas y avisando por `error` si no se puede abrir.
+`MapWidget::loadGeoAsLayer()` crea una entidad por trazado en la misma capa:
+**poligono** si cierra, **punto** si es un solo vertice, **polilinea** en los
+demas casos; devuelve la lista de identificadores. El `Aguas.geo` (aguas
+jurisdiccionales) es un anillo de 140 vertices (139 tras quitar el de cierre).
+
+El primer intento se paraba en el **primer** `0.0,0.0` y solo cargaba un
+segmento: por eso `corredores` salia con una sola linea. Corregido tratando
+`0.0,0.0` como separador y no como terminador.
+
+### Geometria multi-parte: un fichero, una entidad
+
+Un `.geo` entero es **una sola entidad multi-parte**, no una entidad por
+trazado. `MapFeature` gana `QVector<QVector<QGeoCoordinate>> parts`: vacio =
+una sola parte (se usa `geometry`); con elementos, la entidad es multi-parte y
+todas las partes comparten tipo, estilo, nombre y atributos. `loadGeoAsLayer()`
+crea **un** poligono multi-parte si todos los trazados cierran, o una polilinea
+multi-parte si no.
+
+- **Dibujo y seleccion** recorren `outlines()` (las partes, o `geometry`):
+  `FeatureLayer` pinta y detecta bajo el cursor parte a parte.
+- **Edicion**: mover la entidad entera desplaza todas las partes; editar
+  vertices sueltos se rechaza en multi-parte (no se sabria que parte tocar).
+- **Persistencia**: `entidad_vertice` gana una columna `parte`; guardar escribe
+  una fila por vertice agrupada por parte, y cargar reconstruye las partes. Los
+  ficheros del esquema anterior (sin `parte`) se detectan y se leen como una
+  sola parte.
+
+### Objetivos: etiqueta multilinea y opciones de traza
+
+- La **etiqueta** de un objetivo admite varias lineas (`\n`): un parametro por
+  linea (nombre, rumbo, velocidad...). `TargetLayer` las dibuja apiladas, cada
+  una con su halo.
+- La **traza** tiene opciones: `setTargetTrailLength(n)` con `n < 0` = toda
+  (ilimitada), `0` = sin traza, `n > 0` = las ultimas N (10, 100, 500...). El
+  demo lo expone en un desplegable.
+
+### Objetivos moviles: la capa dinamica
+
+La Fase 6 dejaba prevista una capa aparte para lo que se mueve, y aqui esta.
+Tres piezas, separadas igual que las entidades estaticas:
+
+- **`MapTarget`** (publico): posicion, rumbo, velocidad, **etiqueta de texto**,
+  color. La identidad la pone la aplicacion (pista, MMSI...).
+- **`TargetModel`**: guarda los objetivos y su **traza** (las ultimas N
+  posiciones, acotada), sin dibujar. `upsert` da de alta; `update(id, pos,
+  rumbo)` es la via rapida del tiempo real y anade el punto a la traza.
+- **`TargetLayer`**: los dibuja todos en un unico `QCPLayerable` —traza,
+  simbolo orientado por el rumbo y etiqueta con halo—.
+
+Lo que hace que 250+ objetivos vayan fluidos: la capa vive en su propia
+`QCPLayer` en modo **`lmBuffered`**, asi que actualizar posiciones repinta
+**solo esa capa** y recompone, sin rehacer teselas ni entidades estaticas. Y
+los avisos del modelo se **agrupan con un temporizador** (~30 fps): aunque
+lleguen decenas de posiciones por segundo, no se repinta de mas. Fuera de
+pantalla los objetivos se descartan (culling).
+
+API en `MapWidget`: `addTarget`, `updateTarget`, `setTargetLabel`,
+`removeTarget`, `clearTargets`, `target`, `targets`, `targetCount`,
+`setTargetTrailLength`, `setTargetsVisible`.
+
+### Verificacion
+
+`tst_geofile` lee el `aguas.geo` real (un anillo), los `corredores` (6
+polilineas) y `ejercitos` (39 segmentos), comprobando que NO se para en el
+primer separador. `tst_targetmodel`
+prueba altas, actualizaciones, poda de la traza y **250 objetivos** con 20
+actualizaciones cada uno. `tst_mapwidget` carga un `.geo` como poligono y
+**dibuja 250 objetivos** forzando el render con `grab()`. El `demo` gana
+"Cargar .geo..." y un simulador de objetivos (250 por defecto) con traza y
+etiqueta, moviendose en tiempo real.
+
+**Estado: 13 tests (incluye `.geo` multi-trazado, entidad multi-parte con
+guardar/cargar, y opciones de traza), 0 avisos, compilado y probado en Qt 5.15
+y Qt 6.4.**
+
+---
+
+## 30. Vector pesado como capa base: `geo_to_tiles`
+
+Un `.geo`/`.xyz` de Cuba con **~381.000 vertices** (uno solo de sus trazados
+tiene 198.238) dibujado como entidad vector arrastra la aplicacion: hay que
+recorrer y pintar cientos de miles de puntos en cada frame. La solucion no es
+optimizar ese dibujo, sino **cambiar de representacion**: rasterizar el vector
+a un **piramide de teselas** y servirlo con el motor de mapa que ya existe,
+igual que OSM o el satelital. Asi solo se pintan los 256x256 visibles, cacheados.
+
+La herramienta `geo_to_tiles` hace esa conversion:
+
+```
+geo_to_tiles --in Cuba.geo --out Cuba_Vector.sqlitedb \
+             --id costas --name "Costas de Cuba" --minzoom 4 --maxzoom 12
+```
+
+- Lee `.geo` (longitud,latitud) y `.xyz` (metros Web Mercator): el formato se
+  detecta por la magnitud. `0.0,0.0` separa trazados.
+- Escribe un SQLite en el formato RMaps/XYZ que la libreria ya consume (tabla
+  `tiles(x,y,z,s,image)`, esquema XYZ, `zFactor=1`), y **imprime el bloque
+  para pegar en `datasets.json`**: la capa aparece como una base mas.
+
+Dos cosas hacen que genere en **segundos** y no en minutos:
+
+1. **Decimado sub-pixel** por zoom: a bajo zoom cientos de miles de vertices
+   colapsan a los pocos que se distinguen.
+2. **Bucketing de segmentos**: cada segmento se reparte a las teselas que
+   cruza su caja, de modo que el trazado gigante de la costa aporta a cada
+   tesela solo su tramo, en vez de redibujarse entero en todas. Sin esto, ese
+   unico trazado de 198k puntos se pintaba completo en cada una de las ~1.300
+   teselas.
+
+El `Cuba.geo` completo (z4-12, 1.373 teselas) se convierte en ~7 segundos.
+
+La DB generada NO usa columna `s` (se declara `hasSColumn:false`): en teselas
+propias no significa nada y arrastraba un error facil —un `sValue` mal copiado
+en `datasets.json` (p. ej. el de `osm`) hacia que la consulta filtrara `AND
+s = <valor>` y **no devolviera ninguna tesela** aunque la fuente abriera bien.
+Sin columna `s`, ese filtro no existe.
+
+**Estado: 13 tests + la herramienta `geo_to_tiles`, 0 avisos, Qt 5.15 y Qt 6.4.**

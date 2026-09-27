@@ -70,9 +70,14 @@ QPointF FeatureLayer::screenPos(const QGeoCoordinate &c) const
 
 QPolygonF FeatureLayer::screenPolygon(const MapFeature &f) const
 {
+    return screenPolygonOf(f.geometry);
+}
+
+QPolygonF FeatureLayer::screenPolygonOf(const QVector<QGeoCoordinate> &pts) const
+{
     QPolygonF poly;
-    poly.reserve(f.geometry.size());
-    for (const QGeoCoordinate &c : f.geometry)
+    poly.reserve(pts.size());
+    for (const QGeoCoordinate &c : pts)
         poly.append(screenPos(c));
     return poly;
 }
@@ -148,21 +153,44 @@ void FeatureLayer::draw(QCPPainter *painter)
 void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
                                bool selected) const
 {
-    switch (f.kind) {
-    case GeometryKind::Point:
-        drawPoint(painter, f, selected);
-        break;
-    case GeometryKind::Polyline:
-    case GeometryKind::Polygon:
-        drawPath(painter, f, selected);
-        break;
+    const auto partes = f.outlines();
+
+    for (const QVector<QGeoCoordinate> &parte : partes) {
+        if (f.kind == GeometryKind::Point)
+            drawPointPart(painter, f, parte, selected);
+        else
+            drawPathPart(painter, f, parte, selected);
+    }
+
+    // Los tiradores de edicion solo tienen sentido en una sola parte.
+    if ((selected || f.style.verticesVisible) && !f.isMultiPart()
+        && f.kind != GeometryKind::Point)
+        drawVertices(painter, f);
+
+    if (f.style.labelVisible && !f.name.isEmpty()) {
+        if (f.kind == GeometryKind::Point && !f.isMultiPart()) {
+            const QPointF pos = screenPos(f.position());
+            const double r = f.style.pointRadiusPx;
+            drawLabel(painter, f, pos + QPointF(r + 4, -r - 2));
+        } else {
+            // La etiqueta va en el centro del rectangulo que contiene TODA la
+            // geometria, estable al desplazar el mapa.
+            QRectF caja;
+            for (const QVector<QGeoCoordinate> &parte : partes)
+                caja = caja.united(screenPolygonOf(parte).boundingRect());
+            if (!caja.isNull())
+                drawLabel(painter, f, caja.center());
+        }
     }
 }
 
-void FeatureLayer::drawPoint(QPainter *painter, const MapFeature &f,
-                             bool selected) const
+void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f,
+                                 const QVector<QGeoCoordinate> &part,
+                                 bool selected) const
 {
-    const QPointF pos = screenPos(f.position());
+    if (part.isEmpty())
+        return;
+    const QPointF pos = screenPos(part.first());
     const double r = f.style.pointRadiusPx;
 
     if (!f.style.icon.isNull()) {
@@ -186,15 +214,13 @@ void FeatureLayer::drawPoint(QPainter *painter, const MapFeature &f,
         painter->setPen(QPen(Qt::black, 1, Qt::DashLine));
         painter->drawEllipse(pos, r + 5, r + 5);
     }
-
-    if (f.style.labelVisible && !f.name.isEmpty())
-        drawLabel(painter, f, pos + QPointF(r + 4, -r - 2));
 }
 
-void FeatureLayer::drawPath(QPainter *painter, const MapFeature &f,
-                            bool selected) const
+void FeatureLayer::drawPathPart(QPainter *painter, const MapFeature &f,
+                                const QVector<QGeoCoordinate> &part,
+                                bool selected) const
 {
-    const QPolygonF poly = screenPolygon(f);
+    const QPolygonF poly = screenPolygonOf(part);
     if (poly.size() < 2)
         return;
 
@@ -233,15 +259,8 @@ void FeatureLayer::drawPath(QPainter *painter, const MapFeature &f,
         else
             painter->drawPolyline(poly);
     }
-
-    if (selected || f.style.verticesVisible)
-        drawVertices(painter, f);
-
-    if (f.style.labelVisible && !f.name.isEmpty()) {
-        // La etiqueta va en el centro del rectangulo que contiene la
-        // geometria, que es estable al desplazar el mapa.
-        drawLabel(painter, f, poly.boundingRect().center());
-    }
+    // Los tiradores y la etiqueta los pinta drawFeature una sola vez, no por
+    // parte.
 }
 
 void FeatureLayer::drawVertices(QPainter *painter, const MapFeature &f) const
@@ -344,22 +363,28 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
 
             double d = std::numeric_limits<double>::max();
 
-            if (f.kind == GeometryKind::Point) {
-                const QPointF c = screenPos(f.position());
-                d = std::hypot(p.x() - c.x(), p.y() - c.y())
-                    - f.style.pointRadiusPx;
-                d = qMax(0.0, d);
-            } else {
-                const QPolygonF poly = screenPolygon(f);
+            // Se prueba parte a parte: en una entidad multi-parte basta que el
+            // cursor caiga cerca de cualquiera de sus trazados.
+            for (const QVector<QGeoCoordinate> &parte : f.outlines()) {
+                if (f.kind == GeometryKind::Point) {
+                    if (parte.isEmpty())
+                        continue;
+                    const QPointF c = screenPos(parte.first());
+                    d = qMin(d, qMax(0.0, std::hypot(p.x() - c.x(),
+                                                     p.y() - c.y())
+                                          - f.style.pointRadiusPx));
+                    continue;
+                }
+                const QPolygonF poly = screenPolygonOf(parte);
                 if (f.kind == GeometryKind::Polygon
                     && poly.containsPoint(p, Qt::OddEvenFill)) {
                     d = 0.0;      // dentro del area cuenta como acierto
-                } else {
-                    for (int j = 0; j + 1 < static_cast<int>(poly.size()); ++j)
-                        d = qMin(d, distanceToSegment(p, poly[j], poly[j + 1]));
-                    if (f.kind == GeometryKind::Polygon && poly.size() > 2)
-                        d = qMin(d, distanceToSegment(p, poly.last(), poly.first()));
+                    break;
                 }
+                for (int j = 0; j + 1 < static_cast<int>(poly.size()); ++j)
+                    d = qMin(d, distanceToSegment(p, poly[j], poly[j + 1]));
+                if (f.kind == GeometryKind::Polygon && poly.size() > 2)
+                    d = qMin(d, distanceToSegment(p, poly.last(), poly.first()));
             }
 
             if (d <= mejorDist) {

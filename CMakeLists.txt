@@ -111,6 +111,9 @@ add_library(libmapa_core STATIC
     src/tiles/TileLoader.h
     src/tiles/TileService.cpp
     src/tiles/TileService.h
+
+    src/io/GeoFile.cpp
+    include/libmapa/GeoFile.h
 )
 
 target_include_directories(libmapa_core
@@ -143,12 +146,17 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/OverlayModel.h
         src/widget/FeatureLayer.cpp
         src/widget/FeatureLayer.h
+        src/widget/TargetModel.cpp
+        src/widget/TargetModel.h
+        src/widget/TargetLayer.cpp
+        src/widget/TargetLayer.h
         src/widget/MapView.cpp
         src/widget/MapView.h
         src/widget/MapWidget.cpp
         include/libmapa/MapWidget.h
         include/libmapa/MapTypes.h
         include/libmapa/MapFeature.h
+        include/libmapa/MapTarget.h
     )
 
     target_include_directories(libmapa_widget
@@ -194,6 +202,14 @@ if(LIBMAPA_BUILD_TOOLS)
 
     add_executable(vector_db tools/vector_db/main.cpp)
     target_link_libraries(vector_db PRIVATE libmapa_core)
+
+    # Rasteriza vector (.geo/.xyz) a un piramide de teselas SQLite. Necesita
+    # QGuiApplication (QImage/QPainter): en un servidor sin pantalla se ejecuta
+    # con QT_QPA_PLATFORM=offscreen.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Gui)
+    add_executable(geo_to_tiles tools/geo_to_tiles/main.cpp)
+    target_link_libraries(geo_to_tiles PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Gui)
+    target_include_directories(geo_to_tiles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
     if(LIBMAPA_HAVE_QCP)
         add_executable(render_map tools/render_map/main.cpp)
@@ -241,6 +257,10 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_tileservice)
     libmapa_add_test(tst_vectorrepository)
 
+    libmapa_add_test(tst_geofile)
+    target_compile_definitions(tst_geofile PRIVATE
+        LIBMAPA_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
+
     if(LIBMAPA_HAVE_QCP)
         add_executable(tst_overlaymodel tests/tst_overlaymodel.cpp)
         target_link_libraries(tst_overlaymodel
@@ -257,5 +277,13 @@ if(LIBMAPA_BUILD_TESTS)
             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_include_directories(tst_mapwidget SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
         add_test(NAME tst_mapwidget COMMAND tst_mapwidget)
+
+        add_executable(tst_targetmodel tests/tst_targetmodel.cpp)
+        target_link_libraries(tst_targetmodel
+            PRIVATE libmapa_widget Qt${QT_VERSION_MAJOR}::Test)
+        target_include_directories(tst_targetmodel
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_include_directories(tst_targetmodel SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
+        add_test(NAME tst_targetmodel COMMAND tst_targetmodel)
     endif()
 endif()

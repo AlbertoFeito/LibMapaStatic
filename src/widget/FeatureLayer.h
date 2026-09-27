@@ -84,8 +84,12 @@ protected:
 
 private:
     void drawFeature(QPainter *painter, const MapFeature &f, bool selected) const;
-    void drawPoint(QPainter *painter, const MapFeature &f, bool selected) const;
-    void drawPath(QPainter *painter, const MapFeature &f, bool selected) const;
+    //! Dibuja UNA parte (un punto de ella) de una entidad Point.
+    void drawPointPart(QPainter *painter, const MapFeature &f,
+                       const QVector<QGeoCoordinate> &part, bool selected) const;
+    //! Dibuja UNA parte de una entidad Polyline/Polygon.
+    void drawPathPart(QPainter *painter, const MapFeature &f,
+                      const QVector<QGeoCoordinate> &part, bool selected) const;
     void drawVertices(QPainter *painter, const MapFeature &f) const;
     void drawDraft(QPainter *painter) const;
     void drawLabel(QPainter *painter, const MapFeature &f,
@@ -93,6 +97,7 @@ private:
 
     QPointF screenPos(const QGeoCoordinate &c) const;
     QPolygonF screenPolygon(const MapFeature &f) const;
+    QPolygonF screenPolygonOf(const QVector<QGeoCoordinate> &pts) const;
 
     //! Distancia de un punto a un segmento, en pixeles.
     static double distanceToSegment(const QPointF &p, const QPointF &a,
