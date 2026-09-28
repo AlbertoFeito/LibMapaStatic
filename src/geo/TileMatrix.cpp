@@ -45,7 +45,7 @@ TileKey TileMatrix::tileAt(const QGeoCoordinate &coord, int z)
     const int n = tilesPerSide(z);
     const int x = static_cast<int>(std::floor(longitudeToTileX(coord.longitude(), z)));
     const int y = static_cast<int>(std::floor(latitudeToTileY(coord.latitude(), z)));
-    return TileKey{z, std::clamp(x, 0, n - 1), std::clamp(y, 0, n - 1)};
+    return TileKey{z, qBound(0, x, n - 1), qBound(0, y, n - 1)};
 }
 
 QGeoCoordinate TileMatrix::tileNorthWest(const TileKey &key)
@@ -113,10 +113,10 @@ TileMatrix::TileRange TileMatrix::rangeFor(const QGeoCoordinate &northWest,
     r.yMin = static_cast<int>(std::floor(ya)) - margin;
     r.yMax = static_cast<int>(std::floor(yb)) + margin;
 
-    r.xMin = std::clamp(r.xMin, 0, n - 1);
-    r.xMax = std::clamp(r.xMax, 0, n - 1);
-    r.yMin = std::clamp(r.yMin, 0, n - 1);
-    r.yMax = std::clamp(r.yMax, 0, n - 1);
+    r.xMin = qBound(0, r.xMin, n - 1);
+    r.xMax = qBound(0, r.xMax, n - 1);
+    r.yMin = qBound(0, r.yMin, n - 1);
+    r.yMax = qBound(0, r.yMax, n - 1);
 
     return r;
 }
@@ -125,7 +125,7 @@ int TileMatrix::bestZoomFor(double spanLongitudeDeg, int viewportWidthPx,
                             int minZoom, int maxZoom) const
 {
     if (spanLongitudeDeg <= 0.0 || viewportWidthPx <= 0)
-        return std::clamp(minZoom, minZoom, maxZoom);
+        return qBound(minZoom, minZoom, maxZoom);
 
     // Anchura del mundo en pixeles necesaria para que spanLongitudeDeg ocupe
     // exactamente viewportWidthPx:
@@ -135,7 +135,7 @@ int TileMatrix::bestZoomFor(double spanLongitudeDeg, int viewportWidthPx,
     const double zExact  = std::log2(worldPx / m_tileSize);
 
     int z = static_cast<int>(std::lround(zExact));
-    return std::clamp(z, minZoom, maxZoom);
+    return qBound(minZoom, z, maxZoom);
 }
 
 } // namespace libmapa

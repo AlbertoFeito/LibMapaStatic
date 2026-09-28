@@ -47,7 +47,7 @@ void TstTileSource::initTestCase()
 
     // Dataset "OSM": z directo, XYZ. Como Cuba_OSM_CID3.sqlitedb.
     SyntheticSpec osm;
-    osm.path = m_dir.filePath(QStringLiteral("osm.sqlitedb"));
+    osm.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("osm.sqlitedb"));
     osm.minLogicalZ = 6;
     osm.maxLogicalZ = 10;
     osm.invertedZ = false;
@@ -57,7 +57,7 @@ void TstTileSource::initTestCase()
     // Dataset "Satelital": storedZ = 17 - logicalZ, tal y como hacia el
     // original con "int Zoom = 18 - Zoom_Level".
     SyntheticSpec sat;
-    sat.path = m_dir.filePath(QStringLiteral("sat.sqlitedb"));
+    sat.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("sat.sqlitedb"));
     sat.minLogicalZ = 6;
     sat.maxLogicalZ = 10;
     sat.invertedZ = true;
@@ -67,7 +67,7 @@ void TstTileSource::initTestCase()
 
     // Dataset con eje Y invertido (TMS).
     SyntheticSpec tms;
-    tms.path = m_dir.filePath(QStringLiteral("tms.sqlitedb"));
+    tms.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("tms.sqlitedb"));
     tms.minLogicalZ = 7;
     tms.maxLogicalZ = 9;
     tms.scheme = TileScheme::TMS;
@@ -76,7 +76,7 @@ void TstTileSource::initTestCase()
 
     // Dataset sin columna 's'.
     SyntheticSpec noS;
-    noS.path = m_dir.filePath(QStringLiteral("nos.sqlitedb"));
+    noS.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("nos.sqlitedb"));
     noS.minLogicalZ = 7;
     noS.maxLogicalZ = 8;
     noS.withSColumn = false;

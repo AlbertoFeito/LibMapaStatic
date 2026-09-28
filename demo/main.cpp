@@ -40,7 +40,11 @@
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
-#include <QRandomGenerator>
+#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+#  include <QRandomGenerator>
+#else
+#  include <cstdlib>          // qrand()/RAND_MAX para Qt 5.7
+#endif
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -60,6 +64,19 @@ namespace {
 //! Roles para distinguir capas de entidades en el arbol.
 constexpr int RolCapa = Qt::UserRole;        //!< id de capa (en ambos)
 constexpr int RolEntidad = Qt::UserRole + 1; //!< id de entidad (solo hojas)
+
+// Compatibilidad Qt 5.7: QRandomGenerator llego en 5.10. Con 5.7 se usa el
+// qrand() de toda la vida (basta para la simulacion de ejemplo). En Qt 6
+// qrand ya no existe, pero esta rama solo se compila para Qt < 5.10.
+#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+inline QRandomGenerator *azar() { return QRandomGenerator::global(); }
+#else
+struct AzarCompat {
+    double bounded(double max) { return (double(qrand()) / (double(RAND_MAX) + 1.0)) * max; }
+    int bounded(int max) { return max > 0 ? (qrand() % max) : 0; }
+};
+inline AzarCompat *azar() { static AzarCompat g; return &g; }
+#endif
 } // namespace
 
 class Ventana : public QMainWindow
@@ -910,7 +927,7 @@ private:
         m_simIds.reserve(n);
         m_simVel.reserve(n);
 
-        auto *r = QRandomGenerator::global();
+        auto *r = azar();
         static const char *tipos[] = { "Buque", "Aereo", "Pesca", "Patrulla" };
 
         for (int i = 0; i < n; ++i) {
@@ -944,7 +961,7 @@ private:
 
     void pasoSimulacion()
     {
-        auto *r = QRandomGenerator::global();
+        auto *r = azar();
         for (int i = 0; i < m_simIds.size(); ++i) {
             QPointF &v = m_simVel[i];
             const auto t = m_mapa->target(m_simIds[i]);

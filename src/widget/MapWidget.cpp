@@ -297,10 +297,10 @@ void MapWidget::clearFeatures()
         d->view->overlayModel()->clear();
 }
 
-std::optional<MapFeature> MapWidget::feature(qint64 id) const
+libmapa::optional<MapFeature> MapWidget::feature(qint64 id) const
 {
     return d->view ? d->view->overlayModel()->feature(id)
-                   : std::optional<MapFeature>();
+                   : libmapa::optional<MapFeature>();
 }
 
 QVector<MapFeature> MapWidget::features() const
@@ -508,10 +508,10 @@ void MapWidget::clearTargets()
         d->view->targetModel()->clear();
 }
 
-std::optional<MapTarget> MapWidget::target(qint64 id) const
+libmapa::optional<MapTarget> MapWidget::target(qint64 id) const
 {
     return d->view ? d->view->targetModel()->target(id)
-                   : std::optional<MapTarget>();
+                   : libmapa::optional<MapTarget>();
 }
 
 QVector<MapTarget> MapWidget::targets() const

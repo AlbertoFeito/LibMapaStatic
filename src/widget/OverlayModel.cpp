@@ -203,11 +203,11 @@ QVector<LayerInfo> OverlayModel::layers() const
     return out;
 }
 
-std::optional<LayerInfo> OverlayModel::layer(const QString &id) const
+libmapa::optional<LayerInfo> OverlayModel::layer(const QString &id) const
 {
     auto it = m_layers.constFind(id);
     if (it == m_layers.constEnd())
-        return std::nullopt;
+        return libmapa::nullopt;
 
     LayerInfo capa = it.value();
     capa.featureCount = 0;
@@ -369,11 +369,11 @@ void OverlayModel::clear()
     emit changed();
 }
 
-std::optional<MapFeature> OverlayModel::feature(qint64 id) const
+libmapa::optional<MapFeature> OverlayModel::feature(qint64 id) const
 {
     auto it = m_features.constFind(id);
     if (it == m_features.constEnd())
-        return std::nullopt;
+        return libmapa::nullopt;
     return it.value();
 }
 

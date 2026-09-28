@@ -60,14 +60,14 @@ void TstProbe::initTestCase()
                            QGeoCoordinate(19.7, -74.0));
 
     SyntheticSpec direct;
-    direct.path = m_dir.filePath(QStringLiteral("direct.sqlitedb"));
+    direct.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("direct.sqlitedb"));
     direct.minLogicalZ = 6;
     direct.maxLogicalZ = 10;
     m_direct = direct.path;
     QVERIFY(buildSyntheticDb(direct) > 0);
 
     SyntheticSpec inverted;
-    inverted.path = m_dir.filePath(QStringLiteral("inverted.sqlitedb"));
+    inverted.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("inverted.sqlitedb"));
     inverted.minLogicalZ = 6;
     inverted.maxLogicalZ = 10;
     inverted.invertedZ = true;
@@ -76,7 +76,7 @@ void TstProbe::initTestCase()
     QVERIFY(buildSyntheticDb(inverted) > 0);
 
     SyntheticSpec tms;
-    tms.path = m_dir.filePath(QStringLiteral("tms.sqlitedb"));
+    tms.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("tms.sqlitedb"));
     tms.minLogicalZ = 7;
     tms.maxLogicalZ = 9;
     tms.scheme = TileScheme::TMS;
@@ -84,7 +84,7 @@ void TstProbe::initTestCase()
     QVERIFY(buildSyntheticDb(tms) > 0);
 
     SyntheticSpec noS;
-    noS.path = m_dir.filePath(QStringLiteral("nos.sqlitedb"));
+    noS.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("nos.sqlitedb"));
     noS.minLogicalZ = 7;
     noS.maxLogicalZ = 8;
     noS.withSColumn = false;
@@ -92,7 +92,7 @@ void TstProbe::initTestCase()
     QVERIFY(buildSyntheticDb(noS) > 0);
 
     SyntheticSpec big;
-    big.path = m_dir.filePath(QStringLiteral("big.sqlitedb"));
+    big.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("big.sqlitedb"));
     big.minLogicalZ = 7;
     big.maxLogicalZ = 8;
     big.tileSize = 512;
@@ -229,7 +229,7 @@ void TstProbe::reportsCoverage()
 
 void TstProbe::failsOnMissingFile()
 {
-    auto r = TileDatasetProbe::probe(m_dir.filePath(QStringLiteral("nope.db")),
+    auto r = TileDatasetProbe::probe((m_dir.path() + QLatin1Char('/') + QStringLiteral("nope.db")),
                                      QStringLiteral("x"), m_cuba);
     QVERIFY(!r.has_value());
 }
@@ -306,7 +306,7 @@ void TstProbe::detectsSliverLevelAndCapsZoom()
     // Se fabrica el caso real de la BD de OSM: un nivel extra con muchas
     // teselas pero concentradas en una franja estrechisima, fuera del area
     // util. Antes ese nivel dictaba la extension de toda la BD.
-    const QString path = m_dir.filePath(QStringLiteral("sliver.sqlitedb"));
+    const QString path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("sliver.sqlitedb"));
 
     SyntheticSpec base;
     base.path = path;

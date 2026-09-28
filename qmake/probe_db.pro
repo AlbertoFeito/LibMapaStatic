@@ -12,8 +12,20 @@
 QT += core gui sql positioning
 QT -= widgets
 
-CONFIG += console c++17
+CONFIG += console
 CONFIG -= app_bundle
+
+# Estandar de C++ segun la version de Qt:
+#  - Qt 6 exige C++17 (sus cabeceras no compilan con menos).
+#  - Qt 5.7 (MinGW 5.3 de EstacionTerrena) NO entiende la opcion c++17 de
+#    qmake (llego en Qt 5.12) y caeria a C++11, rompiendo make_unique y la
+#    init por llaves. c++14 existe desde Qt 5.4 y basta: el codigo evita
+#    <optional>/std::clamp con libmapa::optional y qBound.
+greaterThan(QT_MAJOR_VERSION, 5) {
+    CONFIG += c++17
+} else {
+    CONFIG += c++14
+}
 
 TARGET = probe_db
 TEMPLATE = app

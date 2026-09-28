@@ -100,13 +100,13 @@ void TstTileService::initTestCase()
 
     // Replica de las dos BD reales: convenciones de zoom distintas.
     SyntheticSpec osm;
-    osm.path = m_dir.filePath(QStringLiteral("osm.sqlitedb"));
+    osm.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("osm.sqlitedb"));
     osm.minLogicalZ = 6;
     osm.maxLogicalZ = 11;
     QVERIFY(buildSyntheticDb(osm) > 0);
 
     SyntheticSpec sat;
-    sat.path = m_dir.filePath(QStringLiteral("sat.sqlitedb"));
+    sat.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("sat.sqlitedb"));
     sat.minLogicalZ = 6;
     sat.maxLogicalZ = 11;
     sat.colorSeed = 7;          // teselas distinguibles de las de OSM
@@ -152,7 +152,7 @@ void TstTileService::rejectsMissingFiles()
 {
     TileDataset bad;
     bad.id = QStringLiteral("fantasma");
-    bad.filePath = m_dir.filePath(QStringLiteral("noexiste.sqlitedb"));
+    bad.filePath = (m_dir.path() + QLatin1Char('/') + QStringLiteral("noexiste.sqlitedb"));
 
     TileService svc;
     QSignalSpy errors(&svc, &TileService::errorOccurred);
@@ -341,7 +341,7 @@ void TstTileService::planUsesFallbackAfterPartialLoad()
 
 void TstTileService::loadsDatasetsFromJson()
 {
-    const QString jsonPath = m_dir.filePath(QStringLiteral("datasets.json"));
+    const QString jsonPath = (m_dir.path() + QLatin1Char('/') + QStringLiteral("datasets.json"));
     {
         QJsonArray arr;
         for (const TileDataset &d : m_datasets) {
@@ -373,7 +373,7 @@ void TstTileService::loadsDatasetsFromJson()
 
     // Un fichero inexistente da error, no un cuelgue.
     QString error2;
-    QVERIFY(TileService::loadDatasets(m_dir.filePath(QStringLiteral("nope.json")),
+    QVERIFY(TileService::loadDatasets((m_dir.path() + QLatin1Char('/') + QStringLiteral("nope.json")),
                                       &error2).isEmpty());
     QVERIFY(!error2.isEmpty());
 }
@@ -588,7 +588,7 @@ void TstTileService::openSeaFallsBackToWorldLevel()
 {
     // BD como la satelital real: niveles gruesos con el mundo entero (unicos
     // que tienen mar) y niveles de detalle solo sobre el recuadro de Cuba.
-    const QString path = m_dir.filePath(QStringLiteral("conmar.sqlitedb"));
+    const QString path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("conmar.sqlitedb"));
 
     SyntheticSpec mundo;
     mundo.path = path;
@@ -685,7 +685,7 @@ void TstTileService::blurryFallbackTriggersRefinement()
     // BD con un nivel de detalle lleno de huecos y un nivel intermedio
     // COMPLETO justo encima. Sin refinamiento, los huecos se taparian con el
     // nivel de fondo, muchisimo mas arriba.
-    const QString path = m_dir.filePath(QStringLiteral("borroso.sqlitedb"));
+    const QString path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("borroso.sqlitedb"));
 
     SyntheticSpec fondo;
     fondo.path = path;

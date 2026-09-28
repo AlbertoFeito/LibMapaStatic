@@ -135,7 +135,7 @@ void TstMapWidget::initTestCase()
     QVERIFY(m_dir.isValid());
 
     SyntheticSpec mundo;
-    mundo.path = m_dir.filePath(QStringLiteral("osm.sqlitedb"));
+    mundo.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("osm.sqlitedb"));
     mundo.minLogicalZ = 3;
     mundo.maxLogicalZ = 4;
     mundo.worldCoverage = true;
@@ -149,7 +149,7 @@ void TstMapWidget::initTestCase()
     QVERIFY(buildSyntheticDb(osm) > 0);
 
     SyntheticSpec mundoSat;
-    mundoSat.path = m_dir.filePath(QStringLiteral("sat.sqlitedb"));
+    mundoSat.path = (m_dir.path() + QLatin1Char('/') + QStringLiteral("sat.sqlitedb"));
     mundoSat.minLogicalZ = 3;
     mundoSat.maxLogicalZ = 4;
     mundoSat.worldCoverage = true;
@@ -190,7 +190,7 @@ void TstMapWidget::initTestCase()
     root[QStringLiteral("version")] = 1;
     root[QStringLiteral("datasets")] = arr;
 
-    m_jsonPath = m_dir.filePath(QStringLiteral("datasets.json"));
+    m_jsonPath = (m_dir.path() + QLatin1Char('/') + QStringLiteral("datasets.json"));
     QFile f(m_jsonPath);
     QVERIFY(f.open(QIODevice::WriteOnly));
     f.write(QJsonDocument(root).toJson());
@@ -223,7 +223,7 @@ void TstMapWidget::buildsFromDatasetsJson()
 
 void TstMapWidget::reportsErrorOnMissingJson()
 {
-    MapConfig cfg = baseConfig(m_dir.filePath(QStringLiteral("nada.json")));
+    MapConfig cfg = baseConfig((m_dir.path() + QLatin1Char('/') + QStringLiteral("nada.json")));
     MapWidget w(cfg);
     QVERIFY(!w.isReady());
     QVERIFY(!w.lastError().isEmpty());
@@ -1492,7 +1492,7 @@ void TstMapWidget::draggingIsOneUndoStep()
 
 void TstMapWidget::savesAndLoadsFeatures()
 {
-    const QString bd = m_dir.filePath(QStringLiteral("entidades.db"));
+    const QString bd = (m_dir.path() + QLatin1Char('/') + QStringLiteral("entidades.db"));
     QFile::remove(bd);
 
     qint64 idOriginal = -1;
@@ -1572,7 +1572,7 @@ void TstMapWidget::loadsGeoFileAsPolygonLayer()
 
     // Un .geo cerrado (triangulo): lon,lat por linea, terminador 0,0. El
     // ultimo vertice repite el primero, como en los ficheros reales.
-    const QString ruta = m_dir.filePath(QStringLiteral("mini.geo"));
+    const QString ruta = (m_dir.path() + QLatin1Char('/') + QStringLiteral("mini.geo"));
     QFile f(ruta);
     QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
     QTextStream(&f) << "-82.0,23.0,\n-81.0,23.0,\n-81.5,23.5,\n"
@@ -1607,7 +1607,7 @@ void TstMapWidget::loadsGeoWithSeveralPolylines()
     MapWidget w(baseConfig(m_jsonPath));
     QVERIFY(w.isReady());
 
-    const QString ruta = m_dir.filePath(QStringLiteral("corredores.geo"));
+    const QString ruta = (m_dir.path() + QLatin1Char('/') + QStringLiteral("corredores.geo"));
     QFile f(ruta);
     QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
     QTextStream(&f) << "-81.4,23.0,\n-81.5,21.6,\n0.0,0.0\n"
@@ -1649,7 +1649,7 @@ void TstMapWidget::savesAndLoadsMultiPartFeature()
     const qint64 id = w.addFeature(f);
     QVERIFY(id > 0);
 
-    const QString db = m_dir.filePath(QStringLiteral("multi.db"));
+    const QString db = (m_dir.path() + QLatin1Char('/') + QStringLiteral("multi.db"));
     QVERIFY(w.saveFeaturesTo(db));
 
     w.clearFeatures();

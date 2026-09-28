@@ -599,14 +599,14 @@ void TileDatasetProbe::detectTileSize(QSqlDatabase &db, TileDataset &ds,
     }
 }
 
-std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
+libmapa::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
                                                    const QString &id,
                                                    const QGeoRectangle &reference)
 {
     const QFileInfo fi(filePath);
     if (!fi.exists()) {
         qCCritical(lcMapaTiles) << "No existe:" << filePath;
-        return std::nullopt;
+        return libmapa::nullopt;
     }
 
     // Se usa un id de sondeo distinto para no pisar la conexion de produccion.
@@ -615,7 +615,7 @@ std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
         SqliteConnectionPool::Mode::ReadOnly);
 
     if (!db.isOpen())
-        return std::nullopt;
+        return libmapa::nullopt;
 
     ProbeResult result;
     result.fileSizeBytes = fi.size();
@@ -645,16 +645,16 @@ std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
         }
         if (!found) {
             qCCritical(lcMapaTiles) << "No hay tabla de teselas en" << filePath;
-            return std::nullopt;
+            return libmapa::nullopt;
         }
         result.warnings << QStringLiteral("No hay tabla 'tiles'; se usa '%1'.")
                                .arg(result.dataset.tableName);
     }
 
     if (!detectColumns(db, result.dataset, result.warnings))
-        return std::nullopt;
+        return libmapa::nullopt;
     if (!detectZMapping(db, result.dataset, result, reference))
-        return std::nullopt;
+        return libmapa::nullopt;
 
     detectScheme(db, result.dataset, result, reference);
     detectTileSize(db, result.dataset, result);

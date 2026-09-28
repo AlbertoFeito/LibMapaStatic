@@ -59,7 +59,7 @@ private slots:
     void reportsErrorsInsteadOfSwallowingThem();
 
 private:
-    QString dbPath(const QString &name) const { return m_dir.filePath(name); }
+    QString dbPath(const QString &name) const { return (m_dir.path() + QLatin1Char('/') + name); }
     QTemporaryDir m_dir;
 };
 
@@ -636,7 +636,7 @@ void TstVectorRepository::reportsErrorsInsteadOfSwallowingThem()
     QSignalSpy errores(&repo, &VectorRepository::errorOccurred);
 
     // Directorio inexistente.
-    QVERIFY(!repo.open(m_dir.filePath(QStringLiteral("no/existe/x.db"))));
+    QVERIFY(!repo.open((m_dir.path() + QLatin1Char('/') + QStringLiteral("no/existe/x.db"))));
     QVERIFY(!repo.lastError().isEmpty());
     QVERIFY(errores.count() > 0);
 

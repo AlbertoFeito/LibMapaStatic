@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(libmapa VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+# C++14 es el minimo comun: compila con el MinGW/GCC 5.3 que trae Qt 5.7
+# (el qmake de 5.7 no entiende "CONFIG += c++17") y tambien con Qt 5.15 y Qt 6.
+# La libreria no usa nada de C++17: optional propio (compat/Optional.h) y qBound
+# en vez de std::clamp.
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
