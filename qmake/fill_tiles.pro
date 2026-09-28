@@ -33,21 +33,23 @@ TEMPLATE = app
 # La raiz del proyecto, subiendo un nivel desde qmake/
 ROOT = $$PWD/..
 
-INCLUDEPATH += $$ROOT/src $$ROOT/include
+INCLUDEPATH += $$ROOT/src $$ROOT/include $$ROOT/tools/common
 
-# Solo el nucleo minimo: geodesia, el descriptor de dataset y el log. La
-# herramienta lee datasets.json por su cuenta (no arrastra el motor de teselas).
+# Solo el nucleo minimo: geodesia, el descriptor de dataset, el log y el motor
+# de descarga comun (TileFiller). No arrastra el motor de teselas del mapa.
 SOURCES += \
     $$ROOT/src/core/Logging.cpp \
     $$ROOT/src/geo/WebMercator.cpp \
     $$ROOT/src/geo/TileMatrix.cpp \
     $$ROOT/src/tiles/TileDataset.cpp \
+    $$ROOT/tools/common/TileFiller.cpp \
     $$ROOT/tools/fill_tiles/main.cpp
 
 HEADERS += \
     $$ROOT/src/core/Logging.h \
     $$ROOT/src/geo/WebMercator.h \
     $$ROOT/src/geo/TileMatrix.h \
-    $$ROOT/src/tiles/TileDataset.h
+    $$ROOT/src/tiles/TileDataset.h \
+    $$ROOT/tools/common/TileFiller.h
 
 DESTDIR = $$ROOT/bin

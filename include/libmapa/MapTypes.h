@@ -21,6 +21,8 @@ enum class MapTool {
     None,          //!< Solo navegar.
     Measure,       //!< Medir distancia y marcacion entre dos puntos.
     AreaZoom,      //!< Ampliar arrastrando un rectangulo.
+    SelectArea,    //!< Marcar un rectangulo SIN hacer zoom: emite areaSelected
+                   //!< y deja el recuadro visible (para rellenar teselas, etc.).
     PickPoint,     //!< Devolver la coordenada del siguiente clic.
 
     // --- Creacion de entidades -------------------------------------------

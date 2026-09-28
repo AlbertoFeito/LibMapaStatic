@@ -99,6 +99,9 @@ public:
     //! Pide al servicio las teselas del viewport actual.
     void requestVisibleTiles();
 
+    //! Oculta el recuadro de SelectArea, si lo hay.
+    void clearAreaSelection();
+
     //! Capa donde se crean las entidades nuevas.
     void setActiveFeatureLayer(const QString &id) { m_activeLayer = id; }
     QString activeFeatureLayer() const { return m_activeLayer; }

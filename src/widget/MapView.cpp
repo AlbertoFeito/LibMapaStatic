@@ -311,6 +311,14 @@ void MapView::requestVisibleTiles()
                                m_zoom, /*marginTiles=*/1);
 }
 
+void MapView::clearAreaSelection()
+{
+    if (m_areaRect && m_areaRect->visible()) {
+        m_areaRect->setVisible(false);
+        replot(QCustomPlot::rpQueuedReplot);
+    }
+}
+
 void MapView::refreshPlan()
 {
     if (!m_service || !m_tileLayer)
@@ -532,6 +540,7 @@ void MapView::mousePressEvent(QMouseEvent *event)
             break;
 
         case MapTool::AreaZoom:
+        case MapTool::SelectArea:
             m_toolFirstPoint = coordinateAt(event->pos());
             m_toolFirstPointSet = true;
             if (!m_areaRect) {
@@ -672,7 +681,8 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
         emit centerChanged(m_center);
         requestVisibleTiles();
         refreshPlan();
-    } else if (m_tool == MapTool::AreaZoom && m_toolFirstPointSet && m_areaRect) {
+    } else if ((m_tool == MapTool::AreaZoom || m_tool == MapTool::SelectArea)
+               && m_toolFirstPointSet && m_areaRect) {
         // toAxis() y no la latitud a secas: el eje Y va en grados de
         // MERCATOR, no de latitud. Pasarle la latitud coloca el item por
         // debajo del cursor. Sobre Cuba a zoom 3 el desfase es de unos 4
@@ -722,10 +732,9 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
             break;      // ya se atendio al pulsar
 
         case MapTool::AreaZoom:
+        case MapTool::SelectArea:
             if (m_toolFirstPointSet) {
                 m_toolFirstPointSet = false;
-                if (m_areaRect)
-                    m_areaRect->setVisible(false);
 
                 const QGeoCoordinate no(qMax(m_toolFirstPoint.latitude(),
                                              donde.latitude()),
@@ -736,7 +745,17 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
                                         qMax(m_toolFirstPoint.longitude(),
                                              donde.longitude()));
                 emit areaSelected(no, se);
-                fitBounds(no, se);
+
+                if (m_tool == MapTool::AreaZoom) {
+                    // Ampliar: el recuadro se oculta y saltamos a la zona.
+                    if (m_areaRect)
+                        m_areaRect->setVisible(false);
+                    fitBounds(no, se);
+                } else {
+                    // SelectArea: dejamos el recuadro visible como marca de la
+                    // zona elegida; NO hacemos zoom.
+                    replot(QCustomPlot::rpQueuedReplot);
+                }
             }
             break;
 

@@ -95,6 +95,18 @@ public:
     int minZoom() const;
     int maxZoom() const;
 
+    /*!
+     * \brief Olvida las teselas en cache y vuelve a pedir las del viewport.
+     *
+     * Util despues de MODIFICAR la base de teselas por fuera (p. ej. tras
+     * rellenar huecos con la herramienta de descarga): sin esto, la cache
+     * seguiria mostrando lo de antes -incluidas las marcas de "no existe"-.
+     */
+    void reloadBaseLayer();
+
+    //! Quita el recuadro dibujado con la herramienta SelectArea.
+    void clearAreaSelection();
+
     void zoomIn();
     void zoomOut();
     void fitBounds(const QGeoCoordinate &northWest,

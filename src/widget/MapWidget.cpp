@@ -179,6 +179,19 @@ bool MapWidget::setBaseLayerId(const QString &id)
     return d->service.setActiveDataset(id);
 }
 
+void MapWidget::reloadBaseLayer()
+{
+    d->syncGeometry();
+    d->service.cache().clear();      // olvida teselas y marcas de "no existe"
+    d->view->requestVisibleTiles();  // vuelve a pedirlas a la BD
+    d->view->refreshPlan();
+}
+
+void MapWidget::clearAreaSelection()
+{
+    d->view->clearAreaSelection();
+}
+
 QGeoCoordinate MapWidget::center() const
 {
     d->syncGeometry();

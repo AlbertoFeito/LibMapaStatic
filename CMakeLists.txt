@@ -216,17 +216,35 @@ if(LIBMAPA_BUILD_TOOLS)
     target_include_directories(geo_to_tiles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
     # Rellena huecos de una BD de teselas descargando de una fuente XYZ sin
-    # clave (Esri satelite por defecto). Necesita el modulo Network.
+    # clave (Esri satelite por defecto). El motor (TileFiller) es comun a la
+    # version de consola y a la de ventana con mapa. Necesita el modulo Network.
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Network)
-    add_executable(fill_tiles tools/fill_tiles/main.cpp)
+    add_executable(fill_tiles
+        tools/fill_tiles/main.cpp
+        tools/common/TileFiller.cpp
+        tools/common/TileFiller.h)
     target_link_libraries(fill_tiles PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Network)
-    target_include_directories(fill_tiles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_include_directories(fill_tiles PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/common)
 
     if(LIBMAPA_HAVE_QCP)
         add_executable(render_map tools/render_map/main.cpp)
         target_link_libraries(render_map PRIVATE libmapa_widget)
         target_include_directories(render_map PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_include_directories(render_map SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
+
+        # Ventana con mapa para rellenar teselas (mismo motor TileFiller).
+        add_executable(fill_map
+            tools/fill_map/main.cpp
+            tools/common/TileFiller.cpp
+            tools/common/TileFiller.h)
+        target_link_libraries(fill_map PRIVATE
+            libmapa_widget Qt${QT_VERSION_MAJOR}::Network)
+        target_include_directories(fill_map PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/common)
+        target_include_directories(fill_map SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
     endif()
 endif()
 
