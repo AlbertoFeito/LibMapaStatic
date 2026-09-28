@@ -215,6 +215,13 @@ if(LIBMAPA_BUILD_TOOLS)
     target_link_libraries(geo_to_tiles PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Gui)
     target_include_directories(geo_to_tiles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+    # Rellena huecos de una BD de teselas descargando de una fuente XYZ sin
+    # clave (Esri satelite por defecto). Necesita el modulo Network.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Network)
+    add_executable(fill_tiles tools/fill_tiles/main.cpp)
+    target_link_libraries(fill_tiles PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Network)
+    target_include_directories(fill_tiles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
     if(LIBMAPA_HAVE_QCP)
         add_executable(render_map tools/render_map/main.cpp)
         target_link_libraries(render_map PRIVATE libmapa_widget)
