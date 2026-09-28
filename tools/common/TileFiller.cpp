@@ -71,6 +71,28 @@ bool TileFiller::prepare(const Params &params, QString *error)
     // busy_timeout, la escritura espera al lector en vez de fallar por lock.
     QSqlQuery(*m_db).exec(QStringLiteral("PRAGMA busy_timeout=5000"));
 
+    // Base NUEVA: crea la tabla si no existe, con las columnas del dataset. En
+    // una base ya existente esto es un no-op (IF NOT EXISTS).
+    if (m_p.createSchema) {
+        const TileDataset &d = m_p.ds;
+        QString cols = QStringLiteral("%1 INTEGER,%2 INTEGER,%3 INTEGER")
+                           .arg(d.colX, d.colY, d.colZ);
+        QString pk = QStringLiteral("%1,%2,%3").arg(d.colX, d.colY, d.colZ);
+        if (d.hasSColumn) {
+            cols += QStringLiteral(",%1 INTEGER").arg(d.colS);
+            pk   += QStringLiteral(",%1").arg(d.colS);
+        }
+        cols += QStringLiteral(",%1 BLOB").arg(d.colImage);
+        QSqlQuery cq(*m_db);
+        if (!cq.exec(QStringLiteral(
+                "CREATE TABLE IF NOT EXISTS %1 (%2, PRIMARY KEY(%3))")
+                .arg(d.tableName, cols, pk))) {
+            if (error) *error = QStringLiteral("No se pudo crear la tabla: %1")
+                                    .arg(cq.lastError().text());
+            return false;
+        }
+    }
+
     const TileDataset &ds = m_p.ds;
     m_plan.clear();
     m_total = 0;

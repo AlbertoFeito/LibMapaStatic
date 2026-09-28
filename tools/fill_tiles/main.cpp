@@ -85,7 +85,7 @@ int main(int argc, char *argv[])
     QCoreApplication app(argc, argv);
     QNetworkProxyFactory::setUseSystemConfiguration(true);
 
-    QString datasetsPath, id, bbox;
+    QString datasetsPath, id, bbox, newFile, name;
     TileFiller::Params p;
     // Por defecto Esri "Clarity": misma imagen satelital sin clave, pero mas
     // clara y viva que la "World_Imagery" normal -casa mejor con las bases de
@@ -103,6 +103,8 @@ int main(int argc, char *argv[])
         const auto val = [&]() { return i + 1 < args.size() ? args.at(++i) : QString(); };
         if (k == QLatin1String("--datasets")) datasetsPath = val();
         else if (k == QLatin1String("--id")) id = val();
+        else if (k == QLatin1String("--new")) newFile = val();
+        else if (k == QLatin1String("--name")) name = val();
         else if (k == QLatin1String("--bbox")) bbox = val();
         else if (k == QLatin1String("--url")) p.url = val();
         else if (k == QLatin1String("--minzoom")) minZoom = val().toInt();
@@ -117,14 +119,19 @@ int main(int argc, char *argv[])
         else { cerr() << "Opcion desconocida: " << k << '\n'; return 2; }
     }
 
-    if (datasetsPath.isEmpty() || id.isEmpty() || bbox.isEmpty()) {
-        cout() << "Uso: fill_tiles --datasets datasets.json --id satelital \\\n"
-                  "                --bbox latN,lonO,latS,lonE \\\n"
-                  "                [--minzoom N --maxzoom N] \\\n"
-                  "                [--url \"...{z}/{y}/{x}...\"]  (por defecto Esri satelite)\n"
-                  "                [--only-missing (def) | --overwrite]\n"
-                  "                [--rate 2] [--retries 3] [--timeout 20000] [--yes]\n\n"
-                  "La codificacion (z/s/esquema) se toma del dataset indicado con --id.\n"
+    const bool modoNuevo = !newFile.isEmpty();
+    const bool faltanArgs = bbox.isEmpty()
+        || (modoNuevo ? false : (datasetsPath.isEmpty() || id.isEmpty()));
+    if (faltanArgs) {
+        cout() << "Uso (rellenar una base existente):\n"
+                  "  fill_tiles --datasets datasets.json --id satelital \\\n"
+                  "             --bbox latN,lonO,latS,lonE [--minzoom N --maxzoom N]\n\n"
+                  "Uso (crear una base NUEVA, toda de la fuente elegida):\n"
+                  "  fill_tiles --new Cuba_Clarity.sqlitedb [--id clarity] [--name \"...\"] \\\n"
+                  "             --bbox latN,lonO,latS,lonE --minzoom 0 --maxzoom 18\n\n"
+                  "  Comun: [--url \"...{z}/{y}/{x}...\"] (def. Esri Clarity, sin clave)\n"
+                  "         [--only-missing (def) | --overwrite]\n"
+                  "         [--rate 2] [--retries 3] [--timeout 20000] [--yes]\n\n"
                   "AVISO: respeta los terminos de uso de la fuente que utilices.\n";
         return 2;
     }
@@ -137,10 +144,36 @@ int main(int argc, char *argv[])
     p.lonE = bp.at(3).trimmed().toDouble();
 
     QString err;
-    if (!loadDataset(datasetsPath, id, &p.ds, &err)) { cerr() << err << '\n'; return 1; }
-    if (!QFileInfo::exists(p.ds.filePath)) {
-        cerr() << "No existe la BD del dataset: " << p.ds.filePath << '\n';
-        return 1;
+    if (modoNuevo) {
+        // Base NUEVA con una codificacion LIMPIA (no la rara de Google):
+        // esquema XYZ, z guardado = z logico, sin columna 's'. El motor crea la
+        // tabla si el fichero no existe; si ya existe, solo baja lo que falta
+        // (reanudable).
+        p.ds = TileDataset{};
+        p.ds.id = id.isEmpty() ? QStringLiteral("clarity") : id;
+        p.ds.displayName = name.isEmpty()
+            ? QStringLiteral("Satelital (Esri Clarity)") : name;
+        p.ds.filePath = newFile;
+        p.ds.tableName = QStringLiteral("tiles");
+        p.ds.zFactor = 1; p.ds.zOffset = 0;
+        p.ds.scheme = TileScheme::XYZ;
+        p.ds.hasSColumn = false;
+        p.ds.tileSize = 256;
+        p.ds.colX = QStringLiteral("x");
+        p.ds.colY = QStringLiteral("y");
+        p.ds.colZ = QStringLiteral("z");
+        p.ds.colImage = QStringLiteral("image");
+        p.ds.minZoom = minZoom < 0 ? 0 : minZoom;
+        p.ds.maxZoom = maxZoom < 0 ? 18 : maxZoom;
+        p.ds.recommendedMaxZoom = p.ds.maxZoom;
+        p.ds.baseZoom = p.ds.minZoom;
+        p.createSchema = true;
+    } else {
+        if (!loadDataset(datasetsPath, id, &p.ds, &err)) { cerr() << err << '\n'; return 1; }
+        if (!QFileInfo::exists(p.ds.filePath)) {
+            cerr() << "No existe la BD del dataset: " << p.ds.filePath << '\n';
+            return 1;
+        }
     }
 
     p.minZoom = minZoom < 0 ? p.ds.minZoom : minZoom;
@@ -209,11 +242,30 @@ int main(int argc, char *argv[])
     });
     int exitCode = 0;
     QObject::connect(&filler, &TileFiller::finished, &app,
-                     [&app, &exitCode](const TileFiller::Stats &s, bool cancelled) {
+                     [&app, &exitCode, modoNuevo, &p](const TileFiller::Stats &s, bool cancelled) {
         cout() << QStringLiteral("\n%1 Descargadas: %2  ya existian: -  "
                                  "sin origen(404): %3  fallidas: %4\n")
                       .arg(cancelled ? QStringLiteral("Cancelado.") : QStringLiteral("Listo."))
                       .arg(s.downloaded).arg(s.notFound).arg(s.failed);
+        // Base nueva: imprime la entrada lista para pegar en datasets.json.
+        if (modoNuevo) {
+            cout() << "\n--- Anade esto al array \"datasets\" de tu datasets.json ---\n";
+            cout() << QStringLiteral(
+                "    {\n"
+                "      \"id\": \"%1\",\n"
+                "      \"displayName\": \"%2\",\n"
+                "      \"filePath\": \"%3\",\n"
+                "      \"tableName\": \"tiles\",\n"
+                "      \"zFactor\": 1, \"zOffset\": 0,\n"
+                "      \"minZoom\": %4, \"maxZoom\": %5, \"recommendedMaxZoom\": %5,\n"
+                "      \"typicalFill\": 1.0, \"scheme\": \"XYZ\",\n"
+                "      \"hasSColumn\": false, \"tileSize\": 256,\n"
+                "      \"colZ\": \"z\", \"colX\": \"x\", \"colY\": \"y\",\n"
+                "      \"colImage\": \"image\", \"baseZoom\": %4\n"
+                "    }\n")
+                .arg(p.ds.id, p.ds.displayName, QFileInfo(p.ds.filePath).fileName())
+                .arg(p.minZoom).arg(p.maxZoom);
+        }
         exitCode = s.failed > 0 ? 3 : 0;
         app.quit();
     });

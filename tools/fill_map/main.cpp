@@ -22,6 +22,8 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QGeoCoordinate>
 #include <QHash>
 #include <QLabel>
@@ -130,6 +132,12 @@ private:
         connect(m_btnRellenar, &QPushButton::clicked, this, &Ventana::alRellenar);
         tb->addWidget(m_btnRellenar);
 
+        m_btnNueva = new QPushButton(tr("Nueva base..."), this);
+        m_btnNueva->setToolTip(tr("Crea un .sqlitedb nuevo, todo de la fuente "
+                                  "elegida, en el area marcada (o la vista actual)."));
+        connect(m_btnNueva, &QPushButton::clicked, this, &Ventana::alNuevaBase);
+        tb->addWidget(m_btnNueva);
+
         // Segunda fila: la fuente (URL), por si se quiere cambiar.
         QToolBar *tb2 = new QToolBar(tr("Fuente"), this);
         tb2->setMovable(false);
@@ -178,6 +186,7 @@ private:
             8000);
     }
 
+    //! "Rellenar": completa la capa ACTUAL en el area marcada.
     void alRellenar()
     {
         if (m_running)
@@ -204,6 +213,59 @@ private:
         p.url = m_url->text().trimmed();
         p.rate = m_rate->value();
 
+        ejecutar(p, /*nueva=*/false);
+    }
+
+    //! "Nueva base": crea un .sqlitedb NUEVO todo de la fuente elegida, con una
+    //! codificacion limpia (XYZ, z=z logico, sin columna s). Reanudable.
+    void alNuevaBase()
+    {
+        if (m_running)
+            return;
+
+        const QString file = QFileDialog::getSaveFileName(
+            this, tr("Nueva base de teselas"),
+            QStringLiteral("Nueva_Clarity.sqlitedb"),
+            tr("SQLite (*.sqlitedb *.db *.sqlite)"));
+        if (file.isEmpty())
+            return;
+
+        // Zona: el rectangulo marcado si lo hay; si no, lo que se ve ahora.
+        QGeoCoordinate no = m_hayArea ? m_no : m_mapa->visibleNorthWest();
+        QGeoCoordinate se = m_hayArea ? m_se : m_mapa->visibleSouthEast();
+
+        TileFiller::Params p;
+        p.ds.id = QStringLiteral("clarity");
+        p.ds.displayName = QStringLiteral("Satelital (Esri Clarity)");
+        p.ds.filePath = file;
+        p.ds.tableName = QStringLiteral("tiles");
+        p.ds.zFactor = 1; p.ds.zOffset = 0;
+        p.ds.scheme = TileScheme::XYZ;
+        p.ds.hasSColumn = false;
+        p.ds.tileSize = 256;
+        p.ds.colX = QStringLiteral("x");
+        p.ds.colY = QStringLiteral("y");
+        p.ds.colZ = QStringLiteral("z");
+        p.ds.colImage = QStringLiteral("image");
+        p.ds.minZoom = qMin(m_zDesde->value(), m_zHasta->value());
+        p.ds.maxZoom = qMax(m_zDesde->value(), m_zHasta->value());
+        p.ds.recommendedMaxZoom = p.ds.maxZoom;
+        p.ds.baseZoom = p.ds.minZoom;
+        p.createSchema = true;
+
+        p.latN = no.latitude();  p.lonW = no.longitude();
+        p.latS = se.latitude();  p.lonE = se.longitude();
+        p.minZoom = p.ds.minZoom;
+        p.maxZoom = p.ds.maxZoom;
+        p.url = m_url->text().trimmed();
+        p.rate = m_rate->value();
+
+        ejecutar(p, /*nueva=*/true);
+    }
+
+    //! Flujo comun: estima, confirma y descarga con barra de progreso.
+    void ejecutar(TileFiller::Params p, bool nueva)
+    {
         auto *filler = new TileFiller(this);
         QString err;
         if (!filler->prepare(p, &err)) {
@@ -220,7 +282,6 @@ private:
             return;
         }
 
-        // Desglose + aviso si es una descarga grande.
         QString detalle;
         for (const auto &pz : filler->perZoomMissing())
             if (pz.second > 0)
@@ -228,7 +289,7 @@ private:
         QString aviso = tr("Se descargaran %1 teselas.\n\n%2").arg(total).arg(detalle);
         if (total > 50000)
             aviso += tr("\nATENCION: son muchas; puede tardar bastante y ocupar "
-                        "varios cientos de MB.");
+                        "varios cientos de MB (o mas).");
         aviso += tr("\nA %1 t/s son ~%2 minutos.\n\n¿Continuar?")
                      .arg(p.rate, 0, 'f', 1)
                      .arg(double(total) / p.rate / 60.0, 0, 'f', 1);
@@ -239,7 +300,6 @@ private:
             return;
         }
 
-        // --- Lanzar ---------------------------------------------------------
         m_filler = filler;
         m_running = true;
         ponerControles(false);
@@ -249,28 +309,55 @@ private:
         m_btnCancelar->setVisible(true);
 
         connect(filler, &TileFiller::progress, this,
-                [this, total](qint64 done, qint64 tot, double tps) {
+                [this](qint64 done, qint64 tot, double tps) {
             m_barra->setValue(int(qMin<qint64>(done, 1000000)));
             const double restan = tps > 0 ? double(tot - done) / tps / 60.0 : 0.0;
             statusBar()->showMessage(
                 tr("%1/%2  %3 t/s  ~%4 min restantes")
                     .arg(done).arg(tot).arg(tps, 0, 'f', 1).arg(restan, 0, 'f', 1));
         });
-        connect(filler, &TileFiller::zoomFinished, this, [this](int, qint64 added) {
-            if (added > 0) m_mapa->reloadBaseLayer();   // ver el relleno en vivo
+        connect(filler, &TileFiller::zoomFinished, this, [this, nueva](int, qint64 added) {
+            // En una base nueva no la ve el mapa (no esta en datasets.json), asi
+            // que no refrescamos; al rellenar la capa actual, si.
+            if (!nueva && added > 0) m_mapa->reloadBaseLayer();
         });
         connect(filler, &TileFiller::finished, this,
-                [this, filler](const TileFiller::Stats &s, bool cancelled) {
-            m_mapa->reloadBaseLayer();
+                [this, filler, nueva, p](const TileFiller::Stats &s, bool cancelled) {
+            if (!nueva) m_mapa->reloadBaseLayer();
             m_barra->setVisible(false);
             m_btnCancelar->setVisible(false);
             ponerControles(true);
             m_running = false;
             m_filler = nullptr;
-            QMessageBox::information(this,
-                cancelled ? tr("Cancelado") : tr("Terminado"),
-                tr("Descargadas: %1\nSin origen (404): %2\nFallidas: %3")
-                    .arg(s.downloaded).arg(s.notFound).arg(s.failed));
+
+            QString msg = tr("Descargadas: %1\nSin origen (404): %2\nFallidas: %3")
+                              .arg(s.downloaded).arg(s.notFound).arg(s.failed);
+            QMessageBox box(this);
+            box.setWindowTitle(cancelled ? tr("Cancelado") : tr("Terminado"));
+            box.setText(msg);
+            if (nueva) {
+                // Snippet para pegar en datasets.json.
+                const QString snip = QStringLiteral(
+                    "    {\n"
+                    "      \"id\": \"%1\",\n"
+                    "      \"displayName\": \"%2\",\n"
+                    "      \"filePath\": \"%3\",\n"
+                    "      \"tableName\": \"tiles\",\n"
+                    "      \"zFactor\": 1, \"zOffset\": 0,\n"
+                    "      \"minZoom\": %4, \"maxZoom\": %5, \"recommendedMaxZoom\": %5,\n"
+                    "      \"typicalFill\": 1.0, \"scheme\": \"XYZ\",\n"
+                    "      \"hasSColumn\": false, \"tileSize\": 256,\n"
+                    "      \"colZ\": \"z\", \"colX\": \"x\", \"colY\": \"y\",\n"
+                    "      \"colImage\": \"image\", \"baseZoom\": %4\n"
+                    "    }")
+                    .arg(p.ds.id, p.ds.displayName, QFileInfo(p.ds.filePath).fileName())
+                    .arg(p.minZoom).arg(p.maxZoom);
+                box.setInformativeText(
+                    tr("Anade esta entrada al array \"datasets\" de tu datasets.json "
+                       "(boton \"Show Details\" para copiarla):"));
+                box.setDetailedText(snip);
+            }
+            box.exec();
             filler->deleteLater();
         });
 
@@ -280,6 +367,7 @@ private:
     void ponerControles(bool on)
     {
         m_btnRellenar->setEnabled(on);
+        m_btnNueva->setEnabled(on);
         m_capa->setEnabled(on);
         m_btnArea->setEnabled(on);
         m_zDesde->setEnabled(on);
@@ -299,6 +387,7 @@ private:
     QDoubleSpinBox *m_rate = nullptr;
     QLineEdit *m_url = nullptr;
     QPushButton *m_btnRellenar = nullptr;
+    QPushButton *m_btnNueva = nullptr;
     QProgressBar *m_barra = nullptr;
     QPushButton *m_btnCancelar = nullptr;
 

@@ -55,6 +55,8 @@ public:
         int retries = 3;
         int timeoutMs = 20000;
         bool overwrite = false;         //!< false = solo lo que falta.
+        bool createSchema = false;      //!< true = crea la tabla si no existe
+                                        //!< (para bases NUEVAS).
     };
 
     struct Stats {
