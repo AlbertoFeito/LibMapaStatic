@@ -35,6 +35,7 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QTimer>
 #include <QToolBar>
 #include <QVector>
 
@@ -76,6 +77,13 @@ public:
                 tr("No se pudo abrir el mapa:\n%1").arg(m_mapa->lastError()));
         }
 
+        // Antirebote del modo "al navegar": espera a que el mapa se pare antes
+        // de descargar, para no lanzar en cada pixel del arrastre.
+        m_debounce = new QTimer(this);
+        m_debounce->setSingleShot(true);
+        m_debounce->setInterval(500);
+        connect(m_debounce, &QTimer::timeout, this, &Ventana::dispararAuto);
+
         construirBarra();
         construirEstado();
 
@@ -83,6 +91,11 @@ public:
                 this, &Ventana::alSeleccionarArea);
         connect(m_mapa, &MapWidget::zoomChanged, this, [this](int) {
             if (!m_running) sincronizarZoomDesde();
+            if (m_autoOn) m_debounce->start();
+        });
+        connect(m_mapa, &MapWidget::centerChanged, this,
+                [this](const QGeoCoordinate &) {
+            if (m_autoOn) m_debounce->start();
         });
     }
 
@@ -138,6 +151,18 @@ private:
         connect(m_btnNueva, &QPushButton::clicked, this, &Ventana::alNuevaBase);
         tb->addWidget(m_btnNueva);
 
+        m_btnAuto = new QPushButton(tr("Descargar al navegar"), this);
+        m_btnAuto->setCheckable(true);
+        m_btnAuto->setToolTip(tr("Mientras navegas, baja las teselas que falten "
+                                 "en la capa activa, al ZOOM ACTUAL. Ideal para ir "
+                                 "llenando lo que miras. (El rectangulo sirve para "
+                                 "un rango de zoom en un area.)"));
+        connect(m_btnAuto, &QPushButton::toggled, this, [this](bool on) {
+            m_autoOn = on;
+            if (on) m_debounce->start();   // rellena ya la vista actual
+        });
+        tb->addWidget(m_btnAuto);
+
         // Segunda fila: la fuente (URL), por si se quiere cambiar.
         QToolBar *tb2 = new QToolBar(tr("Fuente"), this);
         tb2->setMovable(false);
@@ -189,8 +214,11 @@ private:
     //! "Rellenar": completa la capa ACTUAL en el area marcada.
     void alRellenar()
     {
-        if (m_running)
+        if (ocupado()) {
+            QMessageBox::information(this, tr("Ocupado"),
+                tr("Ya hay una descarga en curso."));
             return;
+        }
         if (!m_hayArea) {
             QMessageBox::information(this, tr("Falta la zona"),
                 tr("Pulsa \"Seleccionar area\" y arrastra un rectangulo sobre "
@@ -220,8 +248,11 @@ private:
     //! codificacion limpia (XYZ, z=z logico, sin columna s). Reanudable.
     void alNuevaBase()
     {
-        if (m_running)
+        if (ocupado()) {
+            QMessageBox::information(this, tr("Ocupado"),
+                tr("Ya hay una descarga en curso."));
             return;
+        }
 
         const QString file = QFileDialog::getSaveFileName(
             this, tr("Nueva base de teselas"),
@@ -263,111 +294,152 @@ private:
         ejecutar(p, /*nueva=*/true);
     }
 
-    //! Flujo comun: estima, confirma y descarga con barra de progreso.
-    void ejecutar(TileFiller::Params p, bool nueva)
+    bool ocupado() const { return m_filler != nullptr; }
+
+    /*!
+     * \brief Flujo comun de descarga.
+     * \param silencioso  true = modo "al navegar": sin confirmacion ni dialogos,
+     *        sin bloquear los controles; el progreso va en la barra de estado.
+     */
+    void ejecutar(TileFiller::Params p, bool nueva, bool silencioso = false)
     {
         auto *filler = new TileFiller(this);
         QString err;
         if (!filler->prepare(p, &err)) {
-            QMessageBox::warning(this, tr("Error"), err);
+            if (!silencioso) QMessageBox::warning(this, tr("Error"), err);
             filler->deleteLater();
             return;
         }
 
         const qint64 total = filler->totalToDownload();
         if (total == 0) {
-            QMessageBox::information(this, tr("Nada que hacer"),
-                tr("No falta ninguna tesela en esa zona y ese rango de zoom."));
+            if (silencioso)
+                statusBar()->showMessage(tr("Vista completa (nada que bajar)."), 2000);
+            else
+                QMessageBox::information(this, tr("Nada que hacer"),
+                    tr("No falta ninguna tesela en esa zona y ese rango de zoom."));
             filler->deleteLater();
             return;
         }
 
-        QString detalle;
-        for (const auto &pz : filler->perZoomMissing())
-            if (pz.second > 0)
-                detalle += tr("  z%1: %2\n").arg(pz.first).arg(pz.second);
-        QString aviso = tr("Se descargaran %1 teselas.\n\n%2").arg(total).arg(detalle);
-        if (total > 50000)
-            aviso += tr("\nATENCION: son muchas; puede tardar bastante y ocupar "
-                        "varios cientos de MB (o mas).");
-        aviso += tr("\nA %1 t/s son ~%2 minutos.\n\n¿Continuar?")
-                     .arg(p.rate, 0, 'f', 1)
-                     .arg(double(total) / p.rate / 60.0, 0, 'f', 1);
-
-        if (QMessageBox::question(this, tr("Confirmar descarga"), aviso)
-            != QMessageBox::Yes) {
-            filler->deleteLater();
-            return;
+        if (!silencioso) {
+            QString detalle;
+            for (const auto &pz : filler->perZoomMissing())
+                if (pz.second > 0)
+                    detalle += tr("  z%1: %2\n").arg(pz.first).arg(pz.second);
+            QString aviso = tr("Se descargaran %1 teselas.\n\n%2").arg(total).arg(detalle);
+            if (total > 50000)
+                aviso += tr("\nATENCION: son muchas; puede tardar bastante y ocupar "
+                            "varios cientos de MB (o mas).");
+            aviso += tr("\nA %1 t/s son ~%2 minutos.\n\n¿Continuar?")
+                         .arg(p.rate, 0, 'f', 1)
+                         .arg(double(total) / p.rate / 60.0, 0, 'f', 1);
+            if (QMessageBox::question(this, tr("Confirmar descarga"), aviso)
+                != QMessageBox::Yes) {
+                filler->deleteLater();
+                return;
+            }
         }
 
         m_filler = filler;
-        m_running = true;
-        ponerControles(false);
-        m_barra->setRange(0, int(qMin<qint64>(total, 1000000)));
-        m_barra->setValue(0);
-        m_barra->setVisible(true);
-        m_btnCancelar->setVisible(true);
+        if (!silencioso) {
+            m_running = true;
+            ponerControles(false);
+            m_barra->setRange(0, int(qMin<qint64>(total, 1000000)));
+            m_barra->setValue(0);
+            m_barra->setVisible(true);
+            m_btnCancelar->setVisible(true);
+        }
 
         connect(filler, &TileFiller::progress, this,
-                [this](qint64 done, qint64 tot, double tps) {
-            m_barra->setValue(int(qMin<qint64>(done, 1000000)));
+                [this, silencioso](qint64 done, qint64 tot, double tps) {
+            if (!silencioso)
+                m_barra->setValue(int(qMin<qint64>(done, 1000000)));
             const double restan = tps > 0 ? double(tot - done) / tps / 60.0 : 0.0;
-            statusBar()->showMessage(
-                tr("%1/%2  %3 t/s  ~%4 min restantes")
-                    .arg(done).arg(tot).arg(tps, 0, 'f', 1).arg(restan, 0, 'f', 1));
+            statusBar()->showMessage(silencioso
+                ? tr("Navegar: bajando %1/%2  %3 t/s").arg(done).arg(tot).arg(tps, 0, 'f', 1)
+                : tr("%1/%2  %3 t/s  ~%4 min restantes")
+                      .arg(done).arg(tot).arg(tps, 0, 'f', 1).arg(restan, 0, 'f', 1));
         });
         connect(filler, &TileFiller::zoomFinished, this, [this, nueva](int, qint64 added) {
-            // En una base nueva no la ve el mapa (no esta en datasets.json), asi
-            // que no refrescamos; al rellenar la capa actual, si.
             if (!nueva && added > 0) m_mapa->reloadBaseLayer();
         });
         connect(filler, &TileFiller::finished, this,
-                [this, filler, nueva, p](const TileFiller::Stats &s, bool cancelled) {
+                [this, filler, nueva, silencioso, p](const TileFiller::Stats &s, bool cancelled) {
             if (!nueva) m_mapa->reloadBaseLayer();
-            m_barra->setVisible(false);
-            m_btnCancelar->setVisible(false);
-            ponerControles(true);
-            m_running = false;
             m_filler = nullptr;
 
-            QString msg = tr("Descargadas: %1\nSin origen (404): %2\nFallidas: %3")
-                              .arg(s.downloaded).arg(s.notFound).arg(s.failed);
-            QMessageBox box(this);
-            box.setWindowTitle(cancelled ? tr("Cancelado") : tr("Terminado"));
-            box.setText(msg);
-            if (nueva) {
-                // Snippet para pegar en datasets.json.
-                const QString snip = QStringLiteral(
-                    "    {\n"
-                    "      \"id\": \"%1\",\n"
-                    "      \"displayName\": \"%2\",\n"
-                    "      \"filePath\": \"%3\",\n"
-                    "      \"tableName\": \"tiles\",\n"
-                    "      \"zFactor\": 1, \"zOffset\": 0,\n"
-                    "      \"minZoom\": %4, \"maxZoom\": %5, \"recommendedMaxZoom\": %5,\n"
-                    "      \"typicalFill\": 1.0, \"scheme\": \"XYZ\",\n"
-                    "      \"hasSColumn\": false, \"tileSize\": 256,\n"
-                    "      \"colZ\": \"z\", \"colX\": \"x\", \"colY\": \"y\",\n"
-                    "      \"colImage\": \"image\", \"baseZoom\": %4\n"
-                    "    }")
-                    .arg(p.ds.id, p.ds.displayName, QFileInfo(p.ds.filePath).fileName())
-                    .arg(p.minZoom).arg(p.maxZoom);
-                box.setInformativeText(
-                    tr("Anade esta entrada al array \"datasets\" de tu datasets.json "
-                       "(boton \"Show Details\" para copiarla):"));
-                box.setDetailedText(snip);
+            if (silencioso) {
+                statusBar()->showMessage(tr("Navegar: +%1 teselas").arg(s.downloaded), 2000);
+                // Por si la vista se movio mientras bajaba, re-comprueba.
+                if (m_autoOn) m_debounce->start();
+            } else {
+                m_barra->setVisible(false);
+                m_btnCancelar->setVisible(false);
+                ponerControles(true);
+                m_running = false;
+
+                QMessageBox box(this);
+                box.setWindowTitle(cancelled ? tr("Cancelado") : tr("Terminado"));
+                box.setText(tr("Descargadas: %1\nSin origen (404): %2\nFallidas: %3")
+                                .arg(s.downloaded).arg(s.notFound).arg(s.failed));
+                if (nueva) {
+                    const QString snip = QStringLiteral(
+                        "    {\n"
+                        "      \"id\": \"%1\",\n"
+                        "      \"displayName\": \"%2\",\n"
+                        "      \"filePath\": \"%3\",\n"
+                        "      \"tableName\": \"tiles\",\n"
+                        "      \"zFactor\": 1, \"zOffset\": 0,\n"
+                        "      \"minZoom\": %4, \"maxZoom\": %5, \"recommendedMaxZoom\": %5,\n"
+                        "      \"typicalFill\": 1.0, \"scheme\": \"XYZ\",\n"
+                        "      \"hasSColumn\": false, \"tileSize\": 256,\n"
+                        "      \"colZ\": \"z\", \"colX\": \"x\", \"colY\": \"y\",\n"
+                        "      \"colImage\": \"image\", \"baseZoom\": %4\n"
+                        "    }")
+                        .arg(p.ds.id, p.ds.displayName, QFileInfo(p.ds.filePath).fileName())
+                        .arg(p.minZoom).arg(p.maxZoom);
+                    box.setInformativeText(
+                        tr("Anade esta entrada al array \"datasets\" de tu datasets.json "
+                           "(boton \"Show Details\" para copiarla):"));
+                    box.setDetailedText(snip);
+                }
+                box.exec();
             }
-            box.exec();
             filler->deleteLater();
         });
 
         filler->start();
     }
 
+    //! Modo "descargar al navegar": baja las teselas del viewport actual (zoom
+    //! actual) que falten en la BD de la capa activa. Silencioso.
+    void dispararAuto()
+    {
+        if (!m_autoOn || ocupado())
+            return;
+        const QString id = m_capa->currentData().toString();
+        if (!m_datasets.contains(id))
+            return;
+
+        TileFiller::Params p;
+        p.ds = m_datasets.value(id);
+        const QGeoCoordinate no = m_mapa->visibleNorthWest();
+        const QGeoCoordinate se = m_mapa->visibleSouthEast();
+        p.latN = no.latitude();  p.lonW = no.longitude();
+        p.latS = se.latitude();  p.lonE = se.longitude();
+        p.minZoom = p.maxZoom = m_mapa->zoom();   // solo el zoom actual
+        p.url = m_url->text().trimmed();
+        p.rate = m_rate->value();
+
+        ejecutar(p, /*nueva=*/false, /*silencioso=*/true);
+    }
+
     void ponerControles(bool on)
     {
         m_btnRellenar->setEnabled(on);
         m_btnNueva->setEnabled(on);
+        m_btnAuto->setEnabled(on);
         m_capa->setEnabled(on);
         m_btnArea->setEnabled(on);
         m_zDesde->setEnabled(on);
@@ -388,6 +460,9 @@ private:
     QLineEdit *m_url = nullptr;
     QPushButton *m_btnRellenar = nullptr;
     QPushButton *m_btnNueva = nullptr;
+    QPushButton *m_btnAuto = nullptr;
+    QTimer *m_debounce = nullptr;
+    bool m_autoOn = false;
     QProgressBar *m_barra = nullptr;
     QPushButton *m_btnCancelar = nullptr;
 
