@@ -11,8 +11,8 @@
  *   fill_tiles --datasets datasets.json --id satelital \
  *              --bbox 23.3,-85.0,19.7,-74.0 --minzoom 6 --maxzoom 12
  *
- * Fuente por defecto (sin API key):
- *   https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+ * Fuente por defecto (sin API key), Esri "Clarity" (mas clara, casa con Google):
+ *   https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
  *
  * AVISO: respeta los terminos de uso de la fuente que utilices. La descarga
  * masiva desde servidores publicos suele estar limitada o prohibida.
@@ -87,8 +87,12 @@ int main(int argc, char *argv[])
 
     QString datasetsPath, id, bbox;
     TileFiller::Params p;
+    // Por defecto Esri "Clarity": misma imagen satelital sin clave, pero mas
+    // clara y viva que la "World_Imagery" normal -casa mejor con las bases de
+    // Google-. Se puede cambiar con --url. (Alternativa mas oscura:
+    //  https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x})
     p.url = QStringLiteral(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/"
+        "https://clarity.maptiles.arcgis.com/arcgis/rest/services/"
         "World_Imagery/MapServer/tile/{z}/{y}/{x}");
     int minZoom = -1, maxZoom = -1;
     bool assumeYes = false;

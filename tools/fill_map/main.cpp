@@ -39,8 +39,11 @@
 using namespace libmapa;
 
 namespace {
-const char *kEsri =
-    "https://server.arcgisonline.com/ArcGIS/rest/services/"
+// Esri "Clarity": misma imagen satelital sin clave, mas clara y viva que la
+// "World_Imagery" normal -casa mejor con las bases de Google-. Editable en la
+// casilla "Fuente (URL)".
+const char *kFuenteDefecto =
+    "https://clarity.maptiles.arcgis.com/arcgis/rest/services/"
     "World_Imagery/MapServer/tile/{z}/{y}/{x}";
 }
 
@@ -133,7 +136,7 @@ private:
         addToolBar(Qt::TopToolBarArea, tb2);
         insertToolBarBreak(tb2);
         tb2->addWidget(new QLabel(tr("  Fuente (URL {z}/{x}/{y}): ")));
-        m_url = new QLineEdit(QString::fromLatin1(kEsri), this);
+        m_url = new QLineEdit(QString::fromLatin1(kFuenteDefecto), this);
         m_url->setMinimumWidth(600);
         tb2->addWidget(m_url);
 
