@@ -163,14 +163,28 @@ private:
         });
         tb->addWidget(m_btnAuto);
 
-        // Segunda fila: la fuente (URL), por si se quiere cambiar.
-        QToolBar *tb2 = new QToolBar(tr("Fuente"), this);
+        // Segunda fila: bbox escrito a mano y la fuente (URL).
+        QToolBar *tb2 = new QToolBar(tr("Zona / Fuente"), this);
         tb2->setMovable(false);
         addToolBar(Qt::TopToolBarArea, tb2);
         insertToolBarBreak(tb2);
-        tb2->addWidget(new QLabel(tr("  Fuente (URL {z}/{x}/{y}): ")));
+
+        tb2->addWidget(new QLabel(tr("  BBox (latN,lonO,latS,lonE): ")));
+        m_bbox = new QLineEdit(this);
+        m_bbox->setMinimumWidth(230);
+        m_bbox->setPlaceholderText(QStringLiteral("24.86,-86.61,17.40,-72.44"));
+        m_bbox->setToolTip(tr("Escribe o pega el rectangulo como en fill_tiles y "
+                              "pulsa Intro (o \"Usar\"). Tambien se rellena solo al "
+                              "dibujar con \"Seleccionar area\"."));
+        connect(m_bbox, &QLineEdit::returnPressed, this, &Ventana::aplicarBboxTexto);
+        tb2->addWidget(m_bbox);
+        QPushButton *btnUsar = new QPushButton(tr("Usar"), this);
+        connect(btnUsar, &QPushButton::clicked, this, &Ventana::aplicarBboxTexto);
+        tb2->addWidget(btnUsar);
+
+        tb2->addWidget(new QLabel(tr("   Fuente (URL {z}/{x}/{y}): ")));
         m_url = new QLineEdit(QString::fromLatin1(kFuenteDefecto), this);
-        m_url->setMinimumWidth(600);
+        m_url->setMinimumWidth(520);
         tb2->addWidget(m_url);
 
         sincronizarZoomDesde();
@@ -204,11 +218,39 @@ private:
     void alSeleccionarArea(const QGeoCoordinate &no, const QGeoCoordinate &se)
     {
         m_no = no; m_se = se; m_hayArea = true;
+        // Refleja el rectangulo en el campo de texto (mismo formato que fill_tiles).
+        m_bbox->setText(QStringLiteral("%1,%2,%3,%4")
+            .arg(no.latitude(), 0, 'f', 5).arg(no.longitude(), 0, 'f', 5)
+            .arg(se.latitude(), 0, 'f', 5).arg(se.longitude(), 0, 'f', 5));
         statusBar()->showMessage(
             tr("Zona: N %1  O %2  ->  S %3  E %4")
                 .arg(no.latitude(), 0, 'f', 3).arg(no.longitude(), 0, 'f', 3)
                 .arg(se.latitude(), 0, 'f', 3).arg(se.longitude(), 0, 'f', 3),
             8000);
+    }
+
+    //! Lee el bbox escrito a mano (latN,lonO,latS,lonE), fija la zona y encuadra.
+    void aplicarBboxTexto()
+    {
+        const QStringList p = m_bbox->text().split(QLatin1Char(','));
+        bool ok = p.size() == 4;
+        double v[4] = {0, 0, 0, 0};
+        for (int i = 0; ok && i < 4; ++i) {
+            bool o = false;
+            v[i] = p.at(i).trimmed().toDouble(&o);
+            ok = ok && o;
+        }
+        if (!ok) {
+            QMessageBox::warning(this, tr("BBox invalido"),
+                tr("Formato: latN,lonO,latS,lonE\nEjemplo: 24.86,-86.61,17.40,-72.44"));
+            return;
+        }
+        // v = latN, lonO, latS, lonE.  no = (latN,lonO)  se = (latS,lonE)
+        m_no = QGeoCoordinate(qMax(v[0], v[2]), qMin(v[1], v[3]));
+        m_se = QGeoCoordinate(qMin(v[0], v[2]), qMax(v[1], v[3]));
+        m_hayArea = true;
+        m_mapa->fitBounds(m_no, m_se);   // encuadra para que se vea la zona
+        statusBar()->showMessage(tr("Zona fijada desde el texto."), 5000);
     }
 
     //! "Rellenar": completa la capa ACTUAL en el area marcada.
@@ -445,6 +487,7 @@ private:
         m_zDesde->setEnabled(on);
         m_zHasta->setEnabled(on);
         m_rate->setEnabled(on);
+        m_bbox->setEnabled(on);
         m_url->setEnabled(on);
     }
 
@@ -457,6 +500,7 @@ private:
     QSpinBox *m_zDesde = nullptr;
     QSpinBox *m_zHasta = nullptr;
     QDoubleSpinBox *m_rate = nullptr;
+    QLineEdit *m_bbox = nullptr;
     QLineEdit *m_url = nullptr;
     QPushButton *m_btnRellenar = nullptr;
     QPushButton *m_btnNueva = nullptr;
