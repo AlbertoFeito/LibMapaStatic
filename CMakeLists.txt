@@ -73,9 +73,16 @@ else()
         -Wunused
         -Wconversion
         -Wsign-conversion
-        -Wnull-dereference
         -Wdouble-promotion
     )
+    # -Wnull-dereference solo existe desde GCC 6 / Clang: el MinGW 5.3 que trae
+    # Qt 5.7 es GCC 5.3 y lo rechazaria ("unrecognized command line option").
+    # Se anade solo si el compilador lo entiende.
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-Wnull-dereference" LIBMAPA_HAS_WNULL_DEREF)
+    if(LIBMAPA_HAS_WNULL_DEREF)
+        add_compile_options(-Wnull-dereference)
+    endif()
 endif()
 
 # -----------------------------------------------------------------------------
