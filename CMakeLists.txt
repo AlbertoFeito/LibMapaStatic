@@ -69,9 +69,11 @@ else()
         -Wunused
         -Wconversion
         -Wsign-conversion
-        -Wnull-dereference
         -Wdouble-promotion
     )
+    # -Wnull-dereference no se usa: dispara falsos positivos dentro de
+    # QCustomPlot y de los contenedores de Qt (QVector/QCPRange inline), que
+    # inundan la salida sin aportar nada sobre NUESTRO codigo.
 endif()
 
 # -----------------------------------------------------------------------------
