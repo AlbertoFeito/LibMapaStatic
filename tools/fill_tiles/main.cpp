@@ -30,6 +30,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkProxyFactory>
+#include <QSslSocket>
 #include <QStringList>
 #include <QTextStream>
 #include <QTimer>
@@ -84,6 +85,16 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QNetworkProxyFactory::setUseSystemConfiguration(true);
+
+    // Diagnostico TLS: sin soporte SSL, TODA descarga HTTPS falla (en Windows
+    // suele faltar OpenSSL: libssl-3-x64.dll / libcrypto-3-x64.dll junto al exe).
+    if (!QSslSocket::supportsSsl()) {
+        cerr() << "AVISO: este Qt NO tiene soporte TLS/SSL, las descargas HTTPS "
+                  "van a fallar.\n"
+                  "  Qt esperaba: " << QSslSocket::sslLibraryBuildVersionString()
+               << "\n  En Windows: copia libssl-3-x64.dll y libcrypto-3-x64.dll "
+                  "(OpenSSL 3, 64-bit) junto al .exe o en el PATH.\n";
+    }
 
     QString datasetsPath, id, bbox, newFile, name;
     TileFiller::Params p;
@@ -239,6 +250,17 @@ int main(int argc, char *argv[])
         cout() << QStringLiteral("\r  z=%1: +%2 teselas nuevas                    \n")
                       .arg(z).arg(added);
         cout().flush();
+    });
+    // Motivo real de los fallos (SSL, host, timeout...). Se imprimen los
+    // primeros para no inundar, pero bastan para saber que pasa.
+    int msgs = 0;
+    QObject::connect(&filler, &TileFiller::message, &app,
+                     [&msgs](const QString &texto) {
+        if (++msgs <= 15) {
+            cerr() << "\n  " << texto << '\n';
+            if (msgs == 15)
+                cerr() << "  (mas fallos; se omiten los siguientes avisos)\n";
+        }
     });
     int exitCode = 0;
     QObject::connect(&filler, &TileFiller::finished, &app,

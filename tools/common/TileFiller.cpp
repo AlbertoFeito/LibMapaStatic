@@ -276,7 +276,10 @@ void TileFiller::onReplyFinished()
     const int status =
         reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QNetworkReply::NetworkError netErr = reply->error();
-    const QByteArray body = reply->readAll();
+    // Solo se lee el cuerpo si la respuesta NO dio error: leer un reply
+    // abortado/errado dispara el aviso "QIODevice::read: device not open".
+    const QByteArray body =
+        (netErr == QNetworkReply::NoError) ? reply->readAll() : QByteArray();
     const QString ctype =
         reply->header(QNetworkRequest::ContentTypeHeader).toString();
     const QString errStr = reply->errorString();

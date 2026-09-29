@@ -32,6 +32,7 @@
 #include <QMessageBox>
 #include <QNetworkProxyFactory>
 #include <QProgressBar>
+#include <QSslSocket>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -524,6 +525,15 @@ int main(int argc, char *argv[])
                                       : QStringLiteral("datasets.json");
     Ventana v(datasets);
     v.show();
+    // Sin TLS, toda descarga HTTPS falla: avisar en claro (Windows: falta OpenSSL).
+    if (!QSslSocket::supportsSsl()) {
+        QMessageBox::warning(&v, QObject::tr("Sin TLS/SSL"),
+            QObject::tr("Este Qt no tiene soporte TLS/SSL, asi que las descargas "
+                        "HTTPS van a fallar.\n\nEn Windows suele faltar OpenSSL: "
+                        "copia libssl-3-x64.dll y libcrypto-3-x64.dll (OpenSSL 3, "
+                        "64-bit) junto al .exe o en el PATH.\n\nQt esperaba: %1")
+                .arg(QSslSocket::sslLibraryBuildVersionString()));
+    }
     return app.exec();
 }
 
