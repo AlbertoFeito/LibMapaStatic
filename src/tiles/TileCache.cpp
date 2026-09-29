@@ -15,13 +15,7 @@ namespace {
 //! con bytes, 2 GiB desbordarian el int.
 int costInKiB(const QImage &image)
 {
-    // sizeInBytes() es de Qt 5.10; en 5.7 (MinGW de EstacionTerrena) se usa
-    // byteCount(), que devuelve int pero sirve igual para teselas de 256x256.
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
     const qint64 bytes = static_cast<qint64>(image.sizeInBytes());
-#else
-    const qint64 bytes = static_cast<qint64>(image.byteCount());
-#endif
     return static_cast<int>(qBound<qint64>(1, bytes / 1024, static_cast<qint64>(INT_MAX)));
 }
 

@@ -8,7 +8,7 @@ namespace libmapa {
 
 double WebMercator::clampLatitude(double latitudeDeg)
 {
-    return qBound(-kMaxLatitude, latitudeDeg, kMaxLatitude);
+    return std::clamp(latitudeDeg, -kMaxLatitude, kMaxLatitude);
 }
 
 double WebMercator::latitudeToMercatorDegrees(double latitudeDeg)

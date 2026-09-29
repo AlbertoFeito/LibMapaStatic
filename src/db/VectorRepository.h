@@ -9,7 +9,7 @@
 #include <QSqlDatabase>
 #include <QString>
 #include <QVector>
-#include "libmapa/compat/Optional.h"
+#include <optional>
 
 namespace libmapa {
 
@@ -50,15 +50,15 @@ public:
     QString lastError() const { return m_lastError; }
 
     // --- Puntos ----------------------------------------------------------
-    libmapa::optional<qint64> insertPoint(const MapPoint &point);
+    std::optional<qint64> insertPoint(const MapPoint &point);
     bool updatePoint(const MapPoint &point);
     bool removePoint(qint64 id);
     QVector<MapPoint> loadPoints() const;
-    libmapa::optional<MapPoint> findPointByName(const QString &name) const;
+    std::optional<MapPoint> findPointByName(const QString &name) const;
 
     // --- Vehiculos -------------------------------------------------------
     //! Inserta el punto y su fila de vehiculo en una sola transaccion.
-    libmapa::optional<qint64> insertVehicle(const MapVehicle &vehicle);
+    std::optional<qint64> insertVehicle(const MapVehicle &vehicle);
     bool updateVehicle(const MapVehicle &vehicle);
     QVector<MapVehicle> loadVehicles() const;
 
@@ -79,7 +79,7 @@ public:
     bool pruneTrack(qint64 pointId, int keep);
 
     // --- Poligonos -------------------------------------------------------
-    libmapa::optional<qint64> insertPolygon(const MapPolygon &polygon);
+    std::optional<qint64> insertPolygon(const MapPolygon &polygon);
     bool removePolygon(qint64 id);
     QVector<MapPolygon> loadPolygons() const;
 
@@ -93,7 +93,7 @@ public:
      */
     //@{
     //! Guarda o actualiza. Si feature.id es valido y existe, actualiza.
-    libmapa::optional<qint64> saveFeature(const MapFeature &feature);
+    std::optional<qint64> saveFeature(const MapFeature &feature);
     //! Guarda un conjunto entero en UNA transaccion.
     bool saveFeatures(const QVector<MapFeature> &features);
     bool removeFeatureRow(qint64 id);
@@ -107,7 +107,7 @@ public:
     //@}
 
     // --- Rutas -----------------------------------------------------------
-    libmapa::optional<qint64> insertRoute(const MapRoute &route);
+    std::optional<qint64> insertRoute(const MapRoute &route);
     bool removeRoute(qint64 id);
     QVector<MapRoute> loadRoutes() const;
 
@@ -122,7 +122,7 @@ private:
      * abre una y luego llama a saveFeature, que abre otra, la interior falla.
      * Cada punto de entrada publico abre la suya y ambos usan esta.
      */
-    libmapa::optional<qint64> writeFeature(QSqlDatabase &database,
+    std::optional<qint64> writeFeature(QSqlDatabase &database,
                                        const MapFeature &feature);
 
     bool migrate();

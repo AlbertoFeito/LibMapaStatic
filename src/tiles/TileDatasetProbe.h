@@ -7,7 +7,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
-#include "libmapa/compat/Optional.h"
+#include <optional>
 
 // Declaracion adelantada FUERA del namespace: si se pusiera dentro, el
 // compilador entenderia libmapa::QSqlDatabase, que es otro tipo distinto.
@@ -96,7 +96,7 @@ public:
      *                  para desempatar XYZ vs TMS. Si es invalida, se asume
      *                  XYZ y se anota el aviso correspondiente.
      */
-    static libmapa::optional<ProbeResult> probe(const QString &filePath,
+    static std::optional<ProbeResult> probe(const QString &filePath,
                                             const QString &id,
                                             const QGeoRectangle &reference = {});
 

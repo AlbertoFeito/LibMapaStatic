@@ -131,14 +131,8 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
 
     // --- Etiqueta (multilinea: un parametro por linea) ---------------------
     if (t.labelVisible && !t.label.isEmpty()) {
-        // Qt::SkipEmptyParts es de Qt 5.14; en 5.7 el flag vive en QString.
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
         const QStringList lineas =
             t.label.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-#else
-        const QStringList lineas =
-            t.label.split(QLatin1Char('\n'), QString::SkipEmptyParts);
-#endif
         const QFontMetricsF fm(painter->font());
         const double h = fm.height();
         double y = pos.y() + r * 0.5 + fm.ascent();

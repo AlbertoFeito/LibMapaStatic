@@ -51,8 +51,7 @@ private:
 
 QString TstConnectionPool::makeDb(const QString &name)
 {
-    // QTemporaryDir::filePath() es de Qt 5.9; el join manual sirve en 5.7.
-    const QString path = m_dir.path() + QLatin1Char('/') + name;
+    const QString path = m_dir.filePath(name);
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
                                                     QStringLiteral("setup"));
@@ -226,8 +225,7 @@ void TstConnectionPool::readOnlyRejectsWrites()
 void TstConnectionPool::missingFileFails()
 {
     QSqlDatabase db = SqliteConnectionPool::connectionFor(
-        QStringLiteral("noexiste"),
-        m_dir.path() + QLatin1String("/nope.db"));
+        QStringLiteral("noexiste"), m_dir.filePath(QStringLiteral("nope.db")));
     QVERIFY(!db.isOpen());
     QCOMPARE(SqliteConnectionPool::openConnectionCount(), 0);
 }

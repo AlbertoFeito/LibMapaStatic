@@ -15,13 +15,7 @@ QT += core gui widgets sql positioning printsupport network
 CONFIG += console
 CONFIG -= app_bundle
 
-# Estandar de C++ segun la version de Qt (Qt 6 exige C++17; el qmake de Qt 5.7
-# no entiende c++17 y caeria a C++11, por eso c++14 en Qt 5).
-greaterThan(QT_MAJOR_VERSION, 5) {
-    CONFIG += c++17
-} else {
-    CONFIG += c++14
-}
+CONFIG += c++17
 
 TARGET = fill_map
 TEMPLATE = app

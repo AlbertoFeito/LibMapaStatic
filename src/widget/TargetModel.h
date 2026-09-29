@@ -7,7 +7,7 @@
 #include <QObject>
 #include <QVector>
 #include <limits>
-#include "libmapa/compat/Optional.h"
+#include <optional>
 
 namespace libmapa {
 
@@ -58,7 +58,7 @@ public:
     void clear();
     void clearTrail(qint64 id);
 
-    libmapa::optional<MapTarget> target(qint64 id) const;
+    std::optional<MapTarget> target(qint64 id) const;
     QVector<MapTarget> targets() const;
     QVector<QGeoCoordinate> trail(qint64 id) const;
     bool contains(qint64 id) const { return m_targets.contains(id); }

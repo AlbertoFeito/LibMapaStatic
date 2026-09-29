@@ -6,7 +6,7 @@
 #include <QHash>
 #include <QObject>
 #include <QVector>
-#include "libmapa/compat/Optional.h"
+#include <optional>
 
 namespace libmapa {
 
@@ -37,7 +37,7 @@ public:
 
     //! Capas ordenadas por zOrder ascendente: la ultima se pinta encima.
     QVector<LayerInfo> layers() const;
-    libmapa::optional<LayerInfo> layer(const QString &id) const;
+    std::optional<LayerInfo> layer(const QString &id) const;
 
     bool setLayerVisible(const QString &id, bool visible);
     bool setLayerEditable(const QString &id, bool editable);
@@ -57,7 +57,7 @@ public:
     void clearLayer(const QString &layerId);
     void clear();
 
-    libmapa::optional<MapFeature> feature(qint64 id) const;
+    std::optional<MapFeature> feature(qint64 id) const;
     QVector<MapFeature> features() const;
     QVector<MapFeature> featuresInLayer(const QString &layerId) const;
     QVector<MapFeature> featuresOfType(const QString &type) const;

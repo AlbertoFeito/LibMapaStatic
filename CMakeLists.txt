@@ -1,11 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(libmapa VERSION 0.1.0 LANGUAGES CXX)
 
-# C++14 es el minimo comun: compila con el MinGW/GCC 5.3 que trae Qt 5.7
-# (el qmake de 5.7 no entiende "CONFIG += c++17") y tambien con Qt 5.15 y Qt 6.
-# La libreria no usa nada de C++17: optional propio (compat/Optional.h) y qBound
-# en vez de std::clamp.
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
@@ -73,16 +69,9 @@ else()
         -Wunused
         -Wconversion
         -Wsign-conversion
+        -Wnull-dereference
         -Wdouble-promotion
     )
-    # -Wnull-dereference solo existe desde GCC 6 / Clang: el MinGW 5.3 que trae
-    # Qt 5.7 es GCC 5.3 y lo rechazaria ("unrecognized command line option").
-    # Se anade solo si el compilador lo entiende.
-    include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-Wnull-dereference" LIBMAPA_HAS_WNULL_DEREF)
-    if(LIBMAPA_HAS_WNULL_DEREF)
-        add_compile_options(-Wnull-dereference)
-    endif()
 endif()
 
 # -----------------------------------------------------------------------------

@@ -16,16 +16,7 @@ QT -= gui
 CONFIG += console
 CONFIG -= app_bundle
 
-# Estandar de C++ segun la version de Qt:
-#  - Qt 6 exige C++17.
-#  - Qt 5.7 (MinGW 5.3 de EstacionTerrena) NO entiende la opcion c++17 de
-#    qmake (llego en Qt 5.12) y caeria a C++11. c++14 existe desde Qt 5.4 y
-#    basta para la libreria.
-greaterThan(QT_MAJOR_VERSION, 5) {
-    CONFIG += c++17
-} else {
-    CONFIG += c++14
-}
+CONFIG += c++17
 
 TARGET = fill_tiles
 TEMPLATE = app

@@ -114,11 +114,11 @@ void TargetModel::clearTrail(qint64 id)
     emit changed();
 }
 
-libmapa::optional<MapTarget> TargetModel::target(qint64 id) const
+std::optional<MapTarget> TargetModel::target(qint64 id) const
 {
     auto it = m_targets.constFind(id);
     if (it == m_targets.constEnd())
-        return libmapa::nullopt;
+        return std::nullopt;
     return it->target;
 }
 

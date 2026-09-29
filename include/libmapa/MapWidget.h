@@ -13,7 +13,7 @@
 #include <QWidget>
 #include <limits>
 #include <memory>
-#include "libmapa/compat/Optional.h"
+#include <optional>
 
 namespace libmapa {
 
@@ -139,7 +139,7 @@ public:
     void clearFeatureLayer(const QString &layerId);
     void clearFeatures();
 
-    libmapa::optional<MapFeature> feature(qint64 id) const;
+    std::optional<MapFeature> feature(qint64 id) const;
     QVector<MapFeature> features() const;
     QVector<MapFeature> featuresInLayer(const QString &layerId) const;
     //! Filtra por la etiqueta de dominio que puso la aplicacion.
@@ -209,7 +209,7 @@ public:
     bool removeTarget(qint64 id);
     void clearTargets();
 
-    libmapa::optional<MapTarget> target(qint64 id) const;
+    std::optional<MapTarget> target(qint64 id) const;
     QVector<MapTarget> targets() const;
     int targetCount() const;
 

@@ -206,20 +206,20 @@ bool VectorRepository::migrate()
 
 // ---------------------------------------------------------------- puntos ---
 
-libmapa::optional<qint64> VectorRepository::insertPoint(const MapPoint &p)
+std::optional<qint64> VectorRepository::insertPoint(const MapPoint &p)
 {
     if (!m_open) {
         fail(QStringLiteral("insertPoint"), tr("Repositorio cerrado"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
     if (p.name.isEmpty()) {
         fail(QStringLiteral("insertPoint"), tr("El punto necesita un nombre"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
     if (!p.position.isValid()) {
         fail(QStringLiteral("insertPoint"),
              tr("Coordenada invalida para '%1'").arg(p.name));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     QSqlQuery q(db());
@@ -242,7 +242,7 @@ libmapa::optional<qint64> VectorRepository::insertPoint(const MapPoint &p)
 
     if (!q.exec()) {
         fail(QStringLiteral("insertPoint"), q.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
     return q.lastInsertId().toLongLong();
 }
@@ -317,16 +317,16 @@ QVector<MapPoint> VectorRepository::loadPoints() const
     return out;
 }
 
-libmapa::optional<MapPoint> VectorRepository::findPointByName(const QString &name) const
+std::optional<MapPoint> VectorRepository::findPointByName(const QString &name) const
 {
     if (!m_open)
-        return libmapa::nullopt;
+        return std::nullopt;
 
     QSqlQuery q(db());
     q.prepare(QStringLiteral("SELECT * FROM punto WHERE nombre=:n"));
     q.bindValue(QStringLiteral(":n"), name);
     if (!q.exec() || !q.next())
-        return libmapa::nullopt;
+        return std::nullopt;
 
     MapPoint p;
     p.id = field(q, "id").toLongLong();
@@ -343,18 +343,18 @@ libmapa::optional<MapPoint> VectorRepository::findPointByName(const QString &nam
 
 // ------------------------------------------------------------- vehiculos ---
 
-libmapa::optional<qint64> VectorRepository::insertVehicle(const MapVehicle &v)
+std::optional<qint64> VectorRepository::insertVehicle(const MapVehicle &v)
 {
     if (!m_open) {
         fail(QStringLiteral("insertVehicle"), tr("Repositorio cerrado"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     QSqlDatabase database = db();
     Transaction tx(database);
     if (!tx.isActive()) {
         fail(QStringLiteral("insertVehicle"), tr("Sin transaccion"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     MapPoint base;
@@ -365,7 +365,7 @@ libmapa::optional<qint64> VectorRepository::insertVehicle(const MapVehicle &v)
 
     const auto id = insertPoint(base);
     if (!id)
-        return libmapa::nullopt;      // rollback automatico al salir del scope
+        return std::nullopt;      // rollback automatico al salir del scope
 
     QSqlQuery q(database);
     q.prepare(QStringLiteral(
@@ -381,7 +381,7 @@ libmapa::optional<qint64> VectorRepository::insertVehicle(const MapVehicle &v)
     q.bindValue(QStringLiteral(":ve"), v.speed);
     if (!q.exec()) {
         fail(QStringLiteral("insertVehicle"), q.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     if (v.ais.isValid()) {
@@ -408,13 +408,13 @@ libmapa::optional<qint64> VectorRepository::insertVehicle(const MapVehicle &v)
                     v.ais.lastUpdateUtcMs > 0 ? v.ais.lastUpdateUtcMs : nowUtcMs());
         if (!q.exec()) {
             fail(QStringLiteral("insertVehicle/ais"), q.lastError().text());
-            return libmapa::nullopt;
+            return std::nullopt;
         }
     }
 
     if (!tx.commit()) {
         fail(QStringLiteral("insertVehicle"), database.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
     return id;
 }
@@ -614,23 +614,23 @@ bool VectorRepository::pruneTrack(qint64 pointId, int keep)
 
 // ------------------------------------------------------------- poligonos ---
 
-libmapa::optional<qint64> VectorRepository::insertPolygon(const MapPolygon &poly)
+std::optional<qint64> VectorRepository::insertPolygon(const MapPolygon &poly)
 {
     if (!m_open) {
         fail(QStringLiteral("insertPolygon"), tr("Repositorio cerrado"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
     if (poly.vertices.size() < 3) {
         fail(QStringLiteral("insertPolygon"),
              tr("Un poligono necesita al menos tres vertices"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     QSqlDatabase database = db();
     Transaction tx(database);
     if (!tx.isActive()) {
         fail(QStringLiteral("insertPolygon"), tr("Sin transaccion"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     QSqlQuery q(database);
@@ -644,7 +644,7 @@ libmapa::optional<qint64> VectorRepository::insertPolygon(const MapPolygon &poly
     q.bindValue(QStringLiteral(":c"), nowUtcMs());
     if (!q.exec()) {
         fail(QStringLiteral("insertPolygon"), q.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     const qint64 id = q.lastInsertId().toLongLong();
@@ -661,13 +661,13 @@ libmapa::optional<qint64> VectorRepository::insertPolygon(const MapPolygon &poly
         q.bindValue(QStringLiteral(":lo"), poly.vertices[i].longitude());
         if (!q.exec()) {
             fail(QStringLiteral("insertPolygon/vertice"), q.lastError().text());
-            return libmapa::nullopt;
+            return std::nullopt;
         }
     }
 
     if (!tx.commit()) {
         fail(QStringLiteral("insertPolygon"), database.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
     return id;
 }
@@ -727,18 +727,18 @@ QVector<MapPolygon> VectorRepository::loadPolygons() const
 
 // ----------------------------------------------------------------- rutas ---
 
-libmapa::optional<qint64> VectorRepository::insertRoute(const MapRoute &route)
+std::optional<qint64> VectorRepository::insertRoute(const MapRoute &route)
 {
     if (!m_open) {
         fail(QStringLiteral("insertRoute"), tr("Repositorio cerrado"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     QSqlDatabase database = db();
     Transaction tx(database);
     if (!tx.isActive()) {
         fail(QStringLiteral("insertRoute"), tr("Sin transaccion"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     QSqlQuery q(database);
@@ -750,7 +750,7 @@ libmapa::optional<qint64> VectorRepository::insertRoute(const MapRoute &route)
     q.bindValue(QStringLiteral(":cr"), nowUtcMs());
     if (!q.exec()) {
         fail(QStringLiteral("insertRoute"), q.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     const qint64 id = q.lastInsertId().toLongLong();
@@ -769,13 +769,13 @@ libmapa::optional<qint64> VectorRepository::insertRoute(const MapRoute &route)
         q.bindValue(QStringLiteral(":ra"), rp.approachRadiusMeters);
         if (!q.exec()) {
             fail(QStringLiteral("insertRoute/punto"), q.lastError().text());
-            return libmapa::nullopt;
+            return std::nullopt;
         }
     }
 
     if (!tx.commit()) {
         fail(QStringLiteral("insertRoute"), database.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
     return id;
 }
@@ -838,37 +838,37 @@ QVector<MapRoute> VectorRepository::loadRoutes() const
 
 // ------------------------------------------------------- entidades dibujo --
 
-libmapa::optional<qint64> VectorRepository::saveFeature(const MapFeature &f)
+std::optional<qint64> VectorRepository::saveFeature(const MapFeature &f)
 {
     if (!m_open) {
         fail(QStringLiteral("saveFeature"), tr("Repositorio cerrado"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     QSqlDatabase database = db();
     Transaction tx(database);
     if (!tx.isActive()) {
         fail(QStringLiteral("saveFeature"), tr("Sin transaccion"));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     const auto id = writeFeature(database, f);
     if (!id)
-        return libmapa::nullopt;
+        return std::nullopt;
     if (!tx.commit()) {
         fail(QStringLiteral("saveFeature"), database.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
     return id;
 }
 
-libmapa::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
+std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
                                                      const MapFeature &f)
 {
     if (!f.isValid()) {
         fail(QStringLiteral("writeFeature"),
              tr("Geometria invalida en '%1'").arg(f.name));
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     QSqlQuery q(database);
@@ -900,7 +900,7 @@ libmapa::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
 
     if (!q.exec()) {
         fail(QStringLiteral("writeFeature"), q.lastError().text());
-        return libmapa::nullopt;
+        return std::nullopt;
     }
 
     const qint64 id = q.lastInsertId().toLongLong();
@@ -921,7 +921,7 @@ libmapa::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
             q.bindValue(QStringLiteral(":lo"), parte[i].longitude());
             if (!q.exec()) {
                 fail(QStringLiteral("writeFeature/vertice"), q.lastError().text());
-                return libmapa::nullopt;
+                return std::nullopt;
             }
         }
     }
