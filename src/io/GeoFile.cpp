@@ -30,6 +30,13 @@ void cerrar(QVector<GeoPath> &paths, GeoPath &actual)
 }
 } // namespace
 
+// Lee un fichero .geo de texto (una coordenada "lon,lat" por linea) y devuelve
+// sus trazados. Reglas del formato: la linea "0.0,0.0" SEPARA trazados (cierra el
+// que iba y empieza otro); las lineas vacias o mal formadas se ignoran con aviso;
+// un trazado se marca 'closed' si su primer y ultimo vertice coinciden. Si no hay
+// ningun trazado valido (o el fichero no abre) rellena 'error' (si se paso) y
+// devuelve una lista vacia. Ojo: el fichero trae lon,lat, pero QGeoCoordinate se
+// construye lat,lon.
 QVector<GeoPath> readGeoFile(const QString &path, QString *error)
 {
     QVector<GeoPath> paths;

@@ -36,6 +36,8 @@ QVariant field(const QSqlQuery &q, const char *name)
     return i >= 0 ? q.value(i) : QVariant();
 }
 
+// Serializa un icono a PNG para guardarlo como BLOB. Un QPixmap nulo da un
+// QByteArray vacio (no NULL), que es lo que espera la columna.
 QByteArray pixmapToPng(const QPixmap &pm)
 {
     if (pm.isNull())
@@ -47,6 +49,8 @@ QByteArray pixmapToPng(const QPixmap &pm)
     return out;
 }
 
+// Inverso de pixmapToPng: reconstruye el icono desde el BLOB. Un BLOB vacio
+// (o NULL) devuelve un QPixmap nulo, que la vista trata como "sin icono".
 QPixmap pngToPixmap(const QByteArray &data)
 {
     QPixmap pm;
@@ -72,6 +76,8 @@ QString text(const QString &s)
     return s.isNull() ? QString::fromLatin1("") : s;
 }
 
+// Marca de tiempo actual en milisegundos UTC (epoch). Es lo que guardan las
+// columnas creado_utc/actualizado_utc: comparable e indexable en SQL.
 qint64 nowUtcMs()
 {
     return QDateTime::currentMSecsSinceEpoch();
@@ -89,12 +95,17 @@ VectorRepository::~VectorRepository()
     close();
 }
 
+// Conexion de escritura para este repositorio, servida por el pool (una por
+// hilo). No abre nada nuevo si ya existe: delega toda la gestion en el pool.
 QSqlDatabase VectorRepository::db() const
 {
     return SqliteConnectionPool::connectionFor(
         m_connectionId, m_filePath, SqliteConnectionPool::Mode::ReadWrite);
 }
 
+// Registra un error (guarda lastError, lo escribe en el log y emite
+// errorOccurred) y SIEMPRE devuelve false, para poder escribir
+// "return fail(...)" en un solo renglon dentro de las operaciones.
 bool VectorRepository::fail(const QString &context, const QString &message) const
 {
     m_lastError = QStringLiteral("%1: %2").arg(context, message);
@@ -103,6 +114,10 @@ bool VectorRepository::fail(const QString &context, const QString &message) cons
     return false;
 }
 
+// Abre (o crea) la BD vectorial de 'filePath': fija el id de conexion, activa
+// las claves foraneas (imprescindible para ON DELETE CASCADE) y aplica las
+// migraciones pendientes. Devuelve false y deja el repositorio cerrado si algo
+// falla. Cierra cualquier BD previa antes de empezar.
 bool VectorRepository::open(const QString &filePath)
 {
     close();
@@ -130,11 +145,15 @@ bool VectorRepository::open(const QString &filePath)
     return true;
 }
 
+// ¿Hay una BD abierta y utilizable? Comprueba tanto el flag interno como que la
+// conexion subyacente siga viva.
 bool VectorRepository::isOpen() const
 {
     return m_open && db().isOpen();
 }
 
+// Marca el repositorio como cerrado y olvida la ruta/id. No cierra fisicamente la
+// conexion del pool: de eso se encarga el pool al terminar el hilo.
 void VectorRepository::close()
 {
     m_open = false;
@@ -142,6 +161,8 @@ void VectorRepository::close()
     m_connectionId.clear();
 }
 
+// Version de esquema guardada en la BD (-1 si esta cerrada, 0 si aun no hay tabla
+// de version). Sirve para diagnostico y pruebas de migracion.
 int VectorRepository::schemaVersion() const
 {
     if (!m_open)
@@ -154,6 +175,10 @@ int VectorRepository::schemaVersion() const
     return q.value(0).toInt();
 }
 
+// Lleva el esquema a la version actual. Crea la tabla de version si falta, lee la
+// version actual y, si esta atrasada, aplica TODAS las sentencias de
+// schema::migrations dentro de una unica transaccion (todo o nada) y actualiza el
+// numero de version. Idempotente: si ya esta al dia, no hace nada.
 bool VectorRepository::migrate()
 {
     QSqlDatabase database = db();
@@ -206,6 +231,9 @@ bool VectorRepository::migrate()
 
 // ---------------------------------------------------------------- puntos ---
 
+// Inserta un punto nuevo (nombre unico, coordenada valida). Valida antes de
+// tocar la BD, usa bindValue para todos los campos (nombres con apostrofo, etc.)
+// y devuelve el id generado, o nullopt si falla alguna validacion o el INSERT.
 std::optional<qint64> VectorRepository::insertPoint(const MapPoint &p)
 {
     if (!m_open) {
@@ -247,6 +275,9 @@ std::optional<qint64> VectorRepository::insertPoint(const MapPoint &p)
     return q.lastInsertId().toLongLong();
 }
 
+// Actualiza un punto existente por id (no cambia el tipo ni la fecha de
+// creacion). Devuelve true solo si alguna fila cambio; false si el id no existe o
+// el UPDATE falla.
 bool VectorRepository::updatePoint(const MapPoint &p)
 {
     if (!m_open || p.id < 0)
@@ -272,6 +303,9 @@ bool VectorRepository::updatePoint(const MapPoint &p)
     return q.numRowsAffected() > 0;
 }
 
+// Borra un punto por id. Las filas dependientes (vehiculo, buque_ais,
+// trayectoria) desaparecen solas gracias a ON DELETE CASCADE. Devuelve true si
+// se borro alguna fila.
 bool VectorRepository::removePoint(qint64 id)
 {
     if (!m_open)
@@ -288,6 +322,8 @@ bool VectorRepository::removePoint(qint64 id)
     return q.numRowsAffected() > 0;
 }
 
+// Carga TODOS los puntos ordenados por id. Lee cada campo por NOMBRE (helper
+// field), nunca por posicion, para no descuadrarse si cambia el orden de columnas.
 QVector<MapPoint> VectorRepository::loadPoints() const
 {
     QVector<MapPoint> out;
@@ -317,6 +353,8 @@ QVector<MapPoint> VectorRepository::loadPoints() const
     return out;
 }
 
+// Busca un punto por su nombre (columna unica). Devuelve nullopt si no existe o
+// el repositorio esta cerrado.
 std::optional<MapPoint> VectorRepository::findPointByName(const QString &name) const
 {
     if (!m_open)
@@ -343,6 +381,10 @@ std::optional<MapPoint> VectorRepository::findPointByName(const QString &name) c
 
 // ------------------------------------------------------------- vehiculos ---
 
+// Inserta un vehiculo: crea el 'punto' base y su fila 'vehiculo', y si trae datos
+// AIS validos tambien la fila 'buque_ais', TODO en una sola transaccion (por
+// composicion, no herencia). Cualquier fallo intermedio deshace lo anterior por
+// el guard RAII. Devuelve el id del punto/vehiculo o nullopt.
 std::optional<qint64> VectorRepository::insertVehicle(const MapVehicle &v)
 {
     if (!m_open) {
@@ -419,6 +461,9 @@ std::optional<qint64> VectorRepository::insertVehicle(const MapVehicle &v)
     return id;
 }
 
+// Actualiza la posicion/altura del punto y el rumbo/velocidad del vehiculo (los
+// campos que cambian a menudo con el movimiento), ambos en una transaccion. No
+// toca los datos AIS. Pensado para llamarse con frecuencia.
 bool VectorRepository::updateVehicle(const MapVehicle &v)
 {
     if (!m_open || v.id < 0)
@@ -450,6 +495,9 @@ bool VectorRepository::updateVehicle(const MapVehicle &v)
     return tx.commit();
 }
 
+// Carga todos los vehiculos con sus datos AIS (si los tienen) en UN solo JOIN
+// (vehiculo + punto + LEFT JOIN buque_ais). El LEFT JOIN deja NULL el bloque AIS
+// para los que no son buques; se rellena v.ais solo cuando mmsi no es NULL.
 QVector<MapVehicle> VectorRepository::loadVehicles() const
 {
     QVector<MapVehicle> out;
@@ -512,6 +560,8 @@ QVector<MapVehicle> VectorRepository::loadVehicles() const
     return out;
 }
 
+// Solo los buques (AIS valido) actualizados en/despues de 'since' (epoch ms).
+// Filtra en memoria sobre loadVehicles(); util para refrescos incrementales.
 QVector<MapVehicle> VectorRepository::loadVesselsUpdatedSince(qint64 since) const
 {
     QVector<MapVehicle> out;
@@ -523,11 +573,15 @@ QVector<MapVehicle> VectorRepository::loadVesselsUpdatedSince(qint64 since) cons
 
 // ---------------------------------------------------------- trayectorias ---
 
+// Anade UNA muestra a la trayectoria de un punto. Atajo sobre appendTrackBatch.
 bool VectorRepository::appendTrack(qint64 pointId, const TrackSample &s)
 {
     return appendTrackBatch(pointId, {s});
 }
 
+// Anade VARIAS muestras de trayectoria en una sola transaccion (un fsync, no uno
+// por muestra). INSERT OR REPLACE: si ya hay una muestra con ese (punto, t_utc)
+// la pisa, lo que hace la operacion idempotente ante reenvios.
 bool VectorRepository::appendTrackBatch(qint64 pointId,
                                         const QVector<TrackSample> &samples)
 {
@@ -563,6 +617,9 @@ bool VectorRepository::appendTrackBatch(qint64 pointId,
     return tx.commit();
 }
 
+// Devuelve hasta 'limit' muestras MAS RECIENTES de un punto, pero ordenadas de
+// forma CRONOLOGICA para dibujar la traza. La consulta pide DESC (para quedarse
+// con las ultimas) y luego se inserta al principio (prepend) para invertirlas.
 QVector<TrackSample> VectorRepository::loadTrack(qint64 pointId, int limit) const
 {
     QVector<TrackSample> out;
@@ -594,6 +651,8 @@ QVector<TrackSample> VectorRepository::loadTrack(qint64 pointId, int limit) cons
     return out;
 }
 
+// Recorta la trayectoria de un punto dejando solo las 'keep' muestras mas
+// recientes (borra el resto). Evita que las trazas crezcan sin limite.
 bool VectorRepository::pruneTrack(qint64 pointId, int keep)
 {
     if (!m_open)
@@ -614,6 +673,9 @@ bool VectorRepository::pruneTrack(qint64 pointId, int keep)
 
 // ------------------------------------------------------------- poligonos ---
 
+// Inserta un poligono (>=3 vertices) y todos sus vertices en UNA transaccion:
+// primero la fila 'poligono', luego una fila por vertice con su 'orden'. Antes
+// eran N commits sueltos; ahora es uno solo. Devuelve el id o nullopt.
 std::optional<qint64> VectorRepository::insertPolygon(const MapPolygon &poly)
 {
     if (!m_open) {
@@ -672,6 +734,7 @@ std::optional<qint64> VectorRepository::insertPolygon(const MapPolygon &poly)
     return id;
 }
 
+// Borra un poligono por id; sus vertices se van solos por ON DELETE CASCADE.
 bool VectorRepository::removePolygon(qint64 id)
 {
     if (!m_open)
@@ -684,6 +747,9 @@ bool VectorRepository::removePolygon(qint64 id)
     return q.numRowsAffected() > 0;
 }
 
+// Carga todos los poligonos y luego, por cada uno, sus vertices ordenados. Se
+// hace en dos pasos (cabeceras y despues vertices) para no traer geometrias
+// grandes en un JOIN que multiplicaria filas.
 QVector<MapPolygon> VectorRepository::loadPolygons() const
 {
     QVector<MapPolygon> out;
@@ -727,6 +793,9 @@ QVector<MapPolygon> VectorRepository::loadPolygons() const
 
 // ----------------------------------------------------------------- rutas ---
 
+// Inserta una ruta y sus puntos de paso (con prioridad, descripcion y radio de
+// aproximacion) en una sola transaccion, cada punto con su 'orden'. Devuelve el
+// id de la ruta o nullopt.
 std::optional<qint64> VectorRepository::insertRoute(const MapRoute &route)
 {
     if (!m_open) {
@@ -780,6 +849,7 @@ std::optional<qint64> VectorRepository::insertRoute(const MapRoute &route)
     return id;
 }
 
+// Borra una ruta por id; sus puntos de paso se van solos por ON DELETE CASCADE.
 bool VectorRepository::removeRoute(qint64 id)
 {
     if (!m_open)
@@ -792,6 +862,8 @@ bool VectorRepository::removeRoute(qint64 id)
     return q.numRowsAffected() > 0;
 }
 
+// Carga todas las rutas y, por cada una, sus puntos de paso ordenados (dos
+// pasos, como loadPolygons: cabeceras primero y luego los puntos).
 QVector<MapRoute> VectorRepository::loadRoutes() const
 {
     QVector<MapRoute> out;
@@ -838,6 +910,8 @@ QVector<MapRoute> VectorRepository::loadRoutes() const
 
 // ------------------------------------------------------- entidades dibujo --
 
+// Guarda UNA entidad de dibujo (punto/polilinea/poligono con su estilo y
+// atributos) en su propia transaccion. Delega la escritura en writeFeature.
 std::optional<qint64> VectorRepository::saveFeature(const MapFeature &f)
 {
     if (!m_open) {
@@ -862,6 +936,10 @@ std::optional<qint64> VectorRepository::saveFeature(const MapFeature &f)
     return id;
 }
 
+// Escribe una entidad SIN abrir transaccion propia (asume que el llamador ya la
+// abrio: asi saveFeature guarda una y saveFeatures guarda muchas atomicamente).
+// Inserta la fila 'entidad' (estilo + atributos como JSON) y sus vertices,
+// agrupados por 'parte' para soportar geometrias multi-parte. Devuelve el id.
 std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
                                                      const MapFeature &f)
 {
@@ -929,6 +1007,8 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     return id;
 }
 
+// Guarda un lote de entidades en UNA sola transaccion: o entran todas o ninguna
+// (si una falla, el guard RAII deshace el resto). Util al importar un .geo entero.
 bool VectorRepository::saveFeatures(const QVector<MapFeature> &features)
 {
     if (!m_open)
@@ -946,6 +1026,7 @@ bool VectorRepository::saveFeatures(const QVector<MapFeature> &features)
     return tx.commit();
 }
 
+// Borra una entidad de dibujo por id; sus vertices caen por ON DELETE CASCADE.
 bool VectorRepository::removeFeatureRow(qint64 id)
 {
     if (!m_open)
@@ -958,6 +1039,8 @@ bool VectorRepository::removeFeatureRow(qint64 id)
     return q.numRowsAffected() > 0;
 }
 
+// Vacia por completo la tabla de entidades (y en cascada sus vertices). Se usa
+// antes de reimportar para dejar el lienzo limpio.
 bool VectorRepository::clearFeatures()
 {
     if (!m_open)
@@ -968,6 +1051,10 @@ bool VectorRepository::clearFeatures()
     return true;
 }
 
+// Carga todas las entidades de dibujo con su estilo y atributos (JSON), y luego
+// sus vertices agrupados por 'parte'. Es tolerante con ficheros antiguos: si la
+// columna 'parte' no existe, cae a una consulta de una sola parte. La primera
+// parte va a geometry; si hay mas de una, se guarda tambien en parts (multi-parte).
 QVector<MapFeature> VectorRepository::loadFeatures() const
 {
     QVector<MapFeature> out;
@@ -1053,6 +1140,7 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
     return out;
 }
 
+// Entidades de una capa concreta. Filtra en memoria sobre loadFeatures().
 QVector<MapFeature> VectorRepository::loadFeaturesInLayer(const QString &capa) const
 {
     QVector<MapFeature> out;
@@ -1062,6 +1150,8 @@ QVector<MapFeature> VectorRepository::loadFeaturesInLayer(const QString &capa) c
     return out;
 }
 
+// Crea o actualiza una capa (INSERT OR REPLACE por id). Guardar la capa aparte
+// permite que una capa vacia conserve su visibilidad, editabilidad y orden Z.
 bool VectorRepository::saveLayer(const LayerInfo &capa)
 {
     if (!m_open)
@@ -1081,6 +1171,8 @@ bool VectorRepository::saveLayer(const LayerInfo &capa)
     return true;
 }
 
+// Carga todas las capas ordenadas por orden Z (y luego id): ese orden es el de
+// pintado, de abajo a arriba.
 QVector<LayerInfo> VectorRepository::loadLayers() const
 {
     QVector<LayerInfo> out;

@@ -25,11 +25,15 @@ namespace libmapa {
 class Transaction
 {
 public:
+    // Abre la transaccion al construirse. isActive() dice si se pudo abrir
+    // (algunos motores/estados no lo permiten); no lanza excepciones.
     explicit Transaction(QSqlDatabase &db)
         : m_db(db), m_active(db.transaction())
     {
     }
 
+    // Si la transaccion sigue abierta al destruirse (nadie llamo a commit ni a
+    // rollback), deshace los cambios. Esto es lo que cubre los "return" tempranos.
     ~Transaction()
     {
         if (m_active && !m_finished)
@@ -39,8 +43,11 @@ public:
     Transaction(const Transaction &) = delete;
     Transaction &operator=(const Transaction &) = delete;
 
+    // ¿La transaccion se abrio correctamente? Comprobar antes de escribir.
     bool isActive() const { return m_active; }
 
+    // Confirma los cambios. Devuelve false si no habia transaccion viva o si el
+    // commit fallo; en cualquier caso la marca como terminada (no habra rollback).
     bool commit()
     {
         if (!m_active || m_finished)
@@ -49,6 +56,8 @@ public:
         return m_db.commit();
     }
 
+    // Deshace los cambios de forma explicita y marca la transaccion como
+    // terminada, de modo que el destructor ya no vuelva a intentarlo.
     void rollback()
     {
         if (!m_active || m_finished)
