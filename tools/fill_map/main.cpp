@@ -172,6 +172,21 @@ private:
         });
         tb->addWidget(m_btnAuto);
 
+        // Rejilla de depuracion (como render_map --grid): dibuja el borde de cada
+        // tesela con su z/x/y. Verde = tesela EXACTA (esta en la BD); rojo = se
+        // esta pintando con un ANCESTRO ampliado porque falta a este zoom. Asi se
+        // ve de un vistazo que teselas faltan en la zona visible.
+        m_btnGrid = new QPushButton(tr("Rejilla"), this);
+        m_btnGrid->setCheckable(true);
+        m_btnGrid->setToolTip(tr("Muestra la rejilla de teselas con z/x/y.\n"
+                                 "Verde: tesela propia (en la BD).\n"
+                                 "Rojo: falta a este zoom (se ve con un ancestro "
+                                 "ampliado)."));
+        connect(m_btnGrid, &QPushButton::toggled, this, [this](bool on) {
+            m_mapa->setDebugGridVisible(on);
+        });
+        tb->addWidget(m_btnGrid);
+
         // Segunda fila: bbox escrito a mano y la fuente (URL).
         QToolBar *tb2 = new QToolBar(tr("Zona / Fuente"), this);
         tb2->setMovable(false);
@@ -524,6 +539,7 @@ private:
     QPushButton *m_btnRellenar = nullptr;
     QPushButton *m_btnNueva = nullptr;
     QPushButton *m_btnAuto = nullptr;
+    QPushButton *m_btnGrid = nullptr;
     QTimer *m_debounce = nullptr;
     bool m_autoOn = false;
     QProgressBar *m_barra = nullptr;
