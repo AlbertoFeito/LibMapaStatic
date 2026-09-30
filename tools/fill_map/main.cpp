@@ -55,6 +55,10 @@ class Ventana : public QMainWindow
 {
     Q_OBJECT
 public:
+    // Monta la ventana: carga la codificacion de cada capa, crea el MapWidget
+    // centrado en Cuba, prepara el antirebote del modo "al navegar", construye la
+    // barra de herramientas y la de estado, y conecta las senales del mapa
+    // (seleccion de area, cambios de zoom/centro) a los slots correspondientes.
     Ventana(const QString &datasetsFile)
         : m_datasetsFile(datasetsFile)
     {
@@ -101,6 +105,10 @@ public:
     }
 
 private:
+    // Construye las dos filas de la barra de herramientas: la primera con la capa,
+    // el boton de seleccionar area, el rango de zoom, la velocidad y los botones
+    // Rellenar / Nueva base / Descargar al navegar; la segunda con el campo de
+    // bbox a mano y la URL de la fuente.
     void construirBarra()
     {
         QToolBar *tb = addToolBar(tr("Relleno"));
@@ -191,6 +199,8 @@ private:
         sincronizarZoomDesde();
     }
 
+    // Coloca en la barra de estado la barra de progreso y el boton de cancelar
+    // (ocultos hasta que arranca una descarga).
     void construirEstado()
     {
         m_barra = new QProgressBar(this);
@@ -337,6 +347,7 @@ private:
         ejecutar(p, /*nueva=*/true);
     }
 
+    // ¿Hay ya una descarga en curso? (evita lanzar dos a la vez).
     bool ocupado() const { return m_filler != nullptr; }
 
     /*!
@@ -483,6 +494,8 @@ private:
         ejecutar(p, /*nueva=*/false, /*silencioso=*/true);
     }
 
+    // Habilita o deshabilita en bloque los controles de la barra, para bloquear la
+    // interfaz mientras hay una descarga (no silenciosa) en marcha.
     void ponerControles(bool on)
     {
         m_btnRellenar->setEnabled(on);
@@ -522,6 +535,9 @@ private:
     TileFiller *m_filler = nullptr;
 };
 
+// Punto de entrada de la version con ventana: crea la QApplication, abre la
+// Ventana sobre el datasets.json indicado (o ./datasets.json), avisa si falta
+// soporte TLS (toda descarga HTTPS fallaria) y entra en el bucle de eventos.
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);

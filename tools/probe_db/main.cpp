@@ -28,6 +28,9 @@
 
 using namespace libmapa;
 
+// Parsea un bbox "latN,lonO,latS,lonE" a un QGeoRectangle. Deja *ok en false si el
+// texto no tiene 4 numeros validos. Es el rectangulo de referencia con el que la
+// sonda desempata el esquema XYZ vs TMS.
 static QGeoRectangle parseBBox(const QString &s, bool *ok)
 {
     *ok = false;
@@ -112,6 +115,10 @@ static void smokeTest(QTextStream &out, const TileDataset &ds,
     out << "\n";
 }
 
+// Punto de entrada: parsea los pares --id/--file (y el --ref-bbox opcional),
+// sonda cada BD con TileDatasetProbe para deducir su codificacion, imprime el
+// informe y (salvo --no-test) verifica que la fuente lee de verdad, y finalmente
+// vuelca todos los datasets a un datasets.json. Devuelve 1 si alguna sonda fallo.
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);

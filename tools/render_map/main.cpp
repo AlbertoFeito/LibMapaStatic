@@ -23,6 +23,12 @@
 
 using namespace libmapa;
 
+// Punto de entrada: crea un MapWidget sin mostrarlo, lo centra/zooma segun los
+// argumentos, opcionalmente anade entidades de ejemplo o la rejilla de depuracion,
+// deja un tiempo para que la carga asincrona de teselas llegue, y vuelca el
+// QCustomPlot a un PNG. Ademas imprime un diagnostico del plan de dibujo para
+// poder verificar el resultado sin abrir la imagen. Util en servidores sin
+// pantalla y en scripts de comprobacion.
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);

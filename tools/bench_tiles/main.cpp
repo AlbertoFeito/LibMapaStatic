@@ -24,6 +24,10 @@
 
 using namespace libmapa;
 
+// Bloquea (con un bucle de eventos local) hasta que el servicio emita la PRIMERA
+// senal tilesReady, o hasta agotar el timeout. Devuelve true si llegaron teselas.
+// Como el motor es asincrono, es la forma de medir tiempos en una herramienta
+// secuencial.
 static bool waitForTiles(TileService &svc, int timeoutMs = 30000)
 {
     QEventLoop loop;
@@ -54,6 +58,12 @@ static bool waitForZoom(TileService &svc, int zoom, int timeoutMs = 30000)
     return got;
 }
 
+// Punto de entrada del banco de pruebas. Para cada dataset del datasets.json:
+// arranca un TileService, calcula el viewport a medir, y mide la carga en frio
+// (retorno inmediato, respaldo grueso y nivel de detalle), la cobertura
+// exacta/respaldo/huecos, el refinamiento por demanda, la segunda carga con cache
+// caliente y un arrastre simulado (cuantas peticiones se sirven y cuantas se
+// descartan por obsoletas). Todo se imprime como informe legible.
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);

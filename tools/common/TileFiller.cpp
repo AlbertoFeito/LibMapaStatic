@@ -35,6 +35,9 @@ TileFiller::TileFiller(QObject *parent)
 {
 }
 
+// Cierra ordenadamente: aborta la peticion en vuelo, destruye la consulta de
+// insercion (una QSqlQuery debe morir antes que su conexion) y cierra/da de baja
+// la conexion SQLite propia de esta instancia.
 TileFiller::~TileFiller()
 {
     if (m_reply) {
@@ -52,6 +55,12 @@ TileFiller::~TileFiller()
     }
 }
 
+// Fase 1 (SIN red): abre la BD con su propia conexion, crea la tabla si se pidio
+// (bases nuevas), y por cada zoom calcula el rango de teselas del bbox y, salvo en
+// modo overwrite, consulta cuales YA existen para contar las que faltan. Deja el
+// plan (m_plan), los totales (m_total/m_cells) y el desglose por zoom listos para
+// que el llamador muestre cuanto se va a descargar y pida confirmacion. false (con
+// motivo en *error) si la BD no abre o la tabla no se puede crear.
 bool TileFiller::prepare(const Params &params, QString *error)
 {
     m_p = params;
@@ -156,6 +165,12 @@ bool TileFiller::prepare(const Params &params, QString *error)
     return true;
 }
 
+// Fase 2: arranca la descarga (requiere prepare() previo). Crea el gestor de red
+// y la sentencia INSERT OR REPLACE con las columnas del dataset, fija el intervalo
+// minimo entre peticiones a partir de la tasa, coloca el cursor en la primera
+// tesela que falta y lanza la primera peticion. Si no falta ninguna, termina de
+// inmediato. Todo el trabajo posterior lo encadena onReplyFinished por el bucle de
+// eventos: no bloquea.
 void TileFiller::start()
 {
     if (m_running || !m_db)
@@ -196,6 +211,9 @@ void TileFiller::start()
         pump();
 }
 
+// Solicita la cancelacion: marca la bandera y aborta la peticion en vuelo. El
+// finished(cancelled=true) lo emite onReplyFinished al recoger el abort, o aqui
+// mismo si no habia ninguna peticion en curso.
 void TileFiller::cancel()
 {
     if (!m_running)
@@ -209,6 +227,10 @@ void TileFiller::cancel()
         finish(true);
 }
 
+// Avanza el cursor a la siguiente tesela que hay que descargar, saltando las que
+// ya existen (salvo overwrite) y recorriendo los niveles en orden. Al terminar un
+// nivel emite zoomFinished. Devuelve true si dejo el cursor sobre una tesela
+// pendiente, o false si ya no queda ninguna (fin del plan).
 bool TileFiller::advanceCursor()
 {
     while (m_zi < m_plan.size()) {
@@ -234,6 +256,9 @@ bool TileFiller::advanceCursor()
     return false;
 }
 
+// Lanza la peticion HTTP de la tesela sobre la que esta el cursor: construye la
+// URL desde la plantilla, fija el User-Agent y arma un temporizador de timeout que
+// aborta la respuesta si tarda demasiado. La respuesta la recoge onReplyFinished.
 void TileFiller::pump()
 {
     if (m_cancelled) {
@@ -263,6 +288,14 @@ void TileFiller::pump()
     m_timeout->start(m_p.timeoutMs);
 }
 
+// Corazon del bucle: procesa la respuesta de una tesela y programa la siguiente
+// accion. Clasifica el resultado en Ok (imagen valida -> se inserta), NotFound
+// (404/204: el origen no tiene esa tesela, no es error) o Failed (red/estado/tipo
+// erroneos: reintenta con backoff hasta 'retries', y al agotarlos cuenta el fallo).
+// Actualiza estadisticas y progreso, aplica el AUTO-FRENO (si se acumulan fallos
+// seguidos, la fuente esta limitando: pausa con backoff creciente y reanuda) y, con
+// un temporizador que respeta la tasa, avanza el cursor y vuelve a pump() -o
+// termina si ya no queda nada-.
 void TileFiller::onReplyFinished()
 {
     if (!m_reply)
@@ -363,6 +396,10 @@ void TileFiller::onReplyFinished()
     });
 }
 
+// Inserta el BLOB de una tesela con la codificacion del dataset: x logico, Y de
+// ALMACENAMIENTO (ya convertida por el esquema), z guardado (zFactor/zOffset) y s
+// si corresponde. Si el INSERT falla, revierte el contador de descargadas y lo
+// cuenta como fallo.
 void TileFiller::insertTile(const QByteArray &image)
 {
     m_ins->bindValue(QStringLiteral(":x"), m_cx);
@@ -379,6 +416,8 @@ void TileFiller::insertTile(const QByteArray &image)
     }
 }
 
+// Cierra la corrida una sola vez: baja la bandera de "en marcha" y emite finished
+// con las estadisticas finales y si se cancelo a mitad.
 void TileFiller::finish(bool cancelled)
 {
     if (!m_running)

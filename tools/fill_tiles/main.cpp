@@ -41,6 +41,8 @@ using namespace libmapa;
 
 namespace {
 
+// Flujos de salida estandar y de error, envueltos en QTextStream (una sola
+// instancia cada uno) para escribir texto Unicode comodamente.
 QTextStream &cout() { static QTextStream s(stdout); return s; }
 QTextStream &cerr() { static QTextStream s(stderr); return s; }
 
@@ -81,6 +83,14 @@ bool loadDataset(const QString &jsonPath, const QString &id,
 
 } // namespace
 
+// Punto de entrada de la herramienta de consola. Flujo: (1) diagnostico TLS;
+// (2) parsea los argumentos (--datasets/--id sobre una base existente, o --new
+// para crear una base nueva con codificacion limpia); (3) parsea el bbox y arma
+// los Params (dataset + zoom + fuente + ritmo/auto-freno); (4) prepare() calcula
+// cuanto falta SIN red y lo muestra pidiendo confirmacion (salvo --yes);
+// (5) conecta las senales del TileFiller a la salida por consola (barra de
+// progreso, fin de nivel, fallos, auto-freno, resumen final) y arranca el bucle de
+// eventos. Codigo de salida: 0 ok, 1 error de preparacion, 2 uso, 3 hubo fallos.
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);

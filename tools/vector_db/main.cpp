@@ -24,6 +24,10 @@
 
 using namespace libmapa;
 
+// Inserta un juego de datos de ejemplo que ejercita todo el modelo: puntos (uno
+// con comilla, que rompia el INSERT concatenado original), un avion sin AIS, un
+// buque con AIS y una trayectoria de 500 muestras (en una sola transaccion), un
+// poligono y una ruta. Sirve para inspeccionar la BD con herramientas externas.
 static void poblar(VectorRepository &repo, QTextStream &out)
 {
     out << " Creando datos de ejemplo...\n";
@@ -112,6 +116,10 @@ static void poblar(VectorRepository &repo, QTextStream &out)
     out << " Listo.\n\n";
 }
 
+// Vuelca a texto el esquema (tablas, restricciones de 'punto', claves foraneas
+// con su ON DELETE) y todo el contenido (puntos, vehiculos con su AIS y traza,
+// poligonos y rutas). Confirma que las restricciones existen de verdad, que era el
+// fallo del "NOT nullptr" original, y sirve para verificar sin depender de tests.
 static void volcar(VectorRepository &repo, const QString &ruta, QTextStream &out)
 {
     out << "==========================================================\n";
@@ -213,6 +221,9 @@ static void volcar(VectorRepository &repo, const QString &ruta, QTextStream &out
     out << "\n";
 }
 
+// Punto de entrada: segun los argumentos, crea una BD nueva con datos de ejemplo
+// (--out, borrandola si existe) o abre una existente sin tocarla (--file), y
+// opcionalmente vuelca su esquema y contenido (--dump; implicito al crear).
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);

@@ -116,6 +116,9 @@ QVector<Path> leer(const QString &ruta, QString *error)
     return paths;
 }
 
+// Crea la tabla 'tiles' con el formato XYZ que lee la libreria, SIN columna 's'
+// (en teselas generadas no significa nada y un sValue mal copiado filtraria todas
+// las filas). false con el motivo en *error si el CREATE falla.
 bool crearEsquema(QSqlDatabase &db, QString *error)
 {
     QSqlQuery q(db);
@@ -134,6 +137,13 @@ bool crearEsquema(QSqlDatabase &db, QString *error)
 
 } // namespace
 
+// Punto de entrada: lee el fichero vectorial, calcula su bbox y, por cada nivel
+// de zoom, proyecta los trazados a pixeles globales (decimando puntos sub-pixel) y
+// REPARTE los segmentos por tesela (bucketing), de modo que un trazado enorme solo
+// aporte a cada tesela los segmentos que la cruzan. Rasteriza cada tesela con
+// QPainter (relleno opcional bajo las lineas), la guarda como PNG en la BD y, al
+// final, imprime la entrada lista para pegar en datasets.json. Convierte un .geo
+// pesado en una piramide de teselas que el motor sirve cacheada.
 int main(int argc, char *argv[])
 {
     // QGuiApplication: QImage + QPainter necesitan el modulo Gui inicializado.
