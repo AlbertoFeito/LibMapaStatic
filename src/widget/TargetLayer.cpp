@@ -35,6 +35,8 @@ TargetLayer::TargetLayer(QCustomPlot *parent, TargetModel *model)
 
 TargetLayer::~TargetLayer() = default;
 
+// Inyecta la funcion que convierte lat/lon a coordenadas de EJE (la proyeccion
+// de Mercator la aporta MapView). Sin ella se usa lon/lat directo como respaldo.
 void TargetLayer::setAxisMapper(
     std::function<QPointF(const QGeoCoordinate &)> toAxis)
 {
@@ -42,12 +44,17 @@ void TargetLayer::setAxisMapper(
     programarRepintado();
 }
 
+// Pide un repintado coalescido: arranca el temporizador de 33 ms si no corre ya,
+// de modo que una rafaga de actualizaciones se dibuje una sola vez (~30 fps).
 void TargetLayer::programarRepintado()
 {
     if (!m_repintar.isActive())
         m_repintar.start();
 }
 
+// Coordenada geografica -> pixel de pantalla: primero a eje (via m_toAxis) y
+// luego a pixel con los ejes de QCustomPlot. Punto nulo si no hay plot o la
+// coordenada no es valida.
 QPointF TargetLayer::screenPos(const QGeoCoordinate &c) const
 {
     QCustomPlot *plot = parentPlot();
@@ -59,11 +66,14 @@ QPointF TargetLayer::screenPos(const QGeoCoordinate &c) const
                    plot->yAxis->coordToPixel(eje.y()));
 }
 
+// Gancho de QCustomPlot: aplica el hint de antialiasing de esta capa.
 void TargetLayer::applyDefaultAntialiasingHint(QCPPainter *painter) const
 {
     applyAntialiasingHint(painter, mAntialiased, QCP::aeAll);
 }
 
+// Pinta TODOS los objetivos del modelo (cada uno con drawTarget). Guarda en
+// m_lastDrawn cuantos se dibujaron realmente (los que pasaron el culling).
 void TargetLayer::draw(QCPPainter *painter)
 {
     QCustomPlot *plot = parentPlot();
@@ -76,6 +86,10 @@ void TargetLayer::draw(QCPPainter *painter)
         drawTarget(painter, e, area);
 }
 
+// Dibuja UN objetivo: su traza (polilinea semitransparente), su simbolo (un galon
+// girado segun el rumbo) y su etiqueta multilinea con halo claro para leerse
+// sobre el mapa. Aplica culling con margen: si el objetivo cae muy lejos del area
+// visible se salta entero.
 void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
                              const QRect &area) const
 {

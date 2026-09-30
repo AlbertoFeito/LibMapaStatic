@@ -16,6 +16,12 @@
 
 namespace libmapa {
 
+// Construye la vista de mapa sobre QCustomPlot: oculta ejes y rejilla (pero usa
+// su sistema de coordenadas), desactiva la interaccion nativa (el arrastre/zoom
+// se manejan aqui por niveles discretos) y crea las tres capas apiladas —
+// teselas, entidades estaticas y objetivos moviles (esta en modo BUFFERED para
+// repintarse sola sin rehacer el resto)—, cada una con su modelo y su mapeador de
+// proyeccion.
 MapView::MapView(TileService *service, QWidget *parent)
     : QCustomPlot(parent)
     , m_service(service)
@@ -81,6 +87,9 @@ MapView::MapView(TileService *service, QWidget *parent)
 
 MapView::~MapView() = default;
 
+// Area de dibujo en pixeles. Usa rect() (tamano real del widget) y cae a
+// viewport() o a un tamano por defecto para no devolver NUNCA un rectangulo
+// degenerado, que colgaria el calculo de rangos de eje.
 QRect MapView::plotArea() const
 {
     // rect() es siempre el tamano actual del widget; viewport() puede ir por
@@ -94,6 +103,7 @@ QRect MapView::plotArea() const
     return QRect(0, 0, 640, 480);   // ultimo recurso, nunca degenerado
 }
 
+// Relacion de aspecto (ancho/alto) del area de dibujo. 1.0 si la altura es nula.
 double MapView::aspectRatio() const
 {
     const QRect r = plotArea();
@@ -102,11 +112,16 @@ double MapView::aspectRatio() const
     return double(r.width()) / double(r.height());
 }
 
+// Centro geografico actual de la vista.
 QGeoCoordinate MapView::center() const
 {
     return m_center;
 }
 
+// Devuelve una coordenada SIEMPRE valida: envuelve la longitud a [-180,180],
+// recorta la latitud al limite de Mercator y sustituye NaN por 0. Es la barrera
+// que impide que una coordenada invalida (que da NaN) llegue a los rangos de eje
+// y cuelgue a QCustomPlot generando marcas.
 QGeoCoordinate MapView::normalized(const QGeoCoordinate &c)
 {
     // QGeoCoordinate con longitud fuera de [-180,180] o latitud fuera de
@@ -130,6 +145,12 @@ QGeoCoordinate MapView::normalized(const QGeoCoordinate &c)
     return QGeoCoordinate(lat, lon);
 }
 
+// Traduce (centro, zoom) a los rangos de los ejes X/Y. Calcula el ancho del
+// mundo en pixeles al zoom actual, deriva cuantos grados abarca la pantalla en
+// cada eje y centra alli, ACOTANDO el centro para que la vista no se salga del
+// mundo (evita las bandas vacias arriba/lados). Trabaja en el eje proyectado
+// (grados de Mercator en Y), donde el mundo mide 360 en ambos ejes y las teselas
+// salen cuadradas. Guarda el centro efectivo en m_center.
 void MapView::applyZoomToAxes(const QGeoCoordinate &center)
 {
     ensureLayout();
@@ -176,6 +197,8 @@ void MapView::applyZoomToAxes(const QGeoCoordinate &center)
         WebMercator::mercatorDegreesToLatitude(cy), cx));
 }
 
+// Recentra el mapa en una coordenada (sin cambiar el zoom) y pide las teselas
+// visibles y el plan de dibujo. Ignora coordenadas invalidas.
 void MapView::setCenter(const QGeoCoordinate &center)
 {
     if (!center.isValid())
@@ -186,6 +209,10 @@ void MapView::setCenter(const QGeoCoordinate &center)
     refreshPlan();
 }
 
+// Fija el nivel de zoom (acotado al rango del dataset). Si se pasa un pixel de
+// ancla (la rueda del raton), recoloca el centro para que el punto bajo el cursor
+// se quede QUIETO tras ampliar/reducir; si no, mantiene el centro. Pide teselas y
+// plan tras el cambio.
 void MapView::setZoom(int zoom, const QPointF *anchorPx)
 {
     const TileDataset *ds = m_service ? m_service->activeDataset() : nullptr;
@@ -223,6 +250,9 @@ void MapView::setZoom(int zoom, const QPointF *anchorPx)
     refreshPlan();
 }
 
+// Encuadra un rectangulo geografico: elige el mayor zoom con el que la anchura
+// del rectangulo cabe en el ancho del widget y centra en su punto medio. Lo usa
+// la herramienta "ampliar area".
 void MapView::fitBounds(const QGeoCoordinate &northWest,
                         const QGeoCoordinate &southEast)
 {
@@ -267,6 +297,7 @@ QGeoCoordinate MapView::visibleNorthWest() const
         xAxis->range().lower));
 }
 
+// Esquina SURESTE visible (misma proteccion normalized() que visibleNorthWest).
 QGeoCoordinate MapView::visibleSouthEast() const
 {
     return normalized(QGeoCoordinate(
@@ -274,23 +305,30 @@ QGeoCoordinate MapView::visibleSouthEast() const
         xAxis->range().upper));
 }
 
+// Pixel de pantalla -> coordenada geografica (a traves del eje proyectado).
 QGeoCoordinate MapView::coordinateAt(const QPoint &pixel) const
 {
     return fromAxis(QPointF(xAxis->pixelToCoord(pixel.x()),
                                   yAxis->pixelToCoord(pixel.y())));
 }
 
+// Coordenada geografica -> punto de EJE (x = longitud, y = grados de Mercator).
+// Es la proyeccion que comparten todas las capas para pintar sobre el mapa.
 QPointF MapView::toAxis(const QGeoCoordinate &c)
 {
     return QPointF(c.longitude(),
                    WebMercator::latitudeToMercatorDegrees(c.latitude()));
 }
 
+// Inverso de toAxis: punto de eje -> coordenada geografica.
 QGeoCoordinate MapView::fromAxis(const QPointF &p)
 {
     return QGeoCoordinate(WebMercator::mercatorDegreesToLatitude(p.y()), p.x());
 }
 
+// Fuerza a QCustomPlot a poner al dia su viewport/disposicion antes de leer o
+// fijar rangos de eje, porque el resizeEvent del widget puede ir por detras. Sin
+// esto, el area del axisRect llega a cero y los calculos de zoom salen mal.
 void MapView::ensureLayout()
 {
     if (rect().width() <= 1 || rect().height() <= 1)
@@ -303,6 +341,8 @@ void MapView::ensureLayout()
     }
 }
 
+// Pide al servicio que cargue (en segundo plano) las teselas del viewport actual,
+// con un margen de una tesela para que al arrastrar ya esten precargadas.
 void MapView::requestVisibleTiles()
 {
     if (!m_service)
@@ -311,6 +351,8 @@ void MapView::requestVisibleTiles()
                                m_zoom, /*marginTiles=*/1);
 }
 
+// Oculta el recuadro de "seleccionar area" si estaba visible (sin borrarlo, para
+// reutilizar el item). Lo usa MapWidget al confirmar o descartar la seleccion.
 void MapView::clearAreaSelection()
 {
     if (m_areaRect && m_areaRect->visible()) {
@@ -319,6 +361,8 @@ void MapView::clearAreaSelection()
     }
 }
 
+// Recalcula el plan de dibujo de teselas para el viewport actual (que pintar y
+// con que respaldo) y encola un repintado. Se llama tras cada cambio de vista.
 void MapView::refreshPlan()
 {
     if (!m_service || !m_tileLayer)
@@ -328,6 +372,8 @@ void MapView::refreshPlan()
     replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Respuesta del servicio: llegaron teselas nuevas a la cache. Solo rehace el plan
+// (y repinta) si de verdad hay teselas nuevas que mostrar.
 void MapView::onTilesReady(quint64 requestId, int zoom, int newTiles)
 {
     Q_UNUSED(requestId)
@@ -348,6 +394,8 @@ void MapView::resizeEvent(QResizeEvent *event)
     refreshPlan();
 }
 
+// Rueda del raton = zoom por pasos discretos, anclado al punto bajo el cursor
+// (para eso pasa la posicion a setZoom). Ignora deltas que no llegan a un paso.
 void MapView::wheelEvent(QWheelEvent *event)
 {
     const int pasos = event->angleDelta().y() / 120;
@@ -366,6 +414,10 @@ void MapView::wheelEvent(QWheelEvent *event)
     event->accept();
 }
 
+// Gestiona la herramienta de medir en dos clics. Primer clic: ancla el origen
+// (dibuja una marca y una linea que seguira al raton). Segundo clic: calcula
+// distancia y azimut entre los dos puntos y emite measurementFinished. La marca
+// del origen se dimensiona en pixeles para no deformarse con el zoom.
 void MapView::handleMeasureClick(const QGeoCoordinate &donde)
 {
     if (!m_toolFirstPointSet) {
@@ -413,6 +465,9 @@ void MapView::handleMeasureClick(const QGeoCoordinate &donde)
     replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Cancela el trazado en curso (si lo hay): descarta el borrador y avisa. Devuelve
+// true si de verdad habia algo que cancelar. Lo llama Escape y el cambio de
+// herramienta.
 bool MapView::cancelDrawing()
 {
     if (!m_drafting)
@@ -424,6 +479,10 @@ bool MapView::cancelDrawing()
     return true;
 }
 
+// Cierra el trazado en curso y lo convierte en entidad definitiva en el modelo.
+// Si la geometria no es valida (pocos vertices) la descarta en vez de crear una
+// entidad degenerada. Devuelve el id creado o -1. Lo llaman Enter, doble clic y
+// clic derecho.
 qint64 MapView::finishDrawing()
 {
     if (!m_drafting)
@@ -447,6 +506,10 @@ qint64 MapView::finishDrawing()
     return id;
 }
 
+// Atajos de teclado sensibles al contexto: Escape cancela el trazado o la
+// seleccion; Enter cierra el trazado; Supr/Retroceso deshace el ultimo vertice
+// mientras se dibuja o borra la entidad seleccionada al editar. Lo no manejado se
+// delega en QCustomPlot.
 void MapView::keyPressEvent(QKeyEvent *event)
 {
     switch (event->key()) {
@@ -496,6 +559,9 @@ void MapView::keyPressEvent(QKeyEvent *event)
     QCustomPlot::keyPressEvent(event);
 }
 
+// Doble clic: si se esta trazando, lo cierra; si se esta editando y cae sobre un
+// lado de una entidad, inserta un vertice ahi. En cualquier otro caso, delega en
+// QCustomPlot.
 void MapView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     const QGeoCoordinate donde = coordinateAt(event->pos());
@@ -528,6 +594,11 @@ void MapView::mouseDoubleClickEvent(QMouseEvent *event)
     QCustomPlot::mouseDoubleClickEvent(event);
 }
 
+// Boton izquierdo segun la herramienta activa: arrastrar el mapa (None), anclar
+// el rectangulo de area (AreaZoom/SelectArea), medir o elegir punto (al PULSAR,
+// no al soltar, para que la marca caiga donde se apunta), colocar/continuar el
+// trazado de una entidad, o en modo edicion agarrar un vertice o mover/seleccionar
+// una entidad (abriendo un grupo de deshacer para todo el arrastre).
 void MapView::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
@@ -633,6 +704,11 @@ void MapView::mousePressEvent(QMouseEvent *event)
     event->accept();
 }
 
+// Movimiento del raton: emite la coordenada bajo el cursor y, segun el estado,
+// arrastra un vertice/entidad (prioridad sobre el resto), estira el "lado de goma"
+// del trazado, desplaza el mapa (calculado en el eje proyectado, no en latitud) o
+// redimensiona el recuadro de area / la linea de medir. Todo en coordenadas de
+// Mercator para que no haya desfase con el zoom ni la latitud.
 void MapView::mouseMoveEvent(QMouseEvent *event)
 {
     const QGeoCoordinate bajo = coordinateAt(event->pos());
@@ -702,6 +778,11 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
     event->accept();
 }
 
+// Soltar el boton cierra el gesto en curso: termina la edicion (cerrando el grupo
+// de deshacer), suelta el arrastre del mapa, o confirma el area seleccionada
+// (emite areaSelected y, si es AreaZoom, encuadra; si es SelectArea, deja el
+// recuadro como marca). El clic derecho cierra el trazado. Medir/elegir ya se
+// atendieron al pulsar.
 void MapView::mouseReleaseEvent(QMouseEvent *event)
 {
     const QGeoCoordinate donde = coordinateAt(event->pos());
@@ -772,6 +853,9 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
     event->accept();
 }
 
+// Cambia la herramienta activa (arrastrar, medir, dibujar, editar, seleccionar
+// area...). Abandona cualquier trazado o edicion a medias, oculta las marcas
+// temporales y ajusta el cursor. Fija StrongFocus para poder recibir Escape/Supr.
 void MapView::setActiveTool(MapTool tool)
 {
     // Cambiar de herramienta abandona lo que hubiera a medias: dejarlo vivo
