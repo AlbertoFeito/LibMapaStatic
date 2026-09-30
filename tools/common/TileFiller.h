@@ -57,6 +57,10 @@ public:
         bool overwrite = false;         //!< false = solo lo que falta.
         bool createSchema = false;      //!< true = crea la tabla si no existe
                                         //!< (para bases NUEVAS).
+        //! Auto-freno: tras esta racha de fallos SEGUIDOS (la fuente esta
+        //! limitando), pausa y reanuda. 0 = desactivado.
+        int throttleAfter = 8;
+        int maxPauseSec = 300;          //!< Tope de la pausa (backoff creciente).
     };
 
     struct Stats {
@@ -94,6 +98,9 @@ signals:
     void zoomFinished(int zoom, qint64 added);
     //! Mensajes puntuales (fallos de una tesela), para un registro.
     void message(const QString &text);
+    //! Auto-freno: la fuente parece estar limitando; se pausa \a pauseSeconds
+    //! antes de reanudar (tras \a consecutiveFails fallos seguidos).
+    void throttling(int pauseSeconds, qint64 consecutiveFails);
     //! Fin de todo. \a cancelled indica si se corto a mitad.
     void finished(const libmapa::TileFiller::Stats &stats, bool cancelled);
 
@@ -129,6 +136,8 @@ private:
     int m_cx = 0, m_cy = 0;         // cursor dentro del nivel (indices XYZ)
     int m_curStoredY = 0;
     int m_attempt = 0;              // reintentos de la tesela actual
+    qint64 m_consecFails = 0;       // fallos definitivos SEGUIDOS (auto-freno)
+    int m_pauseCount = 0;           // pausas ya hechas (backoff creciente)
 
     qint64 m_total = 0, m_cells = 0, m_done = 0;
     Stats m_stats;

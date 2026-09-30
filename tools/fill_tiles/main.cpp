@@ -262,6 +262,15 @@ int main(int argc, char *argv[])
                 cerr() << "  (mas fallos; se omiten los siguientes avisos)\n";
         }
     });
+    // Auto-freno: la fuente esta limitando; se pausa y reanuda solo.
+    QObject::connect(&filler, &TileFiller::throttling, &app,
+                     [](int pauseSec, qint64 racha) {
+        cout() << QStringLiteral(
+                      "\n  [auto-freno] %1 fallos seguidos: la fuente parece "
+                      "limitar. Pauso %2 s y reanudo...\n")
+                      .arg(racha).arg(pauseSec);
+        cout().flush();
+    });
     int exitCode = 0;
     QObject::connect(&filler, &TileFiller::finished, &app,
                      [&app, &exitCode, modoNuevo, &p](const TileFiller::Stats &s, bool cancelled) {

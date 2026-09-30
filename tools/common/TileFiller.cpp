@@ -308,8 +308,11 @@ void TileFiller::onReplyFinished()
         ++m_stats.downloaded;
         if (m_zi < m_plan.size())
             ++m_plan[m_zi].added;
+        m_consecFails = 0;   // la fuente responde bien: racha rota
+        m_pauseCount = 0;    // y recuperada: reinicia el backoff de pausas
     } else if (res == NotFound) {
         ++m_stats.notFound;
+        m_consecFails = 0;   // 404 = el servidor SI responde, no es limite
     } else {  // Failed
         if (m_attempt < m_p.retries) {
             ++m_attempt;
@@ -319,6 +322,7 @@ void TileFiller::onReplyFinished()
                              .arg(m_cx).arg(m_cy).arg(errStr));
         } else {
             ++m_stats.failed;
+            ++m_consecFails;   // fallo definitivo: cuenta para el auto-freno
             emit message(QStringLiteral("fallo z%1 x%2 y%3: %4")
                              .arg(m_plan[m_zi].z).arg(m_cx).arg(m_cy).arg(errStr));
         }
@@ -334,7 +338,21 @@ void TileFiller::onReplyFinished()
     // Programa la siguiente accion respetando el ritmo (o backoff si reintenta).
     int delay = int(m_minIntervalMs);
     if (!consume)
-        delay = 300 * m_attempt;   // backoff creciente
+        delay = 300 * m_attempt;   // backoff creciente del reintento
+
+    // Auto-freno: si se acumulan fallos SEGUIDOS, la fuente nos esta limitando.
+    // Pausa (con backoff creciente) y reanuda; asi no gira en vano ni insiste
+    // hasta que nos bloqueen del todo.
+    if (consume && m_p.throttleAfter > 0 && m_consecFails >= m_p.throttleAfter) {
+        int pauseSec = 30;
+        for (int i = 0; i < m_pauseCount; ++i) pauseSec = qMin(m_p.maxPauseSec, pauseSec * 2);
+        pauseSec = qMin(pauseSec, m_p.maxPauseSec);
+        ++m_pauseCount;
+        const qint64 rachaPrevia = m_consecFails;
+        m_consecFails = 0;         // se le da otra oportunidad tras la pausa
+        emit throttling(pauseSec, rachaPrevia);
+        delay = pauseSec * 1000;
+    }
 
     QTimer::singleShot(delay, this, [this, consume] {
         if (m_cancelled) { finish(true); return; }

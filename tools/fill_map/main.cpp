@@ -407,6 +407,11 @@ private:
         connect(filler, &TileFiller::zoomFinished, this, [this, nueva](int, qint64 added) {
             if (!nueva && added > 0) m_mapa->reloadBaseLayer();
         });
+        connect(filler, &TileFiller::throttling, this, [this](int pauseSec, qint64 racha) {
+            statusBar()->showMessage(
+                tr("Auto-freno: %1 fallos seguidos (la fuente limita). "
+                   "Pausa %2 s y reanudo...").arg(racha).arg(pauseSec), pauseSec * 1000);
+        });
         connect(filler, &TileFiller::finished, this,
                 [this, filler, nueva, silencioso, p](const TileFiller::Stats &s, bool cancelled) {
             if (!nueva) m_mapa->reloadBaseLayer();
