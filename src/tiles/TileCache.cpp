@@ -33,6 +33,10 @@ TileCache::TileCache(qint64 maxBytes, qint64 pinnedBytes)
 {
 }
 
+// Devuelve la imagen de una tesela si esta cargada (mirando primero el area LRU
+// y luego la anclada), o una QImage vacia si no. Cuenta acierto/fallo. La copia
+// de QImage es implicitamente compartida (barata). Protegido por mutex porque lo
+// llama el hilo de dibujo mientras el lector inserta.
 QImage TileCache::take(const TileKey &key) const
 {
     QMutexLocker lock(&m_mutex);
@@ -48,12 +52,15 @@ QImage TileCache::take(const TileKey &key) const
     return {};
 }
 
+// ¿La tesela esta cargada (en cualquiera de las dos areas)?
 bool TileCache::contains(const TileKey &key) const
 {
     QMutexLocker lock(&m_mutex);
     return m_cache.contains(key) || m_pinned.contains(key);
 }
 
+// Anota que una tesela NO existe en la BD, para no volver a pedirla. Solo si no
+// la tenemos ya cargada (una que llego no "falta").
 void TileCache::markMissing(const TileKey &key)
 {
     QMutexLocker lock(&m_mutex);
@@ -61,18 +68,22 @@ void TileCache::markMissing(const TileKey &key)
         m_missing.insert(key, new bool(true));
 }
 
+// ¿Sabemos ya que esta tesela no existe? Evita relecturas inutiles a disco.
 bool TileCache::isKnownMissing(const TileKey &key) const
 {
     QMutexLocker lock(&m_mutex);
     return m_missing.contains(key);
 }
 
+// Cuantas teselas hay marcadas como inexistentes (diagnostico).
 int TileCache::missingCount() const
 {
     QMutexLocker lock(&m_mutex);
     return static_cast<int>(m_missing.size());
 }
 
+// Cuantas teselas del rectangulo estan "resueltas": o cargadas o sabidas
+// ausentes. Sirve para medir cuanto del viewport ya esta listo.
 int TileCache::countCached(int z, int xMin, int xMax,
                            int yMin, int yMax) const
 {
@@ -90,6 +101,8 @@ int TileCache::countCached(int z, int xMin, int xMax,
     return n;
 }
 
+// Mete una tesela a partir de sus BYTES codificados (PNG/JPG): los decodifica a
+// QImage y delega en insertImage. Devuelve false si no decodifica.
 bool TileCache::insert(const TileKey &key, const QByteArray &encoded, bool pinned)
 {
     if (encoded.isEmpty())
@@ -116,6 +129,9 @@ bool TileCache::insert(const TileKey &key, const QByteArray &encoded, bool pinne
     return true;
 }
 
+// Mete una imagen YA decodificada. Si 'pinned', va al area anclada (no se
+// expulsa: el nivel de fondo); si no, al area LRU normal. El coste se contabiliza
+// por lo que ocupa DECODIFICADA en RAM (no el tamano del PNG de origen).
 void TileCache::insertImage(const TileKey &key, const QImage &image, bool pinned)
 {
     if (image.isNull())
@@ -133,6 +149,7 @@ void TileCache::insertImage(const TileKey &key, const QImage &image, bool pinned
     ++m_stats.inserts;
 }
 
+// Quita una tesela de las tres estructuras (cache, anclada, ausentes).
 void TileCache::remove(const TileKey &key)
 {
     QMutexLocker lock(&m_mutex);
@@ -141,6 +158,8 @@ void TileCache::remove(const TileKey &key)
     m_missing.remove(key);
 }
 
+// Vacia todo. Lo usa MapWidget::reloadBaseLayer() para olvidar lo cargado
+// (incluidas las marcas de "no existe") tras modificar la BD por fuera.
 void TileCache::clear()
 {
     QMutexLocker lock(&m_mutex);
@@ -149,18 +168,21 @@ void TileCache::clear()
     m_missing.clear();
 }
 
+// Total de teselas cargadas (LRU + ancladas).
 int TileCache::count() const
 {
     QMutexLocker lock(&m_mutex);
     return static_cast<int>(m_cache.size()) + static_cast<int>(m_pinned.size());
 }
 
+// Cuantas hay en el area anclada (nivel de fondo).
 int TileCache::pinnedCount() const
 {
     QMutexLocker lock(&m_mutex);
     return static_cast<int>(m_pinned.size());
 }
 
+// RAM ocupada ahora mismo por las imagenes (KiB internos -> bytes).
 qint64 TileCache::usedBytes() const
 {
     QMutexLocker lock(&m_mutex);
@@ -168,36 +190,42 @@ qint64 TileCache::usedBytes() const
             + static_cast<qint64>(m_pinned.totalCost())) * 1024;
 }
 
+// Presupuesto del area anclada, en bytes.
 qint64 TileCache::pinnedBytes() const
 {
     QMutexLocker lock(&m_mutex);
     return static_cast<qint64>(m_pinned.maxCost()) * 1024;
 }
 
+// Cambia el presupuesto del area anclada (se guarda internamente en KiB).
 void TileCache::setPinnedBytes(qint64 bytes)
 {
     QMutexLocker lock(&m_mutex);
     m_pinned.setMaxCost(limitInKiB(bytes));
 }
 
+// Presupuesto del area LRU normal, en bytes.
 qint64 TileCache::maxBytes() const
 {
     QMutexLocker lock(&m_mutex);
     return static_cast<qint64>(m_cache.maxCost()) * 1024;
 }
 
+// Cambia el presupuesto del area LRU (al reducirlo, QCache expulsa lo mas viejo).
 void TileCache::setMaxBytes(qint64 bytes)
 {
     QMutexLocker lock(&m_mutex);
     m_cache.setMaxCost(limitInKiB(bytes));
 }
 
+// Copia de los contadores (aciertos, fallos, inserciones, fallos de decodif.).
 TileCache::Stats TileCache::stats() const
 {
     QMutexLocker lock(&m_mutex);
     return m_stats;
 }
 
+// Pone los contadores a cero (para medir un tramo concreto).
 void TileCache::resetStats()
 {
     QMutexLocker lock(&m_mutex);

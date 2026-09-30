@@ -15,6 +15,7 @@
 
 namespace libmapa {
 
+// Guarda el descriptor de la BD; no abre nada todavia (eso ocurre en open()).
 RMapsTileSource::RMapsTileSource(TileDataset dataset)
     : m_ds(std::move(dataset))
 {
@@ -29,6 +30,8 @@ RMapsTileSource::~RMapsTileSource()
     m_qCount.reset();
 }
 
+// Construye el WHERE comun de las consultas de rango, usando los NOMBRES de
+// columna reales del dataset e incluyendo la columna 's' solo si existe.
 QString RMapsTileSource::whereClause() const
 {
     QString w = QStringLiteral("WHERE %1 = :z AND %2 BETWEEN :x1 AND :x2 "
@@ -39,6 +42,7 @@ QString RMapsTileSource::whereClause() const
     return w;
 }
 
+// Rellena los parametros del WHERE (z guardado, rango de x/y, y 's' si toca).
 void RMapsTileSource::bindCommon(QSqlQuery &q, int storedZ,
                                  int xMin, int xMax,
                                  int yMinStored, int yMaxStored) const
@@ -52,6 +56,8 @@ void RMapsTileSource::bindCommon(QSqlQuery &q, int storedZ,
         q.bindValue(QStringLiteral(":s"), m_ds.sValue);
 }
 
+// Traduce un rango de Y LOGICO (XYZ) al rango de Y de ALMACENAMIENTO. En TMS la
+// conversion invierte el orden, por eso hay que recalcular min y max.
 void RMapsTileSource::storageYRange(int z, int yMin, int yMax,
                                     int *outMin, int *outMax) const
 {
@@ -61,6 +67,9 @@ void RMapsTileSource::storageYRange(int z, int yMin, int yMax,
     *outMax = std::max(a, b);
 }
 
+// Abre la BD (solo lectura, via el pool por hilo) y PREPARA las cuatro consultas
+// reutilizables: una tesela, un rango (con imagen), disponibilidad (sin imagen) y
+// conteo por zoom. Resuelve aqui los nombres de columna reales. Idempotente.
 bool RMapsTileSource::open()
 {
     if (m_open)
@@ -129,6 +138,8 @@ bool RMapsTileSource::open()
     return true;
 }
 
+// UNA tesela: traduce el TileKey logico a la fila real (storedZ, Y del esquema,
+// s) y devuelve el BLOB de imagen, o vacio si no existe/da error.
 QByteArray RMapsTileSource::fetch(const TileKey &key)
 {
     if (!m_open && !open())
@@ -157,6 +168,9 @@ QByteArray RMapsTileSource::fetch(const TileKey &key)
     return blob;
 }
 
+// MUCHAS teselas de un golpe (un viewport): una sola consulta por rango. Devuelve
+// un mapa TileKey(logico) -> imagen. Resuelve las columnas por nombre (no por
+// posicion) y reconvierte la Y almacenada a logica.
 QHash<TileKey, QByteArray> RMapsTileSource::fetchRange(int z,
                                                        int xMin, int xMax,
                                                        int yMin, int yMax)
@@ -206,6 +220,8 @@ QHash<TileKey, QByteArray> RMapsTileSource::fetchRange(int z,
     return out;
 }
 
+// QUE teselas EXISTEN en un rango, SIN traer la imagen (solo x,y). Mas barato que
+// fetchRange; sirve para saber huecos y precargar la "escalera de respaldo".
 QSet<TileKey> RMapsTileSource::available(int z,
                                          int xMin, int xMax,
                                          int yMin, int yMax)
@@ -244,6 +260,8 @@ QSet<TileKey> RMapsTileSource::available(int z,
     return out;
 }
 
+// Cuantas teselas hay guardadas a un zoom (COUNT por z). -1 si error. Lo usan la
+// sonda y las estadisticas de relleno.
 qint64 RMapsTileSource::tileCount(int z)
 {
     if (!m_open && !open())

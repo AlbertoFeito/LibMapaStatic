@@ -16,6 +16,8 @@ TileLoader::TileLoader(QObject *parent)
 
 TileLoader::~TileLoader() = default;
 
+// Marca "la peticion mas nueva": todo lo anterior queda obsoleto. Se llama desde
+// el hilo de la interfaz cuando el usuario se mueve. Atomico y monotono.
 void TileLoader::invalidateBefore(quint64 requestId)
 {
     // Solo avanza; nunca retrocede aunque llegue algo fuera de orden.
@@ -26,11 +28,15 @@ void TileLoader::invalidateBefore(quint64 requestId)
     }
 }
 
+// ¿Esta peticion ya quedo atras (llego una mas nueva)? Si es asi, no vale la pena
+// seguir trabajando en ella.
 bool TileLoader::isStale(quint64 requestId) const
 {
     return requestId < m_newestRequest.loadAcquire();
 }
 
+// Registra los datasets disponibles (solo guarda descriptores; las fuentes/BD se
+// abren perezosamente en el hilo trabajador con sourceFor()).
 void TileLoader::configure(const QVector<TileDataset> &datasets)
 {
     m_datasets.clear();
@@ -46,6 +52,8 @@ void TileLoader::configure(const QVector<TileDataset> &datasets)
                          << m_datasets.size() << "dataset(s)";
 }
 
+// Devuelve (creando y abriendo la primera vez) la fuente de un dataset. Se hace
+// EN ESTE hilo trabajador porque la conexion SQLite pertenece a quien la abre.
 RMapsTileSource *TileLoader::sourceFor(const QString &datasetId)
 {
     auto it = m_sources.find(datasetId);
@@ -69,6 +77,10 @@ RMapsTileSource *TileLoader::sourceFor(const QString &datasetId)
     return source.get();
 }
 
+// Atiende UNA peticion (varias rejillas, de gruesa a fina): lee cada rango de la
+// BD y decodifica las imagenes, emitiendo tilesLoaded por rango. Comprueba a
+// menudo si la peticion quedo obsoleta (isStale) para abandonar cuanto antes si
+// el usuario ya se movio. Corre en el hilo trabajador.
 void TileLoader::load(const TileRequest &request)
 {
     // Comprobacion previa: si el usuario ya movio el mapa, ni se abre la BD.
@@ -163,6 +175,8 @@ void TileLoader::load(const TileRequest &request)
     }
 }
 
+// Suelta fuentes y conexiones del hilo trabajador (al parar el servicio). El
+// orden importa: las QSqlQuery de las fuentes deben morir antes que la conexion.
 void TileLoader::releaseResources()
 {
     // Las fuentes primero: sus QSqlQuery deben morir antes que la conexion.
