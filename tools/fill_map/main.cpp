@@ -413,6 +413,11 @@ private:
         m_filler = filler;
         if (!silencioso) {
             m_running = true;
+            // Sale del modo "seleccionar area": el area ya quedo guardada en
+            // m_no/m_se, y mantener la herramienta activa impediria DESPLAZAR el
+            // mapa durante la descarga (el arrastre dibujaria otro rectangulo).
+            m_mapa->setActiveTool(MapTool::None);
+            m_btnArea->setChecked(false);
             ponerControles(false);
             m_barra->setRange(0, int(qMin<qint64>(total, 1000000)));
             m_barra->setValue(0);
