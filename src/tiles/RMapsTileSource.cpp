@@ -260,6 +260,62 @@ QSet<TileKey> RMapsTileSource::available(int z,
     return out;
 }
 
+// Histograma de cobertura: una sola consulta que, agrupando por la tesela
+// RESUMEN (x>>shift, y>>shift) a un zoom dado, cuenta cuantas teselas hay en cada
+// celda gruesa. El 'shift' se inyecta como literal (es un entero propio, no texto
+// de usuario) para no repetir el mismo parametro con nombre en dos sitios. Las
+// coords salen en almacenamiento (la conversion a y logico la hace el llamador,
+// pues un bloque de 2^shift y almacenadas corresponde al bloque de la celda
+// resumen tanto en XYZ como en TMS).
+QVector<RMapsTileSource::CoverageCell>
+RMapsTileSource::coverageHistogram(int logicalZ, int shift)
+{
+    QVector<CoverageCell> out;
+    if (!m_open && !open())
+        return out;
+    if (!m_ds.zoomInRange(logicalZ))
+        return out;
+    if (shift < 0)
+        shift = 0;
+
+    QSqlDatabase db = SqliteConnectionPool::connectionFor(
+        m_ds.id, m_ds.filePath, SqliteConnectionPool::Mode::ReadOnly);
+    if (!db.isOpen())
+        return out;
+
+    QString sql = QStringLiteral(
+        "SELECT (%1 >> %5) AS bx, (%2 >> %5) AS by, COUNT(*) AS c "
+        "FROM %3 WHERE %4 = :z")
+        .arg(m_ds.colX, m_ds.colY, m_ds.tableName, m_ds.colZ)
+        .arg(shift);
+    if (m_ds.hasSColumn)
+        sql += QStringLiteral(" AND %1 = :s").arg(m_ds.colS);
+    sql += QStringLiteral(" GROUP BY bx, by");
+
+    QSqlQuery q(db);
+    if (!q.prepare(sql)) {
+        m_lastError = q.lastError().text();
+        qCWarning(lcMapaTiles) << "coverageHistogram prepare fallo:" << m_lastError;
+        return out;
+    }
+    q.bindValue(QStringLiteral(":z"), m_ds.storedZ(logicalZ));
+    if (m_ds.hasSColumn)
+        q.bindValue(QStringLiteral(":s"), m_ds.sValue);
+    if (!q.exec()) {
+        m_lastError = q.lastError().text();
+        qCWarning(lcMapaTiles) << "coverageHistogram fallo:" << m_lastError;
+        return out;
+    }
+    while (q.next()) {
+        CoverageCell c;
+        c.bx = q.value(0).toInt();
+        c.by = q.value(1).toInt();
+        c.count = q.value(2).toInt();
+        out.append(c);
+    }
+    return out;
+}
+
 // Cuantas teselas hay guardadas a un zoom (COUNT por z). -1 si error. Lo usan la
 // sonda y las estadisticas de relleno.
 qint64 RMapsTileSource::tileCount(int z)

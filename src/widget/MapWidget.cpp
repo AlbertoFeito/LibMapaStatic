@@ -1,8 +1,11 @@
 #include "libmapa/MapWidget.h"
 
 #include "core/Logging.h"
+#include "geo/TileMatrix.h"
+#include "tiles/RMapsTileSource.h"
 #include "tiles/TileService.h"
 #include "db/VectorRepository.h"
+#include "widget/CoverageLayer.h"
 #include "widget/MapView.h"
 
 #include <QLayout>
@@ -67,6 +70,10 @@ public:
     MapView *view = nullptr;
     QString error;
     bool ready = false;
+
+    // Mancha de cobertura (diagnostico): zoom objetivo y si esta encendida.
+    int coverageZoom = 14;
+    bool coverageVisible = false;
 };
 
 // Construye el widget completo desde la configuracion: carga los datasets del
@@ -747,6 +754,86 @@ void MapWidget::setDebugGridVisible(bool visible)
         d->view->tileLayer()->setDebugGridVisible(visible);
         d->view->refreshPlan();
     }
+}
+
+// Enciende o apaga la mancha de cobertura. Al encenderla recalcula; al apagarla
+// solo oculta la capa y repinta.
+void MapWidget::setCoverageVisible(bool on)
+{
+    d->coverageVisible = on;
+    if (!d->view || !d->view->coverageLayer())
+        return;
+    d->view->coverageLayer()->setVisible(on);
+    if (on)
+        refreshCoverage();
+    else
+        d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+bool MapWidget::isCoverageVisible() const
+{
+    return d->coverageVisible;
+}
+
+// Fija el zoom cuya cobertura se muestra; recomputa solo si la mancha esta a la
+// vista.
+void MapWidget::setCoverageZoom(int targetZoom)
+{
+    d->coverageZoom = targetZoom;
+    if (d->coverageVisible)
+        refreshCoverage();
+}
+
+int MapWidget::coverageZoom() const
+{
+    return d->coverageZoom;
+}
+
+// Vuelve a consultar la BD de la capa activa y rehace la mancha. Agrega la
+// cobertura del zoom objetivo a una rejilla 4 niveles mas gruesa (asi se ve a
+// zoom bajo) y colorea cada celda por su fraccion de teselas presentes. La
+// consulta es solo-lectura, en el hilo de la GUI (conexion propia via el pool,
+// que convive con el hilo trabajador y con TileFiller gracias al busy_timeout).
+void MapWidget::refreshCoverage()
+{
+    if (!d->view || !d->view->coverageLayer())
+        return;
+    CoverageLayer *capa = d->view->coverageLayer();
+
+    const TileDataset *ds = d->service.activeDataset();
+    if (!ds) {
+        capa->clearData();
+        d->view->replot(QCustomPlot::rpQueuedReplot);
+        return;
+    }
+
+    const int zt = qBound(ds->minZoom, d->coverageZoom, ds->maxZoom);
+    const int zs = qBound(ds->minZoom, zt - 4, zt);   // 4 niveles mas grueso
+    const int shift = zt - zs;
+
+    RMapsTileSource src(*ds);
+    if (!src.open()) {
+        capa->clearData();
+        d->view->replot(QCustomPlot::rpQueuedReplot);
+        return;
+    }
+
+    const auto hist = src.coverageHistogram(zt, shift);
+    const double total = double(qint64(1) << (2 * shift));   // 4^shift
+
+    QVector<CoverageLayer::Cell> celdas;
+    celdas.reserve(hist.size());
+    for (const RMapsTileSource::CoverageCell &h : hist) {
+        CoverageLayer::Cell c;
+        c.sx = h.bx;
+        // by esta en coords de almacenamiento; a y logico segun el esquema.
+        c.sy = TileMatrix::fromStorageY(h.by, zs, ds->scheme);
+        c.frac = float(qMin(1.0, double(h.count) / total));
+        celdas.append(c);
+    }
+
+    capa->setData(zt, zs, celdas);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
 }
 
 // Expone la proyeccion lat/lon -> eje (grados de Mercator) por si el cliente

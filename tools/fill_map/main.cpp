@@ -125,6 +125,9 @@ private:
             const QString id = m_capa->currentData().toString();
             m_mapa->setBaseLayerId(id);
             sincronizarZoomDesde();
+            // La cobertura es por capa: si esta visible, recalcular para la nueva.
+            if (m_btnCobertura && m_btnCobertura->isChecked())
+                m_mapa->refreshCoverage();
         });
         tb->addWidget(m_capa);
 
@@ -186,6 +189,40 @@ private:
             m_mapa->setDebugGridVisible(on);
         });
         tb->addWidget(m_btnGrid);
+
+        // Mancha de COBERTURA: capa fija que muestra que zonas del zoom objetivo
+        // ya estan en la BD, coloreadas por completitud (verde = llena). Se ve
+        // aunque estes mirando a un zoom mucho menor. El spin elige ese zoom.
+        m_btnCobertura = new QPushButton(tr("Cobertura"), this);
+        m_btnCobertura->setCheckable(true);
+        m_btnCobertura->setToolTip(tr("Mancha fija con las zonas que ya tienen "
+                                      "teselas del zoom elegido al lado.\n"
+                                      "Verde: celda llena. Ambar: a medias.\n"
+                                      "Visible aunque mires a otro zoom."));
+        connect(m_btnCobertura, &QPushButton::toggled, this, [this](bool on) {
+            m_mapa->setCoverageZoom(m_zCobertura->value());
+            m_mapa->setCoverageVisible(on);
+        });
+        tb->addWidget(m_btnCobertura);
+
+        tb->addWidget(new QLabel(tr(" z:")));
+        m_zCobertura = new QSpinBox(this);
+        m_zCobertura->setRange(0, 22);
+        m_zCobertura->setValue(14);
+        // Por defecto, el zoom maximo recomendado de la capa activa.
+        {
+            const QString id = m_capa->currentData().toString();
+            if (m_datasets.contains(id))
+                m_zCobertura->setValue(
+                    qBound(0, m_datasets.value(id).recommendedMaxZoom, 22));
+        }
+        m_zCobertura->setToolTip(tr("Zoom cuya cobertura se dibuja en la mancha."));
+        connect(m_zCobertura, QOverload<int>::of(&QSpinBox::valueChanged),
+                this, [this](int v) {
+            if (m_btnCobertura->isChecked())
+                m_mapa->setCoverageZoom(v);
+        });
+        tb->addWidget(m_zCobertura);
 
         // Segunda fila: bbox escrito a mano y la fuente (URL).
         QToolBar *tb2 = new QToolBar(tr("Zona / Fuente"), this);
@@ -446,6 +483,10 @@ private:
         connect(filler, &TileFiller::finished, this,
                 [this, filler, nueva, silencioso, p](const TileFiller::Stats &s, bool cancelled) {
             if (!nueva) m_mapa->reloadBaseLayer();
+            // Si la mancha de cobertura esta a la vista, recalcularla: acaba de
+            // cambiar lo que hay en la BD.
+            if (m_btnCobertura && m_btnCobertura->isChecked())
+                m_mapa->refreshCoverage();
             m_filler = nullptr;
 
             if (silencioso) {
@@ -545,6 +586,8 @@ private:
     QPushButton *m_btnNueva = nullptr;
     QPushButton *m_btnAuto = nullptr;
     QPushButton *m_btnGrid = nullptr;
+    QPushButton *m_btnCobertura = nullptr;
+    QSpinBox *m_zCobertura = nullptr;
     QTimer *m_debounce = nullptr;
     bool m_autoOn = false;
     QProgressBar *m_barra = nullptr;

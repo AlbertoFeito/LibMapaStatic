@@ -252,6 +252,22 @@ public:
     void setDebugGridVisible(bool visible);
 
     /*!
+     * \brief Mancha de COBERTURA: que zonas de un zoom OBJETIVO hay ya en la BD.
+     *
+     * Dibuja una capa traslucida FIJA (visible aunque se mire a un zoom menor)
+     * que agrega la cobertura del zoom objetivo a una rejilla gruesa y la colorea
+     * por completitud (ambar = a medias, verde = llena). A diferencia de la
+     * rejilla de depuracion, no depende del zoom actual de la vista.
+     */
+    void setCoverageVisible(bool on);
+    bool isCoverageVisible() const;
+    //! Zoom cuya cobertura se muestra. Recomputa si la mancha esta visible.
+    void setCoverageZoom(int targetZoom);
+    int coverageZoom() const;
+    //! Vuelve a consultar la BD y redibuja la mancha (p.ej. tras una descarga).
+    void refreshCoverage();
+
+    /*!
      * \brief Geografico -> coordenadas de los ejes del QCustomPlot interno.
      *
      * IMPRESCINDIBLE para cualquier overlay dibujado con coordenadas de eje

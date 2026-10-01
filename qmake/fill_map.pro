@@ -53,6 +53,7 @@ SOURCES += \
     $$ROOT/src/widget/OverlayModel.cpp \
     $$ROOT/src/widget/TargetModel.cpp \
     $$ROOT/src/widget/TargetLayer.cpp \
+    $$ROOT/src/widget/CoverageLayer.cpp \
     $$QCP/qcustomplot.cpp
 
 # --- Motor de descarga comun + la app ---------------------------------------
@@ -69,6 +70,7 @@ HEADERS += \
     $$ROOT/src/widget/TargetModel.h \
     $$ROOT/src/widget/TargetLayer.h \
     $$ROOT/src/widget/TileLayer.h \
+    $$ROOT/src/widget/CoverageLayer.h \
     $$ROOT/src/tiles/TileService.h \
     $$ROOT/src/tiles/TileLoader.h \
     $$ROOT/src/db/VectorRepository.h \

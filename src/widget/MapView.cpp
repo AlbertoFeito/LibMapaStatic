@@ -79,6 +79,14 @@ MapView::MapView(TileService *service, QWidget *parent)
     m_targetLayer->setAxisMapper(
         [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
 
+    // Capa de COBERTURA, encima de todo: una mancha de diagnostico (que teselas
+    // de un zoom hay en la BD). Oculta por defecto; la enciende fill_map.
+    addLayer(QStringLiteral("coverage"), layer(QStringLiteral("targets")),
+             QCustomPlot::limAbove);
+    m_coverageLayer = new CoverageLayer(this);
+    m_coverageLayer->setLayer(QStringLiteral("coverage"));
+    m_coverageLayer->setVisible(false);
+
     if (service) {
         connect(service, &TileService::tilesReady,
                 this, &MapView::onTilesReady);

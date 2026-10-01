@@ -9,6 +9,7 @@
 // posible desde int, QString ni QByteArray.
 #include <QVariant>
 #include <QSqlQuery>
+#include <QVector>
 #include <memory>
 
 namespace libmapa {
@@ -61,6 +62,23 @@ public:
                             int yMin, int yMax) override;
 
     qint64 tileCount(int z) override;
+
+    //! Una celda del histograma de cobertura: indices RESUMEN en coordenadas de
+    //! ALMACENAMIENTO (bx, by = x>>shift, y_stored>>shift) y cuantas teselas del
+    //! zoom objetivo hay dentro de esa celda.
+    struct CoverageCell { int bx = 0; int by = 0; int count = 0; };
+
+    /*!
+     * \brief Histograma de cobertura de un zoom, agregado a una rejilla gruesa.
+     *
+     * Para cada celda resumen (de lado 2^shift teselas) cuenta cuantas teselas
+     * del nivel \a logicalZ estan presentes, con UNA sola consulta GROUP BY. Con
+     * shift 0 es por tesela exacta. Sirve para pintar una "mancha de cobertura"
+     * visible a cualquier zoom sin traer un millon de filas. Devuelve las celdas
+     * en coordenadas de almacenamiento; el llamador convierte \a by a y logico
+     * segun el esquema.
+     */
+    QVector<CoverageCell> coverageHistogram(int logicalZ, int shift);
 
     //! Ultimo error registrado, para diagnostico.
     QString lastError() const { return m_lastError; }

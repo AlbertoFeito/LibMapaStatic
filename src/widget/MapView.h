@@ -5,6 +5,7 @@
 
 #include "libmapa/MapTypes.h"
 #include "tiles/TileService.h"
+#include "widget/CoverageLayer.h"
 #include "widget/FeatureLayer.h"
 #include "widget/OverlayModel.h"
 #include "widget/TargetLayer.h"
@@ -45,6 +46,7 @@ public:
     OverlayModel *overlayModel() const { return m_model; }
     TargetModel *targetModel() const { return m_targetModel; }
     TargetLayer *targetLayer() const { return m_targetLayer; }
+    CoverageLayer *coverageLayer() const { return m_coverageLayer; }
 
     QGeoCoordinate center() const;
     void setCenter(const QGeoCoordinate &center);
@@ -174,6 +176,7 @@ private:
     FeatureLayer *m_featureLayer = nullptr;
     TargetModel *m_targetModel = nullptr;
     TargetLayer *m_targetLayer = nullptr;
+    CoverageLayer *m_coverageLayer = nullptr;
 
     int m_zoom = 10;
     QGeoCoordinate m_center{23.1136, -82.3666};
