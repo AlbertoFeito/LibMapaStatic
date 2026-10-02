@@ -21,6 +21,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QElapsedTimer>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -471,6 +472,15 @@ private:
                 ? tr("Navegar: bajando %1/%2  %3 t/s").arg(done).arg(tot).arg(tps, 0, 'f', 1)
                 : tr("%1/%2  %3 t/s  ~%4 min restantes")
                       .arg(done).arg(tot).arg(tps, 0, 'f', 1).arg(restan, 0, 'f', 1));
+            // Si la mancha de cobertura esta visible, se va refrescando sola segun
+            // llegan teselas (limitado a una vez cada ~2.5 s: la consulta es un
+            // GROUP BY y no conviene por cada tesela). El estado exacto final lo
+            // deja el refresco de 'finished'.
+            if (m_btnCobertura && m_btnCobertura->isChecked()
+                && (!m_lastCov.isValid() || m_lastCov.elapsed() > 2500)) {
+                m_lastCov.restart();
+                m_mapa->refreshCoverage();
+            }
         });
         connect(filler, &TileFiller::zoomFinished, this, [this, nueva](int, qint64 added) {
             if (!nueva && added > 0) m_mapa->reloadBaseLayer();
@@ -597,6 +607,7 @@ private:
     bool m_hayArea = false;
     bool m_running = false;
     TileFiller *m_filler = nullptr;
+    QElapsedTimer m_lastCov;   // limita el refresco de la cobertura al descargar
 };
 
 // Punto de entrada de la version con ventana: crea la QApplication, abre la

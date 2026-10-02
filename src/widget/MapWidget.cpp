@@ -808,7 +808,7 @@ void MapWidget::refreshCoverage()
     }
 
     const int zt = qBound(ds->minZoom, d->coverageZoom, ds->maxZoom);
-    const int zs = qBound(ds->minZoom, zt - 4, zt);   // 4 niveles mas grueso
+    const int zs = qBound(ds->minZoom, zt - 3, zt);   // 3 niveles mas grueso
     const int shift = zt - zs;
 
     RMapsTileSource src(*ds);
