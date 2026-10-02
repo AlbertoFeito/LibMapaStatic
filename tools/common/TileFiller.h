@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QGeoCoordinate>
+#include <QHash>
 #include <QObject>
 #include <QPair>
 #include <QSet>
@@ -56,7 +57,10 @@ public:
         int minZoom = 0, maxZoom = 0;
         QString url;                    //!< Plantilla con {z}{x}{y}.
         QByteArray userAgent = "LibMapaStatic-fill/1.0";
-        double rate = 2.0;              //!< Peticiones por segundo.
+        double rate = 2.0;              //!< Lanzamientos por segundo (tope suave).
+        //! Peticiones EN VUELO a la vez (oculta la latencia). El tope de ritmo lo
+        //! sigue marcando 'rate'; para ir mas rapido se sube 'rate'.
+        int connections = 2;
         int retries = 3;
         int timeoutMs = 20000;
         bool overwrite = false;         //!< false = solo lo que falta.
@@ -120,10 +124,21 @@ private:
         qint64 added = 0;
     };
 
-    void pump();                    //!< Lanza la siguiente peticion (o termina).
-    bool advanceCursor();           //!< Coloca el cursor en la siguiente que falta.
-    void onReplyFinished();
-    void insertTile(const QByteArray &image);
+    // Estado de UNA tesela en vuelo (antes era el cursor global). Permite varias
+    // peticiones concurrentes sin que se pisen las coordenadas.
+    struct Pending {
+        int zi = 0;                 // indice de nivel en m_plan
+        int z = 0, storedZ = 0;
+        int x = 0, y = 0;           // indices XYZ logicos
+        int storedY = 0;            // Y de almacenamiento (segun esquema)
+        int attempt = 0;            // reintentos ya hechos de ESTA tesela
+    };
+
+    void schedule();                //!< Lanza peticiones hasta llenar las conexiones.
+    void launch(Pending p);         //!< Crea la peticion HTTP de una tesela.
+    bool nextTile(Pending &out);    //!< Siguiente tesela que falta (avanza cursor).
+    void onReplyDone(QNetworkReply *reply);
+    void insertTile(const Pending &p, const QByteArray &image);
     void finish(bool cancelled);
 
     Params m_p;
@@ -131,25 +146,29 @@ private:
     QSqlDatabase *m_db = nullptr;    // conexion propia (puntero para el .h ligero)
     QSqlQuery *m_ins = nullptr;
     QNetworkAccessManager *m_nam = nullptr;
-    QTimer *m_timeout = nullptr;
-    QNetworkReply *m_reply = nullptr;
+
+    // Peticiones EN VUELO (reply -> su tesela) y cola de reintentos ya listos.
+    QHash<QNetworkReply *, Pending> m_active;
+    QVector<Pending> m_retry;
+    int m_pendingRetries = 0;       // reintentos esperando su backoff (aun no en m_retry)
+    QHash<QNetworkReply *, QTimer *> m_timeouts;   // timeout por peticion
 
     QVector<ZoomPlan> m_plan;
     QVector<QPair<int, qint64>> m_perZoom;   // (zoom, faltan) para el desglose
-    int m_zi = 0;                   // indice de zoom en el plan
+    int m_zi = 0;                   // indice de zoom del cursor
     qint64 m_idxInZoom = 0;         // celda lineal dentro del nivel actual
-    int m_cx = 0, m_cy = 0;         // cursor dentro del nivel (indices XYZ)
-    int m_curStoredY = 0;
-    int m_attempt = 0;              // reintentos de la tesela actual
+    bool m_exhausted = false;       // el cursor ya recorrio todo el plan
     qint64 m_consecFails = 0;       // fallos definitivos SEGUIDOS (auto-freno)
     int m_pauseCount = 0;           // pausas ya hechas (backoff creciente)
+    bool m_paused = false;          // en pausa por auto-freno
 
     qint64 m_total = 0, m_cells = 0, m_done = 0;
     Stats m_stats;
     bool m_running = false;
     bool m_cancelled = false;
     qint64 m_minIntervalMs = 0;
-    QElapsedTimer m_clock;          // para la velocidad media
+    qint64 m_lastLaunchMs = 0;      // ultimo lanzamiento (para el ritmo)
+    QElapsedTimer m_clock;          // para la velocidad media y el ritmo
 };
 
 } // namespace libmapa

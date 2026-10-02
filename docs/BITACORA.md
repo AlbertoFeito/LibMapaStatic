@@ -1975,3 +1975,48 @@ reaprovecha el borrador (líneas, cierre, tiradores) sin tocar el `OverlayModel`
 
 **Estado: 13 tests verdes (con un caso nuevo `pointInPolygonBasic` dentro de
 `tst_tilematrix`), Qt 6.4.**
+
+---
+
+## 37. Acercarnos a SAS.Planet (2/4): descarga en paralelo limitada
+
+`TileFiller` bajaba **una tesela cada vez**: lanzaba una petición y, al volver,
+encadenaba la siguiente. Con la latencia de un servidor remoto eso deja la
+conexión parada entre tesela y tesela. SAS.Planet usa muchos hilos; aquí basta
+con tener **unas pocas peticiones en vuelo a la vez** (sin hilos nuevos: todo en
+el bucle de eventos).
+
+El cambio de fondo fue sacar el estado de "qué tesela" de variables **globales**
+(`m_cx/m_cy/m_curStoredY/m_attempt/m_reply`) a una `struct Pending` **por
+petición**, guardada en `m_active` (`QHash<QNetworkReply*,Pending>`). Así varias
+peticiones conviven sin pisarse las coordenadas.
+
+- `advanceCursor()` → **`nextTile(Pending&)`**: produce la siguiente tesela que
+  falta (cursor global de nivel+celda, con el filtro de polígono/present); marca
+  `m_exhausted` al acabar.
+- `pump()` → **`schedule()`**: mientras no esté cancelado ni en pausa y queden
+  huecos (`m_active.size() < connections`), lanza —de la cola de reintentos
+  primero, si no de `nextTile()`— respetando el **ritmo** (`--rate`, tope de
+  lanzamientos/seg; si es pronto se re-arma solo). `launch()` crea la petición,
+  su timeout propio y la registra.
+- `onReplyDone(reply)`: busca su `Pending`, clasifica igual que antes e **inserta
+  con las coords de esa `Pending`**. Un fallo con reintentos vuelve a la cola tras
+  su backoff (contados en `m_pendingRetries` para no terminar antes de tiempo). El
+  **auto-freno** y las estadísticas son compartidos; al dispararse pone
+  `m_paused` y reanuda tras la pausa. Termina cuando no hay nada en vuelo, ni
+  reintentos, ni cursor.
+
+Decisión de semántica: `--rate` sigue siendo el **tope suave** de lanzamientos
+por segundo (para no abusar de la fuente) y `--conns` (por defecto 2, máx 8) las
+**peticiones simultáneas** que ocultan la latencia. Para ir realmente rápido se
+sube `--rate`; el auto-freno y la **reanudabilidad** quedan intactos.
+
+Verificado end-to-end sobre Esri Clarity: 20/20 teselas con `--conns 3` (progreso
+a ráfagas), 0 al reanudar, y con `--poly` + `--conns 2` el triángulo baja solo 3
+de las 20 del bbox.
+
+En las herramientas: `fill_tiles --conns N` y, en `fill_map`, el selector
+**"Conex"** (1..8).
+
+**Estado: 13 tests verdes; descarga en paralelo verificada contra la fuente
+real, Qt 6.4.**

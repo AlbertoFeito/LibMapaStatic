@@ -170,7 +170,15 @@ private:
         tb->addWidget(new QLabel(tr("  Vel(t/s): ")));
         m_rate = new QDoubleSpinBox(this);
         m_rate->setRange(0.5, 50.0); m_rate->setValue(2.0); m_rate->setDecimals(1);
+        m_rate->setToolTip(tr("Lanzamientos por segundo (tope suave con la fuente)."));
         tb->addWidget(m_rate);
+
+        tb->addWidget(new QLabel(tr("  Conex: ")));
+        m_conns = new QSpinBox(this);
+        m_conns->setRange(1, 8); m_conns->setValue(2);
+        m_conns->setToolTip(tr("Peticiones en vuelo a la vez (oculta la latencia). "
+                               "Para ir mas rapido, sube tambien la velocidad."));
+        tb->addWidget(m_conns);
 
         m_btnRellenar = new QPushButton(tr("Rellenar"), this);
         connect(m_btnRellenar, &QPushButton::clicked, this, &Ventana::alRellenar);
@@ -381,6 +389,7 @@ private:
         p.maxZoom = qMax(m_zDesde->value(), m_zHasta->value());
         p.url = m_url->text().trimmed();
         p.rate = m_rate->value();
+        p.connections = m_conns->value();
 
         ejecutar(p, /*nueva=*/false);
     }
@@ -436,6 +445,7 @@ private:
         p.maxZoom = p.ds.maxZoom;
         p.url = m_url->text().trimmed();
         p.rate = m_rate->value();
+        p.connections = m_conns->value();
 
         ejecutar(p, /*nueva=*/true);
     }
@@ -602,6 +612,7 @@ private:
         p.minZoom = p.maxZoom = m_mapa->zoom();   // solo el zoom actual
         p.url = m_url->text().trimmed();
         p.rate = m_rate->value();
+        p.connections = m_conns->value();
 
         ejecutar(p, /*nueva=*/false, /*silencioso=*/true);
     }
@@ -619,6 +630,7 @@ private:
         m_zDesde->setEnabled(on);
         m_zHasta->setEnabled(on);
         m_rate->setEnabled(on);
+        m_conns->setEnabled(on);
         m_bbox->setEnabled(on);
         m_url->setEnabled(on);
     }
@@ -633,6 +645,7 @@ private:
     QSpinBox *m_zDesde = nullptr;
     QSpinBox *m_zHasta = nullptr;
     QDoubleSpinBox *m_rate = nullptr;
+    QSpinBox *m_conns = nullptr;
     QLineEdit *m_bbox = nullptr;
     QLineEdit *m_url = nullptr;
     QPushButton *m_btnRellenar = nullptr;

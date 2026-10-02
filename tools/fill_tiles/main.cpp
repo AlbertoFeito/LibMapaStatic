@@ -133,6 +133,7 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--minzoom")) minZoom = val().toInt();
         else if (k == QLatin1String("--maxzoom")) maxZoom = val().toInt();
         else if (k == QLatin1String("--rate")) p.rate = val().toDouble();
+        else if (k == QLatin1String("--conns")) p.connections = val().toInt();
         else if (k == QLatin1String("--retries")) p.retries = val().toInt();
         else if (k == QLatin1String("--timeout")) p.timeoutMs = val().toInt();
         else if (k == QLatin1String("--user-agent")) p.userAgent = val().toUtf8();
@@ -157,7 +158,8 @@ int main(int argc, char *argv[])
                   "        --poly \"lat,lon;lat,lon;lat,lon[;...]\" (solo baja dentro del poligono)\n"
                   "  Comun: [--url \"...{z}/{y}/{x}...\"] (def. Esri Clarity, sin clave)\n"
                   "         [--only-missing (def) | --overwrite]\n"
-                  "         [--rate 2] [--retries 3] [--timeout 20000] [--yes]\n\n"
+                  "         [--rate 2] [--conns 2] [--retries 3] [--timeout 20000] [--yes]\n"
+                  "         (--rate = lanzamientos/seg; --conns = peticiones en vuelo a la vez)\n\n"
                   "AVISO: respeta los terminos de uso de la fuente que utilices.\n";
         return 2;
     }

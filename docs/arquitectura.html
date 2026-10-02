@@ -442,7 +442,8 @@ exactamente donde el mapa la espera.</div>
 <tr><td>--poly "lat,lon;lat,lon;…"</td><td>Polígono (≥3 vértices): solo baja las teselas cuyo centro cae dentro. Alternativa a --bbox.</td></tr>
 <tr><td>--minzoom / --maxzoom</td><td>Rango de zoom.</td></tr>
 <tr><td>--url</td><td>Fuente XYZ (por defecto Esri «Clarity», sin clave).</td></tr>
-<tr><td>--rate / --retries / --timeout</td><td>Ritmo (teselas/seg), reintentos, espera por tesela.</td></tr>
+<tr><td>--rate / --conns</td><td>Ritmo (lanzamientos/seg, tope suave) y peticiones en vuelo a la vez (1..8, def. 2).</td></tr>
+<tr><td>--retries / --timeout</td><td>Reintentos por tesela y espera máxima por petición.</td></tr>
 <tr><td>--overwrite / --only-missing</td><td>Rebajar todo / (def.) solo lo que falta.</td></tr>
 <tr><td>--yes</td><td>No preguntar confirmación.</td></tr>
 </table>
@@ -498,7 +499,7 @@ probada— sirve para la consola y para la ventana con barra de progreso viva.</
 <tr><td class="mono">signal throttling(seg, racha)</td><td><b>Auto-freno</b>: la fuente limita; pausa <code>seg</code> y reanuda.</td></tr>
 <tr><td class="mono">signal message / finished</td><td>Motivo real de un fallo / fin con estadísticas.</td></tr>
 </table>
-<p><b>Propiedades clave:</b> <span class="tag">reanudable</span> solo baja lo que falta (se corta y se relanza sin repetir); <span class="tag">codificación exacta</span> inserta con <code>storedZ</code>/Y/s de la base; <span class="tag">auto-freno</span> pausa con backoff creciente (30→60→120…→300&nbsp;s) ante rachas de fallos y reanuda al primer éxito; <span class="tag">busy_timeout</span> convive con el mapa leyendo la misma BD.</p>
+<p><b>Propiedades clave:</b> <span class="tag">reanudable</span> solo baja lo que falta (se corta y se relanza sin repetir); <span class="tag">paralelo</span> hasta <code>connections</code> peticiones en vuelo a la vez (cada una con su <code>Pending</code> y su timeout), con <code>rate</code> como tope de lanzamientos/seg; <span class="tag">codificación exacta</span> inserta con <code>storedZ</code>/Y/s de la base; <span class="tag">polígono</span> descarta las teselas con centro fuera; <span class="tag">auto-freno</span> pausa con backoff creciente (30→60→120…→300&nbsp;s) ante rachas de fallos y reanuda al primer éxito; <span class="tag">busy_timeout</span> convive con el mapa leyendo la misma BD.</p>
 
 <!-- ===================== 13. DECISIONES ===================== -->
 <h2 class="sec">13 · Decisiones de diseño e historia</h2>

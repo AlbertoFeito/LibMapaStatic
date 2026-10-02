@@ -36,15 +36,19 @@ TileFiller::TileFiller(QObject *parent)
 {
 }
 
-// Cierra ordenadamente: aborta la peticion en vuelo, destruye la consulta de
-// insercion (una QSqlQuery debe morir antes que su conexion) y cierra/da de baja
-// la conexion SQLite propia de esta instancia.
+// Cierra ordenadamente: aborta todas las peticiones en vuelo y sus timeouts,
+// destruye la consulta de insercion (una QSqlQuery debe morir antes que su
+// conexion) y cierra/da de baja la conexion SQLite propia de esta instancia.
 TileFiller::~TileFiller()
 {
-    if (m_reply) {
-        m_reply->abort();
-        m_reply->deleteLater();
+    for (auto it = m_active.constBegin(); it != m_active.constEnd(); ++it) {
+        it.key()->abort();
+        it.key()->deleteLater();
     }
+    m_active.clear();
+    for (QTimer *t : m_timeouts)
+        t->deleteLater();
+    m_timeouts.clear();
     delete m_ins;
     if (m_db) {
         const QString name = m_connName;
@@ -213,10 +217,15 @@ void TileFiller::start()
         return;
     m_running = true;
     m_cancelled = false;
+    m_paused = false;
+    m_exhausted = false;
     m_done = 0;
     m_zi = 0;
-    m_attempt = 0;
+    m_idxInZoom = 0;
     m_stats = Stats{};
+    m_active.clear();
+    m_retry.clear();
+    m_pendingRetries = 0;
     m_minIntervalMs = m_p.rate > 0 ? qint64(1000.0 / m_p.rate) : 0;
 
     m_nam = new QNetworkAccessManager(this);
@@ -230,44 +239,40 @@ void TileFiller::start()
     m_ins = new QSqlQuery(*m_db);
     m_ins->prepare(sql);
 
-    // m_zcursor: empezamos ANTES del primer nivel; pump() busca la primera que
-    // falta y lanza su peticion.
-    // m_idx se reinicia por nivel dentro de advanceCursor().
-    m_idxInZoom = 0;
     m_clock.start();
+    m_lastLaunchMs = -m_minIntervalMs;   // para que el primer lanzamiento sea ya
 
     if (m_total == 0) {
         finish(false);
         return;
     }
-    // Buscar la primera y lanzar.
-    if (!advanceCursor())
-        finish(false);
-    else
-        pump();
+    // schedule() va llenando las conexiones; el resto lo encadena onReplyDone.
+    schedule();
 }
 
-// Solicita la cancelacion: marca la bandera y aborta la peticion en vuelo. El
-// finished(cancelled=true) lo emite onReplyFinished al recoger el abort, o aqui
-// mismo si no habia ninguna peticion en curso.
+// Solicita la cancelacion: marca la bandera y aborta TODAS las peticiones en
+// vuelo. El finished(cancelled=true) lo emite onReplyDone cuando la ultima recoge
+// su abort; si no habia ninguna en curso, se cierra aqui mismo.
 void TileFiller::cancel()
 {
     if (!m_running)
         return;
     m_cancelled = true;
-    if (m_reply)
-        m_reply->abort();
-    // finish se emitira desde onReplyFinished (por el abort) o aqui si no hay
-    // peticion en vuelo.
-    if (!m_reply)
+    if (m_active.isEmpty()) {
         finish(true);
+        return;
+    }
+    const auto replies = m_active.keys();   // copia: abort() dispara onReplyDone
+    for (QNetworkReply *r : replies)
+        r->abort();
 }
 
-// Avanza el cursor a la siguiente tesela que hay que descargar, saltando las que
-// ya existen (salvo overwrite) y recorriendo los niveles en orden. Al terminar un
-// nivel emite zoomFinished. Devuelve true si dejo el cursor sobre una tesela
-// pendiente, o false si ya no queda ninguna (fin del plan).
-bool TileFiller::advanceCursor()
+// Rellena 'out' con la siguiente tesela que hay que descargar, avanzando el
+// cursor global (nivel + celda) y saltando las que ya existen (salvo overwrite) o
+// caen fuera del poligono. Al pasar de nivel emite zoomFinished (puede quedar
+// alguna de ese nivel en vuelo: es una pista de progreso). Devuelve false y marca
+// m_exhausted cuando no queda ninguna.
+bool TileFiller::nextTile(Pending &out)
 {
     while (m_zi < m_plan.size()) {
         ZoomPlan &zp = m_plan[m_zi];
@@ -287,8 +292,8 @@ bool TileFiller::advanceCursor()
             }
             const int sy = TileMatrix::toStorageY(y, zp.z, m_p.ds.scheme);
             if (m_p.overwrite || !zp.present.contains(qMakePair(x, sy))) {
-                m_cx = x; m_cy = y; m_curStoredY = sy;
-                m_attempt = 0;
+                out.zi = m_zi; out.z = zp.z; out.storedZ = zp.storedZ;
+                out.x = x; out.y = y; out.storedY = sy; out.attempt = 0;
                 return true;
             }
         }
@@ -297,39 +302,75 @@ bool TileFiller::advanceCursor()
         ++m_zi;
         m_idxInZoom = 0;
     }
+    m_exhausted = true;
     return false;
 }
 
-// Lanza la peticion HTTP de la tesela sobre la que esta el cursor: construye la
-// URL desde la plantilla, fija el User-Agent y arma un temporizador de timeout que
-// aborta la respuesta si tarda demasiado. La respuesta la recoge onReplyFinished.
-void TileFiller::pump()
+// Motor de lanzamiento: mientras no este cancelado ni en pausa y haya hueco de
+// conexion, lanza la siguiente tesela -primero de la cola de reintentos, si no la
+// que da nextTile()- respetando el ritmo minimo entre lanzamientos (si es pronto,
+// se re-arma solo). Cuando no queda nada en vuelo ni pendiente, termina.
+void TileFiller::schedule()
 {
+    if (!m_running)
+        return;   // ya termino: ignora timers tardios (reintentos, ritmo)
     if (m_cancelled) {
-        finish(true);
+        if (m_active.isEmpty())
+            finish(true);
         return;
     }
-    // Lanza la peticion de la tesela actual (m_zi, m_cx, m_cy).
-    const ZoomPlan &zp = m_plan[m_zi];
-    const QUrl u(buildUrl(m_p.url, zp.z, m_cx, m_cy));
+    if (m_paused)
+        return;   // la reanudacion del auto-freno volvera a llamar
 
+    const int conns = qBound(1, m_p.connections, 8);
+    while (m_active.size() < conns) {
+        // Ritmo: no lanzar antes de que pase el intervalo minimo.
+        if (m_minIntervalMs > 0) {
+            const qint64 since = m_clock.elapsed() - m_lastLaunchMs;
+            if (since < m_minIntervalMs) {
+                QTimer::singleShot(int(m_minIntervalMs - since) + 1, this,
+                                   [this] { schedule(); });
+                return;
+            }
+        }
+        Pending p;
+        if (!m_retry.isEmpty())
+            p = m_retry.takeFirst();
+        else if (!nextTile(p))
+            break;                      // no queda nada que lanzar ahora mismo
+        m_lastLaunchMs = m_clock.elapsed();
+        launch(p);
+    }
+
+    // Fin: ni en vuelo, ni reintentos (ni en espera de backoff), y cursor agotado.
+    if (m_active.isEmpty() && m_retry.isEmpty() && m_pendingRetries == 0
+        && m_exhausted)
+        finish(false);
+}
+
+// Lanza la peticion HTTP de una tesela: construye la URL, fija el User-Agent, la
+// registra en m_active y le arma su propio temporizador de timeout (que la aborta
+// si tarda demasiado). La respuesta la recoge onReplyDone.
+void TileFiller::launch(Pending p)
+{
+    const QUrl u(buildUrl(m_p.url, p.z, p.x, p.y));
     QNetworkRequest req(u);
     req.setHeader(QNetworkRequest::UserAgentHeader, m_p.userAgent);
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     req.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
 #endif
 
-    m_reply = m_nam->get(req);
-    connect(m_reply, &QNetworkReply::finished, this, &TileFiller::onReplyFinished);
+    QNetworkReply *reply = m_nam->get(req);
+    m_active.insert(reply, p);
 
-    if (!m_timeout) {
-        m_timeout = new QTimer(this);
-        m_timeout->setSingleShot(true);
-        connect(m_timeout, &QTimer::timeout, this, [this] {
-            if (m_reply) m_reply->abort();   // dispara finished con error
-        });
-    }
-    m_timeout->start(m_p.timeoutMs);
+    QTimer *to = new QTimer(this);
+    to->setSingleShot(true);
+    connect(to, &QTimer::timeout, this, [reply] { reply->abort(); });
+    to->start(m_p.timeoutMs);
+    m_timeouts.insert(reply, to);
+
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply] { onReplyDone(reply); });
 }
 
 // Corazon del bucle: procesa la respuesta de una tesela y programa la siguiente
@@ -340,15 +381,19 @@ void TileFiller::pump()
 // seguidos, la fuente esta limitando: pausa con backoff creciente y reanuda) y, con
 // un temporizador que respeta la tasa, avanza el cursor y vuelve a pump() -o
 // termina si ya no queda nada-.
-void TileFiller::onReplyFinished()
+void TileFiller::onReplyDone(QNetworkReply *reply)
 {
-    if (!m_reply)
+    auto it = m_active.find(reply);
+    if (it == m_active.end()) {    // ya no estaba (p.ej. tras cancelar): limpiar
+        reply->deleteLater();
         return;
-    if (m_timeout)
-        m_timeout->stop();
-
-    QNetworkReply *reply = m_reply;
-    m_reply = nullptr;
+    }
+    const Pending p = it.value();
+    m_active.erase(it);
+    if (QTimer *to = m_timeouts.take(reply)) {
+        to->stop();
+        to->deleteLater();
+    }
 
     const int status =
         reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -363,7 +408,8 @@ void TileFiller::onReplyFinished()
     reply->deleteLater();
 
     if (m_cancelled) {
-        finish(true);
+        if (m_active.isEmpty())
+            finish(true);
         return;
     }
 
@@ -378,77 +424,79 @@ void TileFiller::onReplyFinished()
     else
         res = Ok;
 
-    bool consume = true;   // ¿pasamos a la siguiente tesela?
+    bool done = true;   // ¿la tesela queda resuelta (no se reintenta)?
 
     if (res == Ok) {
-        insertTile(body);
+        insertTile(p, body);
         ++m_stats.downloaded;
-        if (m_zi < m_plan.size())
-            ++m_plan[m_zi].added;
+        if (p.zi < m_plan.size())
+            ++m_plan[p.zi].added;
         m_consecFails = 0;   // la fuente responde bien: racha rota
         m_pauseCount = 0;    // y recuperada: reinicia el backoff de pausas
     } else if (res == NotFound) {
         ++m_stats.notFound;
         m_consecFails = 0;   // 404 = el servidor SI responde, no es limite
     } else {  // Failed
-        if (m_attempt < m_p.retries) {
-            ++m_attempt;
-            consume = false;   // reintentar la MISMA con backoff
+        if (p.attempt < m_p.retries) {
+            done = false;    // reintentar ESTA misma tesela con backoff
+            Pending r = p;
+            r.attempt = p.attempt + 1;
             emit message(QStringLiteral("reintento %1 z%2 x%3 y%4: %5")
-                             .arg(m_attempt).arg(m_plan[m_zi].z)
-                             .arg(m_cx).arg(m_cy).arg(errStr));
+                             .arg(r.attempt).arg(p.z).arg(p.x).arg(p.y).arg(errStr));
+            const int backoff = 300 * r.attempt;
+            ++m_pendingRetries;
+            QTimer::singleShot(backoff, this, [this, r] {
+                --m_pendingRetries;
+                if (m_cancelled || !m_running) return;
+                m_retry.append(r);
+                schedule();
+            });
         } else {
             ++m_stats.failed;
             ++m_consecFails;   // fallo definitivo: cuenta para el auto-freno
             emit message(QStringLiteral("fallo z%1 x%2 y%3: %4")
-                             .arg(m_plan[m_zi].z).arg(m_cx).arg(m_cy).arg(errStr));
+                             .arg(p.z).arg(p.x).arg(p.y).arg(errStr));
         }
     }
 
-    if (consume) {
+    if (done) {
         ++m_done;
         const double secs = double(m_clock.elapsed()) / 1000.0;
         const double tps = secs > 0 ? double(m_stats.downloaded) / secs : 0.0;
         emit progress(m_done, m_total, tps);
     }
 
-    // Programa la siguiente accion respetando el ritmo (o backoff si reintenta).
-    int delay = int(m_minIntervalMs);
-    if (!consume)
-        delay = 300 * m_attempt;   // backoff creciente del reintento
-
     // Auto-freno: si se acumulan fallos SEGUIDOS, la fuente nos esta limitando.
-    // Pausa (con backoff creciente) y reanuda; asi no gira en vano ni insiste
-    // hasta que nos bloqueen del todo.
-    if (consume && m_p.throttleAfter > 0 && m_consecFails >= m_p.throttleAfter) {
+    // Deja de lanzar, pausa (con backoff creciente) y reanuda; asi no gira en
+    // vano ni insiste hasta que nos bloqueen del todo.
+    if (m_p.throttleAfter > 0 && m_consecFails >= m_p.throttleAfter && !m_paused) {
         int pauseSec = 30;
-        for (int i = 0; i < m_pauseCount; ++i) pauseSec = qMin(m_p.maxPauseSec, pauseSec * 2);
+        for (int i = 0; i < m_pauseCount; ++i)
+            pauseSec = qMin(m_p.maxPauseSec, pauseSec * 2);
         pauseSec = qMin(pauseSec, m_p.maxPauseSec);
         ++m_pauseCount;
         const qint64 rachaPrevia = m_consecFails;
         m_consecFails = 0;         // se le da otra oportunidad tras la pausa
+        m_paused = true;
         emit throttling(pauseSec, rachaPrevia);
-        delay = pauseSec * 1000;
+        QTimer::singleShot(pauseSec * 1000, this, [this] {
+            m_paused = false;
+            schedule();
+        });
     }
 
-    QTimer::singleShot(delay, this, [this, consume] {
-        if (m_cancelled) { finish(true); return; }
-        if (consume) {
-            if (!advanceCursor()) { finish(false); return; }
-        }
-        pump();
-    });
+    schedule();   // rellena el hueco que acaba de quedar libre (o termina)
 }
 
 // Inserta el BLOB de una tesela con la codificacion del dataset: x logico, Y de
 // ALMACENAMIENTO (ya convertida por el esquema), z guardado (zFactor/zOffset) y s
 // si corresponde. Si el INSERT falla, revierte el contador de descargadas y lo
 // cuenta como fallo.
-void TileFiller::insertTile(const QByteArray &image)
+void TileFiller::insertTile(const Pending &p, const QByteArray &image)
 {
-    m_ins->bindValue(QStringLiteral(":x"), m_cx);
-    m_ins->bindValue(QStringLiteral(":y"), m_curStoredY);
-    m_ins->bindValue(QStringLiteral(":z"), m_plan[m_zi].storedZ);
+    m_ins->bindValue(QStringLiteral(":x"), p.x);
+    m_ins->bindValue(QStringLiteral(":y"), p.storedY);
+    m_ins->bindValue(QStringLiteral(":z"), p.storedZ);
     if (m_p.ds.hasSColumn)
         m_ins->bindValue(QStringLiteral(":s"), m_p.ds.sValue);
     m_ins->bindValue(QStringLiteral(":img"), image);
