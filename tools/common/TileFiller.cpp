@@ -1,5 +1,6 @@
 #include "TileFiller.h"
 
+#include "geo/GeoMath.h"
 #include "geo/TileMatrix.h"
 
 #include <QNetworkAccessManager>
@@ -107,6 +108,18 @@ bool TileFiller::prepare(const Params &params, QString *error)
     m_total = 0;
     m_cells = 0;
 
+    // Con poligono, el rectangulo de barrido es su bounding box; luego se filtra
+    // tesela a tesela por centro dentro del poligono.
+    const bool usaPoly = m_p.polygon.size() >= 3;
+    if (usaPoly) {
+        double laN = -90, laS = 90, loW = 180, loE = -180;
+        for (const QGeoCoordinate &c : m_p.polygon) {
+            laN = std::max(laN, c.latitude());  laS = std::min(laS, c.latitude());
+            loW = std::min(loW, c.longitude()); loE = std::max(loE, c.longitude());
+        }
+        m_p.latN = laN; m_p.latS = laS; m_p.lonW = loW; m_p.lonE = loE;
+    }
+
     for (int z = m_p.minZoom; z <= m_p.maxZoom; ++z) {
         const int n = TileMatrix::tilesPerSide(z);
         int x0 = int(std::floor(TileMatrix::longitudeToTileX(m_p.lonW, z)));
@@ -128,9 +141,8 @@ bool TileFiller::prepare(const Params &params, QString *error)
         const int syMin = std::min(sy0, sy1);
         const int syMax = std::max(sy0, sy1);
 
-        const qint64 celdas = qint64(x1 - x0 + 1) * qint64(y1 - y0 + 1);
-        qint64 faltan = celdas;
-
+        // Carga las teselas ya presentes del rectangulo (en coords de
+        // almacenamiento x, storedY) salvo en modo overwrite.
         if (!m_p.overwrite) {
             QString sql = QStringLiteral(
                 "SELECT %1,%2 FROM %3 WHERE %4=:z AND %1 BETWEEN :x0 AND :x1 "
@@ -152,8 +164,32 @@ bool TileFiller::prepare(const Params &params, QString *error)
                     zp.present.insert(qMakePair(q.value(0).toInt(),
                                                 q.value(1).toInt()));
             }
-            faltan = celdas - zp.present.size();
-            if (faltan < 0) faltan = 0;
+        }
+
+        // Teselas de la zona y cuantas faltan. Sin poligono es aritmetica directa
+        // (todo el rectangulo); con poligono hay que recorrer y contar solo las
+        // teselas cuyo centro cae dentro.
+        qint64 celdas, faltan;
+        if (!usaPoly) {
+            celdas = qint64(x1 - x0 + 1) * qint64(y1 - y0 + 1);
+            faltan = m_p.overwrite ? celdas
+                                   : qMax<qint64>(0, celdas - zp.present.size());
+        } else {
+            celdas = 0;
+            faltan = 0;
+            for (int x = x0; x <= x1; ++x) {
+                for (int y = y0; y <= y1; ++y) {
+                    const double clon = TileMatrix::tileXToLongitude(x + 0.5, z);
+                    const double clat = TileMatrix::tileYToLatitude(y + 0.5, z);
+                    if (!GeoMath::pointInPolygon(clon, clat, m_p.polygon))
+                        continue;
+                    ++celdas;
+                    if (m_p.overwrite) { ++faltan; continue; }
+                    const int sy = TileMatrix::toStorageY(y, z, ds.scheme);
+                    if (!zp.present.contains(qMakePair(x, sy)))
+                        ++faltan;
+                }
+            }
         }
 
         m_plan.append(zp);
@@ -237,10 +273,18 @@ bool TileFiller::advanceCursor()
         ZoomPlan &zp = m_plan[m_zi];
         const qint64 w = zp.x1 - zp.x0 + 1;
         const qint64 h = zp.y1 - zp.y0 + 1;
+        const bool usaPoly = m_p.polygon.size() >= 3;
         while (m_idxInZoom < w * h) {
             const qint64 i = m_idxInZoom++;
             const int x = zp.x0 + int(i / h);
             const int y = zp.y0 + int(i % h);
+            // Con poligono, solo valen las teselas cuyo centro cae dentro.
+            if (usaPoly) {
+                const double clon = TileMatrix::tileXToLongitude(x + 0.5, zp.z);
+                const double clat = TileMatrix::tileYToLatitude(y + 0.5, zp.z);
+                if (!GeoMath::pointInPolygon(clon, clat, m_p.polygon))
+                    continue;
+            }
             const int sy = TileMatrix::toStorageY(y, zp.z, m_p.ds.scheme);
             if (m_p.overwrite || !zp.present.contains(qMakePair(x, sy))) {
                 m_cx = x; m_cy = y; m_curStoredY = sy;

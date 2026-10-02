@@ -23,6 +23,9 @@ enum class MapTool {
     AreaZoom,      //!< Ampliar arrastrando un rectangulo.
     SelectArea,    //!< Marcar un rectangulo SIN hacer zoom: emite areaSelected
                    //!< y deja el recuadro visible (para rellenar teselas, etc.).
+    SelectPolygon, //!< Marcar un POLIGONO clic a clic (doble clic / Enter lo
+                   //!< cierra): emite polygonSelected y deja el contorno visible,
+                   //!< para rellenar solo esa zona.
     PickPoint,     //!< Devolver la coordenada del siguiente clic.
 
     // --- Creacion de entidades -------------------------------------------

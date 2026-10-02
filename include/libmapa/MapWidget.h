@@ -310,6 +310,8 @@ signals:
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);
+    //! Poligono cerrado con la herramienta SelectPolygon.
+    void polygonSelected(const QVector<QGeoCoordinate> &polygon);
     void pointPicked(const QGeoCoordinate &position);
     void errorOccurred(const QString &message);
 

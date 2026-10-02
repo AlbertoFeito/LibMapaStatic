@@ -2,6 +2,7 @@
 #define LIBMAPA_GEO_GEOMATH_H_
 
 #include <QGeoCoordinate>
+#include <QVector>
 
 namespace libmapa {
 
@@ -35,6 +36,28 @@ inline double azimuthDegrees(const QGeoCoordinate &a, const QGeoCoordinate &b)
     while (az < 0.0)    az += 360.0;
     while (az >= 360.0) az -= 360.0;
     return az;
+}
+
+//! ¿El punto (lon, lat) cae dentro del poligono? Ray-casting clasico sobre las
+//! coordenadas geograficas (lon en X, lat en Y). Suficiente para decidir que
+//! teselas descargar en areas del tamano de un pais; no corrige la distorsion
+//! de la proyeccion. Con menos de 3 vertices no hay poligono: devuelve true.
+inline bool pointInPolygon(double lon, double lat,
+                           const QVector<QGeoCoordinate> &poly)
+{
+    const int n = poly.size();
+    if (n < 3)
+        return true;
+    bool dentro = false;
+    for (int i = 0, j = n - 1; i < n; j = i++) {
+        const double xi = poly[i].longitude(), yi = poly[i].latitude();
+        const double xj = poly[j].longitude(), yj = poly[j].latitude();
+        const bool cruza = ((yi > lat) != (yj > lat))
+            && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+        if (cruza)
+            dentro = !dentro;
+    }
+    return dentro;
 }
 
 } // namespace GeoMath

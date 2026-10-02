@@ -481,6 +481,7 @@ bool MapView::cancelDrawing()
     if (!m_drafting)
         return false;
     m_drafting = false;
+    m_draftIsSelection = false;
     m_draft = MapFeature();
     m_featureLayer->setDraft(nullptr);
     emit drawingCancelled();
@@ -495,6 +496,24 @@ qint64 MapView::finishDrawing()
 {
     if (!m_drafting)
         return -1;
+
+    // Caso SELECCION de poligono: no crea entidad. Emite el poligono y deja el
+    // contorno dibujado (sin linea de goma) como marca de la zona elegida.
+    if (m_draftIsSelection) {
+        m_drafting = false;
+        const QVector<QGeoCoordinate> poly = m_draft.geometry;
+        if (poly.size() < 3) {               // poligono degenerado: se descarta
+            m_draftIsSelection = false;
+            m_draft = MapFeature();
+            m_featureLayer->setDraft(nullptr);
+            emit drawingCancelled();
+            return -1;
+        }
+        m_featureLayer->setDraftCursor(QPoint(), false);  // apaga la goma
+        m_featureLayer->setDraft(&m_draft);               // deja el contorno
+        emit polygonSelected(poly);
+        return -1;                                        // no hay id de entidad
+    }
 
     MapFeature f = m_draft;
     m_drafting = false;
@@ -664,6 +683,7 @@ void MapView::mousePressEvent(QMouseEvent *event)
         case MapTool::DrawPolygon:
             if (!m_drafting) {
                 m_drafting = true;
+                m_draftIsSelection = false;
                 m_draft = MapFeature();
                 m_draft.kind = (m_tool == MapTool::DrawPolygon)
                                    ? GeometryKind::Polygon
@@ -671,6 +691,23 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 m_draft.layerId = m_activeLayer;
                 m_draft.type = m_draftType;
                 m_draft.style = m_draftStyle;
+            }
+            m_draft.geometry.append(coordinateAt(event->pos()));
+            m_featureLayer->setDraft(&m_draft);
+            break;
+
+        case MapTool::SelectPolygon:
+            // Igual que dibujar un poligono, pero es una SELECCION transitoria:
+            // no crea entidad. Reusa el borrador de FeatureLayer para la linea
+            // de goma; doble clic / Enter / clic derecho lo cierra (finishDrawing
+            // detecta m_draftIsSelection y emite polygonSelected).
+            if (!m_drafting) {
+                m_drafting = true;
+                m_draftIsSelection = true;
+                m_draft = MapFeature();
+                m_draft.kind = GeometryKind::Polygon;
+                m_draft.style.lineColor = QColor(0, 0, 0);
+                m_draft.style.lineWidth = 2;
             }
             m_draft.geometry.append(coordinateAt(event->pos()));
             m_featureLayer->setDraft(&m_draft);
@@ -872,6 +909,15 @@ void MapView::setActiveTool(MapTool tool)
     m_editVertex = -1;
     m_movingFeature = false;
     m_lastEditPos = QGeoCoordinate();
+
+    // Un poligono de seleccion YA cerrado queda como borrador visible (no estaba
+    // "en curso", asi que cancelDrawing no lo toca): se limpia aqui al cambiar de
+    // herramienta, igual que el recuadro de SelectArea.
+    if (m_draftIsSelection) {
+        m_draftIsSelection = false;
+        m_draft = MapFeature();
+        if (m_featureLayer) m_featureLayer->setDraft(nullptr);
+    }
 
     m_tool = tool;
     m_toolFirstPointSet = false;

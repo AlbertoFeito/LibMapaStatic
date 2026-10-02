@@ -331,6 +331,10 @@ void FeatureLayer::drawDraft(QPainter *painter) const
         painter->drawLine(poly.last(), QPointF(m_draftCursor));
         if (m_draft.kind == GeometryKind::Polygon && poly.size() >= 2)
             painter->drawLine(QPointF(m_draftCursor), poly.first());
+    } else if (m_draft.kind == GeometryKind::Polygon && poly.size() >= 3) {
+        // Sin linea de goma (borrador en reposo o seleccion ya cerrada): se
+        // cierra el poligono dibujando el lado ultimo->primero.
+        painter->drawLine(poly.last(), poly.first());
     }
 
     // Los vertices ya puestos, como tiradores.

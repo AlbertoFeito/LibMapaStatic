@@ -132,6 +132,8 @@ signals:
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);
+    //! Poligono cerrado con la herramienta SelectPolygon (vertices en orden).
+    void polygonSelected(const QVector<QGeoCoordinate> &polygon);
     void pointPicked(const QGeoCoordinate &position);
 
 protected:
@@ -198,6 +200,9 @@ private:
 
     MapFeature m_draft;
     bool m_drafting = false;
+    //! El borrador actual es un POLIGONO DE SELECCION (SelectPolygon), no una
+    //! entidad: al cerrarlo se emite polygonSelected y no se crea nada.
+    bool m_draftIsSelection = false;
 
     //! Vertice que se esta arrastrando, o -1.
     int m_editVertex = -1;

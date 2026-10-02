@@ -31,6 +31,7 @@
 #include <QJsonObject>
 #include <QNetworkProxyFactory>
 #include <QSslSocket>
+#include <QGeoCoordinate>
 #include <QStringList>
 #include <QTextStream>
 #include <QTimer>
@@ -106,7 +107,7 @@ int main(int argc, char *argv[])
                   "(OpenSSL 3, 64-bit) junto al .exe o en el PATH.\n";
     }
 
-    QString datasetsPath, id, bbox, newFile, name;
+    QString datasetsPath, id, bbox, poly, newFile, name;
     TileFiller::Params p;
     // Por defecto Esri "Clarity": misma imagen satelital sin clave, pero mas
     // clara y viva que la "World_Imagery" normal -casa mejor con las bases de
@@ -127,6 +128,7 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--new")) newFile = val();
         else if (k == QLatin1String("--name")) name = val();
         else if (k == QLatin1String("--bbox")) bbox = val();
+        else if (k == QLatin1String("--poly")) poly = val();
         else if (k == QLatin1String("--url")) p.url = val();
         else if (k == QLatin1String("--minzoom")) minZoom = val().toInt();
         else if (k == QLatin1String("--maxzoom")) maxZoom = val().toInt();
@@ -141,7 +143,8 @@ int main(int argc, char *argv[])
     }
 
     const bool modoNuevo = !newFile.isEmpty();
-    const bool faltanArgs = bbox.isEmpty()
+    // Hace falta zona (bbox O poly) y, si no es base nueva, datasets+id.
+    const bool faltanArgs = (bbox.isEmpty() && poly.isEmpty())
         || (modoNuevo ? false : (datasetsPath.isEmpty() || id.isEmpty()));
     if (faltanArgs) {
         cout() << "Uso (rellenar una base existente):\n"
@@ -150,6 +153,8 @@ int main(int argc, char *argv[])
                   "Uso (crear una base NUEVA, toda de la fuente elegida):\n"
                   "  fill_tiles --new Cuba_Clarity.sqlitedb [--id clarity] [--name \"...\"] \\\n"
                   "             --bbox latN,lonO,latS,lonE --minzoom 0 --maxzoom 18\n\n"
+                  "  Zona: --bbox latN,lonO,latS,lonE  o bien\n"
+                  "        --poly \"lat,lon;lat,lon;lat,lon[;...]\" (solo baja dentro del poligono)\n"
                   "  Comun: [--url \"...{z}/{y}/{x}...\"] (def. Esri Clarity, sin clave)\n"
                   "         [--only-missing (def) | --overwrite]\n"
                   "         [--rate 2] [--retries 3] [--timeout 20000] [--yes]\n\n"
@@ -157,12 +162,24 @@ int main(int argc, char *argv[])
         return 2;
     }
 
-    const QStringList bp = bbox.split(QLatin1Char(','));
-    if (bp.size() != 4) { cerr() << "bbox debe ser latN,lonO,latS,lonE\n"; return 2; }
-    p.latN = bp.at(0).trimmed().toDouble();
-    p.lonW = bp.at(1).trimmed().toDouble();
-    p.latS = bp.at(2).trimmed().toDouble();
-    p.lonE = bp.at(3).trimmed().toDouble();
+    if (!poly.isEmpty()) {
+        // "lat,lon;lat,lon;..." -> vertices. El bbox lo calcula TileFiller.
+        const QStringList verts = poly.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+        for (const QString &v : verts) {
+            const QStringList c = v.split(QLatin1Char(','));
+            if (c.size() != 2) { cerr() << "poly: cada vertice es lat,lon\n"; return 2; }
+            p.polygon.append(QGeoCoordinate(c.at(0).trimmed().toDouble(),
+                                            c.at(1).trimmed().toDouble()));
+        }
+        if (p.polygon.size() < 3) { cerr() << "poly necesita >=3 vertices\n"; return 2; }
+    } else {
+        const QStringList bp = bbox.split(QLatin1Char(','));
+        if (bp.size() != 4) { cerr() << "bbox debe ser latN,lonO,latS,lonE\n"; return 2; }
+        p.latN = bp.at(0).trimmed().toDouble();
+        p.lonW = bp.at(1).trimmed().toDouble();
+        p.latS = bp.at(2).trimmed().toDouble();
+        p.lonE = bp.at(3).trimmed().toDouble();
+    }
 
     QString err;
     if (modoNuevo) {
@@ -210,9 +227,13 @@ int main(int argc, char *argv[])
            << "  storedZ = " << p.ds.zFactor << "*z + " << p.ds.zOffset
            << (p.ds.hasSColumn ? QStringLiteral("  s=%1").arg(p.ds.sValue) : QString())
            << '\n';
-    cout() << "BBox latN=" << p.latN << " lonO=" << p.lonW
-           << " latS=" << p.latS << " lonE=" << p.lonE
-           << "  zoom " << p.minZoom << ".." << p.maxZoom << '\n';
+    if (!p.polygon.isEmpty())
+        cout() << "Poligono de " << p.polygon.size() << " vertices"
+               << "  zoom " << p.minZoom << ".." << p.maxZoom << '\n';
+    else
+        cout() << "BBox latN=" << p.latN << " lonO=" << p.lonW
+               << " latS=" << p.latS << " lonE=" << p.lonE
+               << "  zoom " << p.minZoom << ".." << p.maxZoom << '\n';
     const auto porZoom = filler.perZoomMissing();
     for (const auto &pz : porZoom)
         cout() << "  z=" << pz.first << ": "

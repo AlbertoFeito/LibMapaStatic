@@ -128,6 +128,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(d->view, &MapView::measurementFinished,
             this, &MapWidget::measurementFinished);
     connect(d->view, &MapView::areaSelected, this, &MapWidget::areaSelected);
+    connect(d->view, &MapView::polygonSelected, this, &MapWidget::polygonSelected);
     connect(d->view, &MapView::pointPicked, this, &MapWidget::pointPicked);
 
     connect(&d->service, &TileService::activeDatasetChanged,

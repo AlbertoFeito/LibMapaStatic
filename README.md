@@ -87,7 +87,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana |
 | `vector_db` | Crea e inspecciona la BD de puntos, rutas y polígonos |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
-| `fill_map` | Lo mismo pero con mapa: marca el área, rango de zoom, barra de progreso y mancha de cobertura |
+| `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura |
 | `demo` | Aplicación de ejemplo con selector de capa y herramientas |
 
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
@@ -96,8 +96,10 @@ tesela propia, rojo si viene de un nivel superior escalado.
 En `fill_map`, el botón **Rejilla** hace lo mismo sobre el mapa, y el botón
 **Cobertura** (con selector de zoom) pinta una mancha fija con las zonas que ya
 están en la BD a ese zoom, coloreada por completitud (ámbar→verde) y visible
-aunque mires a un zoom menor. La fuente por defecto es Esri «Clarity» (sin
-clave); respeta los términos de uso de cada servidor.
+aunque mires a un zoom menor. Además de **Seleccionar área** (rectángulo) está
+**Polígono**: se marca clic a clic y descarga solo lo de dentro (en consola,
+`fill_tiles --poly "lat,lon;lat,lon;..."`). La fuente por defecto es Esri
+«Clarity» (sin clave); respeta los términos de uso de cada servidor.
 
 ## Estructura
 

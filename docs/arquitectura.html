@@ -438,7 +438,8 @@ exactamente donde el mapa la espera.</div>
 <table class="kv">
 <tr><td>--datasets / --id</td><td>Rellenar una BD existente: de <code>datasets.json</code> toma codificación y ruta de la capa.</td></tr>
 <tr><td>--new / --name</td><td>Crear una base nueva desde cero (codificación limpia XYZ, sin columna s).</td></tr>
-<tr><td>--bbox latN,lonO,latS,lonE</td><td>Rectángulo a cubrir (obligatorio).</td></tr>
+<tr><td>--bbox latN,lonO,latS,lonE</td><td>Rectángulo a cubrir.</td></tr>
+<tr><td>--poly "lat,lon;lat,lon;…"</td><td>Polígono (≥3 vértices): solo baja las teselas cuyo centro cae dentro. Alternativa a --bbox.</td></tr>
 <tr><td>--minzoom / --maxzoom</td><td>Rango de zoom.</td></tr>
 <tr><td>--url</td><td>Fuente XYZ (por defecto Esri «Clarity», sin clave).</td></tr>
 <tr><td>--rate / --retries / --timeout</td><td>Ritmo (teselas/seg), reintentos, espera por tesela.</td></tr>
@@ -449,6 +450,7 @@ exactamente donde el mapa la espera.</div>
 <h3>fill_map — cómo se usa</h3>
 <ul>
   <li><b>Rellenar</b>: marca un rectángulo (o escribe el bbox) + rango de zoom → completa la capa activa.</li>
+  <li><b>Polígono</b>: marca un polígono clic a clic (doble clic / Enter lo cierra) y descarga solo las teselas de dentro. Excluyente con "Seleccionar área".</li>
   <li><b>Nueva base…</b>: crea un <code>.sqlitedb</code> nuevo, todo de la fuente elegida, del área marcada.</li>
   <li><b>Descargar al navegar</b>: mientras te mueves, baja lo que falte al zoom actual.</li>
   <li>Tres formas de indicar el área: dibujar rectángulo, escribir <code>bbox</code>, o la vista actual.</li>

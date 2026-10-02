@@ -5,6 +5,7 @@
 
 #include <QByteArray>
 #include <QElapsedTimer>
+#include <QGeoCoordinate>
 #include <QObject>
 #include <QPair>
 #include <QSet>
@@ -48,6 +49,10 @@ public:
     struct Params {
         TileDataset ds;                 //!< Codificacion + ruta de la BD.
         double latN = 0, lonW = 0, latS = 0, lonE = 0;
+        //! Opcional: si trae >=3 vertices, solo se descargan las teselas cuyo
+        //! CENTRO cae dentro del poligono (el bbox se calcula de sus vertices).
+        //! Vacio = rectangulo latN/lonW/latS/lonE.
+        QVector<QGeoCoordinate> polygon;
         int minZoom = 0, maxZoom = 0;
         QString url;                    //!< Plantilla con {z}{x}{y}.
         QByteArray userAgent = "LibMapaStatic-fill/1.0";

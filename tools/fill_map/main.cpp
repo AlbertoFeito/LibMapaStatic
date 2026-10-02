@@ -95,6 +95,8 @@ public:
 
         connect(m_mapa, &MapWidget::areaSelected,
                 this, &Ventana::alSeleccionarArea);
+        connect(m_mapa, &MapWidget::polygonSelected,
+                this, &Ventana::alSeleccionarPoligono);
         connect(m_mapa, &MapWidget::zoomChanged, this, [this](int) {
             if (!m_running) sincronizarZoomDesde();
             if (m_autoOn) m_debounce->start();
@@ -135,12 +137,28 @@ private:
         m_btnArea = new QPushButton(tr("Seleccionar area"), this);
         m_btnArea->setCheckable(true);
         connect(m_btnArea, &QPushButton::toggled, this, [this](bool on) {
+            if (on && m_btnPoly) m_btnPoly->setChecked(false);  // excluyentes
             m_mapa->setActiveTool(on ? MapTool::SelectArea : MapTool::None);
             statusBar()->showMessage(on
                 ? tr("Arrastra sobre el mapa para marcar la zona.")
                 : QString());
         });
         tb->addWidget(m_btnArea);
+
+        // Seleccion por POLIGONO: clic a clic, doble clic (o Enter) lo cierra.
+        // Solo se descargan las teselas dentro del poligono.
+        m_btnPoly = new QPushButton(tr("Poligono"), this);
+        m_btnPoly->setCheckable(true);
+        m_btnPoly->setToolTip(tr("Marca un poligono clic a clic; doble clic o "
+                                 "Enter lo cierra. Solo baja lo de dentro."));
+        connect(m_btnPoly, &QPushButton::toggled, this, [this](bool on) {
+            if (on && m_btnArea) m_btnArea->setChecked(false);  // excluyentes
+            m_mapa->setActiveTool(on ? MapTool::SelectPolygon : MapTool::None);
+            statusBar()->showMessage(on
+                ? tr("Clic a clic marca el poligono; doble clic o Enter lo cierra.")
+                : QString());
+        });
+        tb->addWidget(m_btnPoly);
 
         tb->addWidget(new QLabel(tr("  Zoom: ")));
         m_zDesde = new QSpinBox(this); m_zDesde->setRange(0, 22);
@@ -282,6 +300,7 @@ private:
     void alSeleccionarArea(const QGeoCoordinate &no, const QGeoCoordinate &se)
     {
         m_no = no; m_se = se; m_hayArea = true;
+        m_poly.clear();                 // un rectangulo nuevo anula el poligono
         // Refleja el rectangulo en el campo de texto (mismo formato que fill_tiles).
         m_bbox->setText(QStringLiteral("%1,%2,%3,%4")
             .arg(no.latitude(), 0, 'f', 5).arg(no.longitude(), 0, 'f', 5)
@@ -291,6 +310,17 @@ private:
                 .arg(no.latitude(), 0, 'f', 3).arg(no.longitude(), 0, 'f', 3)
                 .arg(se.latitude(), 0, 'f', 3).arg(se.longitude(), 0, 'f', 3),
             8000);
+    }
+
+    //! Poligono cerrado con la herramienta "Poligono": queda como zona activa
+    //! (tiene prioridad sobre el rectangulo hasta que se marque uno nuevo).
+    void alSeleccionarPoligono(const QVector<QGeoCoordinate> &poly)
+    {
+        m_poly = poly;
+        m_hayArea = true;               // hay zona (aunque sea poligono)
+        statusBar()->showMessage(
+            tr("Poligono de %1 vertices. Pulsa Rellenar para bajar solo su interior.")
+                .arg(poly.size()), 8000);
     }
 
     //! Lee el bbox escrito a mano (latN,lonO,latS,lonE), fija la zona y encuadra.
@@ -313,6 +343,7 @@ private:
         m_no = QGeoCoordinate(qMax(v[0], v[2]), qMin(v[1], v[3]));
         m_se = QGeoCoordinate(qMin(v[0], v[2]), qMax(v[1], v[3]));
         m_hayArea = true;
+        m_poly.clear();                  // un bbox escrito anula el poligono
         m_mapa->fitBounds(m_no, m_se);   // encuadra para que se vea la zona
         statusBar()->showMessage(tr("Zona fijada desde el texto."), 5000);
     }
@@ -340,8 +371,12 @@ private:
 
         TileFiller::Params p;
         p.ds = m_datasets.value(id);
-        p.latN = m_no.latitude();  p.lonW = m_no.longitude();
-        p.latS = m_se.latitude();  p.lonE = m_se.longitude();
+        if (m_poly.size() >= 3) {
+            p.polygon = m_poly;        // el bbox lo calcula TileFiller del poligono
+        } else {
+            p.latN = m_no.latitude();  p.lonW = m_no.longitude();
+            p.latS = m_se.latitude();  p.lonE = m_se.longitude();
+        }
         p.minZoom = qMin(m_zDesde->value(), m_zHasta->value());
         p.maxZoom = qMax(m_zDesde->value(), m_zHasta->value());
         p.url = m_url->text().trimmed();
@@ -367,7 +402,8 @@ private:
         if (file.isEmpty())
             return;
 
-        // Zona: el rectangulo marcado si lo hay; si no, lo que se ve ahora.
+        // Zona: el poligono marcado si lo hay; si no el rectangulo; si no, la
+        // vista actual.
         QGeoCoordinate no = m_hayArea ? m_no : m_mapa->visibleNorthWest();
         QGeoCoordinate se = m_hayArea ? m_se : m_mapa->visibleSouthEast();
 
@@ -390,8 +426,12 @@ private:
         p.ds.baseZoom = p.ds.minZoom;
         p.createSchema = true;
 
-        p.latN = no.latitude();  p.lonW = no.longitude();
-        p.latS = se.latitude();  p.lonE = se.longitude();
+        if (m_poly.size() >= 3) {
+            p.polygon = m_poly;        // el bbox lo calcula TileFiller del poligono
+        } else {
+            p.latN = no.latitude();  p.lonW = no.longitude();
+            p.latS = se.latitude();  p.lonE = se.longitude();
+        }
         p.minZoom = p.ds.minZoom;
         p.maxZoom = p.ds.maxZoom;
         p.url = m_url->text().trimmed();
@@ -456,6 +496,7 @@ private:
             // mapa durante la descarga (el arrastre dibujaria otro rectangulo).
             m_mapa->setActiveTool(MapTool::None);
             m_btnArea->setChecked(false);
+            m_btnPoly->setChecked(false);
             ponerControles(false);
             m_barra->setRange(0, int(qMin<qint64>(total, 1000000)));
             m_barra->setValue(0);
@@ -574,6 +615,7 @@ private:
         m_btnAuto->setEnabled(on);
         m_capa->setEnabled(on);
         m_btnArea->setEnabled(on);
+        m_btnPoly->setEnabled(on);
         m_zDesde->setEnabled(on);
         m_zHasta->setEnabled(on);
         m_rate->setEnabled(on);
@@ -587,6 +629,7 @@ private:
 
     QComboBox *m_capa = nullptr;
     QPushButton *m_btnArea = nullptr;
+    QPushButton *m_btnPoly = nullptr;
     QSpinBox *m_zDesde = nullptr;
     QSpinBox *m_zHasta = nullptr;
     QDoubleSpinBox *m_rate = nullptr;
@@ -604,6 +647,7 @@ private:
     QPushButton *m_btnCancelar = nullptr;
 
     QGeoCoordinate m_no, m_se;
+    QVector<QGeoCoordinate> m_poly;   //!< Poligono de seleccion (>=3 = activo)
     bool m_hayArea = false;
     bool m_running = false;
     TileFiller *m_filler = nullptr;

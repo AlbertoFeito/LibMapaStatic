@@ -1940,3 +1940,38 @@ no una promesa de orden.
 **Estado: la librería cubre el ciclo ver→navegar→dibujar→descargar; cerrar
 dibujar→guardar→recargar y conectar objetivos/rutas con la BD es el siguiente
 salto natural.**
+
+---
+
+## 36. Acercarnos a SAS.Planet (1/4): selección por polígono
+
+Comparando la descarga con **SAS.Planet**, nuestra herramienta era sólida e
+integrada pero le faltaban cuatro cosas: selección por polígono, descarga en
+paralelo, estimación de tamaño y elevación del terreno. Se abordan una a una;
+esta es la primera.
+
+Hasta ahora solo se podía marcar un **rectángulo** (`SelectArea`), y bajar un
+bbox sobre una costa o una isla desperdicia muchas teselas de mar. Ahora se
+puede marcar un **polígono** y descargar **solo lo de dentro**.
+
+- `MapTool::SelectPolygon`: se marca clic a clic (doble clic o Enter lo cierra),
+  reutilizando el borrador de `FeatureLayer` que ya dibujaba los polígonos de
+  entidad —no se crea ninguna entidad, es una selección transitoria—. Emite
+  `polygonSelected(QVector<QGeoCoordinate>)` y deja el contorno visible.
+- El filtro es `GeoMath::pointInPolygon` (ray-casting sobre lon/lat), puesto en
+  el núcleo para poder **probarlo** (test en `tst_tilematrix`). No corrige la
+  distorsión de la proyección, pero para elegir qué teselas bajar en un área del
+  tamaño de un país sobra.
+- `TileFiller` admite `Params::polygon`: el **bbox de barrido** sale de los
+  vértices y, tesela a tesela, se descarta la que tenga su **centro fuera** del
+  polígono —tanto al contar en `prepare()` como al descargar en `advanceCursor()`—.
+- En las herramientas: `fill_tiles --poly "lat,lon;lat,lon;..."` (alternativa a
+  `--bbox`) y, en `fill_map`, el botón **"Polígono"** (excluyente con
+  "Seleccionar área"); marcar un rectángulo o escribir un bbox anula el polígono
+  y viceversa. La mancha de cobertura sigue usando el bbox.
+
+Decisión: el polígono es una **selección**, no una entidad del mapa; por eso se
+reaprovecha el borrador (líneas, cierre, tiradores) sin tocar el `OverlayModel`.
+
+**Estado: 13 tests verdes (con un caso nuevo `pointInPolygonBasic` dentro de
+`tst_tilematrix`), Qt 6.4.**
