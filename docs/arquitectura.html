@@ -334,6 +334,7 @@ añadió para la descarga.</p>
 <tr><td class="cls">TileLayer</td><td>Pinta las teselas del plan (con la escalera de respaldo). Lee del <code>TileCache</code>.</td></tr>
 <tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar.</td></tr>
 <tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas.</td></tr>
+<tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
 </table>
 
 <h3>Modelos (QObject, sin dibujo)</h3>
@@ -451,7 +452,14 @@ exactamente donde el mapa la espera.</div>
   <li><b>Nueva base…</b>: crea un <code>.sqlitedb</code> nuevo, todo de la fuente elegida, del área marcada.</li>
   <li><b>Descargar al navegar</b>: mientras te mueves, baja lo que falte al zoom actual.</li>
   <li>Tres formas de indicar el área: dibujar rectángulo, escribir <code>bbox</code>, o la vista actual.</li>
+  <li><b>Rejilla</b>: dibuja el borde de cada tesela con su <code>z/x/y</code> (verde = propia, rojo = respaldo escalado) para ver qué falta a este zoom.</li>
+  <li><b>Cobertura</b> (+ selector de zoom): mancha fija que muestra qué zonas de ESE zoom ya están en la BD, visible aunque mires a un zoom menor; se refresca sola mientras descargas (ver <code>CoverageLayer</code>).</li>
 </ul>
+<p><b>Orden de descarga</b> (<code>TileFiller::advanceCursor</code>): por nivel de
+zoom de menor a mayor (termina un nivel antes de pasar al siguiente, emitiendo
+<code>zoomFinished</code>); dentro de cada nivel, columna a columna de oeste a
+este y cada columna de norte a sur; saltando las teselas que ya existen (salvo
+<code>--overwrite</code>). Es un barrido sistemático del bbox, reanudable.</p>
 
 <!-- ===================== 12. TILEFILLER ===================== -->
 <h2 class="sec">12 · Motor de descarga <span class="mono">TileFiller</span></h2>

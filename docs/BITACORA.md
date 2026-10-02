@@ -1778,3 +1778,165 @@ s = <valor>` y **no devolviera ninguna tesela** aunque la fuente abriera bien.
 Sin columna `s`, ese filtro no existe.
 
 **Estado: 13 tests + la herramienta `geo_to_tiles`, 0 avisos, Qt 5.15 y Qt 6.4.**
+
+---
+
+## 31. Qt moderno: fuera 5.7, objetivo 5.14 / 5.15 / 6.x
+
+Un compañero intentó compilar en Qt 5.7 con MinGW 5.3 y el proyecto reventaba.
+En vez de arrastrar compatibilidad con un Qt de 2016, se decidió **abandonar
+5.7** y fijar el objetivo en **Qt 5.14 / 5.15 / 6.x** (MinGW, MSVC, GCC), que es
+lo que usan de verdad. Se eliminó de todo el repo cualquier rastro de 5.7.
+
+Dos cosas concretas que salieron de ahí:
+
+- Se **quitó el flag `-Wnull-dereference`**. No es de 5.7, pero su activación
+  producía falsos positivos dentro de las cabeceras de Qt y de QCustomPlot
+  (inalcanzables para nosotros) que inundaban la salida del compilador del
+  compañero. Un flag que solo avisa de código que no es tuyo no aporta.
+- Qt5 solo **declara** `QVariant` en `qsqlquery.h` (Qt6 sí lo incluye). Sin un
+  `#include <QVariant>` explícito, `bindValue()` no compila en 5.14 porque
+  `QVariant` es tipo incompleto. Se añadió donde hacía falta.
+
+**Estado: 13 tests verdes en Qt 5.15 y Qt 6.4, sin avisos propios.**
+
+---
+
+## 32. Rellenar los huecos: `fill_tiles`, `fill_map` y el motor `TileFiller`
+
+La capa satelital tiene `typicalFill ≈ 0.32`: dos tercios de la rejilla están
+vacíos. Hacía falta **descargar las teselas que faltan**, y el usuario pidió la
+vía fácil: **gratis y sin API key**. Resultado: un motor común y dos carcasas.
+
+- **`TileFiller`** (`tools/common`) es un `QObject` **asíncrono** que no bloquea:
+  se apoya en el bucle de eventos (un temporizador marca el ritmo, cada respuesta
+  encadena la siguiente). El mismo motor —y la misma codificación probada— sirve
+  para la consola (`fill_tiles`) y para la ventana con mapa (`fill_map`).
+- **Fuente por defecto: Esri "Clarity"** (World Imagery), sin clave. Se eligió
+  porque, de las fuentes sin clave probadas, es la que mejor **casa en color**
+  con la base satelital de Google del usuario. Plantilla `{z}/{x}/{y}`, editable.
+- **`prepare()`** abre la BD y cuenta cuántas faltan por zoom **sin red**, para
+  poder avisar del total y pedir confirmación antes de una descarga enorme.
+  **`start()`** descarga e **inserta con la codificación exacta de la base**
+  (`storedZ`, Y según esquema, columna `s`). Es **reanudable**: solo baja lo que
+  falta, así que se corta y se relanza sin repetir.
+- **Orden de descarga** (`advanceCursor`): por nivel de zoom de menor a mayor
+  (termina un nivel antes de pasar al siguiente); dentro de cada nivel, columna
+  a columna de oeste a este y cada columna de norte a sur; saltando lo que ya
+  existe. Barrido sistemático del bbox, no espiral desde el centro.
+- **Base nueva** (`--new` / botón "Nueva base…"): crea un `.sqlitedb` desde cero
+  con codificación **limpia** (XYZ, `z` = z lógico, sin columna `s`) y, al
+  terminar, imprime el bloque listo para pegar en `datasets.json`.
+- **Auto-freno**: si se acumulan fallos SEGUIDOS (la fuente está limitando), se
+  pausa con backoff creciente (30→60→120→…→300 s) y se reanuda al primer éxito,
+  en vez de insistir hasta que bloqueen la IP.
+- **Diagnóstico TLS**: en Windows faltaba OpenSSL y toda descarga HTTPS fallaba
+  en silencio. Se avisa al arrancar si `QSslSocket::supportsSsl()` es falso
+  (qué DLLs copiar), y se dejó de leer el cuerpo de respuestas con error, que
+  provocaba el cosmético `QIODevice::read: device not open`.
+
+Sobre OSM: el servidor oficial **prohíbe** la descarga masiva de teselas; por eso
+la fuente por defecto es satélite de Esri, no OSM.
+
+**Estado: dos herramientas nuevas (consola y ventana) sobre un motor común;
+13 tests verdes, Qt 5.15 y Qt 6.4.**
+
+---
+
+## 33. Ver qué falta en la base: rejilla y mancha de cobertura
+
+Descargar a ciegas no dice qué tienes. Dos ayudas visuales, de menos a más útil:
+
+- **Rejilla** (`TileLayer::setDebugGridVisible`, la misma de `render_map --grid`):
+  dibuja el borde de cada tesela con su `z/x/y`, verde si es propia y rojo si se
+  está viendo con un ancestro escalado. Pero es **efímera** y solo muestra el
+  **zoom actual** bajo la vista.
+- **Mancha de cobertura** (`CoverageLayer`): lo que de verdad hacía falta. Fija
+  un **zoom objetivo** (p.ej. 14) y pinta, sobre el mapa, qué zonas de ese zoom
+  están en la BD —**visible aunque estés mirando a z9**—, coloreadas por
+  **completitud** (ámbar = a medias, verde = llena).
+
+Lo delicado era no traer un millón de filas para pintarla. Se resolvió con
+**`RMapsTileSource::coverageHistogram(z, shift)`**: una sola consulta
+`GROUP BY (x>>shift, y>>shift)` que agrega las teselas presentes del nivel a una
+rejilla gruesa (zoom resumen = objetivo − 3). Agrupar por `y_almacenada>>shift`
+es correcto para la completitud tanto en XYZ como en TMS, porque un bloque de
+`2^shift` valores de Y almacenada contiene exactamente los `4^shift` hijos de la
+celda resumen. Se expone por la fachada `MapWidget`
+(`setCoverageVisible/Zoom`, `refreshCoverage`), como el resto de capas.
+
+La mancha se **refresca sola mientras descargas** si está encendida (limitado a
+una vez cada ~2.5 s, que la consulta es un `GROUP BY`), y el estado exacto final
+lo deja el refresco de `finished`. El botón quedó solo como mostrar/ocultar.
+
+De paso, al empezar una descarga se **sale del modo "seleccionar área"** para
+poder desplazar el mapa (deshabilitar el botón no cambiaba la herramienta activa).
+
+**Estado: capa nueva `CoverageLayer` + consulta de cobertura; 13 tests verdes,
+Qt 6.4.**
+
+---
+
+## 34. Documentación: comentarios por función, PDF y convenciones
+
+- **Comentario `//` en español encima de CADA función** de toda la librería y las
+  herramientas (módulos geo, tiles, db, io, core, widget y tools): qué hace y por
+  qué, no lo obvio de la firma. El header documenta el API; el `.cpp`, la
+  implementación. Es la norma del proyecto para todo código nuevo.
+- **`docs/arquitectura.html` + PDF** (`docs/LibMapaStatic_Documentacion.pdf`):
+  documento técnico con arquitectura por capas, módulos, flujos de interacción,
+  codificación de teselas, herramientas y el motor de descarga. El PDF se genera
+  con **Chromium headless** (no hay pandoc/weasyprint en el entorno):
+  `chrome --headless --print-to-pdf=... arquitectura.html`.
+- **`Doxyfile`** para generar la referencia del API a partir de las cabeceras.
+- **`CLAUDE.md`** (raíz) y la skill **`.claude/skills/libmapa-docs`** fijan las
+  convenciones aprendidas (rama y atribución de commits, estilo de comentarios,
+  Qt 5.14/5.15/6.x, QCustomPlot 2.1.1 gitignored, fachada, codificación de
+  teselas, build + 13 tests *offscreen* antes de commitear, y este mismo flujo
+  de documentación) para que cualquier sesión futura las cumpla.
+
+**Estado: documentación al día; sin cambios de código, no requiere build.**
+
+---
+
+## 35. Qué falta — hoja de ruta
+
+Lo que la librería **todavía no tiene**, por prioridad. Es una lista de trabajo,
+no una promesa de orden.
+
+**Alta (funcionalidad central incompleta):**
+
+1. **Persistencia automática de entidades.** Se dibujan y editan en el mapa pero
+   **no se guardan solas**: falta enlazar `MapWidget` con `VectorRepository`
+   (altas/bajas/cambios → BD, y recarga al abrir). Ya lo reconoce el README.
+2. **Objetivos/vehículos en vivo desde la BD.** `VectorRepository` tiene
+   `vehiculo`/`buque_ais`/`trayectoria` y existe `TargetModel`/`TargetLayer`,
+   pero no están conectados: la capa de datos y la de tiempo real van por
+   separado.
+3. **Rutas interactivas.** La BD guarda `ruta`/`ruta_punto`, pero no hay
+   herramienta ni capa para dibujarlas/editarlas en el mapa.
+
+**Media:**
+
+4. **Altura del terreno (DEM).** No existe (ni almacenamiento, ni consulta por
+   coordenada, ni relieve). Opción que encaja: teselas Terrarium/Terrain-RGB
+   (`z/x/y` PNG) descargables con `fill_tiles`, más un decodificador RGB→metros.
+5. **Fusionar bases regionales** (`merge_tiles`): unir varias `.sqlitedb` en una
+   (relevante para bajar OSM por países y unificar).
+6. **Medición de área/perímetro.** Hoy solo hay distancia entre dos puntos.
+7. **Tests del código nuevo.** `TileFiller` (descarga) y la cobertura no tienen
+   tests; los 13 actuales no los cubren.
+
+**Baja (acabado cartográfico):**
+
+8. Barra de escala, flecha norte, cuadrícula de coordenadas y leyenda.
+9. Búsqueda por lugar/coordenada (geocoding).
+10. **Soporte vectorial OSM** (`.pbf`/MVT): el tema grande en pausa. Hoy todo es
+    ráster; servir vector requeriría un decodificador MVT y un renderizador de
+    estilo nuevos (ver el análisis del `.txt` de OSM).
+11. Publicar la referencia Doxygen e internacionalización (cadenas en español
+    sin ficheros `.ts`).
+
+**Estado: la librería cubre el ciclo ver→navegar→dibujar→descargar; cerrar
+dibujar→guardar→recargar y conectar objetivos/rutas con la BD es el siguiente
+salto natural.**

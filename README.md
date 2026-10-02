@@ -7,9 +7,10 @@ de EstacionTerrena3.
 Alterna entre cartografía **OSM** y **satelital** en caliente, lee las teselas
 en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 
-- Qt 5.14+ o Qt 6, MinGW / MSVC / GCC
+- Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
-- 11 tests (9 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 13 tests (10 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable
 
 ## Uso
 
@@ -85,10 +86,18 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana |
 | `vector_db` | Crea e inspecciona la BD de puntos, rutas y polígonos |
+| `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
+| `fill_map` | Lo mismo pero con mapa: marca el área, rango de zoom, barra de progreso y mancha de cobertura |
 | `demo` | Aplicación de ejemplo con selector de capa y herramientas |
 
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
 tesela propia, rojo si viene de un nivel superior escalado.
+
+En `fill_map`, el botón **Rejilla** hace lo mismo sobre el mapa, y el botón
+**Cobertura** (con selector de zoom) pinta una mancha fija con las zonas que ya
+están en la BD a ese zoom, coloreada por completitud (ámbar→verde) y visible
+aunque mires a un zoom menor. La fuente por defecto es Esri «Clarity» (sin
+clave); respeta los términos de uso de cada servidor.
 
 ## Estructura
 
@@ -100,9 +109,10 @@ src/
   db/                conexiones SQLite, esquema, repositorio vectorial
   tiles/             lectura, caché, planificación y carga de teselas
   widget/            MapView y capa de teselas sobre QCustomPlot
-tests/               11 tests (9 sin QCustomPlot)
-tools/               herramientas de línea de comandos
+tests/               13 tests (10 sin QCustomPlot)
+tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
+docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, flujos)
 ```
 
 ## Estado
@@ -114,12 +124,14 @@ docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 | 3 | Motor asíncrono: hilo propio, cancelación, respaldo de tesela padre |
 | 4 | `MapWidget`: navegación, capas, medición, zoom a área |
 | 5 | Datos vectoriales: esquema relacional y repositorio |
-| 6 | Entidades: puntos, polilíneas y polígonos, con capas y edición interactiva |
-| 7 | *Pendiente*: objetivos en movimiento, y rutas aéreas |
+| 6 | Entidades: puntos, polilíneas y polígonos, con capas, edición interactiva y deshacer/rehacer |
+| 7 | Objetivos en movimiento (capa en tiempo real) y ficheros `.geo` como capas multi-parte |
+| 8 | Vector pesado a teselas (`geo_to_tiles`); descarga de teselas que faltan (`fill_tiles`/`fill_map`), base nueva, auto-freno y mancha de cobertura |
 
-Las entidades se dibujan y se editan con el ratón, pero todavía **no se
-guardan solas**: enlazar el `MapWidget` con el `VectorRepository` queda
-pendiente, igual que deshacer/rehacer.
+Las entidades se dibujan, se editan y se **deshacen/rehacen** con el ratón, pero
+todavía **no se guardan solas**: enlazar el `MapWidget` con el
+`VectorRepository` (persistencia automática) es el principal pendiente. La hoja
+de ruta completa está en [`docs/BITACORA.md`](docs/BITACORA.md) §35.
 
 ## Licencia
 
