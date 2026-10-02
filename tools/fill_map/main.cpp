@@ -42,6 +42,8 @@
 #include <QToolBar>
 #include <QVector>
 
+#include <cmath>
+
 using namespace libmapa;
 
 namespace {
@@ -61,7 +63,7 @@ public:
     // centrado en Cuba, prepara el antirebote del modo "al navegar", construye la
     // barra de herramientas y la de estado, y conecta las senales del mapa
     // (seleccion de area, cambios de zoom/centro) a los slots correspondientes.
-    Ventana(const QString &datasetsFile)
+    Ventana(const QString &datasetsFile, const QString &demDir = QString())
         : m_datasetsFile(datasetsFile)
     {
         setWindowTitle(tr("Rellenar teselas - libmapa"));
@@ -74,6 +76,7 @@ public:
         // --- Mapa -----------------------------------------------------------
         MapConfig cfg;
         cfg.datasetsFile = datasetsFile;
+        cfg.elevationDir = demDir;                         // vacio = sin elevacion
         cfg.initialCenter = QGeoCoordinate(21.5, -79.5);   // Cuba entera
         cfg.initialZoom = 6;
         m_mapa = new MapWidget(cfg, this);
@@ -106,6 +109,13 @@ public:
                 [this](const QGeoCoordinate &) {
             if (m_autoOn) m_debounce->start();
         });
+
+        // Cota del terreno bajo el cursor: cada movimiento del raton consulta la
+        // elevacion de esa coordenada en los `.hgt` (si hay carpeta configurada).
+        connect(m_mapa, &MapWidget::mouseMoved, this,
+                [this](const QGeoCoordinate &p) { mostrarCota(p); });
+        if (!demDir.isEmpty())
+            m_demActivo = true;
     }
 
 private:
@@ -276,6 +286,14 @@ private:
         m_url->setMinimumWidth(520);
         tb2->addWidget(m_url);
 
+        // Elevacion del terreno: elige la carpeta con los `.hgt` (SRTM). Una vez
+        // puesta, la cota aparece bajo el cursor en la barra de estado.
+        m_btnDem = new QPushButton(tr("DEM..."), this);
+        m_btnDem->setToolTip(tr("Carpeta con ficheros de elevacion SRTM .hgt "
+                                "(N19W077.hgt ...). Muestra la cota bajo el cursor."));
+        connect(m_btnDem, &QPushButton::clicked, this, &Ventana::alElegirDem);
+        tb2->addWidget(m_btnDem);
+
         sincronizarZoomDesde();
     }
 
@@ -291,8 +309,41 @@ private:
         connect(m_btnCancelar, &QPushButton::clicked, this, [this] {
             if (m_filler) m_filler->cancel();
         });
+        // Cota del terreno bajo el cursor (se rellena al mover el raton si hay DEM).
+        m_cota = new QLabel(this);
+        m_cota->setMinimumWidth(90);
+        m_cota->setToolTip(tr("Altura del terreno bajo el cursor (necesita DEM)."));
+        statusBar()->addPermanentWidget(m_cota);
         statusBar()->addPermanentWidget(m_barra);
         statusBar()->addPermanentWidget(m_btnCancelar);
+    }
+
+    // Abre un dialogo para elegir la carpeta de los `.hgt` y la activa en caliente.
+    void alElegirDem()
+    {
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, tr("Carpeta de ficheros de elevacion (.hgt)"));
+        if (dir.isEmpty())
+            return;
+        m_mapa->setElevationDir(dir);
+        m_demActivo = true;
+        statusBar()->showMessage(tr("Elevacion: %1").arg(dir), 4000);
+    }
+
+    // Muestra la cota de una coordenada en la etiqueta de la barra de estado. Sin
+    // DEM, o si no hay dato (mar, hueco), deja un guion.
+    void mostrarCota(const QGeoCoordinate &p)
+    {
+        if (!m_cota)
+            return;
+        if (!m_demActivo) {
+            m_cota->clear();
+            return;
+        }
+        const double m = m_mapa->elevationAt(p);
+        m_cota->setText(std::isnan(m)
+            ? QStringLiteral("  --- m  ")
+            : QStringLiteral("  %1 m  ").arg(m, 0, 'f', 0));
     }
 
     //! Ajusta "zoom desde" al zoom actual del mapa y "hasta" al recomendado.
@@ -675,6 +726,9 @@ private:
     QPushButton *m_btnGrid = nullptr;
     QPushButton *m_btnCobertura = nullptr;
     QSpinBox *m_zCobertura = nullptr;
+    QPushButton *m_btnDem = nullptr;
+    QLabel *m_cota = nullptr;
+    bool m_demActivo = false;   // hay carpeta de elevacion cargada
     QTimer *m_debounce = nullptr;
     bool m_autoOn = false;
     QProgressBar *m_barra = nullptr;
@@ -695,9 +749,23 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     QNetworkProxyFactory::setUseSystemConfiguration(true);
-    const QString datasets = argc > 1 ? QString::fromLocal8Bit(argv[1])
-                                      : QStringLiteral("datasets.json");
-    Ventana v(datasets);
+
+    // Argumentos: el primer positional es el datasets.json; --dem <carpeta> fija
+    // la carpeta de ficheros de elevacion SRTM `.hgt` (opcional).
+    QString datasets;
+    QString demDir;
+    for (int i = 1; i < argc; ++i) {
+        const QString a = QString::fromLocal8Bit(argv[i]);
+        if ((a == QLatin1String("--dem") || a == QLatin1String("--elev"))
+            && i + 1 < argc)
+            demDir = QString::fromLocal8Bit(argv[++i]);
+        else if (datasets.isEmpty() && !a.startsWith(QLatin1String("--")))
+            datasets = a;
+    }
+    if (datasets.isEmpty())
+        datasets = QStringLiteral("datasets.json");
+
+    Ventana v(datasets, demDir);
     v.show();
     // Sin TLS, toda descarga HTTPS falla: avisar en claro (Windows: falta OpenSSL).
     if (!QSslSocket::supportsSsl()) {

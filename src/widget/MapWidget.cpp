@@ -1,6 +1,7 @@
 #include "libmapa/MapWidget.h"
 
 #include "core/Logging.h"
+#include "dem/HgtElevation.h"
 #include "geo/TileMatrix.h"
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileService.h"
@@ -71,6 +72,9 @@ public:
     QString error;
     bool ready = false;
 
+    // Elevacion del terreno (opcional): lee los `.hgt` de config.elevationDir.
+    HgtElevation elevation;
+
     // Mancha de cobertura (diagnostico): zoom objetivo y si esta encendida.
     int coverageZoom = 14;
     bool coverageVisible = false;
@@ -112,6 +116,9 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
         return;
     }
     d->service.setDebounceMs(config.debounceMs);
+
+    if (!config.elevationDir.isEmpty())
+        d->elevation.setDirectory(config.elevationDir);
 
     if (!config.initialLayerId.isEmpty())
         d->service.setActiveDataset(config.initialLayerId);
@@ -666,6 +673,19 @@ qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx) const
 {
     d->syncGeometry();
     return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx) : -1;
+}
+
+// Cota del terreno (m) en una coordenada, leida de los `.hgt`. Reenvio fino al
+// lector de elevacion; NaN si no hay carpeta o dato (el llamador lo comprueba).
+double MapWidget::elevationAt(const QGeoCoordinate &position) const
+{
+    return d->elevation.elevationAt(position);
+}
+
+// Cambia en caliente la carpeta de ficheros de elevacion (p.ej. desde un boton).
+void MapWidget::setElevationDir(const QString &dir)
+{
+    d->elevation.setDirectory(dir);
 }
 
 // Herramienta activa (arrastrar, medir, dibujar, editar...).

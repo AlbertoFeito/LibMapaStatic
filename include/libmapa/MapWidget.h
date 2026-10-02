@@ -29,6 +29,10 @@ struct MapConfig
      */
     QString datasetsFile;
 
+    //! Carpeta con ficheros de elevacion SRTM `.hgt` (nombres tipo `N19W077.hgt`).
+    //! Vacia = sin elevacion; elevationAt() devolvera NaN. Opcional.
+    QString elevationDir;
+
     QString initialLayerId;                    //!< Vacio = el primero del JSON.
     QGeoCoordinate initialCenter{23.1136, -82.3666};
     int initialZoom = 10;
@@ -226,6 +230,14 @@ public:
 
     //! Entidad bajo un punto de la pantalla, o -1.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+
+    // --- Elevacion -------------------------------------------------------
+    //! Cota del terreno (metros) en \a position leida de los `.hgt` de la carpeta
+    //! configurada, o NaN si no hay dato (sin carpeta, tile ausente o hueco).
+    //! Comprueba el resultado con std::isnan.
+    double elevationAt(const QGeoCoordinate &position) const;
+    //! Cambia en caliente la carpeta de ficheros de elevacion (vacia = desactiva).
+    void setElevationDir(const QString &dir);
 
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;

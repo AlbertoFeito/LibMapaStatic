@@ -36,6 +36,7 @@ SOURCES += \
     $$ROOT/src/db/Schema.cpp \
     $$ROOT/src/db/VectorRepository.cpp \
     $$ROOT/src/io/GeoFile.cpp \
+    $$ROOT/src/dem/HgtElevation.cpp \
     $$ROOT/src/tiles/TileDataset.cpp \
     $$ROOT/src/tiles/RMapsTileSource.cpp \
     $$ROOT/src/tiles/TileDatasetProbe.cpp \

@@ -116,6 +116,9 @@ add_library(libmapa_core STATIC
 
     src/io/GeoFile.cpp
     include/libmapa/GeoFile.h
+
+    src/dem/HgtElevation.cpp
+    src/dem/HgtElevation.h
 )
 
 target_include_directories(libmapa_core
@@ -285,6 +288,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_tileplanner)
     libmapa_add_test(tst_tileservice)
     libmapa_add_test(tst_vectorrepository)
+    libmapa_add_test(tst_hgtelevation)
 
     libmapa_add_test(tst_geofile)
     target_compile_definitions(tst_geofile PRIVATE

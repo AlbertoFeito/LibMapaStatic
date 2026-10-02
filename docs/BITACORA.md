@@ -2064,3 +2064,50 @@ estimado fue **~3.6 MB** (media 25.4 KiB, muestreo de 12) y la BD real quedó en
 SQLite, así que la suma de imágenes casa aún mejor).
 
 **Estado: 13 tests verdes; estimación verificada contra la descarga real, Qt 6.4.**
+
+## 39. Acercarnos a SAS.Planet (4/4): elevación del terreno (HGT/SRTM)
+
+La librería manejaba teselas raster pero no sabía nada de la **altura del
+terreno**. SAS.Planet puede mostrar la cota del punto; aquí añadimos lo mismo
+leyendo ficheros **SRTM `.hgt`** locales (el usuario ya tiene los de 90 m de Cuba
+en su PC; para las pruebas en el contenedor usé los de 30 m de AWS Skadi, mismo
+formato).
+
+El `.hgt` es un formato crudo sin cabecera: una rejilla **cuadrada** de muestras
+`int16` **big-endian** que cubre un tile de 1°×1°. El nombre da la esquina
+suroeste (`N19W077.hgt` = de 19N a 20N y de 77O a 76O). La fila 0 es el borde
+**norte** y la columna 0 el **oeste**. La resolución no está escrita en ningún
+sitio: se **deduce del tamaño** del fichero (`lado = isqrt(bytes/2)` → 1201 = 90 m,
+3601 = 30 m).
+
+Nuevo módulo de núcleo **`src/dem/HgtElevation`** (sin widgets, en
+`libmapa_core`):
+- `setDirectory(dir)` / `elevationAt(QGeoCoordinate) → double` (metros, o
+  **NaN** si no hay dato: tile ausente, fuera de la carpeta, o hueco SRTM).
+- Localiza el tile por el `floor` de lat/lon, lo carga con una **cache LRU**
+  pequeña (no releer el disco al mover el ratón), autodetecta el lado, lee las
+  muestras con `qFromBigEndian<qint16>` e **interpola bilinealmente** entre los 4
+  nodos que rodean el punto. Si alguno es el valor de hueco (`-32768`) → NaN: no
+  se inventa terreno. No había `isqrt` ni lector big-endian reutilizable, así que
+  el módulo trae los suyos.
+
+Se expone por la **fachada** `MapWidget`: nuevo `MapConfig.elevationDir`,
+`MapWidget::elevationAt(coord)` y `setElevationDir(dir)` (para cambiarla en
+caliente). En **`fill_map`**: opción `--dem <carpeta>`, un botón **"DEM…"** que
+abre el selector de carpeta, y una etiqueta en la barra de estado que muestra la
+**cota bajo el cursor** (conectada a `MapWidget::mouseMoved`); "—" cuando no hay
+dato.
+
+Prueba automática (`tst_hgtelevation`, el test nº 14): sin meter un `.hgt` real
+(decenas de MB) en el repo, escribe `.hgt` **sintéticos** pequeños en un temporal
+(lados 7 y 5, rampa conocida, con un hueco) y comprueba el valor exacto en un
+nodo, la **autodetección** del lado, la **interpolación** bilineal, el hueco→NaN
+y el tile ausente→NaN.
+
+Prueba manual sobre el tile real de 30 m `N19W077` (Sierra Maestra): el barrido
+de la zona da **1970.8 m** en 19.99N, 76.836O — el **Pico Turquino** (cumbre real
+1974 m; SRTM 30 m lee ~1971). Confirma orientación norte/oeste, descodificación
+big-endian y bilineal correctas.
+
+**Estado: 14 tests verdes (13 + `tst_hgtelevation`); lectura HGT verificada
+contra un tile SRTM real, Qt 6.4.**
