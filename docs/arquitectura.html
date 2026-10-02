@@ -453,6 +453,7 @@ exactamente donde el mapa la espera.</div>
   <li><b>Rellenar</b>: marca un rectángulo (o escribe el bbox) + rango de zoom → completa la capa activa.</li>
   <li><b>Polígono</b>: marca un polígono clic a clic (doble clic / Enter lo cierra) y descarga solo las teselas de dentro. Excluyente con "Seleccionar área".</li>
   <li><b>Nueva base…</b>: crea un <code>.sqlitedb</code> nuevo, todo de la fuente elegida, del área marcada.</li>
+  <li><b>Estimación de tamaño</b>: antes de confirmar, un muestreo rápido (<code>estimateSize</code>) dice cuántos MB ocupará, además del nº de teselas. Si no logra muestrear, da una cifra "aprox.".</li>
   <li><b>Descargar al navegar</b>: mientras te mueves, baja lo que falte al zoom actual.</li>
   <li>Tres formas de indicar el área: dibujar rectángulo, escribir <code>bbox</code>, o la vista actual.</li>
   <li><b>Rejilla</b>: dibuja el borde de cada tesela con su <code>z/x/y</code> (verde = propia, rojo = respaldo escalado) para ver qué falta a este zoom.</li>
@@ -493,6 +494,8 @@ probada— sirve para la consola y para la ventana con barra de progreso viva.</
 
 <table><tr><th>Función / señal</th><th>Qué hace</th></tr>
 <tr><td class="mono">prepare(params, err)</td><td>Abre la BD (la crea si <code>createSchema</code>), calcula cuántas faltan por zoom. Sin red.</td></tr>
+<tr><td class="mono">estimateSize(n=12)</td><td>Muestreo asíncrono: baja <code>n</code> teselas repartidas por zoom (solo mide bytes, no escribe BD) y emite <code>sizeEstimated</code>. Entre <code>prepare()</code> y <code>start()</code>.</td></tr>
+<tr><td class="mono">signal sizeEstimated(KiB, bytesTotal, muestras)</td><td>Tamaño estimado ≈ media·total; <code>muestras=0</code> = heurística (sin red) ~20&nbsp;KiB/tesela.</td></tr>
 <tr><td class="mono">start() / cancel()</td><td>Empieza / corta la descarga asíncrona.</td></tr>
 <tr><td class="mono">signal progress(hechas,total,t/s)</td><td>Avance y velocidad media (barra + ETA).</td></tr>
 <tr><td class="mono">signal zoomFinished(z, nuevas)</td><td>Un nivel terminado.</td></tr>

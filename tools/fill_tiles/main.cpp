@@ -31,6 +31,7 @@
 #include <QJsonObject>
 #include <QNetworkProxyFactory>
 #include <QSslSocket>
+#include <QEventLoop>
 #include <QGeoCoordinate>
 #include <QStringList>
 #include <QTextStream>
@@ -248,6 +249,30 @@ int main(int argc, char *argv[])
     if (filler.totalToDownload() == 0) {
         cout() << "No falta ninguna tesela en esa zona y zoom. Nada que hacer.\n";
         return 0;
+    }
+
+    // Estimacion de tamano: muestrea unas teselas y extrapola. Como el muestreo
+    // es asincrono, se espera con un QEventLoop local (en consola podemos bloquear).
+    {
+        QEventLoop espera;
+        QObject::connect(&filler, &TileFiller::sizeEstimated, &espera,
+                         [&espera](double avgKiB, qint64 estBytes, int sampled) {
+            if (sampled > 0)
+                cout() << QStringLiteral(
+                              "Tamano estimado: ~%1 MB  (media %2 KiB/tesela, "
+                              "muestreo de %3)\n")
+                              .arg(double(estBytes) / 1048576.0, 0, 'f', 1)
+                              .arg(avgKiB, 0, 'f', 1).arg(sampled);
+            else
+                cout() << QStringLiteral(
+                              "Tamano estimado: ~%1 MB  (heuristica ~20 KiB/tesela, "
+                              "sin muestreo)\n")
+                              .arg(double(estBytes) / 1048576.0, 0, 'f', 1);
+            cout().flush();
+            espera.quit();
+        });
+        filler.estimateSize();
+        espera.exec();
     }
 
     if (!assumeYes) {

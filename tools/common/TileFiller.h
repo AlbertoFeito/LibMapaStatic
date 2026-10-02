@@ -94,6 +94,12 @@ public:
     Stats stats() const { return m_stats; }
     bool isRunning() const { return m_running; }
 
+    //! Estima (asincrono) cuanto ocuparan las teselas que faltan: baja una
+    //! muestra pequena repartida por los zooms, promedia sus bytes y emite
+    //! sizeEstimated. NO escribe la BD. Llamar DESPUES de prepare() y ANTES de
+    //! start(). Sin red (o nada que muestrear) cae a una heuristica.
+    void estimateSize(int samples = 12);
+
 public slots:
     //! Empieza la descarga (debe haberse llamado prepare() con exito).
     void start();
@@ -112,6 +118,9 @@ signals:
     void throttling(int pauseSeconds, qint64 consecutiveFails);
     //! Fin de todo. \a cancelled indica si se corto a mitad.
     void finished(const libmapa::TileFiller::Stats &stats, bool cancelled);
+    //! Estimacion de tamano: media por tesela (KiB), total estimado (bytes) y
+    //! cuantas teselas se muestrearon (0 = heuristica, sin red).
+    void sizeEstimated(double avgKiB, qint64 estBytesTotal, int sampled);
 
 private:
     // Un nivel del plan: rango de teselas y las que ya existen (indices de
@@ -141,6 +150,12 @@ private:
     void insertTile(const Pending &p, const QByteArray &image);
     void finish(bool cancelled);
 
+    // --- Estimacion de tamano (muestreo, independiente de la descarga) ------
+    QVector<Pending> collectSamples(int n);  //!< Teselas de muestra repartidas.
+    void pumpSamples();                      //!< Lanza muestras hasta el cap.
+    void onSampleDone(QNetworkReply *reply);
+    void finishEstimate(double avgBytes, int sampled);
+
     Params m_p;
     QString m_connName;
     QSqlDatabase *m_db = nullptr;    // conexion propia (puntero para el .h ligero)
@@ -161,6 +176,16 @@ private:
     qint64 m_consecFails = 0;       // fallos definitivos SEGUIDOS (auto-freno)
     int m_pauseCount = 0;           // pausas ya hechas (backoff creciente)
     bool m_paused = false;          // en pausa por auto-freno
+
+    // Estado del muestreo de tamano (no toca la descarga real).
+    QNetworkAccessManager *m_sampNam = nullptr;
+    QVector<Pending> m_sampleQueue;        // muestras aun por lanzar
+    QSet<QNetworkReply *> m_sampleActive;  // muestras en vuelo
+    QHash<QNetworkReply *, QTimer *> m_sampleTimeouts;
+    qint64 m_sampleBytes = 0;              // suma de bytes de las muestras OK
+    int m_sampleOk = 0;                    // muestras medidas con exito
+    int m_sampleTargets = 0;               // muestras totales a pedir
+    int m_sampleReturned = 0;              // muestras ya respondidas (ok+fallo)
 
     qint64 m_total = 0, m_cells = 0, m_done = 0;
     Stats m_stats;

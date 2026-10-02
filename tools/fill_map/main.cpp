@@ -22,6 +22,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -480,14 +481,34 @@ private:
         }
 
         if (!silencioso) {
+            // Estima el tamano (muestreo asincrono); se espera con un QEventLoop
+            // local -la interfaz sigue viva, es un bucle anidado como el de un
+            // dialogo modal- para poder mostrar los MB en la confirmacion.
+            qint64 estBytes = 0;
+            int sampled = 0;
+            {
+                QEventLoop espera;
+                connect(filler, &TileFiller::sizeEstimated, &espera,
+                        [&](double, qint64 eb, int s) {
+                            estBytes = eb; sampled = s; espera.quit();
+                        });
+                statusBar()->showMessage(tr("Estimando tamano..."));
+                filler->estimateSize();
+                espera.exec();
+                statusBar()->clearMessage();
+            }
+
             QString detalle;
             for (const auto &pz : filler->perZoomMissing())
                 if (pz.second > 0)
                     detalle += tr("  z%1: %2\n").arg(pz.first).arg(pz.second);
-            QString aviso = tr("Se descargaran %1 teselas.\n\n%2").arg(total).arg(detalle);
+            QString aviso = tr("Se descargaran %1 teselas (~%2 MB%3).\n\n%4")
+                                .arg(total)
+                                .arg(double(estBytes) / 1048576.0, 0, 'f', 1)
+                                .arg(sampled > 0 ? QString() : tr(" aprox."))
+                                .arg(detalle);
             if (total > 50000)
-                aviso += tr("\nATENCION: son muchas; puede tardar bastante y ocupar "
-                            "varios cientos de MB (o mas).");
+                aviso += tr("\nATENCION: son muchas; puede tardar bastante.");
             aviso += tr("\nA %1 t/s son ~%2 minutos.\n\n¿Continuar?")
                          .arg(p.rate, 0, 'f', 1)
                          .arg(double(total) / p.rate / 60.0, 0, 'f', 1);

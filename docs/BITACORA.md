@@ -2020,3 +2020,47 @@ En las herramientas: `fill_tiles --conns N` y, en `fill_map`, el selector
 
 **Estado: 13 tests verdes; descarga en paralelo verificada contra la fuente
 real, Qt 6.4.**
+
+## 38. Acercarnos a SAS.Planet (3/4): estimación de tamaño (MB)
+
+Antes de confirmar sabíamos **cuántas** teselas íbamos a bajar, pero no **cuánto
+ocupaban**. SAS.Planet enseña un tamaño aproximado; aquí añadimos lo mismo con un
+**muestreo pequeño y asíncrono**, sin descargar todo ni escribir la BD.
+
+Nuevo método `TileFiller::estimateSize(int samples = 12)`:
+
+- `collectSamples(n)`: recorre los niveles del plan (sin tocar el cursor real ni
+  emitir `zoomFinished`) y reparte las `n` muestras entre los zooms. En cada nivel
+  salta con un **stride** por el rango de teselas para no coger todas del mismo
+  rincón, aplicando el mismo filtro de **polígono/present** que la descarga (solo
+  muestrea teselas que de verdad faltan). Devuelve una lista de `Pending` ligeras
+  (basta z/x/y para construir la URL).
+- Un mini-descargador propio (`m_sampNam` independiente del de la descarga real,
+  con su `QSet` de peticiones en vuelo y su cap = `connections`) que **solo mide
+  los bytes** de cada respuesta y **no inserta nada** en la BD. Las muestras se
+  vuelven a bajar luego en `start()`; es poca cosa.
+- Al volver todas, promedia los bytes de las que salieron bien y emite
+  **`sizeEstimated(double avgKiB, qint64 estBytesTotal, int sampled)`** con
+  `estBytesTotal ≈ media · totalToDownload()`. Si no logra muestrear nada (sin
+  red, o todo presente), cae a una **heurística de ~20 KiB/tesela** y marca
+  `sampled = 0` para que la interfaz avise de que es aproximado.
+
+Es un paso **previo** y opcional: no interfiere con `start()` (su estado de red es
+aparte) y se llama entre `prepare()` y `start()`.
+
+Integración en las herramientas:
+
+- `fill_tiles`: tras `prepare()` y antes del prompt, lanza `estimateSize()` y
+  espera el `sizeEstimated` con un `QEventLoop` local (la consola puede bloquear);
+  imprime `Tamano estimado: ~X MB (media Y KiB/tesela, muestreo de N)`.
+- `fill_map`: igual, pero el `QEventLoop` es un **bucle anidado** (como un diálogo
+  modal: la ventana sigue viva mientras se muestrea) y el resultado se añade a la
+  confirmación: `Se descargaran N teselas (~X MB).`; si el muestreo falló se marca
+  "aprox.".
+
+Verificado sobre Esri Clarity en un área pequeña (zoom 14–16, 145 teselas): el
+estimado fue **~3.6 MB** (media 25.4 KiB, muestreo de 12) y la BD real quedó en
+**3.50 MB** — mismo orden, diferencia ~3 % (y la BD incluye el propio formato
+SQLite, así que la suma de imágenes casa aún mejor).
+
+**Estado: 13 tests verdes; estimación verificada contra la descarga real, Qt 6.4.**

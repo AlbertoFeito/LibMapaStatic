@@ -98,8 +98,10 @@ En `fill_map`, el botón **Rejilla** hace lo mismo sobre el mapa, y el botón
 están en la BD a ese zoom, coloreada por completitud (ámbar→verde) y visible
 aunque mires a un zoom menor. Además de **Seleccionar área** (rectángulo) está
 **Polígono**: se marca clic a clic y descarga solo lo de dentro (en consola,
-`fill_tiles --poly "lat,lon;lat,lon;..."`). La fuente por defecto es Esri
-«Clarity» (sin clave); respeta los términos de uso de cada servidor.
+`fill_tiles --poly "lat,lon;lat,lon;..."`). La descarga va en **paralelo
+limitado** (`--conns`/selector «Conex», 1..8) y, antes de confirmar, **estima el
+tamaño en MB** con un muestreo rápido. La fuente por defecto es Esri «Clarity»
+(sin clave); respeta los términos de uso de cada servidor.
 
 ## Estructura
 

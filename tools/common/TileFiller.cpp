@@ -519,4 +519,146 @@ void TileFiller::finish(bool cancelled)
     emit finished(m_stats, cancelled);
 }
 
+// Junta hasta n teselas de muestra, repartidas por los zooms del plan, que falten
+// y (si hay poligono) caigan dentro. NO toca el cursor real ni emite senales: es
+// solo para estimar el tamano. Da un paso ('stride') dentro de cada nivel para no
+// coger todas del mismo rincon.
+QVector<TileFiller::Pending> TileFiller::collectSamples(int n)
+{
+    QVector<Pending> out;
+    if (n <= 0 || m_plan.isEmpty())
+        return out;
+
+    const int perLevel = qMax(1, n / int(m_plan.size()));
+    const bool usaPoly = m_p.polygon.size() >= 3;
+
+    for (const ZoomPlan &zp : m_plan) {
+        if (out.size() >= n)
+            break;
+        const qint64 w = zp.x1 - zp.x0 + 1;
+        const qint64 h = zp.y1 - zp.y0 + 1;
+        const qint64 cells = w * h;
+        if (cells <= 0)
+            continue;
+        const qint64 stride = qMax<qint64>(1, cells / (perLevel * 4));
+        int taken = 0;
+        for (qint64 i = 0; i < cells && taken < perLevel && out.size() < n;
+             i += stride) {
+            const int x = zp.x0 + int(i / h);
+            const int y = zp.y0 + int(i % h);
+            if (usaPoly) {
+                const double clon = TileMatrix::tileXToLongitude(x + 0.5, zp.z);
+                const double clat = TileMatrix::tileYToLatitude(y + 0.5, zp.z);
+                if (!GeoMath::pointInPolygon(clon, clat, m_p.polygon))
+                    continue;
+            }
+            const int sy = TileMatrix::toStorageY(y, zp.z, m_p.ds.scheme);
+            if (!m_p.overwrite && zp.present.contains(qMakePair(x, sy)))
+                continue;
+            Pending p;
+            p.z = zp.z; p.x = x; p.y = y;   // para el muestreo basta z/x/y
+            out.append(p);
+            ++taken;
+        }
+    }
+    return out;
+}
+
+// Arranca el muestreo asincrono: prepara la lista de muestras y lanza. Si no hay
+// nada que muestrear (p.ej. todo presente, o plan vacio), cae a la heuristica en
+// el proximo ciclo del bucle de eventos (para que el llamador pueda conectar la
+// senal antes de recibirla).
+void TileFiller::estimateSize(int samples)
+{
+    m_sampleQueue = collectSamples(samples);
+    m_sampleBytes = 0;
+    m_sampleOk = 0;
+    m_sampleReturned = 0;
+    m_sampleTargets = int(m_sampleQueue.size());
+
+    if (m_sampleTargets == 0) {
+        QTimer::singleShot(0, this, [this] { finishEstimate(0.0, 0); });
+        return;
+    }
+    if (!m_sampNam)
+        m_sampNam = new QNetworkAccessManager(this);
+    pumpSamples();
+}
+
+// Lanza muestras hasta llenar el cap de conexiones; cada una SOLO mide bytes (no
+// escribe la BD) y tiene su propio timeout.
+void TileFiller::pumpSamples()
+{
+    const int conns = qBound(1, m_p.connections, 8);
+    while (m_sampleActive.size() < conns && !m_sampleQueue.isEmpty()) {
+        const Pending p = m_sampleQueue.takeFirst();
+        QNetworkRequest req(QUrl(buildUrl(m_p.url, p.z, p.x, p.y)));
+        req.setHeader(QNetworkRequest::UserAgentHeader, m_p.userAgent);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        req.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
+#endif
+        QNetworkReply *reply = m_sampNam->get(req);
+        m_sampleActive.insert(reply);
+
+        QTimer *to = new QTimer(this);
+        to->setSingleShot(true);
+        connect(to, &QTimer::timeout, this, [reply] { reply->abort(); });
+        to->start(m_p.timeoutMs);
+        m_sampleTimeouts.insert(reply, to);
+
+        connect(reply, &QNetworkReply::finished, this,
+                [this, reply] { onSampleDone(reply); });
+    }
+}
+
+// Recoge una muestra: suma sus bytes si es una imagen valida, cuenta la respuesta
+// y, cuando han vuelto todas, promedia y emite la estimacion.
+void TileFiller::onSampleDone(QNetworkReply *reply)
+{
+    if (!m_sampleActive.remove(reply)) {
+        reply->deleteLater();
+        return;
+    }
+    if (QTimer *to = m_sampleTimeouts.take(reply)) {
+        to->stop();
+        to->deleteLater();
+    }
+
+    const int status =
+        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QNetworkReply::NetworkError netErr = reply->error();
+    const QByteArray body =
+        (netErr == QNetworkReply::NoError) ? reply->readAll() : QByteArray();
+    const QString ctype =
+        reply->header(QNetworkRequest::ContentTypeHeader).toString();
+    reply->deleteLater();
+
+    const bool ok = netErr == QNetworkReply::NoError
+                    && (status == 0 || status == 200)
+                    && !body.isEmpty()
+                    && (ctype.isEmpty() || ctype.startsWith(QLatin1String("image")));
+    if (ok) {
+        m_sampleBytes += body.size();
+        ++m_sampleOk;
+    }
+    ++m_sampleReturned;
+
+    if (m_sampleReturned < m_sampleTargets) {
+        pumpSamples();
+        return;
+    }
+    // Todas respondidas: promedia (o heuristica si ninguna sirvio).
+    const double avg = m_sampleOk > 0 ? double(m_sampleBytes) / m_sampleOk : 0.0;
+    finishEstimate(avg, m_sampleOk);
+}
+
+// Emite la estimacion: media por tesela (KiB), total estimado y nº de muestras.
+// Con 0 muestras usa una heuristica de ~20 KiB/tesela (satelite JPG tipico).
+void TileFiller::finishEstimate(double avgBytes, int sampled)
+{
+    const double perTile = avgBytes > 0.0 ? avgBytes : 20.0 * 1024.0;
+    const qint64 est = qint64(perTile * double(m_total));
+    emit sizeEstimated(perTile / 1024.0, est, sampled);
+}
+
 } // namespace libmapa
