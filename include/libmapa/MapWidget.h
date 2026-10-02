@@ -30,8 +30,12 @@ struct MapConfig
     QString datasetsFile;
 
     //! Carpeta con ficheros de elevacion SRTM `.hgt` (nombres tipo `N19W077.hgt`).
-    //! Vacia = sin elevacion; elevationAt() devolvera NaN. Opcional.
+    //! Vacia = sin elevacion por carpeta. Opcional.
     QString elevationDir;
+
+    //! Base de datos de elevacion (`.sqlitedb` generada por `dem_to_db`). Si viene,
+    //! TIENE PRIORIDAD sobre elevationDir. Vacia = no se usa. Opcional.
+    QString elevationDbFile;
 
     QString initialLayerId;                    //!< Vacio = el primero del JSON.
     QGeoCoordinate initialCenter{23.1136, -82.3666};
@@ -232,12 +236,14 @@ public:
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
 
     // --- Elevacion -------------------------------------------------------
-    //! Cota del terreno (metros) en \a position leida de los `.hgt` de la carpeta
-    //! configurada, o NaN si no hay dato (sin carpeta, tile ausente o hueco).
-    //! Comprueba el resultado con std::isnan.
+    //! Cota del terreno (metros) en \a position leida del origen de elevacion
+    //! configurado (carpeta `.hgt` o base de datos), o NaN si no hay dato (sin
+    //! origen, tile ausente o hueco). Comprueba el resultado con std::isnan.
     double elevationAt(const QGeoCoordinate &position) const;
-    //! Cambia en caliente la carpeta de ficheros de elevacion (vacia = desactiva).
+    //! Usa en caliente una CARPETA de ficheros `.hgt` como origen (vacia = quita).
     void setElevationDir(const QString &dir);
+    //! Usa en caliente una BASE DE DATOS `.sqlitedb` como origen (vacia = quita).
+    void setElevationDb(const QString &dbFile);
 
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;

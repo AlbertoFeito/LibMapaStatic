@@ -137,7 +137,7 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
     <rect x="34" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="42" y="316" fill="#145374" font-weight="700">tiles</text><text x="42" y="332" font-size="8.5">TileService·Loader·Cache·Source·Planner·Probe</text>
     <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·TileKey</text>
     <rect x="338" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="346" y="316" fill="#145374" font-weight="700">db</text><text x="346" y="332" font-size="8.5">ConnectionPool·Schema·VectorRepository</text>
-    <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · HgtElevation</text>
+    <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · Elevation</text>
     <rect x="622" y="298" width="106" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="630" y="316" fill="#145374" font-weight="700">tipos</text><text x="630" y="332" font-size="8.5">MapFeature·MapTarget</text>
     <rect x="34" y="352" width="694" height="30" rx="5" fill="#f7f9fb" stroke="#c4ccd6"/><text x="42" y="371" fill="#5b6b7b">Qt: QGeoCoordinate · QImage · QSqlDatabase · QCache · QThread</text>
   </g>
@@ -151,7 +151,7 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
 </figure>
 
 <div class="note"><b>Motivo de la separación:</b> el núcleo (teselas, geodesia, BD) se
-compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así hay 14 tests automáticos que
+compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así hay 15 tests automáticos que
 validan la lógica sin abrir ninguna ventana, y quien solo quiera leer teselas no
 arrastra el motor de dibujo.</div>
 
@@ -353,10 +353,16 @@ entidad multi-parte</b>. También lo usa <code>geo_to_tiles</code> para rasteriz
 
 <!-- ===================== 8bis. DEM ===================== -->
 <h2 class="sec">8b · Módulo <span class="mono">dem</span> — elevación del terreno (HGT/SRTM)</h2>
-<p><span class="cls">HgtElevation</span> <span class="tag">src/dem/HgtElevation.h</span>
-lee ficheros <b>SRTM <code>.hgt</code></b> locales y da la cota en metros de una
-coordenada. Vive en <code>libmapa_core</code> (sin widgets): se consulta igual
-desde la ventana que desde consola o un test.</p>
+<p>Da la cota en metros de una coordenada, leyendo datos <b>SRTM</b>. Vive en
+<code>libmapa_core</code> (sin widgets): se consulta igual desde la ventana que
+desde consola o un test. Separa <i>de dónde salen las muestras</i> de <i>cómo se
+interpola</i>, con una interfaz al estilo de <code>ITileSource</code>:</p>
+<ul>
+  <li><span class="cls">IElevationSource</span> <span class="tag">src/dem/IElevationSource.h</span>: interfaz pura, un método <code>elevationAt(coord)→double</code> (contrato NaN).</li>
+  <li><span class="cls">GridElevation</span> <span class="tag">src/dem/GridElevation.h</span>: base que concentra lo común (caché LRU de tiles, lectura de muestra, <b>interpolación bilineal</b>, huecos→NaN); deja un solo hueco: <code>loadTile()</code>.</li>
+  <li><span class="cls">HgtElevation</span>: <code>loadTile()</code> lee el fichero <code>.hgt</code> de una carpeta.</li>
+  <li><span class="cls">SqliteElevation</span>: <code>loadTile()</code> consulta una base de datos <code>.sqlitedb</code> y descomprime el blob del tile — un <b>solo fichero</b>, cómodo para empaquetar en una app.</li>
+</ul>
 <p>El <code>.hgt</code> es crudo y <b>sin cabecera</b>: una rejilla <b>cuadrada</b>
 de muestras <code>int16</code> <b>big-endian</b> que cubre 1°×1°. El nombre marca
 la esquina suroeste (<code>N19W077.hgt</code> = 19–20 N, 77–76 O); la fila 0 es el
@@ -364,10 +370,11 @@ borde <b>norte</b> y la columna 0 el <b>oeste</b>. La resolución no está escri
 se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m,
 3601 = 30 m).</p>
 <table><tr><th>Función</th><th>Qué hace</th></tr>
-<tr><td class="mono">setDirectory(dir) / setElevationDir</td><td>Carpeta de los <code>.hgt</code>; vacía la caché.</td></tr>
-<tr><td class="mono">elevationAt(coord) → double</td><td>Localiza el tile (floor de lat/lon), autodetecta el lado, lee big-endian e <b>interpola bilinealmente</b>. <b>NaN</b> si no hay dato (tile ausente, sin carpeta, o hueco SRTM <code>-32768</code>).</td></tr>
+<tr><td class="mono">elevationAt(coord) → double</td><td>Localiza el tile (floor de lat/lon), autodetecta el lado, lee big-endian e <b>interpola bilinealmente</b>. <b>NaN</b> si no hay dato (tile ausente, sin origen, o hueco SRTM <code>-32768</code>).</td></tr>
+<tr><td class="mono">loadTile(lat,lon,…)</td><td>El único método que cambia por origen: lee el fichero (<code>HgtElevation</code>) o el blob de la BD (<code>SqliteElevation</code>).</td></tr>
 </table>
-<p><b>Propiedades:</b> <span class="tag">caché LRU</span> de tiles abiertos (no releer el disco al mover el ratón); <span class="tag">sin dependencias nuevas</span> (QFile/QByteArray/<code>qFromBigEndian</code> de QtCore, <code>QGeoCoordinate</code> de QtPositioning, ambos ya enlazados); <span class="tag">huecos→NaN</span> no inventa terreno. Se expone por la fachada: <code>MapConfig.elevationDir</code> y <code>MapWidget::elevationAt()</code>; <code>fill_map</code> muestra la cota bajo el cursor (señal <code>mouseMoved</code>) y la carpeta se elige con <code>--dem</code> o el botón <b>DEM…</b>.</p>
+<p>El <code>.hgt</code> es crudo y <b>sin cabecera</b>: rejilla <b>cuadrada</b> de <code>int16</code> <b>big-endian</b> de 1°×1°, nombre = esquina SO (<code>N19W077.hgt</code>), fila 0 = norte, col 0 = oeste. La resolución se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m, 3601 = 30 m). La <b>BD</b> guarda esas mismas muestras <code>qCompress</code>-adas: <code>dem_tiles(lat,lon,side,data)</code> + <code>dem_meta</code>; se abre read-only por el <code>SqliteConnectionPool</code>.</p>
+<p><b>Propiedades:</b> <span class="tag">caché LRU</span> de tiles abiertos; <span class="tag">huecos→NaN</span> no inventa terreno; <span class="tag">dos orígenes</span> carpeta <code>.hgt</code> o BD empaquetable, misma cota. Se expone por la fachada: <code>MapConfig.elevationDir</code>/<code>elevationDbFile</code>, <code>MapWidget::elevationAt()</code> y <code>setElevationDir/Db()</code>; <code>fill_map</code> muestra la cota bajo el cursor (<code>--dem</code> carpeta, <code>--dem-db</code> base de datos, o el botón <b>DEM…</b>).</p>
 
 <!-- ===================== 9. FLUJOS ===================== -->
 <h2 class="sec">9 · Flujos de interacción entre objetos</h2>
@@ -526,7 +533,7 @@ probada— sirve para la consola y para la ventana con barra de progreso viva.</
 <!-- ===================== 13. DECISIONES ===================== -->
 <h2 class="sec">13 · Decisiones de diseño e historia</h2>
 <ul>
-  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite 14 tests sin GUI y no imponer QCustomPlot.</li>
+  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite 15 tests sin GUI y no imponer QCustomPlot.</li>
   <li><b>PIMPL en MapWidget.</b> QCustomPlot queda dentro; la cabecera pública es limpia.</li>
   <li><b>Configuración en datos.</b> El mapeo de zoom, el esquema y las columnas viven en <code>datasets.json</code>, no cableados en el código.</li>
   <li><b>Zoom hasta z15+.</b> <code>recommendedMaxZoom</code> separa «hasta dónde hay cobertura buena» de «hasta dónde hay teselas sueltas».</li>

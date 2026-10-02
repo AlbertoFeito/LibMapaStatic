@@ -31,6 +31,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
+#include <QMenu>
 #include <QMessageBox>
 #include <QNetworkProxyFactory>
 #include <QProgressBar>
@@ -63,7 +64,8 @@ public:
     // centrado en Cuba, prepara el antirebote del modo "al navegar", construye la
     // barra de herramientas y la de estado, y conecta las senales del mapa
     // (seleccion de area, cambios de zoom/centro) a los slots correspondientes.
-    Ventana(const QString &datasetsFile, const QString &demDir = QString())
+    Ventana(const QString &datasetsFile, const QString &demDir = QString(),
+            const QString &demDb = QString())
         : m_datasetsFile(datasetsFile)
     {
         setWindowTitle(tr("Rellenar teselas - libmapa"));
@@ -76,7 +78,8 @@ public:
         // --- Mapa -----------------------------------------------------------
         MapConfig cfg;
         cfg.datasetsFile = datasetsFile;
-        cfg.elevationDir = demDir;                         // vacio = sin elevacion
+        cfg.elevationDir = demDir;          // carpeta .hgt (vacio = sin carpeta)
+        cfg.elevationDbFile = demDb;        // BD .sqlitedb (prioritaria si viene)
         cfg.initialCenter = QGeoCoordinate(21.5, -79.5);   // Cuba entera
         cfg.initialZoom = 6;
         m_mapa = new MapWidget(cfg, this);
@@ -114,7 +117,7 @@ public:
         // elevacion de esa coordenada en los `.hgt` (si hay carpeta configurada).
         connect(m_mapa, &MapWidget::mouseMoved, this,
                 [this](const QGeoCoordinate &p) { mostrarCota(p); });
-        if (!demDir.isEmpty())
+        if (!demDir.isEmpty() || !demDb.isEmpty())
             m_demActivo = true;
     }
 
@@ -286,12 +289,17 @@ private:
         m_url->setMinimumWidth(520);
         tb2->addWidget(m_url);
 
-        // Elevacion del terreno: elige la carpeta con los `.hgt` (SRTM). Una vez
-        // puesta, la cota aparece bajo el cursor en la barra de estado.
+        // Elevacion del terreno: elige una CARPETA de `.hgt` o una BASE DE DATOS
+        // `.sqlitedb`. Una vez puesta, la cota aparece bajo el cursor.
         m_btnDem = new QPushButton(tr("DEM..."), this);
-        m_btnDem->setToolTip(tr("Carpeta con ficheros de elevacion SRTM .hgt "
-                                "(N19W077.hgt ...). Muestra la cota bajo el cursor."));
-        connect(m_btnDem, &QPushButton::clicked, this, &Ventana::alElegirDem);
+        m_btnDem->setToolTip(tr("Origen de elevacion: carpeta de .hgt o base de "
+                                "datos .sqlitedb. Muestra la cota bajo el cursor."));
+        QMenu *menuDem = new QMenu(m_btnDem);
+        connect(menuDem->addAction(tr("Carpeta de .hgt...")),
+                &QAction::triggered, this, &Ventana::alElegirDemCarpeta);
+        connect(menuDem->addAction(tr("Base de datos .sqlitedb...")),
+                &QAction::triggered, this, &Ventana::alElegirDemDb);
+        m_btnDem->setMenu(menuDem);
         tb2->addWidget(m_btnDem);
 
         sincronizarZoomDesde();
@@ -318,8 +326,8 @@ private:
         statusBar()->addPermanentWidget(m_btnCancelar);
     }
 
-    // Abre un dialogo para elegir la carpeta de los `.hgt` y la activa en caliente.
-    void alElegirDem()
+    // Elige una CARPETA de ficheros `.hgt` como origen de elevacion (en caliente).
+    void alElegirDemCarpeta()
     {
         const QString dir = QFileDialog::getExistingDirectory(
             this, tr("Carpeta de ficheros de elevacion (.hgt)"));
@@ -327,7 +335,20 @@ private:
             return;
         m_mapa->setElevationDir(dir);
         m_demActivo = true;
-        statusBar()->showMessage(tr("Elevacion: %1").arg(dir), 4000);
+        statusBar()->showMessage(tr("Elevacion (carpeta): %1").arg(dir), 4000);
+    }
+
+    // Elige una BASE DE DATOS `.sqlitedb` de elevacion como origen (en caliente).
+    void alElegirDemDb()
+    {
+        const QString file = QFileDialog::getOpenFileName(
+            this, tr("Base de datos de elevacion"), QString(),
+            tr("Base de datos de elevacion (*.sqlitedb *.db);;Todos (*)"));
+        if (file.isEmpty())
+            return;
+        m_mapa->setElevationDb(file);
+        m_demActivo = true;
+        statusBar()->showMessage(tr("Elevacion (BD): %1").arg(file), 4000);
     }
 
     // Muestra la cota de una coordenada en la etiqueta de la barra de estado. Sin
@@ -751,12 +772,15 @@ int main(int argc, char *argv[])
     QNetworkProxyFactory::setUseSystemConfiguration(true);
 
     // Argumentos: el primer positional es el datasets.json; --dem <carpeta> fija
-    // la carpeta de ficheros de elevacion SRTM `.hgt` (opcional).
+    // la carpeta de `.hgt` y --dem-db <fichero> la base de datos de elevacion.
     QString datasets;
     QString demDir;
+    QString demDb;
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
-        if ((a == QLatin1String("--dem") || a == QLatin1String("--elev"))
+        if (a == QLatin1String("--dem-db") && i + 1 < argc)
+            demDb = QString::fromLocal8Bit(argv[++i]);
+        else if ((a == QLatin1String("--dem") || a == QLatin1String("--elev"))
             && i + 1 < argc)
             demDir = QString::fromLocal8Bit(argv[++i]);
         else if (datasets.isEmpty() && !a.startsWith(QLatin1String("--")))
@@ -765,7 +789,7 @@ int main(int argc, char *argv[])
     if (datasets.isEmpty())
         datasets = QStringLiteral("datasets.json");
 
-    Ventana v(datasets, demDir);
+    Ventana v(datasets, demDir, demDb);
     v.show();
     // Sin TLS, toda descarga HTTPS falla: avisar en claro (Windows: falta OpenSSL).
     if (!QSslSocket::supportsSsl()) {

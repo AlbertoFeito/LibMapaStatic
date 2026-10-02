@@ -9,9 +9,9 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
-- 14 tests (11 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 15 tests (12 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
-- Elevación del terreno a partir de ficheros SRTM `.hgt` (cota bajo el cursor en `fill_map`)
+- Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 
 ## Uso
 
@@ -104,10 +104,11 @@ limitado** (`--conns`/selector «Conex», 1..8) y, antes de confirmar, **estima 
 tamaño en MB** con un muestreo rápido. La fuente por defecto es Esri «Clarity»
 (sin clave); respeta los términos de uso de cada servidor.
 
-Con `fill_map --dem <carpeta>` (o el botón **DEM…**) se cargan ficheros SRTM
-`.hgt` (p.ej. `N19W077.hgt`) y la barra de estado muestra la **cota del terreno
-bajo el cursor**. Detecta solo la resolución (90 m / 30 m) por el tamaño del
-fichero e interpola; sobre mar o sin dato muestra «—».
+Con `fill_map --dem <carpeta>` (ficheros `.hgt`) o `fill_map --dem-db <fichero>`
+(base de datos `.sqlitedb`) —o el botón **DEM…**— la barra de estado muestra la
+**cota del terreno bajo el cursor**. Detecta solo la resolución (90 m / 30 m) por
+el tamaño del tile e interpola; sobre mar o sin dato muestra «—». La elevación es
+parte de la librería (`MapWidget::elevationAt`), reutilizable desde cualquier app.
 
 ## Estructura
 
@@ -119,7 +120,7 @@ src/
   db/                conexiones SQLite, esquema, repositorio vectorial
   tiles/             lectura, caché, planificación y carga de teselas
   widget/            MapView y capa de teselas sobre QCustomPlot
-tests/               14 tests (11 sin QCustomPlot)
+tests/               15 tests (12 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, flujos)

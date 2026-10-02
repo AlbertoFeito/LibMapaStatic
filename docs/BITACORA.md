@@ -2111,3 +2111,56 @@ big-endian y bilineal correctas.
 
 **Estado: 14 tests verdes (13 + `tst_hgtelevation`); lectura HGT verificada
 contra un tile SRTM real, Qt 6.4.**
+
+## 40. Elevación en base de datos (1/3): interfaz y lector SQLite
+
+La elevación por ficheros `.hgt` sueltos (§39) está bien para consultar en el PC,
+pero el usuario va a **empaquetar la elevación dentro de una app**: para eso
+quiere **un solo fichero** portable, no cientos de `.hgt`. Se decidió guardarla en
+una **base de datos SQLite**, coherente con cómo el proyecto ya guarda las
+teselas. Este paso añade **leer** de esa BD; generarla y descargar vienen después.
+
+Para no duplicar la matemática, se separa *de dónde salen las muestras* de *cómo
+se interpola*, con una interfaz al estilo de `ITileSource`:
+
+- **`IElevationSource`** (`src/dem/IElevationSource.h`): interfaz pura, un único
+  método `double elevationAt(QGeoCoordinate) const` con el contrato NaN.
+- **`GridElevation`** (`src/dem/GridElevation.{h,cpp}`): base abstracta que
+  concentra TODO lo común de una fuente SRTM en rejilla —`struct Tile`, la **caché
+  LRU**, `sampleAt`, `isqrtExact`, el valor de hueco y la **interpolación
+  bilineal** con su contrato NaN— y deja un único hueco por implementar:
+  `virtual bool loadTile(latFloor, lonFloor, data, side)`.
+- **`HgtElevation`** ahora **hereda de `GridElevation`**: solo implementa
+  `loadTile` leyendo el fichero `.hgt`. Su comportamiento público no cambia, así
+  que `tst_hgtelevation` sigue en verde sin tocarlo.
+- **`SqliteElevation`** (`src/dem/SqliteElevation.{h,cpp}`): implementa `loadTile`
+  consultando la BD y descomprimiendo el blob. Abre la BD **en solo lectura por
+  hilo** con `SqliteConnectionPool` (ya fija `QSQLITE_OPEN_READONLY` y
+  `busy_timeout`).
+
+**Esquema de la BD** (lo fija el lector; lo escribirá `dem_to_db`):
+```sql
+CREATE TABLE dem_tiles (lat INTEGER, lon INTEGER, side INTEGER, data BLOB,
+                        PRIMARY KEY(lat,lon));
+CREATE TABLE dem_meta  (key TEXT PRIMARY KEY, value TEXT);
+```
+`data` son **las MISMAS muestras** `int16` big-endian que el `.hgt`, solo que
+`qCompress`-adas (el terreno comprime bien y el mar casi a cero). Al leer,
+`qUncompress` reproduce el `Tile` exacto → la bilineal es la misma → **idéntica
+cota** que el lector de ficheros. (`qCompress`/`qUncompress`, de QtCore, no se
+usaban aún en el repo.)
+
+**Fachada:** `MapConfig` gana `elevationDbFile` (prioritaria sobre
+`elevationDir`); el miembro de la `Impl` pasa a `std::unique_ptr<IElevationSource>`
+y el constructor elige la implementación; nuevos `MapWidget::setElevationDb()` y
+`setElevationDir()` cambian el origen en caliente. En **`fill_map`**: opción
+`--dem-db <fichero>` y el botón **DEM…** pasa a un menú (carpeta `.hgt` **o** BD
+`.sqlitedb`).
+
+**Test nº 15 (`tst_sqliteelevation`)**: construye en un temporal el mismo tile
+sintético como `.hgt` y como BD (blob `qCompress`-ado) y comprueba que
+`SqliteElevation` da **exactamente lo mismo** que `HgtElevation` en varios puntos
+(nodo, intermedio bilineal), más hueco→NaN y tile ausente→NaN.
+
+**Estado: 15 tests verdes; lector de BD verificado contra el lector de ficheros
+(misma cota). Faltan las herramientas `dem_to_db` y `fill_hgt` (siguientes pasos).**

@@ -60,7 +60,7 @@ reglas que ya venimos aplicando; respétalas siempre.
   (`tile.openstreetmap.org`): está prohibido.
 
 ## Verificación antes de commitear código
-- Compila y pasa **los 13 tests**: `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
+- Compila y pasa **todos los tests** (15 ahora): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
   en el contenedor). Un push verde vale más que tres especulativos.
 - Contenedor nuevo sin Qt: `sudo apt-get update && sudo apt-get install -y
   qt6-base-dev qt6-positioning-dev`, y recupera QCustomPlot (arriba).

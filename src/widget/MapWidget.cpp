@@ -2,6 +2,7 @@
 
 #include "core/Logging.h"
 #include "dem/HgtElevation.h"
+#include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileService.h"
@@ -11,6 +12,8 @@
 
 #include <QLayout>
 #include <QVBoxLayout>
+
+#include <limits>
 
 namespace libmapa {
 
@@ -72,8 +75,9 @@ public:
     QString error;
     bool ready = false;
 
-    // Elevacion del terreno (opcional): lee los `.hgt` de config.elevationDir.
-    HgtElevation elevation;
+    // Elevacion del terreno (opcional): carpeta `.hgt` o base de datos. Puntero a
+    // la interfaz para poder cambiar de origen en caliente. Nulo = sin elevacion.
+    std::unique_ptr<IElevationSource> elevation;
 
     // Mancha de cobertura (diagnostico): zoom objetivo y si esta encendida.
     int coverageZoom = 14;
@@ -117,8 +121,14 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     }
     d->service.setDebounceMs(config.debounceMs);
 
-    if (!config.elevationDir.isEmpty())
-        d->elevation.setDirectory(config.elevationDir);
+    // Origen de elevacion: la base de datos tiene prioridad sobre la carpeta.
+    if (!config.elevationDbFile.isEmpty())
+        d->elevation = std::make_unique<SqliteElevation>(config.elevationDbFile);
+    else if (!config.elevationDir.isEmpty()) {
+        auto hgt = std::make_unique<HgtElevation>();
+        hgt->setDirectory(config.elevationDir);
+        d->elevation = std::move(hgt);
+    }
 
     if (!config.initialLayerId.isEmpty())
         d->service.setActiveDataset(config.initialLayerId);
@@ -675,17 +685,34 @@ qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx) const
     return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx) : -1;
 }
 
-// Cota del terreno (m) en una coordenada, leida de los `.hgt`. Reenvio fino al
-// lector de elevacion; NaN si no hay carpeta o dato (el llamador lo comprueba).
+// Cota del terreno (m) en una coordenada. Reenvio fino al origen de elevacion
+// configurado; NaN si no hay origen o no hay dato (el llamador lo comprueba).
 double MapWidget::elevationAt(const QGeoCoordinate &position) const
 {
-    return d->elevation.elevationAt(position);
+    return d->elevation ? d->elevation->elevationAt(position)
+                        : std::numeric_limits<double>::quiet_NaN();
 }
 
-// Cambia en caliente la carpeta de ficheros de elevacion (p.ej. desde un boton).
+// Cambia en caliente el origen a una CARPETA de `.hgt` (vacia = quita elevacion).
 void MapWidget::setElevationDir(const QString &dir)
 {
-    d->elevation.setDirectory(dir);
+    if (dir.isEmpty()) {
+        d->elevation.reset();
+        return;
+    }
+    auto hgt = std::make_unique<HgtElevation>();
+    hgt->setDirectory(dir);
+    d->elevation = std::move(hgt);
+}
+
+// Cambia en caliente el origen a una BASE DE DATOS `.sqlitedb` (vacia = quita).
+void MapWidget::setElevationDb(const QString &dbFile)
+{
+    if (dbFile.isEmpty()) {
+        d->elevation.reset();
+        return;
+    }
+    d->elevation = std::make_unique<SqliteElevation>(dbFile);
 }
 
 // Herramienta activa (arrastrar, medir, dibujar, editar...).
