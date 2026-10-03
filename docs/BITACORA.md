@@ -1901,6 +1901,9 @@ Qt 6.4.**
 
 ## 35. Qué falta — hoja de ruta
 
+> **Superada:** los puntos 1 (persistencia, §44) y 4 (elevación, §39–42) ya
+> están hechos. La hoja de ruta vigente está en §46.
+
 Lo que la librería **todavía no tiene**, por prioridad. Es una lista de trabajo,
 no una promesa de orden.
 
@@ -2331,3 +2334,55 @@ Cambio de aplicación de ejemplo (no de librería): los 15 tests no se tocan.
 
 **Estado: 15 tests verdes; `demo` enriquecido (cobertura + cota + persistencia),
 build sin avisos, Qt 6.4.**
+
+## 46. Repaso de la documentación y hoja de ruta actualizada
+
+Una revisión completa de los documentos frente al código encontró que se habían
+ido quedando atrás respecto a lo construido en §36–45. Ninguna incoherencia
+afectaba al build, pero varias **contradecían** el estado real:
+
+- **README:** la sección «Estado» seguía diciendo que las entidades «no se
+  guardan solas» justo después de §44; faltaba `geo_to_tiles` en la tabla de
+  herramientas; la «Estructura» no listaba `src/dem/` ni `src/io/` y describía
+  `widget/` como «MapView y capa de teselas»; la nota «sin QCustomPlot» omitía
+  `fill_map`; y la tabla de fases terminaba en la 8. Corregido todo, con las
+  fases 9–11 (descarga avanzada, elevación, persistencia).
+- **§35** proponía como pendiente lo que ya está hecho (persistencia, DEM) y
+  hablaba de 13 tests. Se marca como superada y se sustituye por la lista de
+  abajo, en vez de reescribirla: la bitácora es cronológica.
+- **Skill `libmapa-docs`:** decía «13 tests» (son 15).
+- **Comentarios de `fill_hgt`** (`main.cpp` y `qmake/fill_hgt.pro`): aún decían
+  que descomprime con zlib; desde la corrección de §42 es miniz.
+- **`CLAUDE.md` y la skill** solo describían el contenedor Linux en la nube. Se
+  añade el entorno local (Windows, Qt 6.11.2 MinGW, Qt Creator): dónde está el
+  build, cómo correr los tests y cómo generar el PDF con el Chrome/Edge de
+  Windows.
+- **Atribución:** `CLAUDE.md` prohibía poner un identificador de modelo en el
+  repo y a la vez exigía una línea `Co-Authored-By` que lo lleva. Se aclara que
+  esa línea final del commit es la **única** excepción, y se actualiza.
+- `.qtcreator/` (configuración local de Qt Creator) va al `.gitignore`.
+
+**Hoja de ruta vigente** (sustituye a §35):
+
+*Alta:*
+1. **Objetivos en vivo desde la BD:** conectar `vehiculo`/`buque_ais`/
+   `trayectoria` de `VectorRepository` con `TargetModel`/`TargetLayer`.
+2. **Rutas interactivas:** la BD guarda `ruta`/`ruta_punto`, pero no hay
+   herramienta ni capa para dibujarlas o editarlas.
+3. **Tests del código sin cubrir:** `TileFiller` (descarga) y `CoverageLayer`.
+
+*Media:*
+4. **Guardado incremental por id (UPSERT)** en `VectorRepository`, para que la
+   persistencia de §44 escale a miles de entidades sin volcado completo.
+5. **Fusionar bases regionales** (`merge_tiles`).
+6. **Medición de área y perímetro** (hoy solo distancia entre dos puntos).
+7. **Relieve a partir del DEM** (sombreado), ahora que ya hay elevación.
+
+*Baja:*
+8. Barra de escala, flecha norte, cuadrícula de coordenadas y leyenda.
+9. Búsqueda por lugar/coordenada (geocoding).
+10. Soporte vectorial OSM (`.pbf`/MVT).
+11. Publicar la referencia Doxygen e internacionalización (`.ts`).
+
+**Estado: cambio solo de documentación y comentarios, no requiere build;
+15 tests verdes.**

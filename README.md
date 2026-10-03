@@ -58,7 +58,7 @@ cmake -S . -B build -DLIBMAPA_QCP_DIR=/ruta/a/qcustomplot
 ```
 
 Sin QCustomPlot, el núcleo compila igual y pasa sus tests; se quedan fuera el
-widget, la aplicación `demo` y `render_map`.
+widget, la aplicación `demo`, `render_map` y `fill_map`.
 
 ## Las bases de datos
 
@@ -88,6 +88,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana |
 | `vector_db` | Crea e inspecciona la BD de puntos, rutas y polígonos |
+| `geo_to_tiles` | Rasteriza un fichero vectorial `.geo` a una base de teselas, para usarlo como capa base |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
@@ -169,9 +170,13 @@ src/
   geo/               proyección Web Mercator, conversión geo <-> tesela
   db/                conexiones SQLite, esquema, repositorio vectorial
   tiles/             lectura, caché, planificación y carga de teselas
-  widget/            MapView y capa de teselas sobre QCustomPlot
+  dem/               elevación del terreno: ficheros SRTM .hgt o BD .sqlitedb
+  io/                lectura de ficheros vectoriales .geo
+  widget/            MapView (QCustomPlot), capas de dibujo (teselas,
+                     entidades, objetivos, cobertura) y sus modelos
 tests/               15 tests (12 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
+demo/                aplicación de ejemplo
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, flujos)
 ```
@@ -188,11 +193,14 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 6 | Entidades: puntos, polilíneas y polígonos, con capas, edición interactiva y deshacer/rehacer |
 | 7 | Objetivos en movimiento (capa en tiempo real) y ficheros `.geo` como capas multi-parte |
 | 8 | Vector pesado a teselas (`geo_to_tiles`); descarga de teselas que faltan (`fill_tiles`/`fill_map`), base nueva, auto-freno y mancha de cobertura |
+| 9 | Descarga por polígono, en paralelo y con estimación de tamaño |
+| 10 | Elevación del terreno: ficheros `.hgt` o BD `.sqlitedb` (`fill_hgt` → `dem_to_db`), cota bajo el cursor |
+| 11 | Persistencia automática de entidades (`MapConfig.featuresDbFile`) y `demo` al día |
 
-Las entidades se dibujan, se editan y se **deshacen/rehacen** con el ratón, pero
-todavía **no se guardan solas**: enlazar el `MapWidget` con el
-`VectorRepository` (persistencia automática) es el principal pendiente. La hoja
-de ruta completa está en [`docs/BITACORA.md`](docs/BITACORA.md) §35.
+Las entidades se dibujan, se editan, se **deshacen/rehacen** con el ratón y se
+**guardan solas** en su BD. Lo siguiente es conectar los objetivos móviles y las
+rutas con la BD. La hoja de ruta actualizada está en
+[`docs/BITACORA.md`](docs/BITACORA.md) §46.
 
 ## Licencia
 

@@ -5,7 +5,7 @@ description: >
   LibMapaStatic, y dejar el repo correctamente actualizado. Úsala al terminar
   cualquier cambio de código (una herramienta, una capa, un método del API):
   comentarios por función, entrada en la bitácora, README/arquitectura/PDF si
-  procede, build + 13 tests, y commit+push con la atribución del proyecto.
+  procede, build + 15 tests, y commit+push con la atribución del proyecto.
   Dispara con: "documenta esto", "actualiza la bitácora", "registra la feature",
   "deja el repo al día", "resume y documenta".
 ---
@@ -31,14 +31,24 @@ Termina la sección con una línea de estado (p.ej. "13 tests, Qt 5.15 y 6.4").
 - Si cambió el API público, las herramientas o el estado: actualiza
   `README.md` (nº de tests, tabla de herramientas, tabla de estado).
 - Si cambió la arquitectura o se añadió una capa/módulo: actualiza
-  `docs/arquitectura.html` y **regenera el PDF**:
+  `docs/arquitectura.html` y **regenera el PDF**. En el contenedor:
   ```bash
   CHROME=$(ls /opt/pw-browsers/chromium-*/chrome-linux/chrome | head -1)
   "$CHROME" --headless --no-sandbox --disable-gpu --no-pdf-header-footer \
     --print-to-pdf=docs/LibMapaStatic_Documentacion.pdf docs/arquitectura.html
   ```
+  En el PC local (Windows), con el Chrome instalado (ver `CLAUDE.md` § Entorno):
+  ```powershell
+  & "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless --disable-gpu `
+    --no-pdf-header-footer --print-to-pdf="$PWD\docs\LibMapaStatic_Documentacion.pdf" `
+    "$PWD\docs\arquitectura.html"
+  ```
 
 ## 4. Verificación (si tocaste código)
+En el PC local (Windows, Qt 6.11.2 MinGW), compila con Qt Creator o en la
+carpeta `build/Desktop_Qt_6_11_2_MinGW_64_bit_Release` y lanza `ctest` con
+`C:\Qt\6.11.2\mingw_64\bin` y `C:\Qt\Tools\mingw1310_64\bin` en el `PATH`.
+
 Contenedor nuevo sin Qt:
 ```bash
 sudo apt-get update && sudo apt-get install -y qt6-base-dev qt6-positioning-dev
@@ -54,11 +64,10 @@ Compila y pasa los tests (sin pantalla):
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4
 cd build && QT_QPA_PLATFORM=offscreen ctest
 ```
-Deben pasar los 13. Cambios solo de documentación (.md/.html/skills) no
+Deben pasar los 15 (12 si no hay QCustomPlot). Cambios solo de documentación (.md/.html/skills) no
 necesitan build.
 
 ## 5. Commit + push
 En la rama `claude/sharp-goodall-dt7hh5` (nunca `main`). Mensaje en español
-explicando el porqué, cerrado con las dos líneas de atribución que indica
-`CLAUDE.md`. Luego `git push -u origin claude/sharp-goodall-dt7hh5` (reintenta
+explicando el porqué, cerrado con la atribución que indica `CLAUDE.md`. Luego `git push -u origin claude/sharp-goodall-dt7hh5` (reintenta
 con backoff si hay 503). Nunca pongas un identificador de modelo en el repo.

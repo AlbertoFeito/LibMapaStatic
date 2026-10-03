@@ -151,8 +151,8 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
 </figure>
 
 <div class="note"><b>Motivo de la separación:</b> el núcleo (teselas, geodesia, BD) se
-compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así hay 15 tests automáticos que
-validan la lógica sin abrir ninguna ventana, y quien solo quiera leer teselas no
+compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así 12 de los 15 tests automáticos
+validan la lógica sin QCustomPlot ni ventanas, y quien solo quiera leer teselas no
 arrastra el motor de dibujo.</div>
 
 <!-- ===================== 3. TIPOS ===================== -->
@@ -620,7 +620,7 @@ probada— sirve para la consola y para la ventana con barra de progreso viva.</
 <!-- ===================== 13. DECISIONES ===================== -->
 <h2 class="sec">13 · Decisiones de diseño e historia</h2>
 <ul>
-  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite 15 tests sin GUI y no imponer QCustomPlot.</li>
+  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite probar el núcleo sin GUI (12 de los 15 tests) y no imponer QCustomPlot.</li>
   <li><b>PIMPL en MapWidget.</b> QCustomPlot queda dentro; la cabecera pública es limpia.</li>
   <li><b>Configuración en datos.</b> El mapeo de zoom, el esquema y las columnas viven en <code>datasets.json</code>, no cableados en el código.</li>
   <li><b>Zoom hasta z15+.</b> <code>recommendedMaxZoom</code> separa «hasta dónde hay cobertura buena» de «hasta dónde hay teselas sueltas».</li>

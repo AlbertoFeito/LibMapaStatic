@@ -2,7 +2,7 @@
 # fill_hgt.pro  -  alternativa qmake, por si prefieres no usar CMake.
 #
 # Descarga ficheros de elevacion SRTM `.hgt` (30 m) de AWS Skadi (sin
-# clave) para una zona y los descomprime con zlib. Alimenta a dem_to_db.
+# clave) para una zona y los descomprime con miniz. Alimenta a dem_to_db.
 #
 # El proyecto principal usa CMake (CMakeLists.txt en la raiz).
 #-------------------------------------------------------------------

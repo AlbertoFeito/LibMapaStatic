@@ -9,13 +9,12 @@ reglas que ya venimos aplicando; respétalas siempre.
   `git fetch origin claude/sharp-goodall-dt7hh5 && git reset --hard origin/claude/sharp-goodall-dt7hh5`.
 - Antes de commitear, si puede haber otra sesión, `git fetch` y ponte al día.
 - Mensajes de commit en español, claros, explicando el porqué.
-- **Cierra cada commit** con estas dos líneas (atribución):
-  ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/session_01X8UgEjA9yqurw5eZkjXYF1
-  ```
-- **Nunca** pongas un identificador de modelo en commits, PRs, comentarios de
-  código ni ningún artefacto del repo. Solo en el chat.
+- **Cierra cada commit** con la línea de atribución
+  `Co-Authored-By: Claude <modelo> <noreply@anthropic.com>`, poniendo el nombre
+  del modelo con el que trabaja la sesión. Las sesiones en la nube
+  añaden además su línea `Claude-Session: <url de la sesión>`.
+- Fuera de esa línea final del commit, **nunca** pongas un identificador de
+  modelo en commits, PRs, comentarios de código ni ningún artefacto del repo.
 - `git push -u origin claude/sharp-goodall-dt7hh5`; si el push da un 503
   transitorio del servicio de credenciales, reintenta con backoff (2,4,8,16 s).
 
@@ -84,5 +83,26 @@ reglas que ya venimos aplicando; respétalas siempre.
 - Mantén el **README** al día (nº de tests, herramientas, estado).
 
 ## Entorno
-- Contenedor en la nube, efímero: lo no commiteado+pusheado se pierde.
+Se trabaja en dos sitios; comprueba en cuál estás antes de seguir las
+instrucciones de build y PDF.
+
+**Contenedor en la nube** (Linux)
+- Efímero: lo no commiteado+pusheado se pierde.
 - Salida HTTPS por proxy preconfigurado.
+- Las instrucciones de arriba (`apt-get`, `/opt/pw-browsers/`, `offscreen`)
+  son para este entorno.
+
+**PC local** (Windows 10, `D:\QtPro\LibMapaStatic`)
+- Qt **6.11.2 MinGW 64** (`C:/Qt/6.11.2/mingw_64`, compilador
+  `C:/Qt/Tools/mingw1310_64`), proyecto abierto en **Qt Creator**.
+- Builds de Qt Creator en `build/Desktop_Qt_6_11_2_MinGW_64_bit_{Debug,Release}`.
+  QCustomPlot ya está copiada en `third_party/qcustomplot/` (gitignored).
+- Tests: con `C:/Qt/6.11.2/mingw_64/bin` y `C:/Qt/Tools/mingw1310_64/bin` en el
+  `PATH` (para las DLL), `ctest` dentro de la carpeta de build (no hace falta
+  `offscreen`: hay pantalla).
+- PDF con el Chrome de Windows:
+  `"C:\Program Files\Google\Chrome\Application\chrome.exe" --headless --disable-gpu
+  --no-pdf-header-footer --print-to-pdf=docs\LibMapaStatic_Documentacion.pdf
+  docs\arquitectura.html` (ruta absoluta en `--print-to-pdf` si falla).
+- Aquí no se pierde nada al cerrar, pero haz igualmente commit+push: la nube
+  parte del remoto.

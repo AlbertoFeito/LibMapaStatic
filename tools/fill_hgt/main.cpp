@@ -1,6 +1,6 @@
 // fill_hgt - Descarga ficheros de elevacion SRTM `.hgt` (30 m) de AWS Skadi, sin
 // clave, para una zona (bbox o el preset de Cuba). Descomprime el `.hgt.gz` al
-// vuelo (zlib) y deja los `.hgt` en una carpeta, lista para `dem_to_db`.
+// vuelo (miniz, sin zlib) y deja los `.hgt` en una carpeta, lista para `dem_to_db`.
 //
 // Uso:
 //   fill_hgt --cuba --out carpeta
