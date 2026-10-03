@@ -85,6 +85,17 @@ struct DataPackage
                                            QString *error = nullptr);
 
     /*!
+     * \brief Todos los ficheros que el paquete necesita (rutas absolutas): el
+     *        manifiesto, las bases de teselas, la elevacion (la BD, o cada .hgt
+     *        de su carpeta), las capas fijas y la semilla de entidades.
+     *
+     * Es lo que hay que copiar para llevar el paquete a otro sitio, y nada mas:
+     * la carpeta puede contener otras cosas que el mapa no usa. Solo incluye
+     * los que existen; la BD de entidades del USUARIO no es del paquete.
+     */
+    QStringList files() const;
+
+    /*!
      * \brief Ruta ESCRIBIBLE de la BD de entidades del usuario.
      *
      * Una ruta relativa en "features.file" NO se resuelve contra la carpeta del

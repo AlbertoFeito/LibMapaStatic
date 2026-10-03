@@ -529,6 +529,8 @@ sur, este).</p>
 <tr><td>--quick</td><td>Solo lo rápido (ficheros, apertura, decodificación); sin cobertura por zoom.</td></tr>
 <tr><td>--max-zoom</td><td>No medir cobertura por encima de este zoom.</td></tr>
 <tr><td>--strict</td><td>Salir con 1 también si hay avisos (por defecto solo con errores).</td></tr>
+<tr><td>--export</td><td>Si no hay errores, copia el <code>mapa.json</code> y solo los ficheros que referencia a esa carpeta (reanudable) y comprueba la copia.</td></tr>
+<tr><td>--verbose</td><td>Muestra también el registro interno de la librería.</td></tr>
 </table>
 <p>Imprime una ficha por capa (tamaño, formato de imagen y cobertura por zoom
 dentro de la zona) y los hallazgos de más a menos graves. Salida 0 = listo para
@@ -691,6 +693,23 @@ cmake --build build -j
 <p class="muted">El widget (MapWidget, fill_map, demo) requiere <b>QCustomPlot</b> en
 <code>third_party/qcustomplot/</code> (gitignored). Sin él, se compila solo el núcleo
 y las herramientas de consola, y CMake lo avisa.</p>
+<h3>Usarla desde otra aplicación</h3>
+<pre>cmake --install build --prefix C:/libmapa
+# en la app:
+find_package(libmapa REQUIRED)        # CMAKE_PREFIX_PATH = C:/libmapa;&lt;Qt&gt;
+target_link_libraries(miapp PRIVATE libmapa::widget)</pre>
+<p>Bibliotecas estáticas, solo las cabeceras públicas, <code>libmapaConfig.cmake</code>
+(busca las mismas dependencias de Qt) y las herramientas. Plantilla:
+<code>examples/app_minima</code>. Una guarda en CMake impide que la librería enlace
+<code>Qt Network</code>: el producto trabaja sin conexión.</p>
+
+<h3>Llevarla a otro PC</h3>
+<pre>herramientas\desplegar.bat &lt;app.exe&gt; &lt;destino&gt; [carpeta del paquete]</pre>
+<p><code>windeployqt</code> sin los plugins de red, comprobación de
+<code>qwindows</code>/<code>qsqlite</code>/<code>qjpeg</code>, y
+<code>check_data --export</code>, que copia solo los ficheros del paquete a
+<code>&lt;destino&gt;\datos</code>. La carpeta resultante funciona sin Qt ni internet.</p>
+
 <h3>qmake (alternativa)</h3>
 <pre>qmake qmake/fill_tiles.pro  &amp;&amp;  make      # o fill_map.pro / probe_db.pro
 # el arranque de tu app:   qmake miapp.pro</pre>
@@ -700,6 +719,7 @@ y las herramientas de consola, y CMake lo avisa.</p>
   <li>Preparar los datos (con internet): <code>fill_tiles</code>/<code>fill_map</code> para teselas, <code>fill_hgt</code> → <code>dem_to_db</code> para la elevación.</li>
   <li><code>probe_db --package</code> sobre la carpeta → genera su <code>mapa.json</code> (rutas relativas). Se ajusta a mano lo que haga falta (nombres, atribución, estilos).</li>
   <li><code>check_data</code> sobre la carpeta: 0 errores → el paquete está listo.</li>
+  <li><code>desplegar.bat</code> con la app y el paquete → carpeta lista para otro PC.</li>
   <li>Se copia la carpeta junto a la aplicación. La app solo necesita <code>cfg.dataDir = …/datos</code>: el producto final <b>no usa internet</b>.</li>
 </ol>
 

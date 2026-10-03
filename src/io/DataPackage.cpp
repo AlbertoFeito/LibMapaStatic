@@ -176,6 +176,29 @@ std::optional<DataPackage> DataPackage::load(const QString &path, QString *error
     return p;
 }
 
+// Ficheros del paquete, sin repetir y solo los que existen. La carpeta de .hgt
+// se expande a sus ficheros: copiar la carpeta entera podria arrastrar otros.
+QStringList DataPackage::files() const
+{
+    QStringList out;
+    auto anadir = [&out](const QString &f) {
+        if (!f.isEmpty() && QFileInfo(f).isFile() && !out.contains(f))
+            out << f;
+    };
+    anadir(info.manifestPath);
+    for (const TileDataset &d : datasets)
+        anadir(d.filePath);
+    anadir(elevationFile);
+    if (!elevationDir.isEmpty())
+        for (const QFileInfo &f : QDir(elevationDir).entryInfoList(
+                 {QStringLiteral("*.hgt"), QStringLiteral("*.HGT")}, QDir::Files))
+            anadir(f.absoluteFilePath());
+    for (const Overlay &ov : overlays)
+        anadir(ov.file);
+    anadir(featuresSeed);
+    return out;
+}
+
 // Ruta escribible de la BD de entidades: relativa -> carpeta de datos de la app
 // separada por paquete (para que dos paquetes no compartan entidades); absoluta
 // -> tal cual. La carpeta del paquete NO se usa: puede ser de solo lectura.

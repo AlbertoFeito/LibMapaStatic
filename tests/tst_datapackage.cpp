@@ -134,6 +134,17 @@ void TstDataPackage::fullManifest()
     QCOMPARE(QFileInfo(ov.file), QFileInfo(base.filePath(QStringLiteral("aguas.geo"))));
 
     QCOMPARE(p->featuresFile, QStringLiteral("entidades.db"));
+
+    // files(): exactamente lo que hay que copiar, ni mas ni menos (un fichero
+    // suelto en la carpeta que nadie referencia no entra).
+    touch(dir + QStringLiteral("/no_es_del_paquete.pdf"));
+    const QStringList ficheros = p->files();
+    QCOMPARE(ficheros.size(), 5);   // mapa.json, 2 teselas, dem, aguas.geo
+    QVERIFY(ficheros.contains(p->info.manifestPath));
+    QVERIFY(ficheros.contains(p->elevationFile));
+    QVERIFY(ficheros.contains(ov.file));
+    for (const QString &f : ficheros)
+        QVERIFY(!f.endsWith(QStringLiteral(".pdf")));
 }
 
 // Se puede pasar la carpeta o el fichero; lo que no se declara queda "sin

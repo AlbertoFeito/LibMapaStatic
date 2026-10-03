@@ -8,9 +8,17 @@
  *
  * Uso:
  *   check_data <carpeta del paquete | mapa.json> [--quick] [--max-zoom N] [--strict]
+ *              [--export <carpeta destino>] [--verbose]
+ *
+ * Con --export, si no hay errores, copia el paquete a otra carpeta: el
+ * mapa.json y SOLO los ficheros que referencia (la carpeta de origen puede
+ * tener otras cosas que el mapa no usa), respetando sus rutas relativas.
+ * Reanudable: lo que ya esta copiado con el mismo tamano no se vuelve a copiar.
+ * Al terminar comprueba la copia.
  *
  * Codigo de salida: 0 si no hay errores, 1 si los hay (o, con --strict, si hay
- * avisos), 2 si los argumentos estan mal. Asi se puede usar en un script.
+ * avisos, o si la exportacion falla), 2 si los argumentos estan mal. Asi se
+ * puede usar en un script.
  */
 
 #include "db/SqliteConnectionPool.h"
@@ -21,6 +29,9 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
+#include <QLoggingCategory>
 #include <QTextStream>
 
 using namespace libmapa;
@@ -47,9 +58,64 @@ static QString label(PackageCheck::Severity s)
     return QString();
 }
 
+// Copia los ficheros del paquete a 'destino' respetando sus rutas relativas.
+// Se niega si alguno queda FUERA de la carpeta del paquete (el mapa.json copiado
+// apuntaria a un sitio que no existe en el destino). Salta los que ya estan con
+// el mismo tamano, para poder reanudar una copia de varios GB. false si algo
+// falla; el motivo va a 'err'.
+static bool exportPackage(const DataPackage &p, const QString &destino,
+                          QTextStream &out, QTextStream &err)
+{
+    const QDir origen(p.info.directory);
+    const QDir dst(destino);
+    if (QDir::cleanPath(dst.absolutePath()).compare(QDir::cleanPath(origen.absolutePath()),
+                                                    Qt::CaseInsensitive) == 0) {
+        err << "El destino es la misma carpeta que el paquete.\n";
+        return false;
+    }
+
+    const QStringList ficheros = p.files();
+    for (const QString &f : ficheros) {
+        if (origen.relativeFilePath(f).startsWith(QLatin1String(".."))) {
+            err << "No se puede exportar: " << QDir::toNativeSeparators(f)
+                << " esta fuera de la carpeta del paquete.\n";
+            return false;
+        }
+    }
+
+    out << "\n Exportando " << ficheros.size() << " fichero(s) a "
+        << QDir::toNativeSeparators(dst.absolutePath()) << "\n";
+    for (const QString &f : ficheros) {
+        const QString rel = origen.relativeFilePath(f);
+        const QString destinoF = dst.absoluteFilePath(rel);
+        const QFileInfo fi(f);
+        out << "   " << rel << "  (" << humanSize(fi.size()) << ") ... " << Qt::flush;
+
+        const QFileInfo ya(destinoF);
+        if (ya.exists() && ya.size() == fi.size()) {
+            out << "ya estaba\n";
+            continue;
+        }
+        if (!QDir().mkpath(ya.absolutePath())
+            || (ya.exists() && !QFile::remove(destinoF))
+            || !QFile::copy(f, destinoF)) {
+            out << "FALLO\n";
+            err << "No se pudo copiar " << QDir::toNativeSeparators(f) << " a "
+                << QDir::toNativeSeparators(destinoF) << "\n";
+            return false;
+        }
+        // La copia de un fichero instalado (solo lectura) seguiria siendolo.
+        QFile::setPermissions(destinoF, QFile::permissions(destinoF)
+                                            | QFileDevice::WriteOwner);
+        out << "ok\n";
+    }
+    return true;
+}
+
 // Punto de entrada: lee el paquete, lo comprueba (modo rapido o completo) e
 // imprime el informe: cabecera del paquete, una ficha por capa base con su
-// cobertura por zoom, y los hallazgos ordenados por gravedad.
+// cobertura por zoom, y los hallazgos ordenados por gravedad. Con --export,
+// ademas lo copia (solo si no hay errores) y comprueba la copia.
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
@@ -70,10 +136,22 @@ int main(int argc, char *argv[])
         QStringLiteral("N"), QStringLiteral("99"));
     QCommandLineOption optStrict(QStringLiteral("strict"),
         QStringLiteral("Salir con 1 tambien si hay avisos."));
+    QCommandLineOption optExport(QStringLiteral("export"),
+        QStringLiteral("Si no hay errores, copiar el paquete (solo sus ficheros) a esta carpeta."),
+        QStringLiteral("carpeta"));
+    QCommandLineOption optVerbose(QStringLiteral("verbose"),
+        QStringLiteral("Mostrar tambien el registro interno de la libreria."));
     parser.addOption(optQuick);
     parser.addOption(optMaxZoom);
     parser.addOption(optStrict);
+    parser.addOption(optExport);
+    parser.addOption(optVerbose);
     parser.process(app);
+
+    // El registro interno (que BD abre y cierra) es ruido en un informe.
+    if (!parser.isSet(optVerbose))
+        QLoggingCategory::setFilterRules(QStringLiteral("libmapa.*.debug=false\n"
+                                                        "libmapa.*.info=false"));
 
     if (parser.positionalArguments().size() != 1) {
         err << "Uso: check_data <carpeta del paquete | mapa.json> "
@@ -149,7 +227,28 @@ int main(int argc, char *argv[])
         << "\n";
 
     SqliteConnectionPool::closeAllForCurrentThread();
-    if (errores > 0)
+    if (errores > 0) {
+        if (parser.isSet(optExport))
+            err << " No se exporta: primero hay que corregir los errores.\n";
         return 1;
+    }
+
+    // --- exportar y comprobar la copia ----------------------------------
+    if (parser.isSet(optExport) && paquete) {
+        const QString destino = parser.value(optExport);
+        if (!exportPackage(*paquete, destino, out, err))
+            return 1;
+        PackageCheck::Options rapido;
+        rapido.coverage = false;
+        const PackageCheck copia = PackageCheck::run(destino, rapido);
+        SqliteConnectionPool::closeAllForCurrentThread();
+        if (copia.hasErrors()) {
+            err << " La copia tiene errores:\n   "
+                << copia.problems().join(QStringLiteral("\n   ")) << "\n";
+            return 1;
+        }
+        out << " Copia comprobada: lista para ir junto a la aplicacion.\n";
+    }
+
     return (parser.isSet(optStrict) && avisos > 0) ? 1 : 0;
 }

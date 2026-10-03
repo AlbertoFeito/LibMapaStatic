@@ -118,6 +118,9 @@ int main(int argc, char *argv[])
         const DataPackageInfo info = mapa.packageInfo();
         out << "Paquete " << info.name << " (" << info.id << ", datos "
             << info.dataVersion << ") en " << info.directory << "\n";
+        // Lo que la comprobacion rapida vio mal (p. ej. un plugin que falta).
+        for (const QString &aviso : mapa.dataWarnings())
+            out << "  AVISO " << aviso << "\n";
     }
 
     mapa.resize(s[0].toInt(), s[1].toInt());

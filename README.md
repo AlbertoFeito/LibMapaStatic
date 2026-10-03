@@ -104,6 +104,38 @@ cd build && ctest
 
 En Qt Creator basta con abrir el `CMakeLists.txt`.
 
+### Usarla desde otra aplicación
+
+```bash
+cmake --install build --prefix C:/libmapa
+```
+
+Instala las dos bibliotecas (estáticas: no hay DLL propia que repartir), las
+cabeceras públicas, la configuración de CMake y las herramientas. En la app:
+
+```cmake
+find_package(libmapa REQUIRED)        # -DCMAKE_PREFIX_PATH="C:/libmapa;C:/Qt/6.11.2/mingw_64"
+target_link_libraries(miapp PRIVATE libmapa::widget)
+```
+
+[`examples/app_minima`](examples/app_minima) es la plantilla completa: una app
+que solo usa `MapConfig::dataDir`. Con `add_subdirectory` también valen los
+nombres `libmapa::core` / `libmapa::widget`.
+
+### Llevarla a otro PC
+
+```bat
+herramientas\desplegar.bat <app.exe> <carpeta destino> [carpeta del paquete]
+```
+
+Copia el `.exe`, ejecuta `windeployqt` (sin los plugins de red, que el producto
+no usa), **comprueba** los tres plugins sin los que el mapa sale en blanco
+(`qwindows`, `qsqlite`, `qjpeg`) y, si se le pasa el paquete, lo revisa y copia
+**solo** los ficheros que usa su `mapa.json` a `<destino>\datos` con
+`check_data --export`. La carpeta resultante funciona en un PC sin Qt ni
+internet. La librería tiene una guarda en CMake: si alguien le añade
+`Qt Network`, la configuración se para.
+
 ### QCustomPlot
 
 **No se incluye en el repositorio: es GPL v3.** Ver
@@ -193,7 +225,9 @@ probe_db     --id <id> --file <ruta.sqlitedb> [--name "…"] [--id … --file �
                         [--features entidades.db]]          (genera mapa.json)
 
 check_data   <carpeta_paquete | mapa.json> [--quick] [--max-zoom N] [--strict]
-             (salida 0 = listo para distribuir, 1 = errores)
+             [--export <carpeta>] [--verbose]
+             (salida 0 = listo para distribuir, 1 = errores; --export copia
+              solo los ficheros del paquete si no hay errores)
 
 geo_to_tiles --in <f.geo> --out <salida.sqlitedb> --id <id> --name "<nombre>"
              [--minzoom N] [--maxzoom N] [--color #hex] [--width f] [--fill] [--bg #hex]
@@ -243,6 +277,9 @@ src/
 tests/               17 tests (14 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
+examples/app_minima/ plantilla de producto que usa la librería instalada
+cmake/               libmapaConfig.cmake.in (para find_package)
+herramientas/        desplegar.bat (app + Qt + paquete, listo para otro PC)
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, flujos)
 ```
@@ -264,11 +301,11 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 11 | Persistencia automática de entidades (`MapConfig.featuresDbFile`) y `demo` al día |
 | 12 | **Paquete de datos sin conexión**: manifiesto `mapa.json`, `MapConfig.dataDir`, capas fijas, entidades del usuario en `AppData` |
 | 13 | Comprobación del paquete: `check_data` (informe con cobertura por zoom) y `MapWidget::dataWarnings()` al abrir |
+| 14 | Despliegue: `install()` + `find_package(libmapa)`, `examples/app_minima`, `desplegar.bat`, `check_data --export`, guarda contra Qt Network |
 
-El producto final trabaja **solo con datos locales**. Lo siguiente es
-**desplegar** la librería en otra aplicación sin sorpresas (`install()` +
-`find_package`, plugins de Qt). El plan está en
-[`docs/BITACORA.md`](docs/BITACORA.md) §47–48.
+El producto final trabaja **solo con datos locales**, y la librería ya se puede
+usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en
+[`docs/BITACORA.md`](docs/BITACORA.md) §47–49.
 
 ## Licencia
 

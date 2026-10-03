@@ -2536,3 +2536,64 @@ avisos; nivel vacío en la zona; sin manifiesto) y un caso en `tst_mapwidget`
 (paquete incompleto: arranca y `dataWarnings()` nombra lo que falta).
 
 **Estado: 17 tests verdes (14 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW.**
+
+## 49. Desplegar: `find_package(libmapa)`, `desplegar.bat` y nada de red
+
+Con el paquete de datos resuelto (§47–48) faltaba lo otro: que una aplicación
+**de fuera** use la librería sin copiar sus fuentes, y que esa aplicación se
+pueda llevar a un PC **sin Qt y sin internet**.
+
+**Instalación y `find_package`.** El CMake gana reglas de instalación
+(`cmake --install build --prefix C:/libmapa`): las dos bibliotecas, solo las
+cabeceras **públicas** (`include/libmapa`; `src/` es interno), un
+`libmapaConfig.cmake` (desde `cmake/libmapaConfig.cmake.in`) que busca las
+mismas dependencias de Qt con las que se compiló (5 o 6; Widgets/PrintSupport
+solo si hay widget), y las herramientas. Los targets se ven como
+`libmapa::core` y `libmapa::widget`, también con `add_subdirectory` (alias).
+Las bibliotecas siguen siendo **estáticas**: no hay una DLL propia que
+repartir ni versiones que casar. Se renombraron a `libmapa_core.a` /
+`libmapa_widget.a` (salía `liblibmapa_core.a`).
+
+`examples/app_minima` es la plantilla de producto: un proyecto aparte que solo
+hace `find_package(libmapa)` y `cfg.dataDir = <exe>/datos`. Con `--comprobar`
+no abre ventana: dice si el mapa arranca y lista `dataWarnings()`, y sale con 0
+si todo está bien. Verificado: compilado contra la instalación (sin acceso a
+las fuentes), abre el paquete real con 4 capas y 0 avisos.
+
+**`herramientas/desplegar.bat <app.exe> <destino> [paquete]`:** copia el
+`.exe`, ejecuta `windeployqt` y **comprueba** los tres plugins sin los que el
+mapa falla en silencio (`platforms/qwindows`, `sqldrivers/qsqlite`,
+`imageformats/qjpeg`), copiándolos a mano si faltan. Con el paquete, llama a
+`check_data --quick --export <destino>\datos`.
+
+**`check_data --export <carpeta>`:** si no hay errores, copia el `mapa.json` y
+**solo** los ficheros que referencia (`DataPackage::files()`), respetando sus
+rutas relativas. `Recursos` tiene además PDF, iconos y estilos que el mapa no
+usa: copiar la carpeta entera los arrastraría. Es reanudable (lo ya copiado
+con el mismo tamaño se salta), se niega si algún fichero queda fuera de la
+carpeta, y al final comprueba la copia. `check_data` deja de mostrar el
+registro interno de la librería salvo con `--verbose`.
+
+**Sin red, verificado.** `objdump` sobre los binarios: la librería, `demo` y
+`render_map` **no importan `Qt6Network.dll`** (solo `fill_map`, herramienta de
+descarga, como debe ser); `Qt6Positioning` solo depende de `Qt6Core`. Pero
+`windeployqt` **sí** copiaba `Qt6Network.dll`: la arrastraban plugins que el
+mapa no usa (`tls`, `networkinformation`, `generic`) y el de posición `nmea`
+pedía además `Qt6SerialPort`. Se excluyen con `--skip-plugin-types`; la
+entrega ya no lleva nada de red. Y una guarda en CMake para el futuro: si
+`libmapa_core` o `libmapa_widget` enlazan algo con `Network`, la configuración
+se para con un mensaje claro.
+
+**Prueba de despliegue:** `app_minima` desplegada y ejecutada con un `PATH`
+reducido a `C:\Windows` (sin Qt) → arranca, 4 capas, 0 avisos. Quitando
+`qjpeg.dll` de la copia → arranca igual y `dataWarnings()` dice que
+**satelital y clarity** (JPEG) no se pueden decodificar por falta del plugin,
+mientras OSM y costas (PNG) siguen funcionando. Es exactamente el fallo que
+antes dejaba el mapa en blanco sin explicación.
+
+(Un tropiezo de la prueba: lanzar la copia con `-platform offscreen` aborta,
+porque `windeployqt` solo despliega el plugin de plataforma de Windows. No es un
+fallo del despliegue; en un PC real no se pide `offscreen`.)
+
+**Estado: 17 tests verdes (14 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW;
+instalación, `find_package` y despliegue verificados de punta a punta.**

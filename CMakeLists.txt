@@ -138,7 +138,13 @@ target_include_directories(libmapa_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<INSTALL_INTERFACE:include>
 )
+
+# Nombre con el que lo ve otro proyecto: libmapa::core, tanto instalado
+# (find_package) como metido con add_subdirectory (el alias).
+set_target_properties(libmapa_core PROPERTIES EXPORT_NAME core OUTPUT_NAME mapa_core)
+add_library(libmapa::core ALIAS libmapa_core)
 
 target_link_libraries(libmapa_core
     PUBLIC
@@ -182,9 +188,13 @@ if(LIBMAPA_HAVE_QCP)
     target_include_directories(libmapa_widget
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
+
+    set_target_properties(libmapa_widget PROPERTIES EXPORT_NAME widget OUTPUT_NAME mapa_widget)
+    add_library(libmapa::widget ALIAS libmapa_widget)
 
     # QCustomPlot como cabecera de SISTEMA: sus 25 avisos con nuestro juego de
     # -W... son ruido que no podemos arreglar y que taparia los nuestros.
@@ -361,4 +371,96 @@ if(LIBMAPA_BUILD_TESTS)
         target_include_directories(tst_targetmodel SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
         add_test(NAME tst_targetmodel COMMAND tst_targetmodel)
     endif()
+endif()
+
+# -----------------------------------------------------------------------------
+# Guarda: la LIBRERIA no usa la red.
+#
+# El producto final trabaja sin conexion. Solo las herramientas que preparan
+# los datos (fill_tiles, fill_map, fill_hgt) pueden enlazar Qt Network. Si
+# alguien se lo anade a libmapa_core o libmapa_widget, la configuracion se
+# para aqui en vez de dejar que la red se cuele en todas las apps.
+# (Verificado ademas que Qt Positioning, la unica dependencia que podria
+# arrastrarla, solo depende de Qt Core.)
+# -----------------------------------------------------------------------------
+foreach(_libmapa_lib libmapa_core libmapa_widget)
+    if(TARGET ${_libmapa_lib})
+        get_target_property(_libmapa_deps ${_libmapa_lib} LINK_LIBRARIES)
+        get_target_property(_libmapa_ideps ${_libmapa_lib} INTERFACE_LINK_LIBRARIES)
+        if("${_libmapa_deps};${_libmapa_ideps}" MATCHES "Network")
+            message(FATAL_ERROR
+                "${_libmapa_lib} enlaza Qt Network, y la libreria debe funcionar "
+                "sin conexion. La red es solo para las herramientas de descarga.")
+        endif()
+    endif()
+endforeach()
+
+# -----------------------------------------------------------------------------
+# Instalacion: para usar la libreria desde OTRO proyecto con
+#
+#     find_package(libmapa REQUIRED)
+#     target_link_libraries(miapp PRIVATE libmapa::widget)
+#
+# Se instalan las dos bibliotecas (estaticas: no hay DLL propia que repartir),
+# las cabeceras PUBLICAS (include/libmapa; las de src/ son internas), el
+# libmapaConfig.cmake que busca las dependencias de Qt, y las herramientas de
+# consola (check_data, probe_db...) para preparar y revisar los datos.
+#
+#     cmake --install build --prefix C:/libmapa
+# -----------------------------------------------------------------------------
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(_libmapa_install_default ON)
+else()
+    set(_libmapa_install_default OFF)    # metida con add_subdirectory
+endif()
+option(LIBMAPA_INSTALL "Generar las reglas de instalacion" ${_libmapa_install_default})
+
+if(LIBMAPA_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+
+    set(_libmapa_targets libmapa_core)
+    if(TARGET libmapa_widget)
+        list(APPEND _libmapa_targets libmapa_widget)
+    endif()
+
+    install(TARGETS ${_libmapa_targets}
+        EXPORT libmapaTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+    install(DIRECTORY include/libmapa
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.h")
+
+    install(EXPORT libmapaTargets
+        NAMESPACE libmapa::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libmapa)
+
+    # El Config sabe con que Qt (5 o 6) se compilo y si trae el widget.
+    set(LIBMAPA_CONFIG_HAVE_WIDGET ${LIBMAPA_HAVE_QCP})
+    configure_package_config_file(
+        cmake/libmapaConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/libmapaConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libmapa)
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/libmapaConfigVersion.cmake
+        COMPATIBILITY SameMinorVersion)
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/libmapaConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/libmapaConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libmapa)
+
+    # Herramientas de consola que existan en esta configuracion.
+    foreach(_libmapa_tool check_data probe_db render_map dem_to_db fill_hgt
+                          fill_tiles fill_map geo_to_tiles vector_db bench_tiles)
+        if(TARGET ${_libmapa_tool})
+            install(TARGETS ${_libmapa_tool} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        endif()
+    endforeach()
+
+    install(FILES mapa.example.json herramientas/desplegar.bat
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/libmapa)
 endif()
