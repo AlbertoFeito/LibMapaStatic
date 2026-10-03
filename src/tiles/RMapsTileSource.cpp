@@ -333,4 +333,58 @@ qint64 RMapsTileSource::tileCount(int z)
     return n;
 }
 
+// COUNT(*) sobre el mismo WHERE que fetchRange/available (incluida 's'), asi
+// que usa el indice (z,x,y,s). No se guarda preparada: es una consulta de
+// diagnostico (check_data), no del camino caliente del dibujo.
+qint64 RMapsTileSource::countInRange(int z, int xMin, int xMax, int yMin, int yMax)
+{
+    if (!m_open && !open())
+        return -1;
+    if (xMax < xMin || yMax < yMin)
+        return 0;
+
+    int sy1 = 0, sy2 = 0;
+    storageYRange(z, yMin, yMax, &sy1, &sy2);
+
+    QSqlQuery q(SqliteConnectionPool::connectionFor(
+        m_ds.id, m_ds.filePath, SqliteConnectionPool::Mode::ReadOnly));
+    if (!q.prepare(QStringLiteral("SELECT COUNT(*) FROM %1 %2")
+                       .arg(m_ds.tableName, whereClause()))) {
+        m_lastError = q.lastError().text();
+        return -1;
+    }
+    bindCommon(q, m_ds.storedZ(z), xMin, xMax, sy1, sy2);
+    if (!q.exec() || !q.next()) {
+        m_lastError = q.lastError().text();
+        return -1;
+    }
+    return q.value(0).toLongLong();
+}
+
+// Primera tesela que encuentre SQLite en ese zoom (con la 's' del dataset si la
+// hay). LIMIT 1: no importa cual, solo que exista y se pueda decodificar.
+QByteArray RMapsTileSource::anyTile(int z)
+{
+    if (!m_open && !open())
+        return QByteArray();
+
+    QString where = QStringLiteral("WHERE %1 = :z").arg(m_ds.colZ);
+    if (m_ds.hasSColumn)
+        where += QStringLiteral(" AND %1 = :s").arg(m_ds.colS);
+
+    QSqlQuery q(SqliteConnectionPool::connectionFor(
+        m_ds.id, m_ds.filePath, SqliteConnectionPool::Mode::ReadOnly));
+    if (!q.prepare(QStringLiteral("SELECT %1 FROM %2 %3 LIMIT 1")
+                       .arg(m_ds.colImage, m_ds.tableName, where))) {
+        m_lastError = q.lastError().text();
+        return QByteArray();
+    }
+    q.bindValue(QStringLiteral(":z"), m_ds.storedZ(z));
+    if (m_ds.hasSColumn)
+        q.bindValue(QStringLiteral(":s"), m_ds.sValue);
+    if (!q.exec() || !q.next())
+        return QByteArray();
+    return q.value(0).toByteArray();
+}
+
 } // namespace libmapa

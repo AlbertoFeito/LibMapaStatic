@@ -120,6 +120,14 @@ public:
         conectarSenales();
         aplicarEstiloAlTrazo();
         reconstruirPanel();
+
+        // Asi deberia hacerlo una app real: el mapa arranca con lo que funcione
+        // y avisa de lo que no (fichero que falta, imagenes sin plugin...).
+        const QStringList problemas = m_mapa->dataWarnings();
+        if (!problemas.isEmpty())
+            QMessageBox::warning(this, tr("Datos del mapa"),
+                tr("El paquete de datos tiene problemas; el mapa usara lo que "
+                   "funcione:\n\n%1").arg(problemas.join(QLatin1Char('\n'))));
     }
 
 private:

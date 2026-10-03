@@ -11,6 +11,7 @@
 #include <QGeoCoordinate>
 #include <QPointF>
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 #include <limits>
 #include <memory>
@@ -112,6 +113,19 @@ public:
     //! Paquete de datos abierto (nombre, version, atribucion...). Invalido si el
     //! widget se configuro sin MapConfig::dataDir.
     DataPackageInfo packageInfo() const;
+
+    /*!
+     * \brief Problemas encontrados en los datos al abrir el paquete, uno por
+     *        linea ("satelital: ..."). Vacio = todo bien.
+     *
+     * Con MapConfig::dataDir el widget hace una comprobacion RAPIDA (milisegundos)
+     * de lo que dejaria el mapa en blanco sin decir nada: que falte un fichero,
+     * que una base no abra o que sus imagenes no se puedan decodificar (falta el
+     * plugin de imagen de Qt al desplegar). El mapa arranca igual con lo que si
+     * funciona; la aplicacion decide si avisar. Para el informe completo,
+     * con cobertura por zoom, esta la herramienta check_data.
+     */
+    QStringList dataWarnings() const;
 
     // --- Capa base -------------------------------------------------------
     QVector<BaseLayerInfo> availableBaseLayers() const;

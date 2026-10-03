@@ -143,6 +143,8 @@ private slots:
     void explicitConfigWinsOverPackage();
     //! Paquete inexistente: no arranca y el error dice que falta mapa.json.
     void reportsMissingDataPackage();
+    //! Paquete incompleto: arranca con lo que hay y dataWarnings() dice que falta.
+    void reportsDataWarningsButStillOpens();
 
 private:
     //! Monta un paquete en 'carpeta' sobre las BD sinteticas del test, con una
@@ -1925,6 +1927,39 @@ void TstMapWidget::reportsMissingDataPackage()
     QVERIFY(!w.isReady());
     QVERIFY(w.lastError().contains(QStringLiteral("mapa.json")));
     QVERIFY(!w.packageInfo().isValid());
+}
+
+// Un paquete al que le falta la capa fija y una de las bases: el widget arranca
+// con lo que si hay, y dataWarnings() nombra exactamente lo que falta (en vez de
+// dejar esa parte del mapa en blanco sin explicacion).
+void TstMapWidget::reportsDataWarningsButStillOpens()
+{
+    const QString entidades = m_dir.filePath(QStringLiteral("paquete3_entidades.db"));
+    MapConfig cfg;
+    cfg.dataDir = makePackage(QStringLiteral("paquete3"), entidades);
+    cfg.cacheMiB = 32;
+    cfg.debounceMs = 0;
+    QFile::remove(cfg.dataDir + QStringLiteral("/corredores.geo"));
+
+    // Se anade una tercera capa base que apunta a un fichero inexistente.
+    QFile f(cfg.dataDir + QStringLiteral("/mapa.json"));
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    f.close();
+    QJsonArray capas = root.value(QStringLiteral("datasets")).toArray();
+    capas.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("perdida")},
+                             {QStringLiteral("filePath"), QStringLiteral("no_esta.sqlitedb")}});
+    root[QStringLiteral("datasets")] = capas;
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(QJsonDocument(root).toJson());
+    f.close();
+
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));      // arranca igual
+    const QString avisos = w.dataWarnings().join(QLatin1Char('\n'));
+    QVERIFY2(avisos.contains(QStringLiteral("no_esta.sqlitedb")), qPrintable(avisos));
+    QVERIFY2(avisos.contains(QStringLiteral("corredores.geo")), qPrintable(avisos));
+    QVERIFY(w.featuresInLayer(QStringLiteral("corredores")).isEmpty());
 }
 
 QTEST_MAIN(TstMapWidget)

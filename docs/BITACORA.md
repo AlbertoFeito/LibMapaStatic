@@ -2478,3 +2478,61 @@ librería en otra app sin sorpresas (`install()`/`find_package`, plugins
 `qsqlite`/imágenes, y un test que vigile que la librería no enlaza `Qt Network`).
 
 **Estado: 16 tests verdes (13 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW.**
+
+## 48. Comprobar el paquete: `check_data` y `MapWidget::dataWarnings()`
+
+Con datos solo locales, lo que falte en el paquete **no se puede descargar
+después**. Y lo que falla al instalar en otro PC falla en silencio: si falta el
+plugin de imagen `qjpeg` (lo más típico al copiar una app Qt sin
+`windeployqt`), las bases abren pero ninguna tesela se decodifica, y el mapa sale
+**en blanco sin ningún mensaje**. Hacía falta decirlo antes de distribuir y
+también al abrir.
+
+**`PackageCheck`** (`src/io/`, núcleo sin widgets) recorre el paquete y anota
+hallazgos con gravedad: **Error** si una parte del mapa no se dibujará
+(fichero ausente, base que no abre o sin teselas, imágenes que no se decodifican,
+BD de elevación inválida, `.geo` ilegible, ids repetidos, sin driver `QSQLITE`),
+**Warning** si funciona pero hay algo que arreglar (sin atribución, sin zona,
+capa de arranque inexistente, un fichero **fuera** de la carpeta que no viajará,
+un nivel declarado sin ninguna tesela en la zona) e **Info** para el informe.
+No escribe nada; la BD de entidades del usuario ni se abre (abrirla con
+`VectorRepository` podría migrar su esquema).
+
+Decisiones:
+
+- **Decodificar una tesela de verdad**, no solo abrir la BD: es la única forma de
+  detectar el plugin que falta. Se lee una tesela cualquiera del nivel de fondo
+  (`RMapsTileSource::anyTile`, `LIMIT 1`) y se pasa por `QImageReader`. Si falla,
+  el formato se identifica por los primeros bytes (sin el plugin, Qt ni siquiera
+  lo reconoce) para que el mensaje diga **cuál** falta.
+- **Cobertura por zoom con `COUNT(*)`** (`RMapsTileSource::countInRange`, mismo
+  `WHERE` que la lectura, incluida `s`), no trayendo las claves: usa el índice
+  `(z,x,y,s)`. Sobre el paquete real (6,7 GiB, cuatro capas, hasta z16) el informe
+  completo tarda **~0,2 s**.
+- **Dos modos.** El completo (cobertura) es para `check_data`. El rápido lo hace
+  `MapWidget` al abrir un paquete (unos ms) y lo deja en `dataWarnings()`, además
+  del log; el mapa **arranca igual** con lo que funcione y la aplicación decide si
+  avisar (`demo` muestra un diálogo). Que falte una capa no debe impedir usar las
+  demás.
+- En `DataPackage::load` lo que falta era solo un aviso (para poder abrir el
+  resto); en la comprobación es un **error** con su gravedad real.
+
+**`check_data <paquete> [--quick] [--max-zoom N] [--strict]`** imprime una ficha
+por capa (tamaño, formato, cobertura por zoom) y los hallazgos; sale con 1 si hay
+errores (o avisos, con `--strict`) para usarlo en un script de empaquetado.
+
+Lo que dice del paquete real `D:\QtPro\Recursos`: **0 errores, 0 avisos**;
+OSM completo al 100 % hasta z15 (incluye mar); satelital completo hasta z12 y
+~31 % desde z13 (solo tierra), **6,2 % a z16**; Clarity completo hasta z13 y 54,5 %
+a z14; costas, solo la franja costera (5 % a z14, como corresponde). El dato de
+z16 sugiere que `recommendedMaxZoom` de la satelital debería ser 15: a 16 casi
+todo se vería ampliado desde el nivel anterior.
+
+**Tests:** nuevo `tst_packagecheck` (paquete correcto sin hallazgos; cobertura
+exacta en la zona; modo rápido sin cobertura; ficheros ausentes como errores;
+BLOB que parece JPEG y no lo es → error que nombra el formato; BD de elevación
+inválida; fuera de la carpeta / sin atribución / arranque inexistente como
+avisos; nivel vacío en la zona; sin manifiesto) y un caso en `tst_mapwidget`
+(paquete incompleto: arranca y `dataWarnings()` nombra lo que falta).
+
+**Estado: 17 tests verdes (14 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW.**

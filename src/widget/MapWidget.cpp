@@ -8,6 +8,7 @@
 #include "tiles/TileService.h"
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
+#include "io/PackageCheck.h"
 #include "widget/CoverageLayer.h"
 #include "widget/MapView.h"
 
@@ -101,6 +102,7 @@ public:
     DataPackageInfo package;
     QVector<DataPackage::Overlay> overlays;
     QSet<QString> fixedLayers;
+    QStringList dataWarnings;      // comprobacion rapida del paquete al abrir
 
     /*!
      * \brief Carga las capas fijas del paquete que aun no esten en el modelo.
@@ -162,7 +164,14 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             emit errorOccurred(d->error);
             return;
         }
-        for (const QString &aviso : paquete->warnings)
+        // Comprobacion RAPIDA (sin contar cobertura): lo que dejaria el mapa en
+        // blanco sin explicacion -ficheros, bases que no abren, imagenes que no
+        // se decodifican- se queda en dataWarnings() y en el log. No impide
+        // arrancar: se dibuja lo que si funcione.
+        PackageCheck::Options rapido;
+        rapido.coverage = false;
+        d->dataWarnings = PackageCheck::run(*paquete, rapido).problems();
+        for (const QString &aviso : d->dataWarnings)
             qCWarning(lcMapaRender) << aviso;
 
         d->package = paquete->info;
@@ -310,6 +319,9 @@ bool MapWidget::isReady() const { return d->ready; }
 
 // Informacion del paquete de datos abierto (invalida si no se uso dataDir).
 DataPackageInfo MapWidget::packageInfo() const { return d->package; }
+
+// Problemas de la comprobacion rapida del paquete al abrir (vacio = todo bien).
+QStringList MapWidget::dataWarnings() const { return d->dataWarnings; }
 QString MapWidget::lastError() const { return d->error; }
 
 // Lista las capas base (datasets de teselas) disponibles con su nombre y rango de

@@ -151,7 +151,7 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
 </figure>
 
 <div class="note"><b>Motivo de la separación:</b> el núcleo (teselas, geodesia, BD) se
-compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así 13 de los 16 tests automáticos
+compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así 14 de los 17 tests automáticos
 validan la lógica sin QCustomPlot ni ventanas, y quien solo quiera leer teselas no
 arrastra el motor de dibujo.</div>
 
@@ -319,7 +319,7 @@ la API que usa la aplicación:</p>
 <tr><td>Capas de entidades</td><td class="mono">addFeatureLayer · setFeatureLayerVisible · setFeatureLayerZOrder</td></tr>
 <tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer</td></tr>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
-<tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo</td></tr>
+<tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetTrailLength</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
@@ -373,6 +373,23 @@ Un <code>datasets.json</code> de la versión 1 se acepta como paquete mínimo.</
 </table>
 <p><code>MapConfig::dataDir</code> es el único ajuste necesario; cualquier campo de
 <code>MapConfig</code> rellenado a mano tiene prioridad sobre el paquete.</p>
+
+<h3><span class="cls">PackageCheck</span> <span class="tag">io/PackageCheck.h</span></h3>
+<p>Comprueba que un paquete funcionará <b>sin conexión</b>: lo que falte no se podrá
+descargar después. Cada hallazgo lleva su gravedad: <b>Error</b> si una parte del
+mapa no se dibujará, <b>Warning</b> si funciona pero algo falta o no es portable,
+<b>Info</b> para el informe. No escribe nada (todo en solo lectura; la BD de
+entidades del usuario ni se abre, porque abrirla podría migrar su esquema).</p>
+<table class="kv">
+<tr><td>Qt</td><td>Driver <code>QSQLITE</code> disponible (sin él no abre nada).</td></tr>
+<tr><td>Capas base</td><td>El fichero existe, abre como base de teselas, y una tesela real del nivel de fondo <b>se decodifica</b>: detecta el plugin de imagen que falta al desplegar (<code>qjpeg</code>) y lo nombra.</td></tr>
+<tr><td>Cobertura</td><td>Solo en modo completo: por cada zoom, teselas presentes / esperadas dentro de <code>bounds</code>, con <code>RMapsTileSource::countInRange</code> (un <code>COUNT(*)</code> que usa el índice: ~0,2 s para 7 GB).</td></tr>
+<tr><td>Elevación / capas fijas</td><td>La BD tiene <code>dem_tiles</code> con datos; los <code>.geo</code> se leen.</td></tr>
+<tr><td>Paquete</td><td>Atribución y zona declaradas, capa de arranque existente, ids no repetidos, y todo <b>dentro</b> de la carpeta (lo de fuera no viaja).</td></tr>
+</table>
+<p>El modo <b>rápido</b> (sin cobertura) lo ejecuta <code>MapWidget</code> al abrir un
+paquete y deja los problemas en <code>dataWarnings()</code>; el mapa arranca igual con
+lo que funcione. El completo lo usa la herramienta <code>check_data</code>.</p>
 
 <!-- ===================== 8bis. DEM ===================== -->
 <h2 class="sec">8b · Módulo <span class="mono">dem</span> — elevación del terreno (HGT/SRTM)</h2>
@@ -504,6 +521,18 @@ sur, este).</p>
 <tr><td>--overlay</td><td>Con <code>--package</code>: capa fija <code>.geo</code> (repetible).</td></tr>
 <tr><td>--features</td><td>Con <code>--package</code>: nombre de la BD de entidades del usuario (def. <code>entidades.db</code>).</td></tr>
 </table>
+
+<h3>check_data — comprobar un paquete antes de distribuirlo</h3>
+<p class="mono" style="font-size:12px">check_data &lt;carpeta_paquete | mapa.json&gt; [--quick] [--max-zoom N] [--strict]</p>
+<table class="kv">
+<tr><td>paquete</td><td>Carpeta del paquete o su <code>mapa.json</code>.</td></tr>
+<tr><td>--quick</td><td>Solo lo rápido (ficheros, apertura, decodificación); sin cobertura por zoom.</td></tr>
+<tr><td>--max-zoom</td><td>No medir cobertura por encima de este zoom.</td></tr>
+<tr><td>--strict</td><td>Salir con 1 también si hay avisos (por defecto solo con errores).</td></tr>
+</table>
+<p>Imprime una ficha por capa (tamaño, formato de imagen y cobertura por zoom
+dentro de la zona) y los hallazgos de más a menos graves. Salida 0 = listo para
+distribuir, 1 = errores, 2 = argumentos mal; pensado para scripts.</p>
 
 <h3>geo_to_tiles — rasterizar vector a teselas</h3>
 <p class="mono" style="font-size:12px">geo_to_tiles --in &lt;fichero.geo&gt; --out &lt;salida.sqlitedb&gt; --id &lt;id&gt; --name "&lt;nombre&gt;" [--minzoom N] [--maxzoom N] [--color #hex] [--width f] [--fill] [--bg #hex]</p>
@@ -644,7 +673,7 @@ probada— sirve para la consola y para la ventana con barra de progreso viva.</
 <!-- ===================== 13. DECISIONES ===================== -->
 <h2 class="sec">13 · Decisiones de diseño e historia</h2>
 <ul>
-  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite probar el núcleo sin GUI (13 de los 16 tests) y no imponer QCustomPlot.</li>
+  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite probar el núcleo sin GUI (14 de los 17 tests) y no imponer QCustomPlot.</li>
   <li><b>PIMPL en MapWidget.</b> QCustomPlot queda dentro; la cabecera pública es limpia.</li>
   <li><b>Configuración en datos.</b> El mapeo de zoom, el esquema y las columnas viven en <code>datasets.json</code>, no cableados en el código.</li>
   <li><b>Zoom hasta z15+.</b> <code>recommendedMaxZoom</code> separa «hasta dónde hay cobertura buena» de «hasta dónde hay teselas sueltas».</li>
@@ -670,6 +699,7 @@ y las herramientas de consola, y CMake lo avisa.</p>
 <ol>
   <li>Preparar los datos (con internet): <code>fill_tiles</code>/<code>fill_map</code> para teselas, <code>fill_hgt</code> → <code>dem_to_db</code> para la elevación.</li>
   <li><code>probe_db --package</code> sobre la carpeta → genera su <code>mapa.json</code> (rutas relativas). Se ajusta a mano lo que haga falta (nombres, atribución, estilos).</li>
+  <li><code>check_data</code> sobre la carpeta: 0 errores → el paquete está listo.</li>
   <li>Se copia la carpeta junto a la aplicación. La app solo necesita <code>cfg.dataDir = …/datos</code>: el producto final <b>no usa internet</b>.</li>
 </ol>
 

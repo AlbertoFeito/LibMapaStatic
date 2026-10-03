@@ -10,7 +10,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 16 tests (13 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 17 tests (14 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir
@@ -68,8 +68,24 @@ o junto a la aplicación. Plantilla: [`mapa.example.json`](mapa.example.json).
 | `overlays` | Capas vectoriales **fijas** `.geo`: se cargan al abrir, bloqueadas, y **no** se guardan con las del usuario |
 | `features` | BD de entidades del usuario. Una ruta relativa va a la carpeta de datos de la aplicación (`AppData/<app>/<package.id>/`), **no** a la del paquete, que puede ser de solo lectura. `seed` se copia ahí la primera vez |
 
-Un fichero que falte (una capa, la elevación) se avisa en el log pero no impide
-abrir el resto. `probe_db --package` genera el manifiesto de partida:
+Un fichero que falte (una capa, la elevación) no impide abrir el resto. Al
+abrir, el widget hace una **comprobación rápida** (milisegundos) de lo que
+dejaría el mapa en blanco sin explicación —un fichero que falta, una base que
+no abre, imágenes que no se pueden decodificar porque falta el plugin de Qt— y
+lo deja en `MapWidget::dataWarnings()` para que la app avise.
+
+**Antes de distribuir**, `check_data` revisa el paquete entero: ficheros,
+apertura, decodificación, zona y atribución, rutas fuera de la carpeta, y la
+**cobertura por zoom** dentro de la zona. Sale con 1 si hay errores, para
+usarlo en un script:
+
+```bash
+check_data Recursos              # informe completo (~0,2 s con 7 GB de datos)
+check_data Recursos --quick      # sin cobertura por zoom
+check_data Recursos --strict     # también falla con avisos
+```
+
+`probe_db --package` genera el manifiesto de partida:
 
 ```bash
 probe_db --package --out Recursos/mapa.json --ref-bbox 23.3,-85.0,19.7,-74.0 \
@@ -128,6 +144,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | | |
 |---|---|
 | `probe_db` | Sondea las BD de teselas y genera `datasets.json`, o con `--package` el manifiesto `mapa.json` del paquete (rutas relativas) |
+| `check_data` | Comprueba un paquete de datos antes de distribuirlo: ficheros, que abran, que sus imágenes se decodifiquen, cobertura por zoom en la zona y tamaño total |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
 | `vector_db` | Crea e inspecciona la BD de puntos, rutas y polígonos |
@@ -175,6 +192,9 @@ probe_db     --id <id> --file <ruta.sqlitedb> [--name "…"] [--id … --file �
              [--package [--dem <dem.sqlitedb|carpeta>] [--overlay <f.geo>]…
                         [--features entidades.db]]          (genera mapa.json)
 
+check_data   <carpeta_paquete | mapa.json> [--quick] [--max-zoom N] [--strict]
+             (salida 0 = listo para distribuir, 1 = errores)
+
 geo_to_tiles --in <f.geo> --out <salida.sqlitedb> --id <id> --name "<nombre>"
              [--minzoom N] [--maxzoom N] [--color #hex] [--width f] [--fill] [--bg #hex]
 
@@ -217,10 +237,10 @@ src/
   db/                conexiones SQLite, esquema, repositorio vectorial
   tiles/             lectura, caché, planificación y carga de teselas
   dem/               elevación del terreno: ficheros SRTM .hgt o BD .sqlitedb
-  io/                ficheros vectoriales .geo y manifiesto del paquete (mapa.json)
+  io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               16 tests (13 sin QCustomPlot)
+tests/               17 tests (14 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
@@ -243,12 +263,12 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 10 | Elevación del terreno: ficheros `.hgt` o BD `.sqlitedb` (`fill_hgt` → `dem_to_db`), cota bajo el cursor |
 | 11 | Persistencia automática de entidades (`MapConfig.featuresDbFile`) y `demo` al día |
 | 12 | **Paquete de datos sin conexión**: manifiesto `mapa.json`, `MapConfig.dataDir`, capas fijas, entidades del usuario en `AppData` |
+| 13 | Comprobación del paquete: `check_data` (informe con cobertura por zoom) y `MapWidget::dataWarnings()` al abrir |
 
 El producto final trabaja **solo con datos locales**. Lo siguiente es
-**comprobar** un paquete antes de distribuirlo (que estén todos los ficheros y
-qué zonas y zooms cubren) y **desplegar** la librería en otra aplicación sin
-sorpresas (`find_package`, plugins de Qt). El plan está en
-[`docs/BITACORA.md`](docs/BITACORA.md) §47.
+**desplegar** la librería en otra aplicación sin sorpresas (`install()` +
+`find_package`, plugins de Qt). El plan está en
+[`docs/BITACORA.md`](docs/BITACORA.md) §47–48.
 
 ## Licencia
 

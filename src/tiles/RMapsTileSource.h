@@ -63,6 +63,15 @@ public:
 
     qint64 tileCount(int z) override;
 
+    //! Cuantas teselas del zoom LOGICO \a z hay en el rango logico dado, con un
+    //! COUNT(*) (sin traer los BLOB ni las claves). -1 si hay error. Sirve para
+    //! medir cobertura de zonas grandes sin cargar millones de filas.
+    qint64 countInRange(int z, int xMin, int xMax, int yMin, int yMax);
+
+    //! La imagen de UNA tesela cualquiera del zoom logico \a z (vacio si el nivel
+    //! no tiene ninguna). Para comprobar que el formato se puede decodificar.
+    QByteArray anyTile(int z);
+
     //! Una celda del histograma de cobertura: indices RESUMEN en coordenadas de
     //! ALMACENAMIENTO (bx, by = x>>shift, y_stored>>shift) y cuantas teselas del
     //! zoom objetivo hay dentro de esa celda.

@@ -122,6 +122,8 @@ add_library(libmapa_core STATIC
     src/io/DataPackage.cpp
     src/io/DataPackage.h
     include/libmapa/DataPackage.h
+    src/io/PackageCheck.cpp
+    src/io/PackageCheck.h
 
     src/dem/IElevationSource.h
     src/dem/GridElevation.cpp
@@ -214,6 +216,10 @@ endif()
 if(LIBMAPA_BUILD_TOOLS)
     add_executable(probe_db tools/probe_db/main.cpp)
     target_link_libraries(probe_db PRIVATE libmapa_core)
+
+    # Comprueba un paquete de datos (mapa.json) antes de distribuirlo.
+    add_executable(check_data tools/check_data/main.cpp)
+    target_link_libraries(check_data PRIVATE libmapa_core)
 
     add_executable(bench_tiles tools/bench_tiles/main.cpp)
     target_link_libraries(bench_tiles PRIVATE libmapa_core)
@@ -324,6 +330,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_hgtelevation)
     libmapa_add_test(tst_sqliteelevation)
     libmapa_add_test(tst_datapackage)
+    libmapa_add_test(tst_packagecheck)
 
     libmapa_add_test(tst_geofile)
     target_compile_definitions(tst_geofile PRIVATE
