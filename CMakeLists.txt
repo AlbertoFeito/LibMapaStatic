@@ -242,11 +242,20 @@ if(LIBMAPA_BUILD_TOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/common)
 
     # Descarga ficheros de elevacion SRTM .hgt (30 m) de AWS Skadi (sin clave) y
-    # los descomprime con zlib. Alimenta a dem_to_db.
-    find_package(ZLIB REQUIRED)
-    add_executable(fill_hgt tools/fill_hgt/main.cpp)
-    target_link_libraries(fill_hgt PRIVATE
-        Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Network ZLIB::ZLIB)
+    # los descomprime con zlib. Alimenta a dem_to_db. zlib es OPCIONAL: si no se
+    # encuentra (p.ej. Qt MinGW en Windows sin zlib de desarrollo), se omite SOLO
+    # esta herramienta y el resto del proyecto compila igual. Para bajar los .hgt
+    # sin zlib: usa el script descargar_hgt.ps1, o construye la BD desde tus
+    # propios .hgt con dem_to_db.
+    find_package(ZLIB QUIET)
+    if(ZLIB_FOUND)
+        add_executable(fill_hgt tools/fill_hgt/main.cpp)
+        target_link_libraries(fill_hgt PRIVATE
+            Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Network ZLIB::ZLIB)
+    else()
+        message(STATUS "zlib no encontrado: se omite 'fill_hgt' "
+                       "(el resto del proyecto compila normalmente).")
+    endif()
 
     if(LIBMAPA_HAVE_QCP)
         add_executable(render_map tools/render_map/main.cpp)

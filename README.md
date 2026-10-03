@@ -88,7 +88,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana |
 | `vector_db` | Crea e inspecciona la BD de puntos, rutas y polígonos |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
-| `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona |
+| `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (requiere **zlib**; opcional) |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
 | `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura |
 | `demo` | Aplicación de ejemplo con selector de capa y herramientas |

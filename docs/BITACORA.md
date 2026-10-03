@@ -2227,3 +2227,10 @@ reales de 30 m (0 fallidos), la segunda pasada no baja nada (reanudable),
 
 **Estado: 15 tests verdes; pipeline DEM-en-BD cerrado (descarga 30 m → BD
 comprimida → consulta), verificado contra datos reales, Qt 6.4.**
+
+> **Corrección (zlib opcional):** `find_package(ZLIB REQUIRED)` abortaba TODA la
+> configuración de CMake donde no hubiera zlib de desarrollo (p.ej. Qt MinGW en
+> Windows). Se cambia a `find_package(ZLIB QUIET)` + `if(ZLIB_FOUND)`: si falta,
+> se omite **solo** `fill_hgt` y el resto compila. Para bajar los `.hgt` sin zlib:
+> el script `descargar_hgt.ps1`, o construir la BD desde tus propios `.hgt` con
+> `dem_to_db`. (El núcleo y `dem_to_db` nunca necesitaron zlib.)
