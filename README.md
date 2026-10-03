@@ -118,6 +118,46 @@ Para empaquetar la elevación en un solo fichero, el pipeline es
 `fill_map --dem-db dem.sqlitedb`. El generador acepta también tus propios `.hgt`
 de 90 m. La BD es ideal para distribuir dentro de una app.
 
+## Referencia de comandos (argumentos por herramienta)
+
+Opciones entre `[…]` opcionales; el resto, obligatorias. Los bbox son siempre
+`latN,lonO,latS,lonE` (norte, oeste, sur, este). En `docs/arquitectura.html`
+(y el PDF) está la tabla detallada de cada argumento.
+
+```
+probe_db     --id <id> --file <ruta.sqlitedb> [--id … --file …]
+             [--ref-bbox latN,lonO,latS,lonE] [--out datasets.json] [--no-test]
+
+geo_to_tiles --in <f.geo> --out <salida.sqlitedb> --id <id> --name "<nombre>"
+             [--minzoom N] [--maxzoom N] [--color #hex] [--width f] [--fill] [--bg #hex]
+
+vector_db    --out <mapdata.db> [--dump]            (crea con datos de ejemplo)
+             --file <mapdata.db> --dump             (solo inspecciona)
+
+render_map   --datasets <datasets.json> --out <mapa.png>
+             [--layer id] [--center lat,lon] [--zoom N] [--size AnchoxAlto]
+             [--wait ms] [--grid] [--features f.geo]
+
+bench_tiles  --datasets <datasets.json>
+             [--zoom N] [--width N] [--height N] [--center lat,lon] [--pans N]
+
+fill_tiles   (--datasets <json> --id <id> | --new <fichero> [--id <id>] [--name "…"])
+             (--bbox latN,lonO,latS,lonE | --poly "lat,lon;lat,lon;…")
+             [--minzoom N] [--maxzoom N] [--url "…{z}/{y}/{x}…"]
+             [--only-missing | --overwrite] [--rate N] [--conns 1..8]
+             [--retries N] [--timeout ms] [--yes]
+
+fill_map     [datasets.json] [--dem <carpeta_hgt>] [--dem-db <dem.sqlitedb>]
+             (el resto —área, zoom, fuente, rejilla, cobertura— desde la ventana)
+
+fill_hgt     (--cuba | --bbox latN,lonO,latS,lonE) --out <carpeta>
+             [--url base] [--res 30]               (descarga SRTM 30 m, sin clave)
+
+dem_to_db    <carpeta_hgt> --out <dem.sqlitedb> [--overwrite]
+
+demo         [datasets.json]                        (app de ejemplo con mapa)
+```
+
 ## Estructura
 
 ```

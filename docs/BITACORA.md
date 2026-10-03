@@ -2243,3 +2243,21 @@ comprimida → consulta), verificado contra datos reales, Qt 6.4.**
 > expressions. Verificado: la salida de miniz es **byte a byte idéntica** a la de
 > zlib (mismo md5 del `.hgt`). (De paso, un `-Wconversion` latente en
 > `GeoMath::pointInPolygon` —`int(poly.size())`— que solo salía en build limpio.)
+
+## 43. Documentación: referencia de comandos por herramienta
+
+Para que quede claro cómo se invoca cada aplicación, se añade una **referencia
+completa de comando + argumentos de entrada** de las diez herramientas
+(`probe_db`, `geo_to_tiles`, `vector_db`, `render_map`, `bench_tiles`,
+`fill_tiles`, `fill_map`, `fill_hgt`, `dem_to_db`, `demo`):
+
+- En **`README.md`**, un bloque "Referencia de comandos" con la sintaxis de cada
+  una (opciones `[…]` opcionales; bbox siempre `latN,lonO,latS,lonE`).
+- En **`docs/arquitectura.html`** (§11) + **PDF**, una tabla por herramienta
+  explicando cada argumento, además de las secciones que ya había de `fill_tiles`
+  y `fill_map`, y la síntesis de línea de comandos de `fill_map`.
+
+Los argumentos se tomaron directamente del parseo real de cada `main.cpp` (no
+inventados). Cambio solo de documentación: no toca el build ni los tests.
+
+**Estado: 15 tests verdes (sin cambios de código); documentación de comandos al día.**

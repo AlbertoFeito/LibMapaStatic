@@ -462,6 +462,81 @@ exactamente donde el mapa la espera.</div>
 </table>
 <p><b>Pipeline de elevación empaquetable:</b> <code>fill_hgt --cuba</code> (baja 30 m sin clave) → <code>dem_to_db</code> (BD comprimida) → <code>fill_map --dem-db</code> o <code>MapWidget::elevationAt()</code> en tu app. El generador acepta también <code>.hgt</code> de 90 m ya existentes.</p>
 
+<p class="note" style="background:#eef4f9">A continuación, la <b>síntesis de comando y los argumentos de entrada de cada
+herramienta</b>. Las opciones entre <code>[…]</code> son opcionales; el resto,
+obligatorias. Los bbox siempre son <code>latN,lonO,latS,lonE</code> (norte, oeste,
+sur, este).</p>
+
+<h3>probe_db — sondar BD y generar datasets.json</h3>
+<p class="mono" style="font-size:12px">probe_db --id &lt;id&gt; --file &lt;ruta.sqlitedb&gt; [--id … --file …] [--ref-bbox latN,lonO,latS,lonE] [--out datasets.json] [--no-test]</p>
+<table class="kv">
+<tr><td>--id</td><td>Identificador de la capa. <b>Repetible</b>; en el mismo orden que los <code>--file</code>.</td></tr>
+<tr><td>--file</td><td>Ruta al <code>.sqlitedb</code> a sondar. <b>Repetible</b>, pareado con <code>--id</code>.</td></tr>
+<tr><td>--name</td><td>Nombre visible de la capa (opcional, repetible).</td></tr>
+<tr><td>--ref-bbox</td><td>Rectángulo de referencia para desempatar esquema XYZ vs TMS. Cuba: <code>23.3,-85.0,19.7,-74.0</code>.</td></tr>
+<tr><td>--out</td><td>Fichero <code>datasets.json</code> de salida (si falta, por pantalla).</td></tr>
+<tr><td>--no-test</td><td>No verificar que la fuente lee de verdad (solo deduce).</td></tr>
+</table>
+
+<h3>geo_to_tiles — rasterizar vector a teselas</h3>
+<p class="mono" style="font-size:12px">geo_to_tiles --in &lt;fichero.geo&gt; --out &lt;salida.sqlitedb&gt; --id &lt;id&gt; --name "&lt;nombre&gt;" [--minzoom N] [--maxzoom N] [--color #hex] [--width f] [--fill] [--bg #hex]</p>
+<table class="kv">
+<tr><td>--in</td><td>Fichero de entrada <code>.geo</code>/<code>.xyz</code> (trazados separados por <code>0,0</code>).</td></tr>
+<tr><td>--out</td><td><code>.sqlitedb</code> de teselas a crear.</td></tr>
+<tr><td>--id / --name</td><td>Identificador y nombre de la capa generada.</td></tr>
+<tr><td>--minzoom / --maxzoom</td><td>Rango de zoom de la pirámide (def. 4..11).</td></tr>
+<tr><td>--color / --width</td><td>Color y grosor de línea del trazado.</td></tr>
+<tr><td>--fill / --bg</td><td>Rellenar polígonos / color de fondo.</td></tr>
+</table>
+
+<h3>vector_db — BD de entidades vectoriales</h3>
+<p class="mono" style="font-size:12px">vector_db --out &lt;mapdata.db&gt; [--dump]  ·  vector_db --file &lt;mapdata.db&gt; --dump</p>
+<table class="kv">
+<tr><td>--out</td><td>Crea una BD nueva con datos de ejemplo (la borra si existe).</td></tr>
+<tr><td>--file</td><td>Abre una BD existente sin tocarla (para inspección).</td></tr>
+<tr><td>--dump</td><td>Vuelca esquema y contenido (implícito al crear con <code>--out</code>).</td></tr>
+</table>
+
+<h3>render_map — mapa a imagen (sin ventana)</h3>
+<p class="mono" style="font-size:12px">render_map --datasets &lt;datasets.json&gt; --out &lt;mapa.png&gt; [--layer id] [--center lat,lon] [--zoom N] [--size AnchoxAlto] [--wait ms] [--grid] [--features fichero.geo]</p>
+<table class="kv">
+<tr><td>--datasets / --out</td><td>Config de capas y PNG de salida (obligatorios).</td></tr>
+<tr><td>--layer</td><td>Capa base a dibujar (def. la primera del JSON).</td></tr>
+<tr><td>--center / --zoom</td><td>Centro <code>lat,lon</code> y nivel de zoom.</td></tr>
+<tr><td>--size</td><td>Tamaño en píxeles, <code>1280x800</code>.</td></tr>
+<tr><td>--wait</td><td>Milisegundos de espera a que terminen de cargar las teselas.</td></tr>
+<tr><td>--grid</td><td>Dibuja la rejilla <code>z/x/y</code> (verde = propia, rojo = respaldo escalado).</td></tr>
+<tr><td>--features</td><td>Superpone las entidades de un <code>.geo</code>.</td></tr>
+</table>
+
+<h3>bench_tiles — medir rendimiento de lectura</h3>
+<p class="mono" style="font-size:12px">bench_tiles --datasets &lt;datasets.json&gt; [--zoom N] [--width N] [--height N] [--center lat,lon] [--pans N]</p>
+<table class="kv">
+<tr><td>--datasets</td><td>Config de capas a medir (obligatorio).</td></tr>
+<tr><td>--zoom</td><td>Nivel de zoom de la prueba.</td></tr>
+<tr><td>--width / --height</td><td>Tamaño del viewport simulado.</td></tr>
+<tr><td>--center</td><td>Centro <code>lat,lon</code> del barrido.</td></tr>
+<tr><td>--pans</td><td>Número de desplazamientos a simular.</td></tr>
+</table>
+
+<h3>fill_hgt — descargar elevación SRTM (30 m)</h3>
+<p class="mono" style="font-size:12px">fill_hgt (--cuba | --bbox latN,lonO,latS,lonE) --out &lt;carpeta&gt; [--url base] [--res 30]</p>
+<table class="kv">
+<tr><td>--cuba</td><td>Preset: bbox de Cuba (lat 19..24, lon −85..−74).</td></tr>
+<tr><td>--bbox</td><td>Zona a cubrir, <code>latN,lonO,latS,lonE</code> (alternativa a <code>--cuba</code>).</td></tr>
+<tr><td>--out</td><td>Carpeta donde dejar los <code>.hgt</code> (reanudable: salta los que ya están).</td></tr>
+<tr><td>--url</td><td>Base de la fuente (def. AWS Skadi <code>elevation-tiles-prod/skadi</code>).</td></tr>
+<tr><td>--res</td><td>Resolución; hoy solo <b>30</b> m (Skadi). Se acepta y se ignora.</td></tr>
+</table>
+
+<h3>dem_to_db — carpeta .hgt → base de datos de elevación</h3>
+<p class="mono" style="font-size:12px">dem_to_db &lt;carpeta_hgt&gt; --out &lt;dem.sqlitedb&gt; [--overwrite]</p>
+<table class="kv">
+<tr><td>&lt;carpeta_hgt&gt;</td><td>Carpeta con los <code>.hgt</code> (30 m o 90 m; la resolución se autodetecta por tile). Argumento posicional.</td></tr>
+<tr><td>--out</td><td>Base de datos <code>.sqlitedb</code> a crear (tablas <code>dem_tiles</code> + <code>dem_meta</code>, blobs <code>qCompress</code>).</td></tr>
+<tr><td>--overwrite</td><td>Rehacer la BD si ya existe.</td></tr>
+</table>
+
 <h3>fill_tiles — argumentos</h3>
 <table class="kv">
 <tr><td>--datasets / --id</td><td>Rellenar una BD existente: de <code>datasets.json</code> toma codificación y ruta de la capa.</td></tr>
@@ -477,6 +552,11 @@ exactamente donde el mapa la espera.</div>
 </table>
 
 <h3>fill_map — cómo se usa</h3>
+<p class="mono" style="font-size:12px">fill_map [datasets.json] [--dem &lt;carpeta_hgt&gt;] [--dem-db &lt;dem.sqlitedb&gt;]</p>
+<p>El primer argumento posicional es el <code>datasets.json</code> (def.
+<code>./datasets.json</code>); <code>--dem</code> fija una carpeta de <code>.hgt</code> y
+<code>--dem-db</code> una base de datos de elevación. Todo lo demás se maneja desde
+la ventana:</p>
 <ul>
   <li><b>Rellenar</b>: marca un rectángulo (o escribe el bbox) + rango de zoom → completa la capa activa.</li>
   <li><b>Polígono</b>: marca un polígono clic a clic (doble clic / Enter lo cierra) y descarga solo las teselas de dentro. Excluyente con "Seleccionar área".</li>
