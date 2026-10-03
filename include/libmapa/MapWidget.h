@@ -1,6 +1,7 @@
 #ifndef LIBMAPA_MAPWIDGET_H_
 #define LIBMAPA_MAPWIDGET_H_
 
+#include "libmapa/DataPackage.h"
 #include "libmapa/GeoFile.h"
 #include "libmapa/MapFeature.h"
 #include "libmapa/MapTarget.h"
@@ -20,6 +21,19 @@ namespace libmapa {
 //! Ajustes de arranque del widget.
 struct MapConfig
 {
+    /*!
+     * \brief Carpeta del PAQUETE DE DATOS (la que contiene `mapa.json`), o la
+     *        ruta del propio manifiesto. Es la forma recomendada:
+     *
+     *     cfg.dataDir = QCoreApplication::applicationDirPath() + "/datos";
+     *
+     * Con eso salen las capas base, la elevacion, las capas fijas, la BD de
+     * entidades del usuario y el punto de arranque. Cualquier otro campo de
+     * esta estructura que se rellene a mano TIENE PRIORIDAD sobre el paquete.
+     * Vacio = sin paquete (configuracion clasica con datasetsFile).
+     */
+    QString dataDir;
+
     /*!
      * \brief Ruta al datasets.json generado por probe_db.
      *
@@ -42,9 +56,10 @@ struct MapConfig
     //! (con antirebote). Vacia = sin persistencia automatica. Opcional.
     QString featuresDbFile;
 
-    QString initialLayerId;                    //!< Vacio = el primero del JSON.
-    QGeoCoordinate initialCenter{23.1136, -82.3666};
-    int initialZoom = 10;
+    QString initialLayerId;                    //!< Vacio = el del paquete o el primero del JSON.
+    //! Invalido = el del paquete ("start.center"), o La Habana si no hay paquete.
+    QGeoCoordinate initialCenter;
+    int initialZoom = -1;                      //!< < 0 = el del paquete, o 10.
 
     int cacheMiB = 128;         //!< Memoria para teselas ya decodificadas.
     int debounceMs = 80;        //!< Agrupacion de peticiones al arrastrar.
@@ -60,7 +75,7 @@ struct MapConfig
  * Se usa asi, y esto es todo lo que hace falta:
  *
  *     libmapa::MapConfig cfg;
- *     cfg.datasetsFile = QDir::currentPath() + "/datasets.json";
+ *     cfg.dataDir = QCoreApplication::applicationDirPath() + "/datos";
  *
  *     auto *mapa = new libmapa::MapWidget(cfg, this);
  *     ui->contenedor->layout()->addWidget(mapa);
@@ -93,6 +108,10 @@ public:
     //! false si no se pudo abrir ninguna base de datos de mapas.
     bool isReady() const;
     QString lastError() const;
+
+    //! Paquete de datos abierto (nombre, version, atribucion...). Invalido si el
+    //! widget se configuro sin MapConfig::dataDir.
+    DataPackageInfo packageInfo() const;
 
     // --- Capa base -------------------------------------------------------
     QVector<BaseLayerInfo> availableBaseLayers() const;

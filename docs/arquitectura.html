@@ -151,7 +151,7 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
 </figure>
 
 <div class="note"><b>Motivo de la separación:</b> el núcleo (teselas, geodesia, BD) se
-compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así 12 de los 15 tests automáticos
+compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así 13 de los 16 tests automáticos
 validan la lógica sin QCustomPlot ni ventanas, y quien solo quiera leer teselas no
 arrastra el motor de dibujo.</div>
 
@@ -319,6 +319,7 @@ la API que usa la aplicación:</p>
 <tr><td>Capas de entidades</td><td class="mono">addFeatureLayer · setFeatureLayerVisible · setFeatureLayerZOrder</td></tr>
 <tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer</td></tr>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
+<tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetTrailLength</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
@@ -348,12 +349,30 @@ añadió para la descarga.</p>
 </table>
 
 <!-- ===================== 8. IO ===================== -->
-<h2 class="sec">8 · Módulo <span class="mono">io</span> — ficheros .geo</h2>
+<h2 class="sec">8 · Módulo <span class="mono">io</span> — ficheros .geo y paquete de datos</h2>
 <p><span class="cls">GeoFile</span> <span class="tag">include/libmapa/GeoFile.h</span> lee/escribe
 ficheros <code>.geo</code>/<code>.xyz</code>: listas de coordenadas donde <code>0,0</code>
 separa trazados. Un fichero puede traer varios trazados (aguas jurisdiccionales,
 corredores, divisiones). <code>MapWidget::loadGeoAsLayer()</code> lo carga como <b>una
 entidad multi-parte</b>. También lo usa <code>geo_to_tiles</code> para rasterizar.</p>
+
+<h3><span class="cls">DataPackage</span> <span class="tag">io/DataPackage.h · público: DataPackageInfo</span></h3>
+<p>El producto final trabaja <b>sin conexión</b>: todos sus datos viajan en un
+<b>paquete</b>, una carpeta con un manifiesto <code>mapa.json</code> (formato
+<code>libmapa-package</code>, versión 2) y rutas <b>relativas</b> a ella.
+<code>DataPackage::load()</code> lo lee (carpeta o fichero), valida formato y versión,
+resuelve las rutas a absolutas y anota como <b>aviso</b>, sin fallar, lo que falte.
+Un <code>datasets.json</code> de la versión 1 se acepta como paquete mínimo.</p>
+<table class="kv">
+<tr><td>package</td><td>id, nombre, versión de los datos, fecha, zona (<code>bounds</code>) y atribución → <code>MapWidget::packageInfo()</code>.</td></tr>
+<tr><td>start</td><td>Capa, centro y zoom de arranque.</td></tr>
+<tr><td>datasets</td><td>Capas base (mismo formato que <code>datasets.json</code>; lo omitido toma su valor por defecto).</td></tr>
+<tr><td>elevation</td><td><code>file</code> (BD <code>.sqlitedb</code>) o <code>dir</code> (carpeta <code>.hgt</code>).</td></tr>
+<tr><td>overlays</td><td>Capas vectoriales <b>fijas</b> <code>.geo</code> con estilo: bloqueadas y excluidas del guardado de entidades (<code>fixedLayers</code>), para no duplicarse en cada arranque.</td></tr>
+<tr><td>features</td><td>BD de entidades del usuario. Relativa → <code>AppDataLocation/&lt;package.id&gt;/</code> (escribible), nunca la carpeta del paquete; <code>seed</code> se copia la primera vez.</td></tr>
+</table>
+<p><code>MapConfig::dataDir</code> es el único ajuste necesario; cualquier campo de
+<code>MapConfig</code> rellenado a mano tiene prioridad sobre el paquete.</p>
 
 <!-- ===================== 8bis. DEM ===================== -->
 <h2 class="sec">8b · Módulo <span class="mono">dem</span> — elevación del terreno (HGT/SRTM)</h2>
@@ -471,15 +490,19 @@ herramienta</b>. Las opciones entre <code>[…]</code> son opcionales; el resto,
 obligatorias. Los bbox siempre son <code>latN,lonO,latS,lonE</code> (norte, oeste,
 sur, este).</p>
 
-<h3>probe_db — sondar BD y generar datasets.json</h3>
-<p class="mono" style="font-size:12px">probe_db --id &lt;id&gt; --file &lt;ruta.sqlitedb&gt; [--id … --file …] [--ref-bbox latN,lonO,latS,lonE] [--out datasets.json] [--no-test]</p>
+<h3>probe_db — sondar BD y generar datasets.json / mapa.json</h3>
+<p class="mono" style="font-size:12px">probe_db --id &lt;id&gt; --file &lt;ruta.sqlitedb&gt; [--id … --file …] [--ref-bbox latN,lonO,latS,lonE] [--out datasets.json] [--no-test] [--package [--dem ruta] [--overlay f.geo]… [--features nombre]]</p>
 <table class="kv">
 <tr><td>--id</td><td>Identificador de la capa. <b>Repetible</b>; en el mismo orden que los <code>--file</code>.</td></tr>
 <tr><td>--file</td><td>Ruta al <code>.sqlitedb</code> a sondar. <b>Repetible</b>, pareado con <code>--id</code>.</td></tr>
 <tr><td>--name</td><td>Nombre visible de la capa (opcional, repetible).</td></tr>
 <tr><td>--ref-bbox</td><td>Rectángulo de referencia para desempatar esquema XYZ vs TMS. Cuba: <code>23.3,-85.0,19.7,-74.0</code>.</td></tr>
-<tr><td>--out</td><td>Fichero <code>datasets.json</code> de salida (si falta, por pantalla).</td></tr>
+<tr><td>--out</td><td>Fichero JSON de salida (def. <code>datasets.json</code>). Las rutas se escriben <b>relativas a su carpeta</b>.</td></tr>
 <tr><td>--no-test</td><td>No verificar que la fuente lee de verdad (solo deduce).</td></tr>
+<tr><td>--package</td><td>Genera el manifiesto completo de paquete (<code>mapa.json</code> v2): <code>package</code> (id y nombre de la carpeta, fecha de hoy, zona del <code>--ref-bbox</code>), <code>start</code> y <code>features</code>.</td></tr>
+<tr><td>--dem</td><td>Con <code>--package</code>: BD de elevación o carpeta de <code>.hgt</code>.</td></tr>
+<tr><td>--overlay</td><td>Con <code>--package</code>: capa fija <code>.geo</code> (repetible).</td></tr>
+<tr><td>--features</td><td>Con <code>--package</code>: nombre de la BD de entidades del usuario (def. <code>entidades.db</code>).</td></tr>
 </table>
 
 <h3>geo_to_tiles — rasterizar vector a teselas</h3>
@@ -502,9 +525,10 @@ sur, este).</p>
 </table>
 
 <h3>render_map — mapa a imagen (sin ventana)</h3>
-<p class="mono" style="font-size:12px">render_map --datasets &lt;datasets.json&gt; --out &lt;mapa.png&gt; [--layer id] [--center lat,lon] [--zoom N] [--size AnchoxAlto] [--wait ms] [--grid] [--features fichero.geo]</p>
+<p class="mono" style="font-size:12px">render_map (--datasets &lt;datasets.json&gt; | --data &lt;carpeta_paquete&gt;) --out &lt;mapa.png&gt; [--layer id] [--center lat,lon] [--zoom N] [--size AnchoxAlto] [--wait ms] [--grid] [--features fichero.geo]</p>
 <table class="kv">
 <tr><td>--datasets / --out</td><td>Config de capas y PNG de salida (obligatorios).</td></tr>
+<tr><td>--data</td><td>En vez de <code>--datasets</code>: abre un paquete (<code>mapa.json</code>); capa, centro y zoom salen de su <code>start</code> salvo que se pasen, y dibuja sus capas fijas.</td></tr>
 <tr><td>--layer</td><td>Capa base a dibujar (def. la primera del JSON).</td></tr>
 <tr><td>--center / --zoom</td><td>Centro <code>lat,lon</code> y nivel de zoom.</td></tr>
 <tr><td>--size</td><td>Tamaño en píxeles, <code>1280x800</code>.</td></tr>
@@ -620,7 +644,7 @@ probada— sirve para la consola y para la ventana con barra de progreso viva.</
 <!-- ===================== 13. DECISIONES ===================== -->
 <h2 class="sec">13 · Decisiones de diseño e historia</h2>
 <ul>
-  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite probar el núcleo sin GUI (12 de los 15 tests) y no imponer QCustomPlot.</li>
+  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite probar el núcleo sin GUI (13 de los 16 tests) y no imponer QCustomPlot.</li>
   <li><b>PIMPL en MapWidget.</b> QCustomPlot queda dentro; la cabecera pública es limpia.</li>
   <li><b>Configuración en datos.</b> El mapeo de zoom, el esquema y las columnas viven en <code>datasets.json</code>, no cableados en el código.</li>
   <li><b>Zoom hasta z15+.</b> <code>recommendedMaxZoom</code> separa «hasta dónde hay cobertura buena» de «hasta dónde hay teselas sueltas».</li>
@@ -644,10 +668,9 @@ y las herramientas de consola, y CMake lo avisa.</p>
 
 <h3>Un flujo típico de datos</h3>
 <ol>
-  <li><code>probe_db</code> sobre tus <code>.sqlitedb</code> → genera <code>datasets.json</code>.</li>
-  <li>La app abre <code>MapWidget</code> con ese <code>datasets.json</code> y ya navegas.</li>
-  <li>¿Huecos? <code>fill_tiles</code>/<code>fill_map</code> los rellenan de Esri Clarity.</li>
-  <li>¿Base nueva y uniforme? <code>fill_tiles --new</code> (o «Nueva base…» en <code>fill_map</code>).</li>
+  <li>Preparar los datos (con internet): <code>fill_tiles</code>/<code>fill_map</code> para teselas, <code>fill_hgt</code> → <code>dem_to_db</code> para la elevación.</li>
+  <li><code>probe_db --package</code> sobre la carpeta → genera su <code>mapa.json</code> (rutas relativas). Se ajusta a mano lo que haga falta (nombres, atribución, estilos).</li>
+  <li>Se copia la carpeta junto a la aplicación. La app solo necesita <code>cfg.dataDir = …/datos</code>: el producto final <b>no usa internet</b>.</li>
 </ol>
 
 <p style="margin-top:28px;color:#5b6b7b;font-size:9pt;border-top:1px solid #d7dee6;padding-top:8px">

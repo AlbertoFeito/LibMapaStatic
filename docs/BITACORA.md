@@ -2386,3 +2386,95 @@ afectaba al build, pero varias **contradecían** el estado real:
 
 **Estado: cambio solo de documentación y comentarios, no requiere build;
 15 tests verdes.**
+
+## 47. Paquete de datos sin conexión: `mapa.json` y `MapConfig.dataDir`
+
+**Cambio de rumbo.** Se aclaró el uso real: el producto final **no usa
+internet**; solo trabaja con datos locales que viajan con la aplicación.
+Internet queda para las herramientas que **preparan** esos datos (`fill_tiles`,
+`fill_map`, `fill_hgt`). Eso reordena las prioridades: lo importante deja de ser
+«leer más fuentes» (servidor de teselas, MBTiles) y pasa a ser que el conjunto de
+datos **se instale, se encuentre y funcione** sin sorpresas. La hoja de ruta de
+§46 queda en segundo plano; su punto 1 (objetivos desde la BD) se aparca porque
+nadie lo necesita todavía: las tablas `vehiculo`/`buque_ais`/`trayectoria`
+vienen copiadas del EstacionTerrena original (§25), no de un requisito.
+
+**Lo que lo hacía difícil:**
+
+- `probe_db` escribía **rutas absolutas** (`D:/QtPro/Recursos/...`): el
+  `datasets.json` no servía en otro PC aunque el lector ya aceptaba relativas.
+- Los datos estaban **repartidos** en tres ajustes de `MapConfig`
+  (`datasetsFile`, `elevationDbFile`, `featuresDbFile`) sin idea de conjunto.
+- La BD de entidades necesita **escribir**, y una app instalada en
+  `Program Files` no puede escribir en su propia carpeta.
+- Nada describía el conjunto: ni versión, ni zona, ni atribución.
+
+**El paquete.** Una carpeta con todo y un manifiesto `mapa.json` (formato
+`libmapa-package`, versión 2) con rutas **relativas** a ella:
+
+- `package`: id, nombre, versión de los datos, fecha, zona (`bounds`) y
+  **atribución** (OSM la exige; la app la lee con `MapWidget::packageInfo()`).
+- `start`: capa, centro y zoom de arranque (la app ya no cablea La Habana).
+- `datasets`: lo mismo que `datasets.json`; los campos omitidos toman su valor
+  por defecto, así que ya no hace falta repetir `colZ`, `tableName`…
+- `elevation`: `file` (BD) o `dir` (`.hgt`).
+- `overlays`: capas vectoriales **fijas** `.geo` con su estilo.
+- `features`: la BD de entidades del usuario y, opcional, una `seed` de partida.
+
+Las claves van **en inglés**, como las del `datasets.json` que ya existía. Un
+`datasets.json` versión 1 sigue valiendo (es un paquete con solo capas base), y
+un manifiesto de una versión **futura** se rechaza con un mensaje claro en vez
+de abrirse a medias.
+
+**Decisiones:**
+
+- **Un solo ajuste:** `MapConfig::dataDir`. Lo que la app rellene a mano **gana**
+  al paquete. Para poder distinguir «no puesto» de «puesto», `initialCenter`
+  pasa a ser inválido por defecto e `initialZoom` a −1; si nadie los pone se usan
+  los de siempre (La Habana, 10), así que ninguna app existente cambia.
+- **Lo que falta avisa, no rompe:** una capa base, la elevación o un `.geo`
+  ausentes se anotan como aviso (log) y el resto del mapa funciona. Solo es
+  fatal no tener manifiesto, que no sea JSON, otro formato/versión, o cero
+  datasets.
+- **Entidades fuera del paquete:** una ruta relativa en `features.file` se
+  resuelve contra `AppDataLocation/<package.id>/` (escribible), **nunca** contra
+  la carpeta del paquete. El id separa paquetes distintos. La `seed` se copia
+  la primera vez y se le devuelven los permisos de escritura (la copia hereda el
+  solo-lectura del original instalado). Nunca se pisa lo ya guardado.
+- **Capas fijas que no se duplican:** se cargan en el `OverlayModel` como el
+  resto (reutilizando `loadGeoAsLayer`), pero el widget recuerda sus ids
+  (`fixedLayers`) y `saveFeaturesTo` las **salta**: si se guardaran, en cada
+  arranque aparecerían dos veces. Quedan bloqueadas (capa no editable, entidad
+  no seleccionable) y su carga no entra en el historial de deshacer. Como
+  `setContents` reemplaza todo el modelo, `loadFeaturesFrom` las vuelve a poner,
+  dentro del mismo grupo de deshacer.
+- El lector (`src/io/DataPackage`) va en el **núcleo** (sin widgets) para
+  probarlo sin pantalla; lo público es solo `DataPackageInfo`
+  (`include/libmapa/DataPackage.h`), sin exponer `TileDataset`.
+
+**Herramientas:** `probe_db` escribe las rutas **relativas a la carpeta del
+`--out`** y, con `--package` (+ `--dem`, `--overlay`, `--features`), genera el
+manifiesto completo con la zona del `--ref-bbox` y la fecha de hoy.
+`render_map --data <carpeta>` y `demo <carpeta>` abren un paquete entero.
+
+**El paquete real** `D:\QtPro\Recursos\mapa.json` (plantilla en el repo:
+`mapa.example.json`) lleva los **cuatro** datasets que hay en `Recursos`
+(`Cuba_OSM_CID3`, `Cuba_Satelital_CID3`, `Nueva_Clarity`, `Cuba_Vector`), la
+elevación `cuba_dem.sqlitedb` y los cuatro `.geo` como capas fijas (`Aguas`,
+`FIR`, `Corredores`, `Ejercitos`). Se respetaron los ajustes hechos a mano en el
+`datasets.json` anterior, que la sonda no reproduce (zoom mínimo/fondo 3 en
+`satelital`, 3/4 en `clarity`, `typicalFill` 1.0 en `costas`).
+`render_map --data D:\QtPro\Recursos` lo dibuja entero con una sola opción.
+
+**Tests:** nuevo `tst_datapackage` (todos los bloques, carpeta o fichero,
+valores por defecto, versión 1, formato/versión ajenos, avisos por ficheros que
+faltan, entidades en `AppData` con copia de la semilla) y tres casos en
+`tst_mapwidget` (abrir solo con `dataDir`; la capa fija ni se guarda ni se
+duplica al reabrir; lo manual gana al paquete; error claro si falta).
+
+**Siguiente (pasos 2 y 3 del plan):** comprobar un paquete antes de
+distribuirlo (ficheros, apertura, zonas y zooms cubiertos) y desplegar la
+librería en otra app sin sorpresas (`install()`/`find_package`, plugins
+`qsqlite`/imágenes, y un test que vigile que la librería no enlaza `Qt Network`).
+
+**Estado: 16 tests verdes (13 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW.**

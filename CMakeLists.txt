@@ -119,6 +119,9 @@ add_library(libmapa_core STATIC
 
     src/io/GeoFile.cpp
     include/libmapa/GeoFile.h
+    src/io/DataPackage.cpp
+    src/io/DataPackage.h
+    include/libmapa/DataPackage.h
 
     src/dem/IElevationSource.h
     src/dem/GridElevation.cpp
@@ -320,6 +323,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_vectorrepository)
     libmapa_add_test(tst_hgtelevation)
     libmapa_add_test(tst_sqliteelevation)
+    libmapa_add_test(tst_datapackage)
 
     libmapa_add_test(tst_geofile)
     target_compile_definitions(tst_geofile PRIVATE

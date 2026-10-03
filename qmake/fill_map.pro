@@ -36,6 +36,7 @@ SOURCES += \
     $$ROOT/src/db/Schema.cpp \
     $$ROOT/src/db/VectorRepository.cpp \
     $$ROOT/src/io/GeoFile.cpp \
+    $$ROOT/src/io/DataPackage.cpp \
     $$ROOT/src/dem/GridElevation.cpp \
     $$ROOT/src/dem/HgtElevation.cpp \
     $$ROOT/src/dem/SqliteElevation.cpp \

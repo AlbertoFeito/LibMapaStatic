@@ -5,7 +5,7 @@ description: >
   LibMapaStatic, y dejar el repo correctamente actualizado. Úsala al terminar
   cualquier cambio de código (una herramienta, una capa, un método del API):
   comentarios por función, entrada en la bitácora, README/arquitectura/PDF si
-  procede, build + 15 tests, y commit+push con la atribución del proyecto.
+  procede, build + 16 tests, y commit+push con la atribución del proyecto.
   Dispara con: "documenta esto", "actualiza la bitácora", "registra la feature",
   "deja el repo al día", "resume y documenta".
 ---
@@ -64,7 +64,7 @@ Compila y pasa los tests (sin pantalla):
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4
 cd build && QT_QPA_PLATFORM=offscreen ctest
 ```
-Deben pasar los 15 (12 si no hay QCustomPlot). Cambios solo de documentación (.md/.html/skills) no
+Deben pasar los 16 (13 si no hay QCustomPlot). Cambios solo de documentación (.md/.html/skills) no
 necesitan build.
 
 ## 5. Commit + push

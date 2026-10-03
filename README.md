@@ -9,7 +9,8 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
-- 15 tests (12 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
+- 16 tests (13 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir
@@ -20,9 +21,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 #include <libmapa/MapWidget.h>
 
 libmapa::MapConfig cfg;
-cfg.datasetsFile  = QDir::currentPath() + "/datasets.json";
-cfg.initialCenter = QGeoCoordinate(23.1136, -82.3666);
-cfg.initialZoom   = 11;
+cfg.dataDir = QCoreApplication::applicationDirPath() + "/datos";   // carpeta con mapa.json
 
 auto *mapa = new libmapa::MapWidget(cfg, this);
 ui->contenedor->layout()->addWidget(mapa);
@@ -33,6 +32,50 @@ connect(botonSatelital, &QPushButton::clicked, mapa, [mapa]{
 
 connect(mapa, &libmapa::MapWidget::mouseMoved,
         this, [](const QGeoCoordinate &p){ /* ... */ });
+```
+
+Con esa línea de `dataDir` salen las capas base, la elevación, las capas fijas,
+la BD de entidades del usuario y el punto de arranque. Lo que se rellene a mano
+en `MapConfig` (`initialZoom`, `elevationDbFile`…) **manda sobre el paquete**.
+La configuración clásica con `datasetsFile` sigue funcionando.
+
+## El paquete de datos
+
+Una carpeta con todo lo que el mapa necesita sin conexión y un manifiesto
+`mapa.json` con **rutas relativas** a esa carpeta: se copia tal cual a otro PC
+o junto a la aplicación. Plantilla: [`mapa.example.json`](mapa.example.json).
+
+```json
+{
+  "format": "libmapa-package", "version": 2,
+  "package":  { "id": "cuba", "name": "Cuba", "dataVersion": "2026.10",
+                "bounds": { "north": 23.3, "west": -85.0, "south": 19.7, "east": -74.0 },
+                "attribution": "© colaboradores de OpenStreetMap · …" },
+  "start":    { "layer": "osm", "center": [21.5, -79.5], "zoom": 7 },
+  "datasets": [ { "id": "osm", "filePath": "Cuba_OSM_CID3.sqlitedb", … }, … ],
+  "elevation":{ "file": "cuba_dem.sqlitedb" },
+  "overlays": [ { "id": "aguas", "file": "Aguas.geo", "style": { "lineColor": "#1565c0" } } ],
+  "features": { "file": "entidades.db", "seed": "entidades_iniciales.db" }
+}
+```
+
+| Bloque | Para qué |
+|---|---|
+| `package` | Qué es: id, nombre, versión de los datos, zona y **atribución** (`MapWidget::packageInfo()`) |
+| `start` | Capa, centro y zoom de arranque |
+| `datasets` | Las capas base, igual que en `datasets.json` (los campos omitidos toman su valor por defecto) |
+| `elevation` | `"file"` (BD `.sqlitedb`) o `"dir"` (carpeta de `.hgt`) |
+| `overlays` | Capas vectoriales **fijas** `.geo`: se cargan al abrir, bloqueadas, y **no** se guardan con las del usuario |
+| `features` | BD de entidades del usuario. Una ruta relativa va a la carpeta de datos de la aplicación (`AppData/<app>/<package.id>/`), **no** a la del paquete, que puede ser de solo lectura. `seed` se copia ahí la primera vez |
+
+Un fichero que falte (una capa, la elevación) se avisa en el log pero no impide
+abrir el resto. `probe_db --package` genera el manifiesto de partida:
+
+```bash
+probe_db --package --out Recursos/mapa.json --ref-bbox 23.3,-85.0,19.7,-74.0 \
+         --id osm --file Recursos/Cuba_OSM_CID3.sqlitedb --name "Open Street Map" \
+         --id satelital --file Recursos/Cuba_Satelital_CID3.sqlitedb --name "Satelital" \
+         --dem Recursos/cuba_dem.sqlitedb --overlay Recursos/Aguas.geo
 ```
 
 ## Compilar
@@ -84,9 +127,9 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 
 | | |
 |---|---|
-| `probe_db` | Sondea las BD de teselas y genera `datasets.json` |
+| `probe_db` | Sondea las BD de teselas y genera `datasets.json`, o con `--package` el manifiesto `mapa.json` del paquete (rutas relativas) |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
-| `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana |
+| `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
 | `vector_db` | Crea e inspecciona la BD de puntos, rutas y polígonos |
 | `geo_to_tiles` | Rasteriza un fichero vectorial `.geo` a una base de teselas, para usarlo como capa base |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
@@ -127,8 +170,10 @@ Opciones entre `[…]` opcionales; el resto, obligatorias. Los bbox son siempre
 (y el PDF) está la tabla detallada de cada argumento.
 
 ```
-probe_db     --id <id> --file <ruta.sqlitedb> [--id … --file …]
+probe_db     --id <id> --file <ruta.sqlitedb> [--name "…"] [--id … --file …]
              [--ref-bbox latN,lonO,latS,lonE] [--out datasets.json] [--no-test]
+             [--package [--dem <dem.sqlitedb|carpeta>] [--overlay <f.geo>]…
+                        [--features entidades.db]]          (genera mapa.json)
 
 geo_to_tiles --in <f.geo> --out <salida.sqlitedb> --id <id> --name "<nombre>"
              [--minzoom N] [--maxzoom N] [--color #hex] [--width f] [--fill] [--bg #hex]
@@ -136,7 +181,7 @@ geo_to_tiles --in <f.geo> --out <salida.sqlitedb> --id <id> --name "<nombre>"
 vector_db    --out <mapdata.db> [--dump]            (crea con datos de ejemplo)
              --file <mapdata.db> --dump             (solo inspecciona)
 
-render_map   --datasets <datasets.json> --out <mapa.png>
+render_map   (--datasets <datasets.json> | --data <carpeta_paquete>) --out <mapa.png>
              [--layer id] [--center lat,lon] [--zoom N] [--size AnchoxAlto]
              [--wait ms] [--grid] [--features f.geo]
 
@@ -157,24 +202,25 @@ fill_hgt     (--cuba | --bbox latN,lonO,latS,lonE) --out <carpeta>
 
 dem_to_db    <carpeta_hgt> --out <dem.sqlitedb> [--overwrite]
 
-demo         [datasets.json] [--dem <carpeta>] [--dem-db <db>] [--features <db>]
+demo         [carpeta_paquete | mapa.json | datasets.json]
+             [--dem <carpeta>] [--dem-db <db>] [--features <db>]
              (app de ejemplo: capas, dibujo, cobertura, cota, persistencia)
 ```
 
 ## Estructura
 
 ```
-include/libmapa/     API pública: MapWidget, MapTypes, MapConfig
+include/libmapa/     API pública: MapWidget, MapConfig, MapTypes, DataPackageInfo
 src/
   core/              logging
   geo/               proyección Web Mercator, conversión geo <-> tesela
   db/                conexiones SQLite, esquema, repositorio vectorial
   tiles/             lectura, caché, planificación y carga de teselas
   dem/               elevación del terreno: ficheros SRTM .hgt o BD .sqlitedb
-  io/                lectura de ficheros vectoriales .geo
+  io/                ficheros vectoriales .geo y manifiesto del paquete (mapa.json)
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               15 tests (12 sin QCustomPlot)
+tests/               16 tests (13 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
@@ -196,11 +242,13 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 9 | Descarga por polígono, en paralelo y con estimación de tamaño |
 | 10 | Elevación del terreno: ficheros `.hgt` o BD `.sqlitedb` (`fill_hgt` → `dem_to_db`), cota bajo el cursor |
 | 11 | Persistencia automática de entidades (`MapConfig.featuresDbFile`) y `demo` al día |
+| 12 | **Paquete de datos sin conexión**: manifiesto `mapa.json`, `MapConfig.dataDir`, capas fijas, entidades del usuario en `AppData` |
 
-Las entidades se dibujan, se editan, se **deshacen/rehacen** con el ratón y se
-**guardan solas** en su BD. Lo siguiente es conectar los objetivos móviles y las
-rutas con la BD. La hoja de ruta actualizada está en
-[`docs/BITACORA.md`](docs/BITACORA.md) §46.
+El producto final trabaja **solo con datos locales**. Lo siguiente es
+**comprobar** un paquete antes de distribuirlo (que estén todos los ficheros y
+qué zonas y zooms cubren) y **desplegar** la librería en otra aplicación sin
+sorpresas (`find_package`, plugins de Qt). El plan está en
+[`docs/BITACORA.md`](docs/BITACORA.md) §47.
 
 ## Licencia
 

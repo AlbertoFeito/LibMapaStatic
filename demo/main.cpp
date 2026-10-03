@@ -69,21 +69,29 @@ class Ventana : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit Ventana(const QString &datasetsFile, const QString &demDir = QString(),
+    //! \a origen es un datasets.json o, si \a esPaquete, la carpeta de un
+    //! paquete de datos (mapa.json), que ya trae elevacion, capas fijas y
+    //! entidades: entonces basta con esa linea.
+    explicit Ventana(const QString &origen, bool esPaquete,
+                     const QString &demDir = QString(),
                      const QString &demDb = QString(),
                      const QString &featuresDb = QString())
     {
         // --- Asi se crea el mapa. Esto es todo. -------------------------
         MapConfig cfg;
-        cfg.datasetsFile = datasetsFile;
+        if (esPaquete) {
+            cfg.dataDir = origen;           // el resto lo pone el paquete
+        } else {
+            cfg.datasetsFile = origen;
+            cfg.initialCenter = QGeoCoordinate(23.1136, -82.3666);   // La Habana
+            cfg.initialZoom = 11;
+        }
         cfg.elevationDir = demDir;          // carpeta .hgt para la cota (opcional)
         cfg.elevationDbFile = demDb;        // BD de elevacion (prioritaria si viene)
         cfg.featuresDbFile = featuresDb;    // persistencia automatica (opcional)
-        cfg.initialCenter = QGeoCoordinate(23.1136, -82.3666);   // La Habana
-        cfg.initialZoom = 11;
         cfg.cacheMiB = 192;
 
-        m_demActivo = !demDir.isEmpty() || !demDb.isEmpty();
+        m_demActivo = esPaquete || !demDir.isEmpty() || !demDb.isEmpty();
         m_mapa = new MapWidget(cfg, this);
         setCentralWidget(m_mapa);
         actualizarTitulo();
@@ -92,8 +100,9 @@ public:
         if (!m_mapa->isReady()) {
             QMessageBox::critical(this, tr("Error"),
                 tr("No se pudo iniciar el mapa:\n%1\n\n"
-                   "Genera datasets.json con probe_db y pasa su ruta como "
-                   "argumento.").arg(m_mapa->lastError()));
+                   "Pasa como argumento la carpeta de un paquete de datos "
+                   "(con su mapa.json, ver probe_db --package) o un "
+                   "datasets.json.").arg(m_mapa->lastError()));
             return;
         }
 
@@ -945,7 +954,10 @@ private:
     {
         const QString f = m_archivoActual.isEmpty()
             ? tr("(sin guardar)") : QFileInfo(m_archivoActual).fileName();
-        setWindowTitle(tr("libmapa - demostracion  -  %1").arg(f));
+        const DataPackageInfo paquete = m_mapa ? m_mapa->packageInfo() : DataPackageInfo();
+        const QString datos = paquete.isValid()
+            ? tr("  -  datos: %1 %2").arg(paquete.name, paquete.dataVersion) : QString();
+        setWindowTitle(tr("libmapa - demostracion  -  %1%2").arg(f, datos));
     }
 
     // ============================================ datos / simulacion ======
@@ -1144,9 +1156,10 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
 
-    // Primer positional: datasets.json. Opcionales: --dem <carpeta> / --dem-db
-    // <fichero> (elevacion) y --features <fichero> (persistencia automatica de
-    // entidades: lo que dibujes se guarda y recarga solo).
+    // Primer positional: la carpeta de un paquete de datos (o su mapa.json), o un
+    // datasets.json. Opcionales: --dem <carpeta> / --dem-db <fichero>
+    // (elevacion) y --features <fichero> (persistencia automatica de entidades:
+    // lo que dibujes se guarda y recarga solo); con paquete, mandan sobre el suyo.
     QString datasets;
     QString demDir, demDb, featuresDb;
     for (int i = 1; i < argc; ++i) {
@@ -1161,10 +1174,17 @@ int main(int argc, char *argv[])
         else if (datasets.isEmpty() && !a.startsWith(QLatin1String("--")))
             datasets = a;
     }
+    // Sin argumento: un mapa.json en la carpeta actual, si lo hay; si no, el
+    // datasets.json de siempre.
     if (datasets.isEmpty())
-        datasets = QDir::currentPath() + QStringLiteral("/datasets.json");
+        datasets = QFile::exists(QDir::currentPath() + QStringLiteral("/mapa.json"))
+            ? QDir::currentPath()
+            : QDir::currentPath() + QStringLiteral("/datasets.json");
+    const QFileInfo origen(datasets);
+    const bool esPaquete = origen.isDir()
+        || origen.fileName().compare(QLatin1String("mapa.json"), Qt::CaseInsensitive) == 0;
 
-    Ventana v(datasets, demDir, demDb, featuresDb);
+    Ventana v(datasets, esPaquete, demDir, demDb, featuresDb);
     v.show();
     return app.exec();
 }

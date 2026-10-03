@@ -7,14 +7,17 @@
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileService.h"
 #include "db/VectorRepository.h"
+#include "io/DataPackage.h"
 #include "widget/CoverageLayer.h"
 #include "widget/MapView.h"
 
 #include <QFile>
 #include <QLayout>
+#include <QSet>
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <limits>
 
 namespace libmapa {
@@ -91,6 +94,43 @@ public:
     // Mancha de cobertura (diagnostico): zoom objetivo y si esta encendida.
     int coverageZoom = 14;
     bool coverageVisible = false;
+
+    // Paquete de datos (opcional). Sus capas fijas (overlays) se cargan al abrir
+    // pero NO son del usuario: fixedLayers marca sus ids para que el guardado de
+    // entidades las salte (si no, se duplicarian en cada arranque).
+    DataPackageInfo package;
+    QVector<DataPackage::Overlay> overlays;
+    QSet<QString> fixedLayers;
+
+    /*!
+     * \brief Carga las capas fijas del paquete que aun no esten en el modelo.
+     *
+     * Idempotente: se llama al abrir y otra vez tras cada loadFeaturesFrom,
+     * porque setContents reemplaza TODO el modelo y se las llevaria por delante.
+     * Quedan bloqueadas (capa no editable, entidad no seleccionable).
+     */
+    void loadOverlays()
+    {
+        if (!view)
+            return;
+        OverlayModel *modelo = view->overlayModel();
+        for (const DataPackage::Overlay &ov : overlays) {
+            if (modelo->hasLayer(ov.id))
+                continue;
+            QString motivo;
+            const qint64 fid = q->loadGeoAsLayer(ov.file, ov.id, ov.name, ov.style, &motivo);
+            if (fid < 0) {
+                qCWarning(lcMapaRender) << "Capa fija" << ov.id << "no cargada:" << motivo;
+                continue;
+            }
+            if (auto f = modelo->feature(fid)) {
+                f->selectable = false;
+                modelo->updateFeature(*f);
+            }
+            modelo->setLayerEditable(ov.id, false);
+            modelo->setLayerZOrder(ov.id, ov.zOrder);
+        }
+    }
 };
 
 // Construye el widget completo desde la configuracion: carga los datasets del
@@ -103,18 +143,70 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     : QWidget(parent)
     , d(std::make_unique<Impl>(this))
 {
-    d->config = config;
-
     d->layout = new QVBoxLayout(this);
     d->layout->setContentsMargins(0, 0, 0, 0);
     d->layout->setSpacing(0);
 
+    // La configuracion EFECTIVA: lo que puso la aplicacion, completado con el
+    // paquete de datos (si hay) y, al final, con los valores de siempre. Lo
+    // rellenado a mano gana siempre sobre el paquete.
+    MapConfig cfg = config;
     QString error;
-    const auto datasets = TileService::loadDatasets(config.datasetsFile, &error);
+    QVector<TileDataset> datasets;
+
+    if (!cfg.dataDir.isEmpty()) {
+        const auto paquete = DataPackage::load(cfg.dataDir, &error);
+        if (!paquete) {
+            d->error = error;
+            qCCritical(lcMapaRender) << d->error;
+            emit errorOccurred(d->error);
+            return;
+        }
+        for (const QString &aviso : paquete->warnings)
+            qCWarning(lcMapaRender) << aviso;
+
+        d->package = paquete->info;
+        d->overlays = paquete->overlays;
+        for (const DataPackage::Overlay &ov : paquete->overlays)
+            d->fixedLayers.insert(ov.id);
+
+        if (cfg.datasetsFile.isEmpty())
+            datasets = paquete->datasets;
+        if (cfg.elevationDbFile.isEmpty() && cfg.elevationDir.isEmpty()) {
+            cfg.elevationDbFile = paquete->elevationFile;
+            cfg.elevationDir = paquete->elevationDir;
+        }
+        if (cfg.featuresDbFile.isEmpty()) {
+            QString motivo;
+            cfg.featuresDbFile = paquete->prepareFeaturesFile(&motivo);
+            if (!motivo.isEmpty())
+                qCWarning(lcMapaRender) << motivo;
+        }
+        if (cfg.initialLayerId.isEmpty())
+            cfg.initialLayerId = paquete->startLayer;
+        if (!cfg.initialCenter.isValid())
+            cfg.initialCenter = paquete->startCenter;
+        if (cfg.initialZoom < 0)
+            cfg.initialZoom = paquete->startZoom;
+    }
+
+    if (!cfg.initialCenter.isValid())
+        cfg.initialCenter = QGeoCoordinate(23.1136, -82.3666);   // La Habana
+    if (cfg.initialZoom < 0)
+        cfg.initialZoom = 10;
+    d->config = cfg;
+
+    if (datasets.isEmpty()) {
+        if (cfg.datasetsFile.isEmpty() && cfg.dataDir.isEmpty())
+            error = tr("Falta la configuracion: indica MapConfig::dataDir "
+                       "(o MapConfig::datasetsFile)");
+        else if (!cfg.datasetsFile.isEmpty())
+            datasets = TileService::loadDatasets(cfg.datasetsFile, &error);
+    }
 
     if (datasets.isEmpty()) {
         d->error = error.isEmpty()
-                       ? tr("No se pudo cargar %1").arg(config.datasetsFile)
+                       ? tr("No se pudo cargar %1").arg(cfg.datasetsFile)
                        : error;
         qCCritical(lcMapaRender) << d->error;
         emit errorOccurred(d->error);
@@ -124,28 +216,28 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(&d->service, &TileService::errorOccurred,
             this, &MapWidget::errorOccurred);
 
-    if (!d->service.start(datasets, config.cacheMiB)) {
+    if (!d->service.start(datasets, cfg.cacheMiB)) {
         d->error = tr("No hay ninguna base de datos de mapas utilizable.");
         return;
     }
-    d->service.setDebounceMs(config.debounceMs);
+    d->service.setDebounceMs(cfg.debounceMs);
 
     // Origen de elevacion: la base de datos tiene prioridad sobre la carpeta.
-    if (!config.elevationDbFile.isEmpty())
-        d->elevation = std::make_unique<SqliteElevation>(config.elevationDbFile);
-    else if (!config.elevationDir.isEmpty()) {
+    if (!cfg.elevationDbFile.isEmpty())
+        d->elevation = std::make_unique<SqliteElevation>(cfg.elevationDbFile);
+    else if (!cfg.elevationDir.isEmpty()) {
         auto hgt = std::make_unique<HgtElevation>();
-        hgt->setDirectory(config.elevationDir);
+        hgt->setDirectory(cfg.elevationDir);
         d->elevation = std::move(hgt);
     }
 
-    if (!config.initialLayerId.isEmpty())
-        d->service.setActiveDataset(config.initialLayerId);
+    if (!cfg.initialLayerId.isEmpty())
+        d->service.setActiveDataset(cfg.initialLayerId);
 
     d->view = new MapView(&d->service, this);
     d->layout->addWidget(d->view);
 
-    d->view->tileLayer()->setNoDataColor(config.noDataColor);
+    d->view->tileLayer()->setNoDataColor(cfg.noDataColor);
 
     connect(d->view, &MapView::zoomChanged, this, &MapWidget::zoomChanged);
     connect(d->view, &MapView::centerChanged, this, &MapWidget::centerChanged);
@@ -195,11 +287,19 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             [programarGuardado](qint64) { programarGuardado(); });
     connect(modelo, &OverlayModel::layersChanged, this,
             [programarGuardado] { programarGuardado(); });
-    if (!config.featuresDbFile.isEmpty())
-        setFeaturesDbFile(config.featuresDbFile);
+    if (!cfg.featuresDbFile.isEmpty())
+        setFeaturesDbFile(cfg.featuresDbFile);
 
-    d->view->setZoom(config.initialZoom);
-    d->view->setCenter(config.initialCenter);
+    // Capas fijas del paquete, DESPUES de las entidades del usuario (cargarlas
+    // reemplaza el modelo). Sin guardado ni historial: no son algo que el
+    // usuario haya hecho y no debe poder "deshacerlas".
+    d->suppressAutosave = true;
+    d->loadOverlays();
+    d->suppressAutosave = false;
+    modelo->clearUndoHistory();
+
+    d->view->setZoom(cfg.initialZoom);
+    d->view->setCenter(cfg.initialCenter);
     d->ready = true;
 }
 
@@ -207,6 +307,9 @@ MapWidget::~MapWidget() = default;
 
 // isReady: ¿el widget se inicializo con exito? lastError: el motivo si no.
 bool MapWidget::isReady() const { return d->ready; }
+
+// Informacion del paquete de datos abierto (invalida si no se uso dataDir).
+DataPackageInfo MapWidget::packageInfo() const { return d->package; }
 QString MapWidget::lastError() const { return d->error; }
 
 // Lista las capas base (datasets de teselas) disponibles con su nombre y rango de
@@ -499,9 +602,10 @@ void MapWidget::clearUndoHistory()
         d->view->overlayModel()->clearUndoHistory();
 }
 
-// Guarda TODAS las entidades y capas en una BD vectorial (vuelca el estado
-// completo: borra y reescribe, en vez de llevar la cuenta de altas/bajas). false
-// si no se pudo abrir o escribir; los errores se reemiten por errorOccurred.
+// Guarda las entidades y capas DEL USUARIO en una BD vectorial (vuelca el estado
+// completo: borra y reescribe, en vez de llevar la cuenta de altas/bajas). Las
+// capas fijas del paquete se saltan: vienen con los datos, no son del usuario.
+// false si no se pudo abrir o escribir; los errores se reemiten por errorOccurred.
 bool MapWidget::saveFeaturesTo(const QString &databasePath)
 {
     if (!d->view)
@@ -525,13 +629,25 @@ bool MapWidget::saveFeaturesTo(const QString &databasePath)
         return false;
 
     for (const LayerInfo &c : d->view->overlayModel()->layers())
-        repo.saveLayer(c);
+        if (!d->fixedLayers.contains(c.id))
+            repo.saveLayer(c);
 
-    return repo.saveFeatures(d->view->overlayModel()->features());
+    QVector<MapFeature> propias = d->view->overlayModel()->features();
+    if (!d->fixedLayers.isEmpty()) {
+        propias.erase(std::remove_if(propias.begin(), propias.end(),
+                                     [this](const MapFeature &f) {
+                                         return d->fixedLayers.contains(f.layerId);
+                                     }),
+                      propias.end());
+    }
+    return repo.saveFeatures(propias);
 }
 
 // Carga entidades y capas desde una BD vectorial, REEMPLAZANDO el contenido
-// actual (setContents). false si no se pudo abrir; errores por errorOccurred.
+// actual (setContents), y vuelve a poner las capas fijas del paquete, que
+// setContents se habria llevado. Todo en UN paso de deshacer: deshacer la carga
+// devuelve el mapa anterior entero, capas fijas incluidas. false si no se pudo
+// abrir; errores por errorOccurred.
 bool MapWidget::loadFeaturesFrom(const QString &databasePath)
 {
     if (!d->view)
@@ -548,7 +664,11 @@ bool MapWidget::loadFeaturesFrom(const QString &databasePath)
         return false;
     }
 
-    d->view->overlayModel()->setContents(repo.loadFeatures(), repo.loadLayers());
+    OverlayModel *modelo = d->view->overlayModel();
+    modelo->beginUndoGroup();
+    modelo->setContents(repo.loadFeatures(), repo.loadLayers());
+    d->loadOverlays();
+    modelo->endUndoGroup();
     return true;
 }
 
