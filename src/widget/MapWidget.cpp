@@ -10,7 +10,9 @@
 #include "widget/CoverageLayer.h"
 #include "widget/MapView.h"
 
+#include <QFile>
 #include <QLayout>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <limits>
@@ -78,6 +80,13 @@ public:
     // Elevacion del terreno (opcional): carpeta `.hgt` o base de datos. Puntero a
     // la interfaz para poder cambiar de origen en caliente. Nulo = sin elevacion.
     std::unique_ptr<IElevationSource> elevation;
+
+    // Persistencia automatica de entidades (opcional). Vacio = apagada. El timer
+    // agrupa las rafagas de cambios; suppressAutosave evita guardar durante la
+    // carga inicial (que tambien emite senales de modelo).
+    QString featuresDbFile;
+    QTimer *autosave = nullptr;
+    bool suppressAutosave = false;
 
     // Mancha de cobertura (diagnostico): zoom objetivo y si esta encendida.
     int coverageZoom = 14;
@@ -166,6 +175,28 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
     connect(d->view, &MapView::drawingCancelled, this, &MapWidget::drawingCancelled);
+
+    // Persistencia automatica: el timer de antirebote agrupa las rafagas de
+    // cambios (arrastrar un vertice emite muchos featureUpdated) en un solo
+    // guardado. Solo actua si hay featuresDbFile y no estamos cargando.
+    d->autosave = new QTimer(this);
+    d->autosave->setSingleShot(true);
+    d->autosave->setInterval(500);
+    connect(d->autosave, &QTimer::timeout, this, &MapWidget::saveFeaturesNow);
+    auto programarGuardado = [this] {
+        if (!d->featuresDbFile.isEmpty() && !d->suppressAutosave)
+            d->autosave->start();
+    };
+    connect(modelo, &OverlayModel::featureAdded, this,
+            [programarGuardado](qint64) { programarGuardado(); });
+    connect(modelo, &OverlayModel::featureUpdated, this,
+            [programarGuardado](qint64) { programarGuardado(); });
+    connect(modelo, &OverlayModel::featureRemoved, this,
+            [programarGuardado](qint64) { programarGuardado(); });
+    connect(modelo, &OverlayModel::layersChanged, this,
+            [programarGuardado] { programarGuardado(); });
+    if (!config.featuresDbFile.isEmpty())
+        setFeaturesDbFile(config.featuresDbFile);
 
     d->view->setZoom(config.initialZoom);
     d->view->setCenter(config.initialCenter);
@@ -519,6 +550,29 @@ bool MapWidget::loadFeaturesFrom(const QString &databasePath)
 
     d->view->overlayModel()->setContents(repo.loadFeatures(), repo.loadLayers());
     return true;
+}
+
+// Enciende (o apaga, con cadena vacia) el guardado automatico. Si el fichero ya
+// existe se carga ahora; se marca suppressAutosave durante la carga para que las
+// senales de setContents (layersChanged) no programen un guardado redundante.
+void MapWidget::setFeaturesDbFile(const QString &databasePath)
+{
+    d->featuresDbFile = databasePath;
+    if (databasePath.isEmpty())
+        return;
+    if (QFile::exists(databasePath)) {
+        d->suppressAutosave = true;
+        loadFeaturesFrom(databasePath);
+        d->suppressAutosave = false;
+    }
+}
+
+// Fuerza un volcado inmediato al fichero de persistencia, si hay uno. Lo llama el
+// timer de antirebote y puede llamarlo la app al cerrar.
+void MapWidget::saveFeaturesNow()
+{
+    if (!d->featuresDbFile.isEmpty())
+        saveFeaturesTo(d->featuresDbFile);
 }
 
 // ------------------------------------------------------------ ficheros .geo --

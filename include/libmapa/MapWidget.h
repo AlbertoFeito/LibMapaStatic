@@ -37,6 +37,11 @@ struct MapConfig
     //! TIENE PRIORIDAD sobre elevationDir. Vacia = no se usa. Opcional.
     QString elevationDbFile;
 
+    //! Base de datos de ENTIDADES (puntos/lineas/poligonos dibujados). Si viene,
+    //! el widget la carga al abrir y guarda SOLO lo que se dibuje/edite/borre
+    //! (con antirebote). Vacia = sin persistencia automatica. Opcional.
+    QString featuresDbFile;
+
     QString initialLayerId;                    //!< Vacio = el primero del JSON.
     QGeoCoordinate initialCenter{23.1136, -82.3666};
     int initialZoom = 10;
@@ -169,14 +174,31 @@ public:
 
     // --- Guardar y cargar ------------------------------------------------
     /*!
-     * \brief Vuelca todas las entidades y capas a un fichero SQLite.
+     * \brief Vuelca todas las entidades y capas a un fichero SQLite (manual).
      *
-     * El widget NO guarda solo. Los objetivos en movimiento llegan a decenas
-     * por segundo y una escritura en disco por cada actualizacion de posicion
-     * no tiene sentido: cuando guardar lo decide la aplicacion.
+     * Volcado COMPLETO (borra y reescribe). Es la via manual: la app decide
+     * cuando. Para guardado AUTOMATICO ver \ref setFeaturesDbFile.
      */
     bool saveFeaturesTo(const QString &databasePath);
     bool loadFeaturesFrom(const QString &databasePath);
+
+    // --- Persistencia automatica de entidades ----------------------------
+    /*!
+     * \brief Enciende el guardado AUTOMATICO de entidades en \a databasePath.
+     *
+     * Si el fichero existe, lo carga ahora (reemplaza el contenido). A partir de
+     * aqui, cada alta/edicion/borrado de entidad o capa se guarda SOLO, con un
+     * pequeno antirebote que agrupa las rafagas (p.ej. arrastrar un vertice).
+     * Cadena vacia = apaga la persistencia automatica (no borra el fichero).
+     * Se puede fijar tambien al arrancar con \c MapConfig::featuresDbFile.
+     *
+     * NOTA: los OBJETIVOS en movimiento (TargetModel) no se persisten; esto es
+     * solo para entidades dibujadas, que cambian a mano y en poco volumen.
+     */
+    void setFeaturesDbFile(const QString &databasePath);
+    //! Fuerza un guardado inmediato al fichero de persistencia (si hay). Util al
+    //! cerrar la app para no perder lo que estuviera en el antirebote.
+    void saveFeaturesNow();
 
     // --- Ficheros .geo ---------------------------------------------------
     /*!

@@ -227,7 +227,11 @@ que usa <code>VectorRepository</code>.</p>
 <h3><span class="cls">VectorRepository</span> <span class="tag">db/VectorRepository.h · QObject</span></h3>
 <p>Persiste entidades vectoriales y capas en SQLite: guardar/cargar todo el mapa de
 entidades. Emite <code>errorOccurred</code>. Lo usa <code>MapWidget</code> en
-<code>saveFeaturesTo()/loadFeaturesFrom()</code>.</p>
+<code>saveFeaturesTo()/loadFeaturesFrom()</code>. Con <code>MapConfig.featuresDbFile</code>
+(o <code>setFeaturesDbFile()</code>) el widget hace <b>persistencia automática</b>:
+carga al abrir y guarda solo lo dibujado/editado/borrado con un <b>antirebote</b>
+(~500 ms) que agrupa las ráfagas — volcado completo, reutilizando
+<code>saveFeaturesTo</code>. Los objetivos móviles no se persisten.</p>
 
 <!-- ===================== 6. TILES ===================== -->
 <h2 class="sec">6 · Módulo <span class="mono">tiles</span> — motor de teselas</h2>
@@ -315,7 +319,7 @@ la API que usa la aplicación:</p>
 <tr><td>Capas de entidades</td><td class="mono">addFeatureLayer · setFeatureLayerVisible · setFeatureLayerZOrder</td></tr>
 <tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer</td></tr>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
-<tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom</td></tr>
+<tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetTrailLength</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>

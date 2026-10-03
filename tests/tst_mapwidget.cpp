@@ -1,7 +1,9 @@
 #include "SyntheticTileDb.h"
 
 #include "libmapa/MapWidget.h"
+#include "libmapa/MapFeature.h"
 #include "db/SqliteConnectionPool.h"
+#include "db/VectorRepository.h"
 #include "widget/MapView.h"
 #include "geo/TileMatrix.h"
 
@@ -124,6 +126,14 @@ private slots:
 
     //! La cabecera publica no debe arrastrar QCustomPlot.
     void publicHeaderHasNoQCustomPlot();
+
+    // --- Persistencia automatica de entidades ----------------------------
+    //! Con featuresDbFile, lo que se anade se guarda (saveFeaturesNow).
+    void autoPersistsFeatures();
+    //! Al abrir con featuresDbFile existente, se recargan las entidades.
+    void reloadsFeaturesOnOpen();
+    //! El antirebote dispara el guardado solo tras un cambio (sin saveFeaturesNow).
+    void debouncedAutosaveTriggers();
 
 private:
     QString m_jsonPath;
@@ -1701,6 +1711,71 @@ void TstMapWidget::drawsManyMovingTargets()
     QCOMPARE(w.targetCount(), N - 1);
     w.clearTargets();
     QCOMPARE(w.targetCount(), 0);
+}
+
+// Crea una entidad de punto minima (como el helper de tst_overlaymodel).
+static MapFeature puntoDe(const QString &nombre, double lat, double lon)
+{
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.name = nombre;
+    f.geometry = {QGeoCoordinate(lat, lon)};
+    return f;
+}
+
+// Con featuresDbFile activo, anadir una entidad y forzar el guardado deja la
+// entidad en la BD (comprobado leyendola con un VectorRepository aparte).
+void TstMapWidget::autoPersistsFeatures()
+{
+    const QString ruta = m_dir.filePath(QStringLiteral("feats_auto.sqlitedb"));
+    QFile::remove(ruta);
+    {
+        MapWidget w(baseConfig(m_jsonPath));
+        QVERIFY(w.isReady());
+        w.setFeaturesDbFile(ruta);
+        QVERIFY(w.addFeature(puntoDe(QStringLiteral("Morro"), 23.15, -82.36)) > 0);
+        w.saveFeaturesNow();
+    }
+    VectorRepository repo;
+    QVERIFY(repo.open(ruta));
+    const QVector<MapFeature> leidas = repo.loadFeatures();
+    QCOMPARE(leidas.size(), 1);
+    QCOMPARE(leidas.first().name, QStringLiteral("Morro"));
+}
+
+// Un MapWidget creado con un featuresDbFile que YA tiene entidades las carga
+// solo al abrir.
+void TstMapWidget::reloadsFeaturesOnOpen()
+{
+    const QString ruta = m_dir.filePath(QStringLiteral("feats_reload.sqlitedb"));
+    QFile::remove(ruta);
+    {
+        MapWidget w(baseConfig(m_jsonPath));
+        w.setFeaturesDbFile(ruta);
+        w.addFeature(puntoDe(QStringLiteral("A"), 23.1, -82.3));
+        w.addFeature(puntoDe(QStringLiteral("B"), 23.2, -82.4));
+        w.saveFeaturesNow();
+    }
+    MapConfig cfg = baseConfig(m_jsonPath);
+    cfg.featuresDbFile = ruta;
+    MapWidget w2(cfg);
+    QVERIFY(w2.isReady());
+    QCOMPARE(w2.featureCount(), qint64(2));
+}
+
+// Sin llamar a saveFeaturesNow: solo anadir y dejar correr el bucle de eventos;
+// el antirebote (~500 ms) debe disparar el guardado por si mismo.
+void TstMapWidget::debouncedAutosaveTriggers()
+{
+    const QString ruta = m_dir.filePath(QStringLiteral("feats_debounce.sqlitedb"));
+    QFile::remove(ruta);
+    MapWidget w(baseConfig(m_jsonPath));
+    w.setFeaturesDbFile(ruta);
+    w.addFeature(puntoDe(QStringLiteral("Tardia"), 23.0, -82.0));
+    QTest::qWait(900);   // deja correr el bucle de eventos > antirebote (500 ms)
+    VectorRepository repo;
+    QVERIFY(repo.open(ruta));
+    QCOMPARE(repo.loadFeatures().size(), 1);
 }
 
 QTEST_MAIN(TstMapWidget)

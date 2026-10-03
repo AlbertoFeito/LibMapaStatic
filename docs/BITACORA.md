@@ -2261,3 +2261,47 @@ Los argumentos se tomaron directamente del parseo real de cada `main.cpp` (no
 inventados). Cambio solo de documentación: no toca el build ni los tests.
 
 **Estado: 15 tests verdes (sin cambios de código); documentación de comandos al día.**
+
+## 44. Persistencia automática de entidades
+
+Hasta ahora las entidades (puntos/líneas/polígonos) se **dibujaban y editaban**
+pero **no se guardaban solas**: solo había un guardado/carga manual
+(`saveFeaturesTo`/`loadFeaturesFrom`). Se cierra el ciclo *dibujar → **guardar
+solo** → recargar al abrir*, como capacidad de la **librería** (cualquier app la
+hereda con solo configurarla).
+
+Diseño — **autosave por volcado completo con antirebote** (reutiliza lo ya
+probado, sin refactors arriesgados):
+
+- `MapConfig.featuresDbFile`: si viene, el `MapWidget` **carga** esa BD de
+  entidades al abrir y **guarda solo** lo que se dibuje/edite/borre. Vacío =
+  apagado. También se puede encender en caliente con
+  `MapWidget::setFeaturesDbFile(ruta)`; `saveFeaturesNow()` fuerza un guardado
+  (p.ej. al cerrar la app).
+- El guardado escucha las señales del modelo (`featureAdded`/`featureUpdated`/
+  `featureRemoved`/`layersChanged` — cubren el 100 % de cambios, tanto por ratón
+  como por API) y **rearranca un `QTimer` de antirebote (~500 ms)**: una ráfaga
+  (arrastrar un vértice emite muchos `featureUpdated`) se agrupa en **un solo**
+  volcado (`saveFeaturesTo(featuresDbFile)`: borra y reescribe).
+- **Sin bucles**: `loadFeaturesFrom` usa `setContents`, que **no** reemite
+  `featureAdded` por entidad; además la carga inicial se hace con un guard
+  (`suppressAutosave`) para que su `layersChanged` no programe un guardado.
+
+Por qué volcado completo y no incremental: `VectorRepository::writeFeature`
+**siempre hace INSERT** (no UPSERT) e ignora `f.id`, y el id del `OverlayModel`
+(contador en memoria) ≠ id de la tabla `entidad`. Un guardado incremental por
+`featureUpdated` **duplicaría filas**. El volcado completo con antirebote es
+correcto y simple para un mapa de trabajo (cientos de entidades). El UPSERT real
+por id queda como mejora futura si algún día hay miles.
+
+Los **objetivos móviles** (TargetModel) NO se persisten: llegan a decenas por
+segundo y no tiene sentido escribirlos en disco.
+
+Test (nº 15, `tst_mapwidget`, 3 casos nuevos): con un `featuresDbFile` en un
+temporal, (1) añadir + `saveFeaturesNow()` deja la entidad en la BD (leída con un
+`VectorRepository` aparte); (2) un segundo `MapWidget` con ese fichero
+**autocarga** (`featureCount()==2`); (3) solo añadir y dejar correr el bucle de
+eventos — el **antirebote** dispara el guardado solo (`QTest::qWait(900)`).
+
+**Estado: 15 tests verdes (tst_mapwidget con 3 casos nuevos); persistencia
+automática verificada, sin avisos, Qt 6.4.**
