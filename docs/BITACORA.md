@@ -2305,3 +2305,29 @@ eventos — el **antirebote** dispara el guardado solo (`QTest::qWait(900)`).
 
 **Estado: 15 tests verdes (tst_mapwidget con 3 casos nuevos); persistencia
 automática verificada, sin avisos, Qt 6.4.**
+
+## 45. `demo`: cobertura por zoom, cota del terreno y persistencia
+
+La app `demo` es la vitrina de la librería, pero se había quedado atrás: no
+mostraba ni la **mancha de cobertura** ni la **cota del terreno** (vivían solo en
+`fill_map`), ni usaba la **persistencia automática** recién añadida. Se llevan a
+`demo` reutilizando exactamente la misma API pública (sin tocar el build: `demo`
+ya enlaza `libmapa_widget`, que trae `CoverageLayer` y el DEM; no necesita
+`Qt::Network`, que es solo para descargar).
+
+- **Cobertura:** acción «Cobertura» (checkable) + selector de zoom en la barra de
+  mapa → `setCoverageZoom` + `setCoverageVisible` (igual que en `fill_map`). Pinta
+  qué zonas del zoom elegido ya están en la BD, visible aunque mires a otro zoom.
+- **Cota:** botón **DEM…** con menú (carpeta `.hgt` / BD `.sqlitedb`) → `setElevationDir`/
+  `setElevationDb`; la cota bajo el cursor sale en la barra de estado (junto a las
+  coordenadas que ya había), "—" si no hay dato. También por CLI: `--dem`/`--dem-db`.
+- **Persistencia automática:** opción `--features <db>` que rellena
+  `MapConfig.featuresDbFile` → lo que dibujes se **guarda solo** y se recarga al
+  abrir (los botones manuales Guardar/Abrir siguen para exportar a otro fichero).
+
+Así `demo` demuestra de un vistazo lo último hecho: ver cobertura, consultar
+altura y persistir entidades, sin la parte de descarga (esa sigue en `fill_map`).
+Cambio de aplicación de ejemplo (no de librería): los 15 tests no se tocan.
+
+**Estado: 15 tests verdes; `demo` enriquecido (cobertura + cota + persistencia),
+build sin avisos, Qt 6.4.**

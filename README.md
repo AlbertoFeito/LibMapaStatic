@@ -92,7 +92,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
 | `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura |
-| `demo` | Aplicación de ejemplo con selector de capa y herramientas |
+| `demo` | Aplicación de ejemplo: capas, dibujo/edición, cobertura por zoom, cota del terreno y persistencia automática |
 
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
 tesela propia, rojo si viene de un nivel superior escalado.
@@ -156,7 +156,8 @@ fill_hgt     (--cuba | --bbox latN,lonO,latS,lonE) --out <carpeta>
 
 dem_to_db    <carpeta_hgt> --out <dem.sqlitedb> [--overwrite]
 
-demo         [datasets.json]                        (app de ejemplo con mapa)
+demo         [datasets.json] [--dem <carpeta>] [--dem-db <db>] [--features <db>]
+             (app de ejemplo: capas, dibujo, cobertura, cota, persistencia)
 ```
 
 ## Estructura
