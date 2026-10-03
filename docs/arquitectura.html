@@ -457,7 +457,7 @@ exactamente donde el mapa la espera.</div>
 <tr><td class="mono">bench_tiles</td><td>consola</td><td>Mide el rendimiento de lectura/caché de teselas.</td></tr>
 <tr><td class="mono">fill_tiles</td><td>consola</td><td>Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave.</td></tr>
 <tr><td class="mono">fill_map</td><td>ventana + mapa</td><td>Lo mismo pero visual: marca el área en el mapa, rango de zoom, barra de progreso.</td></tr>
-<tr><td class="mono">fill_hgt</td><td>consola</td><td>Descarga <code>.hgt</code> de 30 m de AWS Skadi (sin clave) para una zona (<code>--bbox</code>/<code>--cuba</code>); descomprime gzip con zlib; reanudable. Alimenta a <code>dem_to_db</code>.</td></tr>
+<tr><td class="mono">fill_hgt</td><td>consola</td><td>Descarga <code>.hgt</code> de 30 m de AWS Skadi (sin clave) para una zona (<code>--bbox</code>/<code>--cuba</code>); descomprime gzip con <b>miniz</b> vendoreado (sin zlib externa); reanudable. Alimenta a <code>dem_to_db</code>.</td></tr>
 <tr><td class="mono">dem_to_db</td><td>consola</td><td>Construye la base de datos de elevación (<code>.sqlitedb</code>) desde una carpeta de <code>.hgt</code> (blobs <code>qCompress</code>, ~30 % del tamaño). La lee <code>SqliteElevation</code>.</td></tr>
 </table>
 <p><b>Pipeline de elevación empaquetable:</b> <code>fill_hgt --cuba</code> (baja 30 m sin clave) → <code>dem_to_db</code> (BD comprimida) → <code>fill_map --dem-db</code> o <code>MapWidget::elevationAt()</code> en tu app. El generador acepta también <code>.hgt</code> de 90 m ya existentes.</p>

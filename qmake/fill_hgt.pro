@@ -20,11 +20,11 @@ TEMPLATE = app
 
 ROOT = $$PWD/..
 
-SOURCES += \
-    $$ROOT/tools/fill_hgt/main.cpp
+# miniz (dominio publico) descomprime el gzip; nada de zlib externa.
+INCLUDEPATH += $$ROOT/third_party/miniz
 
-# zlib para descomprimir los .hgt.gz (gzip). En MinGW suele venir con Qt;
-# si no, ajusta el nombre/ruta de la libreria z.
-LIBS += -lz
+SOURCES += \
+    $$ROOT/tools/fill_hgt/main.cpp \
+    $$ROOT/third_party/miniz/miniz.c
 
 DESTDIR = $$ROOT/bin

@@ -45,7 +45,7 @@ inline double azimuthDegrees(const QGeoCoordinate &a, const QGeoCoordinate &b)
 inline bool pointInPolygon(double lon, double lat,
                            const QVector<QGeoCoordinate> &poly)
 {
-    const int n = poly.size();
+    const int n = int(poly.size());
     if (n < 3)
         return true;
     bool dentro = false;

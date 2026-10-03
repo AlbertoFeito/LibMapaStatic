@@ -2228,9 +2228,18 @@ reales de 30 m (0 fallidos), la segunda pasada no baja nada (reanudable),
 **Estado: 15 tests verdes; pipeline DEM-en-BD cerrado (descarga 30 m → BD
 comprimida → consulta), verificado contra datos reales, Qt 6.4.**
 
-> **Corrección (zlib opcional):** `find_package(ZLIB REQUIRED)` abortaba TODA la
-> configuración de CMake donde no hubiera zlib de desarrollo (p.ej. Qt MinGW en
-> Windows). Se cambia a `find_package(ZLIB QUIET)` + `if(ZLIB_FOUND)`: si falta,
-> se omite **solo** `fill_hgt` y el resto compila. Para bajar los `.hgt` sin zlib:
-> el script `descargar_hgt.ps1`, o construir la BD desde tus propios `.hgt` con
-> `dem_to_db`. (El núcleo y `dem_to_db` nunca necesitaron zlib.)
+> **Corrección (zlib → miniz, `fill_hgt` autónomo):** la primera versión usaba
+> `find_package(ZLIB REQUIRED)`, que **abortaba toda** la configuración de CMake
+> donde no hubiera zlib de desarrollo (p.ej. **Qt MinGW en Windows**:
+> *"Could NOT find ZLIB"*). La solución definitiva **elimina la dependencia de
+> zlib**: se vendoriza **miniz** (descompresor DEFLATE en un solo fichero,
+> **dominio público**, en `third_party/miniz/`, commiteado —a diferencia de
+> QCustomPlot—). `fill_hgt` descomprime el gzip parseando a mano la cabecera
+> (RFC 1952) y usando `tinfl` de miniz, así que **compila en cualquier sitio sin
+> instalar nada**. Detalles: se habilita el lenguaje **C** en `project()` (miniz
+> es C; su `extern "C"` enlaza con el `main.cpp` en C++), se le aplica `-w` (es de
+> terceros) y los tres avisos solo-C++ (`-Woverloaded-virtual`,
+> `-Wnon-virtual-dtor`, `-Wold-style-cast`) se limitan a CXX con generator
+> expressions. Verificado: la salida de miniz es **byte a byte idéntica** a la de
+> zlib (mismo md5 del `.hgt`). (De paso, un `-Wconversion` latente en
+> `GeoMath::pointInPolygon` —`int(poly.size())`— que solo salía en build limpio.)

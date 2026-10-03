@@ -41,6 +41,13 @@ reglas que ya venimos aplicando; respétalas siempre.
 - Sin QCustomPlot, el núcleo (`libmapa_core`) compila y pasa sus tests; se queda
   fuera el widget, `fill_map`, `demo` y `render_map`.
 
+## miniz (descompresor gzip de `fill_hgt`)
+- `third_party/miniz/miniz.{c,h}` es **dominio público** y **SÍ se commitea**
+  (al revés que QCustomPlot). Lo usa solo `fill_hgt` para descomprimir `.hgt.gz`
+  sin depender de zlib externa → compila en cualquier sitio (incl. Qt MinGW).
+- Por eso `project()` habilita **C** además de CXX; a `miniz.c` se le pone `-w`
+  (es de terceros) y los avisos solo-C++ se limitan a CXX con generator expressions.
+
 ## Arquitectura (respétala)
 - **Fachada:** `MapWidget` (API pública en `include/libmapa/`) oculta QCustomPlot.
   Una capa de dibujo nueva es un `QCPLayerable` que vive en `src/widget/` y se

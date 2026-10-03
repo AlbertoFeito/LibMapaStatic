@@ -24,11 +24,10 @@
 #include <QTimer>
 #include <QUrl>
 
-#include <zlib.h>
+#include "miniz.h"
 
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 
 namespace {
 
@@ -44,34 +43,40 @@ QString tileName(int latFloor, int lonFloor)
         .arg(qAbs(lonFloor), 3, 10, QLatin1Char('0'));
 }
 
-// Descomprime en memoria un buffer gzip (como los `.hgt.gz` de Skadi) usando
-// zlib con windowBits 15+16 (modo gzip). Vacio si falla.
+// Descomprime en memoria un buffer gzip (como los `.hgt.gz` de Skadi). Como miniz
+// no entiende el envoltorio gzip, se parsea a mano la cabecera (RFC 1952) para
+// quedarnos con el DEFLATE crudo, y se infla con tinfl de miniz. Vacio si falla.
+// Asi no hace falta zlib: la herramienta es autonoma en cualquier plataforma.
 QByteArray gunzip(const QByteArray &in)
 {
-    if (in.isEmpty())
+    const qsizetype n = in.size();
+    if (n < 18)   // 10 de cabecera minima + algo + 8 de cola (CRC32 + ISIZE)
         return {};
-    z_stream zs;
-    std::memset(&zs, 0, sizeof(zs));
-    if (inflateInit2(&zs, 15 + 16) != Z_OK)
+    const uchar *p = reinterpret_cast<const uchar *>(in.constData());
+    if (p[0] != 0x1f || p[1] != 0x8b || p[2] != 0x08)   // magia gzip + DEFLATE
         return {};
-    zs.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(in.constData()));
-    zs.avail_in = uInt(in.size());
+    const uchar flg = p[3];
+    qsizetype pos = 10;                                  // cabecera fija
+    if (flg & 0x04) {                                    // FEXTRA
+        if (pos + 2 > n) return {};
+        const int xlen = int(p[pos]) | (int(p[pos + 1]) << 8);
+        pos += 2 + xlen;
+    }
+    if (flg & 0x08) { while (pos < n && p[pos] != 0) ++pos; ++pos; }  // FNAME
+    if (flg & 0x10) { while (pos < n && p[pos] != 0) ++pos; ++pos; }  // FCOMMENT
+    if (flg & 0x02) pos += 2;                            // FHCRC
+    if (pos < 0 || pos >= n - 8)
+        return {};
 
-    QByteArray out;
-    char buf[32768];
-    int ret = Z_OK;
-    do {
-        zs.next_out = reinterpret_cast<Bytef *>(buf);
-        zs.avail_out = sizeof(buf);
-        ret = inflate(&zs, Z_NO_FLUSH);
-        if (ret != Z_OK && ret != Z_STREAM_END) {
-            inflateEnd(&zs);
-            return {};
-        }
-        out.append(buf, qsizetype(sizeof(buf) - zs.avail_out));
-    } while (ret != Z_STREAM_END);
-    inflateEnd(&zs);
-    return out;
+    const qsizetype deflateLen = n - 8 - pos;
+    size_t outLen = 0;
+    void *out = tinfl_decompress_mem_to_heap(p + pos, size_t(deflateLen),
+                                             &outLen, 0);
+    if (!out)
+        return {};
+    const QByteArray raw(reinterpret_cast<const char *>(out), qsizetype(outLen));
+    mz_free(out);
+    return raw;
 }
 
 // GET sincrono con timeout. Devuelve los bytes (vacio si error) y deja el codigo

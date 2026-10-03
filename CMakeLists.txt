@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(libmapa VERSION 0.1.0 LANGUAGES CXX)
+project(libmapa VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,9 +62,12 @@ else()
     add_compile_options(
         -Wall -Wextra -Wpedantic
         -Wshadow
-        -Woverloaded-virtual
-        -Wnon-virtual-dtor
-        -Wold-style-cast
+        # Estos tres solo existen en C++ (hay un .c de terceros, miniz, que
+        # compila con el compilador de C): limitarlos a CXX evita el aviso
+        # "option is valid for C++ but not for C".
+        $<$<COMPILE_LANGUAGE:CXX>:-Woverloaded-virtual>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wold-style-cast>
         -Wcast-align
         -Wunused
         -Wconversion
@@ -242,19 +245,20 @@ if(LIBMAPA_BUILD_TOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/common)
 
     # Descarga ficheros de elevacion SRTM .hgt (30 m) de AWS Skadi (sin clave) y
-    # los descomprime con zlib. Alimenta a dem_to_db. zlib es OPCIONAL: si no se
-    # encuentra (p.ej. Qt MinGW en Windows sin zlib de desarrollo), se omite SOLO
-    # esta herramienta y el resto del proyecto compila igual. Para bajar los .hgt
-    # sin zlib: usa el script descargar_hgt.ps1, o construye la BD desde tus
-    # propios .hgt con dem_to_db.
-    find_package(ZLIB QUIET)
-    if(ZLIB_FOUND)
-        add_executable(fill_hgt tools/fill_hgt/main.cpp)
-        target_link_libraries(fill_hgt PRIVATE
-            Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Network ZLIB::ZLIB)
-    else()
-        message(STATUS "zlib no encontrado: se omite 'fill_hgt' "
-                       "(el resto del proyecto compila normalmente).")
+    # los descomprime con miniz (descompresor gzip vendoreado, dominio publico).
+    # Es AUTONOMO: no necesita zlib externa, asi que compila igual en Linux/GCC y
+    # en Qt MinGW de Windows sin instalar nada. Alimenta a dem_to_db.
+    add_executable(fill_hgt
+        tools/fill_hgt/main.cpp
+        third_party/miniz/miniz.c)
+    target_link_libraries(fill_hgt PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Network)
+    target_include_directories(fill_hgt PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz)
+    # miniz.c es codigo de terceros: sin nuestros avisos (nos llenaria de ruido).
+    if(NOT MSVC)
+        set_source_files_properties(third_party/miniz/miniz.c
+            PROPERTIES COMPILE_OPTIONS "-w")
     endif()
 
     if(LIBMAPA_HAVE_QCP)
