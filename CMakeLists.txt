@@ -241,6 +241,13 @@ if(LIBMAPA_BUILD_TOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/common)
 
+    # Descarga ficheros de elevacion SRTM .hgt (30 m) de AWS Skadi (sin clave) y
+    # los descomprime con zlib. Alimenta a dem_to_db.
+    find_package(ZLIB REQUIRED)
+    add_executable(fill_hgt tools/fill_hgt/main.cpp)
+    target_link_libraries(fill_hgt PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Network ZLIB::ZLIB)
+
     if(LIBMAPA_HAVE_QCP)
         add_executable(render_map tools/render_map/main.cpp)
         target_link_libraries(render_map PRIVATE libmapa_widget)

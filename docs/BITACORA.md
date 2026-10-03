@@ -2195,3 +2195,35 @@ En CMake se añade como `dem_to_db` (como `vector_db`); hay `.pro` equivalente
 
 **Estado: 15 tests verdes; `dem_to_db` verificado (BD = ficheros, 30 % de tamaño).
 Falta el descargador `fill_hgt` (último paso).**
+
+## 42. Elevación en base de datos (3/3): descargador `fill_hgt`
+
+Último paso del pipeline: conseguir los `.hgt` sin tenerlos ya. Nueva herramienta
+de consola **`fill_hgt`** que baja tiles SRTM de **30 m** de **AWS Skadi** (sin
+clave), para una zona:
+
+```
+fill_hgt --cuba --out carpeta
+fill_hgt --bbox latN,lonO,latS,lonE --out carpeta
+```
+
+Recorre los tiles de 1°×1° del bbox (o el preset `--cuba`), y por cada uno que
+**falte** baja `…/skadi/N19/N19W077.hgt.gz`, lo **descomprime al vuelo con zlib**
+(`inflateInit2` en modo gzip, en memoria, sin ficheros temporales) y valida que
+el `.hgt` resultante es un cuadrado perfecto de `int16`. Es **reanudable** (salta
+los `.hgt` que ya están), reintenta los fallos de red con backoff, y **salta los
+404** (tiles de mar abierto que la fuente no tiene) sin contarlos como error.
+
+Es la única pieza que estrena una dependencia (**zlib**), porque Skadi solo sirve
+`.hgt.gz`; el núcleo y `dem_to_db` siguen sin zlib (trabajan sobre `.hgt` ya
+descomprimidos). En CMake se añade con `find_package(ZLIB)` y enlace `ZLIB::ZLIB`;
+`.pro` equivalente con `LIBS += -lz`.
+
+Verificado de punta a punta: `fill_hgt --bbox 21,-77.9,19.1,-76.1` baja 6 tiles
+reales de 30 m (0 fallidos), la segunda pasada no baja nada (reanudable),
+`dem_to_db` genera la BD (37,6 MB vs 148 MB crudos) y `SqliteElevation` da el
+**Pico Turquino a 1970.8 m** y NaN fuera de cobertura. Pipeline completo:
+**`fill_hgt` → `dem_to_db` → `fill_map --dem-db`**.
+
+**Estado: 15 tests verdes; pipeline DEM-en-BD cerrado (descarga 30 m → BD
+comprimida → consulta), verificado contra datos reales, Qt 6.4.**

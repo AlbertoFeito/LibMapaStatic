@@ -88,6 +88,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana |
 | `vector_db` | Crea e inspecciona la BD de puntos, rutas y polígonos |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
+| `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
 | `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura |
 | `demo` | Aplicación de ejemplo con selector de capa y herramientas |
@@ -111,9 +112,11 @@ Con `fill_map --dem <carpeta>` (ficheros `.hgt`) o `fill_map --dem-db <fichero>`
 el tamaño del tile e interpola; sobre mar o sin dato muestra «—». La elevación es
 parte de la librería (`MapWidget::elevationAt`), reutilizable desde cualquier app.
 
-Para empaquetar la elevación en un solo fichero, `dem_to_db <carpeta_hgt> --out
-dem.sqlitedb` convierte una carpeta de `.hgt` en una base de datos comprimida
-(~30 % del tamaño) que se consulta igual (`--dem-db`), ideal para distribuir.
+Para empaquetar la elevación en un solo fichero, el pipeline es
+`fill_hgt --cuba --out carpeta` (baja 30 m de AWS Skadi sin clave, reanudable)
+→ `dem_to_db carpeta --out dem.sqlitedb` (BD comprimida, ~30 % del tamaño) →
+`fill_map --dem-db dem.sqlitedb`. El generador acepta también tus propios `.hgt`
+de 90 m. La BD es ideal para distribuir dentro de una app.
 
 ## Estructura
 
