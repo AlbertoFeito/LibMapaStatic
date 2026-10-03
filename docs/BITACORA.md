@@ -2164,3 +2164,34 @@ sintético como `.hgt` y como BD (blob `qCompress`-ado) y comprueba que
 
 **Estado: 15 tests verdes; lector de BD verificado contra el lector de ficheros
 (misma cota). Faltan las herramientas `dem_to_db` y `fill_hgt` (siguientes pasos).**
+
+## 41. Elevación en base de datos (2/3): generador `dem_to_db`
+
+Con el lector de BD ya hecho (§40), falta **construir** esa base de datos. Nueva
+herramienta de consola **`dem_to_db`** (solo `libmapa_core`, patrón de
+`geo_to_tiles`):
+
+```
+dem_to_db <carpeta_hgt> --out cuba_dem.sqlitedb [--overwrite]
+```
+
+Recorre los `.hgt` de la carpeta, saca `(lat,lon)` del nombre
+(`N19W077` → 19, −77, con una `QRegularExpression`), detecta el lado por el
+tamaño, **comprime** las muestras con `qCompress` nivel 9 e inserta cada tile en
+`dem_tiles` dentro de una `Transaction` (una sola, rápida). Escribe `dem_meta`
+(resolución, fuente, nº de tiles, fecha) y un resumen con el ahorro de tamaño.
+Avisa y salta ficheros con nombre o tamaño raros, sin abortar. **Sin red y sin
+gzip**: trabaja sobre `.hgt` ya descomprimidos, así que vale tal cual para los
+90 m del usuario.
+
+Verificado con el tile real de 30 m `N19W077` (24,7 MB): la BD queda en **7,5 MB
+(30 % del crudo)** y `SqliteElevation` lee de ella **exactamente** lo mismo que el
+lector de ficheros (diff 0,0 en todos los puntos; Pico Turquino **1970.8 m**). A
+90 m la relación es parecida, así que una BD de Cuba entera ronda las pocas
+decenas de MB.
+
+En CMake se añade como `dem_to_db` (como `vector_db`); hay `.pro` equivalente
+(`qmake/dem_to_db.pro`, solo QtCore+QtSql, usa el header `Transaction.h`).
+
+**Estado: 15 tests verdes; `dem_to_db` verificado (BD = ficheros, 30 % de tamaño).
+Falta el descargador `fill_hgt` (último paso).**

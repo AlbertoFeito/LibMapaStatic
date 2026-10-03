@@ -215,6 +215,11 @@ if(LIBMAPA_BUILD_TOOLS)
     add_executable(vector_db tools/vector_db/main.cpp)
     target_link_libraries(vector_db PRIVATE libmapa_core)
 
+    # Construye una BD de elevacion (.sqlitedb) desde una carpeta de `.hgt`.
+    add_executable(dem_to_db tools/dem_to_db/main.cpp)
+    target_link_libraries(dem_to_db PRIVATE libmapa_core)
+    target_include_directories(dem_to_db PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
     # Rasteriza vector (.geo/.xyz) a un piramide de teselas SQLite. Necesita
     # QGuiApplication (QImage/QPainter): en un servidor sin pantalla se ejecuta
     # con QT_QPA_PLATFORM=offscreen.
