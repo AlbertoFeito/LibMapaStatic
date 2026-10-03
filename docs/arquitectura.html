@@ -710,16 +710,29 @@ target_link_libraries(miapp PRIVATE libmapa::widget)</pre>
 <code>check_data --export</code>, que copia solo los ficheros del paquete a
 <code>&lt;destino&gt;\datos</code>. La carpeta resultante funciona sin Qt ni internet.</p>
 
-<h3>qmake (alternativa)</h3>
-<pre>qmake qmake/fill_tiles.pro  &amp;&amp;  make      # o fill_map.pro / probe_db.pro
-# el arranque de tu app:   qmake miapp.pro</pre>
+<h3>Qt 5.14 y qmake: el segundo juego de despliegue</h3>
+<p>Para quien no tiene CMake o compila con Qt 5, la librería también se
+compila e instala con qmake (Release y Debug), en una carpeta por versión
+de Qt:</p>
+<pre>qmake qmake/libmapa/libmapa.pro  &amp;&amp;  mingw32-make  &amp;&amp;  mingw32-make install
+#  -&gt; C:/libmapa/qt5  o  C:/libmapa/qt6
+# en el .pro de la app (elige sola la instalación del Qt del kit):
+include(C:/libmapa/qt$${QT_MAJOR_VERSION}/libmapa.pri)</pre>
+<p><code>libmapa.pri</code> se para si la app y la librería son de Qt distintos.
+Para desplegar una app de Qt 5 se usa <code>desplegar_qt5.bat</code>, con los
+mismos argumentos. Comprueba que el <code>.exe</code> es de Qt 5 y está en
+Release, quita a mano los plugins de red (el <code>windeployqt</code> de Qt 5 no
+tiene <code>--skip-plugin-types</code>) y avisa si algo sigue pidiendo
+<code>Qt5Network.dll</code>. Guía paso a paso para alguien sin experiencia:
+<code>docs/DESPLIEGUE.md</code>.</p>
+<pre>qmake qmake/fill_tiles.pro  &amp;&amp;  make      # herramientas sueltas: fill_map.pro / probe_db.pro ...</pre>
 
 <h3>Un flujo típico de datos</h3>
 <ol>
   <li>Preparar los datos (con internet): <code>fill_tiles</code>/<code>fill_map</code> para teselas, <code>fill_hgt</code> → <code>dem_to_db</code> para la elevación.</li>
   <li><code>probe_db --package</code> sobre la carpeta → genera su <code>mapa.json</code> (rutas relativas). Se ajusta a mano lo que haga falta (nombres, atribución, estilos).</li>
   <li><code>check_data</code> sobre la carpeta: 0 errores → el paquete está listo.</li>
-  <li><code>desplegar.bat</code> con la app y el paquete → carpeta lista para otro PC.</li>
+  <li><code>desplegar.bat</code> (Qt 6) o <code>desplegar_qt5.bat</code> (Qt 5) con la app y el paquete → carpeta lista para otro PC.</li>
   <li>Se copia la carpeta junto a la aplicación. La app solo necesita <code>cfg.dataDir = …/datos</code>: el producto final <b>no usa internet</b>.</li>
 </ol>
 

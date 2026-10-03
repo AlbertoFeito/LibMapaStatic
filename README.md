@@ -106,6 +106,24 @@ En Qt Creator basta con abrir el `CMakeLists.txt`.
 
 ### Usarla desde otra aplicación
 
+> **Guía paso a paso, sin conocimientos previos:
+> [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md)**: compilar la librería,
+> integrarla en una app qmake y llevarla a otro PC, con Qt 6 o con Qt 5.14.
+
+**Con qmake (Qt 5.14 / 5.15 / 6.x, sin CMake):** `qmake/libmapa/libmapa.pro`
+compila la librería (Release y Debug) y `make install` la deja en
+`C:/libmapa/qt5` o `C:/libmapa/qt6` según el Qt. En el `.pro` de la app basta
+una línea, que además elige la instalación del Qt del kit:
+
+```qmake
+include(C:/libmapa/qt$${QT_MAJOR_VERSION}/libmapa.pri)
+```
+
+`libmapa.pri` se para con un mensaje claro si la app y la librería son de Qt
+distintos. Plantilla: [`examples/app_minima/app_minima.pro`](examples/app_minima/app_minima.pro).
+
+**Con CMake:**
+
 ```bash
 cmake --install build --prefix C:/libmapa
 ```
@@ -135,6 +153,13 @@ no usa), **comprueba** los tres plugins sin los que el mapa sale en blanco
 `check_data --export`. La carpeta resultante funciona en un PC sin Qt ni
 internet. La librería tiene una guarda en CMake: si alguien le añade
 `Qt Network`, la configuración se para.
+
+Para una app de **Qt 5** (5.14 / 5.15) hay un segundo juego,
+`herramientas\desplegar_qt5.bat`, con los mismos argumentos. El `windeployqt`
+de Qt 5 no tiene `--skip-plugin-types`: este script quita después los plugins
+de red (`bearer`, `generic`, `position`). Además, antes de empezar comprueba
+que el `.exe` es de Qt 5 y está en Release, y al final avisa si algo de la
+entrega sigue pidiendo `Qt5Network.dll`.
 
 ### QCustomPlot
 
@@ -277,9 +302,12 @@ src/
 tests/               17 tests (14 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
-examples/app_minima/ plantilla de producto que usa la librería instalada
+examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
 cmake/               libmapaConfig.cmake.in (para find_package)
-herramientas/        desplegar.bat (app + Qt + paquete, listo para otro PC)
+qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri)
+qmake/*.pro          herramientas sueltas con qmake
+herramientas/        desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete
+docs/DESPLIEGUE.md   guía paso a paso: integrar la librería y llevar la app a otro PC
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, flujos)
 ```
@@ -302,10 +330,11 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 12 | **Paquete de datos sin conexión**: manifiesto `mapa.json`, `MapConfig.dataDir`, capas fijas, entidades del usuario en `AppData` |
 | 13 | Comprobación del paquete: `check_data` (informe con cobertura por zoom) y `MapWidget::dataWarnings()` al abrir |
 | 14 | Despliegue: `install()` + `find_package(libmapa)`, `examples/app_minima`, `desplegar.bat`, `check_data --export`, guarda contra Qt Network |
+| 15 | Juego Qt 5: librería con qmake (`qmake/libmapa`, `libmapa.pri`), `desplegar_qt5.bat` y guía [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md) |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en
-[`docs/BITACORA.md`](docs/BITACORA.md) §47–49.
+[`docs/BITACORA.md`](docs/BITACORA.md) §47–50.
 
 ## Licencia
 

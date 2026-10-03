@@ -31,6 +31,12 @@ reglas que ya venimos aplicando; respétalas siempre.
   dan falsos positivos dentro de las cabeceras de Qt/QCustomPlot.
 - Qt5 solo declara `QVariant` en `qsqlquery.h`: incluye `<QVariant>` explícito
   donde uses `bindValue`.
+- **Dos juegos de despliegue** (guía en `docs/DESPLIEGUE.md`): Qt 6 con
+  `herramientas/desplegar.bat`, y Qt 5 con `herramientas/desplegar_qt5.bat`.
+  No mezcles uno con otro ni cambies el de Qt 6 para cubrir Qt 5.
+- La librería se compila también **con qmake** (`qmake/libmapa/core|widget`).
+  Si añades o quitas un `.cpp` (o una cabecera con `Q_OBJECT`) en
+  `CMakeLists.txt`, haz lo mismo en `core.pro` o `widget.pro`.
 
 ## QCustomPlot
 - Es GPLv3 y **está en `.gitignore`**: no se commitea. Versión usada: **2.1.1**.

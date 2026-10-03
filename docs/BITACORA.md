@@ -2597,3 +2597,98 @@ fallo del despliegue; en un PC real no se pide `offscreen`.)
 
 **Estado: 17 tests verdes (14 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW;
 instalación, `find_package` y despliegue verificados de punta a punta.**
+
+## 50. Segundo juego de despliegue: Qt 5.14 con qmake, y una guía para cualquiera
+
+Un compañero trabaja con **Qt 5.14**, y el despliegue de §49 solo servía para
+Qt 6. Fallaba en tres puntos:
+
+- **`desplegar.bat`** tiene fijos Qt 6.11.2 y MinGW 13.1, y usa
+  `windeployqt --skip-plugin-types`. Esa opción no existe en el `windeployqt`
+  de Qt 5, que se pararía con «opción desconocida».
+- **Las bibliotecas estáticas dependen del Qt y del compilador.** Un `.a`
+  compilado con GCC 13 contra Qt 6 no enlaza en una app de Qt 5.14 con
+  MinGW 7.3. Hay que compilar la librería en el PC del compañero.
+- **`find_package` necesita CMake**, y alguien con Qt 5.14 y qmake no tiene
+  por qué tenerlo. Además, la app de prueba de esta máquina también es de qmake,
+  y hasta ahora se integraba copiando líneas a mano en su `.pro`.
+
+Se decidió **no tocar** el despliegue de Qt 6, que ya funciona y está
+verificado, y añadir un segundo juego con ficheros nuevos:
+
+**`qmake/libmapa/` (librería con qmake).** `libmapa.pro` (subdirs) compila
+`core`, `widget` y `check_data` sin CMake, con Qt 5.14, 5.15 o 6.x. Las
+bibliotecas salen en **Release y Debug** (`mapa_core` / `mapa_cored`). En
+Qt 5 MinGW, una app Debug usa otras DLL (`Qt5Cored.dll`), y mezclarla con una
+biblioteca compilada contra las de Release cargaría dos copias de Qt. `make
+install` las deja por defecto en `C:/libmapa/qt5` o `C:/libmapa/qt6`, para
+poder tener las dos en el mismo PC, con la misma forma que la instalación de
+CMake (`include/`, `lib/`, `bin/check_data.exe`, `share/libmapa/`). Instala
+también el script de despliegue que corresponde a ese Qt. A los `.bat`
+instalados hay que ponerles `CONFIG += nostrip`, porque si no qmake les
+pasa `strip` como a un ejecutable.
+
+**`libmapa.pri` (integración en una línea).** Tiene el mismo papel que el
+`libmapaConfig.cmake`: `QT +=`, `DEFINES`, `INCLUDEPATH` y `LIBS` en el orden
+correcto (el widget antes que el núcleo), las versiones `d` en Debug, y
+`PRE_TARGETDEPS` para volver a enlazar si se reinstala la librería. Con
+`include(C:/libmapa/qt$${QT_MAJOR_VERSION}/libmapa.pri)`, la misma línea elige
+la instalación del Qt del kit. Junto a él se instala `libmapa_qt.pri`, con el
+Qt con el que se compiló (lo genera `write_file`). Si la app es de otro Qt,
+qmake se para con un mensaje que lo explica, en lugar de dar cientos de
+errores de enlace. `examples/app_minima/app_minima.pro` es la plantilla qmake.
+
+**`herramientas/desplegar_qt5.bat`.** Tiene los mismos argumentos y pasos que
+`desplegar.bat`, con estas diferencias:
+
+1. Antes de copiar nada, mira qué DLL de Qt importa el `.exe` (`findstr` sobre
+   el binario):
+   - `Qt5Core.dll`: Qt 5 Release, se sigue.
+   - `Qt5Cored.dll`: Debug, se para y pide Release.
+   - `Qt6Core.dll`: se para y remite a `desplegar.bat`.
+2. Los plugins de red no se pueden excluir en `windeployqt`, así que se borran
+   después:
+   - `bearer` y `generic` (TUIO), que arrastran `Qt5Network`;
+   - `position`, que arrastra `Qt5SerialPort`. El mapa no lee GPS: no hay
+     ningún `QGeoPositionInfoSource` en el código.
+3. Al final, recorre la entrega buscando quién importa todavía
+   `Qt5Network.dll`, y **avisa** sin pararse. Sobre la entrega de Qt 6 esta
+   búsqueda no da falsos positivos. Sin quitar esos plugins, en Qt 6 sí detecta
+   `tls` y `networkinformation`, lo que demuestra que funciona.
+4. Comprueba que el `check_data` que va a usar también es de Qt 5. Uno de Qt 6
+   no arrancaría con las DLL de Qt 5.
+5. Qt y MinGW por defecto: `C:\Qt\5.14.2\mingw73_64` y
+   `C:\Qt\Tools\mingw730_64`. Se cambian con `QTDIR` y `MINGW_BIN`, por ejemplo
+   para 5.15.2 con MinGW 8.1.
+
+**`docs/DESPLIEGUE.md`.** Es una guía para alguien sin experiencia, con un
+glosario, una tabla para elegir el juego, pasos numerados con lo que se debe
+ver en cada uno, y una tabla de problemas frecuentes. Esa tabla recoge errores
+reales de esta sesión:
+
+- lanzar el `.bat` desde Git Bash, que se come las `\`;
+- pensar que la copia se ha parado, porque Windows reserva el tamaño final del
+  fichero desde el primer momento.
+
+**Verificado en este PC (Qt 6.11.2):**
+
+- `libmapa.pro` compila e instala, siguiendo la guía al pie de la letra en la
+  consola «Qt 6.11.2 (MinGW 13.1.0 64-bit)».
+- `app_minima.pro` enlaza en Release y en Debug contra la instalación y abre el
+  paquete real: 4 capas, 0 avisos.
+- Saltan las tres guardas de qmake: falta la instalación, Qt distinto y falta
+  QCustomPlot.
+- Con el `desplegar.bat` sin modificar sobre esa instalación, la copia
+  funciona con un `PATH` sin Qt y no lleva DLL de red.
+- De `desplegar_qt5.bat` se han probado:
+  - sus dos guardas reales: no hay Qt 5 instalado, y la app es de Qt 6;
+  - el resto de su lógica, en una copia adaptada a Qt 6 y con un paquete
+    pequeño: plugins, aviso de red, `check_data` y copia del paquete.
+
+**No verificado:** no hay ningún Qt 5.14 en esta máquina. Falta compilar y
+desplegar con un Qt 5.14 real en el PC del compañero. El código de la librería
+ya tenía en cuenta Qt 5 (§31), pero desde §36 solo se ha compilado con Qt 6.
+
+**Estado: sin cambios en el código de la librería (siguen valiendo los 17 tests de §49); juego Qt 6
+por qmake verificado de punta a punta con Qt 6.11.2 MinGW; juego Qt 5
+preparado y pendiente de probar con Qt 5.14.**
