@@ -42,6 +42,44 @@ la BD de entidades del usuario y el punto de arranque. Lo que se rellene a mano
 en `MapConfig` (`initialZoom`, `elevationDbFile`…) **manda sobre el paquete**.
 La configuración clásica con `datasetsFile` sigue funcionando.
 
+## Seguimiento de objetivos móviles
+
+La librería **representa** objetos móviles sobre el mapa (naval, aéreo, UAVs…) y
+es **agnóstica del dominio**: no sabe de protocolos ni de dónde vienen los datos.
+Tu aplicación conecta a su fuente (AIS, ADS-B, MAVLink…) y le va diciendo dónde
+está cada objetivo; los **comandos y el control** (p. ej. a un UAV) son de la
+app, no de la librería.
+
+```cpp
+// 1) Tu juego de iconos: la librería lo coloca y lo gira por el rumbo.
+mapa->setTargetSymbolProvider([&](const libmapa::MapTarget &t) {
+    libmapa::TargetSymbol s;
+    if (t.kind == "buque")         s.icon = iconoBuque;
+    else if (t.kind == "aeronave") s.icon = iconoAvion;
+    else if (t.kind == "uav")                       // icono por ESTADO:
+        s.icon = t.attributes["bateria"].toInt() < 20 ? iconoUavAlerta : iconoUav;
+    s.rotateWithHeading = true;                     // icono nulo => galón por defecto
+    return s;
+});
+mapa->setTargetDetailBudget(200, 600);              // a miles, ralea etiquetas/trazas
+
+// 2) Alta de un objetivo con sus datos de dominio (la librería no los interpreta).
+libmapa::MapTarget t;
+t.position = QGeoCoordinate(23.1, -82.3);
+t.headingDeg = 270;
+t.kind = "buque";
+t.attributes["mmsi"] = "224123000";
+qint64 id = mapa->addTarget(t);
+
+// 3) Desde tu feed, vía rápida de tiempo real (entra en la traza):
+mapa->updateTarget(id, nuevaPos, nuevoRumbo);
+mapa->setTargetAttribute(id, "velocidad", 12.4);
+```
+
+Escala a **miles** de objetivos (culling por vista, nivel de detalle y declutter
+de etiquetas). La app de ejemplo `demo` lo demuestra: su botón de simulación
+mueve buques, aeronaves y UAVs con su icono orientado al rumbo.
+
 ## El paquete de datos
 
 Una carpeta con todo lo que el mapa necesita sin conexión y un manifiesto

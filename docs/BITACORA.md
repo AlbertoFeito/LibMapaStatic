@@ -2956,3 +2956,42 @@ y qmake no cambian.
 detalle. Con esto el motor de seguimiento está completo (Fases 1–3). Siguiente:
 Fase 4 (corte limpio del dominio naval legado) o Fase 5 (ejemplo de seguimiento
 + contrato público).**
+
+## 57. Ejemplo de seguimiento en `demo` y contrato público (Fase 5)
+
+Las Fases 1–3 dejaron el motor de seguimiento completo pero **invisible**: nada
+en el repo lo usaba. Esta fase lo hace demostrable enriqueciendo el `demo` (que
+ya tenía un simulador de objetivos) y documentando cómo se usa. **Solo cambia la
+app de ejemplo y la documentación; la librería y su API no se tocan.**
+
+En `demo/main.cpp`:
+
+- El simulador crea objetivos de tres clases con `kind` **"buque" / "aeronave" /
+  "uav"**, cada uno con sus **attributes** de dominio (buque: `mmsi`, `eslora`;
+  aeronave: `callsign`, `squawk`, `fl`; uav: `bateria`, `enlace`). La etiqueta se
+  compone de esos atributos → se ven en pantalla (Fase 1).
+- `prepararSeguimiento()` dibuja el **juego de iconos en código** (sin ficheros:
+  un casco, una silueta de avión y un cuadricóptero, con `QPainter` → `QPixmap`)
+  y registra `setTargetSymbolProvider`: elige el icono por `kind` y, para un UAV
+  con `bateria` < 20, una variante **en rojo** → "icono por estado" (Fase 2). Un
+  `kind` sin icono caería al galón por defecto.
+- Fija `setTargetDetailBudget(200, 600)`; el spinbox ya llegaba a 5000, así que
+  subir la cantidad enseña el nivel de detalle a miles (Fase 3).
+
+Documentación del **contrato público**: nueva sección «Seguimiento de objetivos
+móviles» en el README con el patrón mínimo (proveedor de símbolos, alta con
+`kind`+`attributes`, actualización desde el feed, presupuesto de detalle) y la
+frase clave —la librería **representa**; los protocolos (AIS/ADS-B/MAVLink) y el
+control los pone la app—; una línea en `arquitectura.html` + **PDF regenerado**.
+
+Verificación: `demo` compila; los **17 tests** siguen en verde (la librería no
+cambió), sin warnings. La validación visual la hace el usuario en su PC
+(arrancar `demo` → simular → buques/aeronaves/UAVs con su icono y datos).
+
+Fuera de alcance (anotado): "clic en un objetivo → panel con sus datos" pediría
+hit-testing de objetivos en la librería (hoy la selección es solo de entidades);
+los atributos se ven por ahora vía la etiqueta.
+
+**Estado: motor de seguimiento completo y demostrado en `demo` (Fases 1–5
+hechas); 17 tests en verde. Queda, cuando toque, la Fase 4 (corte limpio del
+esquema naval legado), que encaja mejor al reimplementar Estación Terrena.**

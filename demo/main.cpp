@@ -39,6 +39,7 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
 #include <QRandomGenerator>
@@ -61,6 +62,77 @@ namespace {
 //! Roles para distinguir capas de entidades en el arbol.
 constexpr int RolCapa = Qt::UserRole;        //!< id de capa (en ambos)
 constexpr int RolEntidad = Qt::UserRole + 1; //!< id de entidad (solo hojas)
+
+// --- Iconos de objetivos, dibujados en codigo -----------------------------
+// La libreria es agnostica del dominio: el JUEGO de iconos lo pone la app. Aqui
+// se dibujan a mano (sin ficheros) apuntando al NORTE (arriba); la libreria los
+// gira segun el rumbo. Es justo lo que hace un producto real con su simbologia.
+
+// Casco de buque: proa arriba, popa abajo.
+QPixmap iconoBuque(const QColor &c)
+{
+    const int S = 22;
+    QPixmap pm(S, S);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(Qt::black, 1.0));
+    p.setBrush(c);
+    QPolygonF casco;
+    casco << QPointF(S / 2.0, 2) << QPointF(S - 6, S - 5)
+          << QPointF(S / 2.0, S - 2) << QPointF(5, S - 5);
+    p.drawPolygon(casco);
+    return pm;
+}
+
+// Silueta de aeronave: fuselaje, alas y cola, apuntando arriba.
+QPixmap iconoAereo(const QColor &c)
+{
+    const int S = 22;
+    QPixmap pm(S, S);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(Qt::black, 1.0));
+    p.setBrush(c);
+    const double cx = S / 2.0;
+    QPolygonF av;
+    av << QPointF(cx, 1)
+       << QPointF(cx + 2, S * 0.45)
+       << QPointF(S - 2, S * 0.62)
+       << QPointF(cx + 2, S * 0.62)
+       << QPointF(cx + 2, S - 4)
+       << QPointF(cx + 4, S - 1)
+       << QPointF(cx - 4, S - 1)
+       << QPointF(cx - 2, S - 4)
+       << QPointF(cx - 2, S * 0.62)
+       << QPointF(2, S * 0.62)
+       << QPointF(cx - 2, S * 0.45);
+    p.drawPolygon(av);
+    return pm;
+}
+
+// Cuadricoptero: cuatro brazos en X con sus rotores y un nucleo.
+QPixmap iconoUav(const QColor &c)
+{
+    const int S = 22;
+    QPixmap pm(S, S);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const double m = 4, M = S - 4, cx = S / 2.0;
+    p.setPen(QPen(c.darker(160), 2.0));
+    p.drawLine(QPointF(m, m), QPointF(M, M));
+    p.drawLine(QPointF(M, m), QPointF(m, M));
+    p.setPen(QPen(Qt::black, 0.8));
+    p.setBrush(c);
+    for (const QPointF &o : {QPointF(m, m), QPointF(M, m),
+                             QPointF(m, M), QPointF(M, M)})
+        p.drawEllipse(o, 3.2, 3.2);
+    p.setBrush(c.darker(130));
+    p.drawEllipse(QPointF(cx, cx), 2.5, 2.5);
+    return pm;
+}
 
 } // namespace
 
@@ -119,6 +191,7 @@ public:
         construirPanel();
         conectarSenales();
         aplicarEstiloAlTrazo();
+        prepararSeguimiento();
         reconstruirPanel();
 
         // Asi deberia hacerlo una app real: el mapa arranca con lo que funcione
@@ -996,6 +1069,35 @@ private:
             .arg(QFileInfo(ruta).fileName(), id), 5000);
     }
 
+    // Prepara el seguimiento de objetivos: dibuja el juego de iconos (una vez) y
+    // registra la simbologia de la app. Demuestra el contrato de la libreria:
+    // ella es agnostica del dominio; la app elige el icono por 'kind' y por
+    // estado (un UAV con poca bateria va en rojo), y fija el nivel de detalle
+    // para escalar a miles. Un 'kind' sin icono cae al galon por defecto.
+    void prepararSeguimiento()
+    {
+        m_icoBuque   = iconoBuque(QColor(0x20, 0x6a, 0xd0));
+        m_icoAereo   = iconoAereo(QColor(0x0c, 0x97, 0x8a));
+        m_icoUav     = iconoUav(QColor(0x3c, 0xb0, 0x4a));
+        m_icoUavBajo = iconoUav(QColor(0xd0, 0x3a, 0x2a));
+
+        m_mapa->setTargetSymbolProvider([this](const MapTarget &t) {
+            TargetSymbol s;                         // icono nulo => galon
+            if (t.kind == QLatin1String("buque"))
+                s.icon = m_icoBuque;
+            else if (t.kind == QLatin1String("aeronave"))
+                s.icon = m_icoAereo;
+            else if (t.kind == QLatin1String("uav"))
+                s.icon = t.attributes.value(QStringLiteral("bateria")).toInt() < 20
+                             ? m_icoUavBajo : m_icoUav;
+            s.rotateWithHeading = true;
+            return s;
+        });
+
+        // Con miles de objetivos se dejan de rotular/trazar al amontonarse.
+        m_mapa->setTargetDetailBudget(200, 600);
+    }
+
     void alternarSimulacion(bool on)
     {
         if (on) {
@@ -1020,7 +1122,10 @@ private:
         m_simVel.reserve(n);
 
         auto *r = QRandomGenerator::global();
-        static const char *tipos[] = { "Buque", "Aereo", "Pesca", "Patrulla" };
+        // Tres clases de objetivo repartidas. Cada una lleva SUS datos en
+        // attributes (la libreria no los interpreta) y su etiqueta se compone de
+        // ellos: asi se ven las Fases 1 (datos) y 2 (icono por kind/estado).
+        static const char *clases[] = { "buque", "aeronave", "uav" };
 
         for (int i = 0; i < n; ++i) {
             // Repartidos por el mar alrededor de Cuba.
@@ -1029,17 +1134,40 @@ private:
             const double rumbo = r->bounded(360.0);
             const double velGrados = 0.002 + r->bounded(0.004);  // por paso
 
-            const int vel = 8 + r->bounded(22);      // nudos (ficticios)
+            const QString kind = QLatin1String(clases[i % 3]);
             MapTarget t;
             t.position = QGeoCoordinate(lat, lon);
             t.headingDeg = rumbo;
-            t.speed = vel;
-            // Etiqueta MULTILINEA: un parametro por linea.
-            t.label = QStringLiteral("%1 %2\nRbo %3\nVel %4 kn")
-                          .arg(QLatin1String(tipos[i % 4])).arg(i + 1)
-                          .arg(static_cast<int>(rumbo), 3, 10, QLatin1Char('0'))
-                          .arg(vel);
-            t.color = QColor::fromHsv(r->bounded(360), 200, 230);
+            t.kind = kind;
+
+            if (kind == QLatin1String("buque")) {
+                const int mmsi = 224000000 + r->bounded(999999);
+                const int nudos = 8 + r->bounded(14);
+                t.speed = nudos;
+                t.attributes.insert(QStringLiteral("mmsi"), mmsi);
+                t.attributes.insert(QStringLiteral("eslora"), 40 + r->bounded(260));
+                t.label = QStringLiteral("Buque %1\nMMSI %2\n%3 kn")
+                              .arg(i + 1).arg(mmsi).arg(nudos);
+                t.color = QColor(0x20, 0x6a, 0xd0);
+            } else if (kind == QLatin1String("aeronave")) {
+                const QString cs = QStringLiteral("CUB%1").arg(100 + r->bounded(900));
+                const int fl = 80 + r->bounded(320);        // nivel de vuelo
+                t.attributes.insert(QStringLiteral("callsign"), cs);
+                t.attributes.insert(QStringLiteral("squawk"),
+                                    QStringLiteral("%1").arg(1000 + r->bounded(6000)));
+                t.attributes.insert(QStringLiteral("fl"), fl);
+                t.label = QStringLiteral("%1\nFL%2")
+                              .arg(cs).arg(fl, 3, 10, QLatin1Char('0'));
+                t.color = QColor(0x0c, 0x97, 0x8a);
+            } else {                                         // uav
+                const int bat = r->bounded(100);
+                t.attributes.insert(QStringLiteral("bateria"), bat);
+                t.attributes.insert(QStringLiteral("enlace"), 60 + r->bounded(40));
+                t.label = QStringLiteral("UAV %1\nBat %2%").arg(i + 1).arg(bat);
+                t.color = bat < 20 ? QColor(0xd0, 0x3a, 0x2a)
+                                   : QColor(0x3c, 0xb0, 0x4a);
+            }
+
             const qint64 id = m_mapa->addTarget(t);
             m_simIds.append(id);
 
@@ -1148,6 +1276,8 @@ private:
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.
+    // Juego de iconos de la app para la simbologia de objetivos (Fase 2).
+    QPixmap m_icoBuque, m_icoAereo, m_icoUav, m_icoUavBajo;
 };
 
 int main(int argc, char *argv[])

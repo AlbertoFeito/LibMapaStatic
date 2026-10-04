@@ -458,7 +458,11 @@ se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m,
 <p><code>MapWidget::updateTarget(id, pos, rumbo)</code> → <code>TargetModel</code> actualiza
 posición y traza en O(1) y emite <code>changed()</code> → <code>TargetLayer</code>
 <b>agrupa</b> los avisos y repinta como mucho ~30 veces/segundo, y <b>solo</b> su capa
-(modo BUFFERED), sin tocar teselas ni entidades. Así aguanta cientos de móviles.</p>
+(modo BUFFERED), sin tocar teselas ni entidades. Con culling por vista, nivel de
+detalle y declutter escala a <b>miles</b> de móviles. Cada objetivo es agnóstico
+del dominio (<code>kind</code> + <code>attributes</code> libres) y la app pone su
+simbología por un hook; la app de ejemplo <code>demo</code> lo demuestra moviendo
+buques, aeronaves y UAVs con su icono orientado al rumbo.</p>
 
 <h3>9.3 · Entidades y ficheros .geo</h3>
 <p><code>loadGeoAsLayer(ruta)</code> → <code>GeoFile</code> lee los trazados →
