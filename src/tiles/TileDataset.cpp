@@ -2,11 +2,14 @@
 
 namespace libmapa {
 
+// Enum de esquema -> texto para datasets.json ("XYZ" / "TMS").
 QString tileSchemeToString(TileScheme s)
 {
     return s == TileScheme::TMS ? QStringLiteral("TMS") : QStringLiteral("XYZ");
 }
 
+// Texto -> enum de esquema (sin distinguir mayusculas). *ok=false si no encaja;
+// por defecto cae a XYZ (el mas comun).
 TileScheme tileSchemeFromString(const QString &s, bool *ok)
 {
     if (ok) *ok = true;
@@ -18,6 +21,8 @@ TileScheme tileSchemeFromString(const QString &s, bool *ok)
     return TileScheme::XYZ;
 }
 
+// Serializa el descriptor completo a un objeto JSON (una entrada del array
+// "datasets"). Lo usan probe_db y geo_to_tiles al imprimir la configuracion.
 QJsonObject TileDataset::toJson() const
 {
     QJsonObject o;
@@ -44,6 +49,8 @@ QJsonObject TileDataset::toJson() const
     return o;
 }
 
+// Reconstruye un TileDataset desde una entrada de datasets.json. Cada campo
+// tiene un valor por defecto sensato, de modo que un JSON minimo tambien vale.
 TileDataset TileDataset::fromJson(const QJsonObject &o)
 {
     TileDataset d;

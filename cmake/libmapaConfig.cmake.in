@@ -1,0 +1,23 @@
+# libmapaConfig.cmake - lo lee find_package(libmapa) en el proyecto que usa
+# la libreria. Busca las MISMAS dependencias de Qt con las que se compilo y
+# carga los targets libmapa::core y (si se compilo con QCustomPlot)
+# libmapa::widget.
+#
+#     find_package(libmapa REQUIRED)
+#     target_link_libraries(miapp PRIVATE libmapa::widget)
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Las bibliotecas son estaticas: el ejecutable final enlaza tambien sus
+# dependencias de Qt, asi que tienen que encontrarse aqui.
+find_dependency(Qt@QT_VERSION_MAJOR@ COMPONENTS Core Gui Sql Positioning)
+set(libmapa_WIDGET_FOUND @LIBMAPA_CONFIG_HAVE_WIDGET@)
+if(libmapa_WIDGET_FOUND)
+    find_dependency(Qt@QT_VERSION_MAJOR@ COMPONENTS Widgets PrintSupport)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/libmapaTargets.cmake")
+
+check_required_components(libmapa)

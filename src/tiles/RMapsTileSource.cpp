@@ -15,6 +15,7 @@
 
 namespace libmapa {
 
+// Guarda el descriptor de la BD; no abre nada todavia (eso ocurre en open()).
 RMapsTileSource::RMapsTileSource(TileDataset dataset)
     : m_ds(std::move(dataset))
 {
@@ -29,6 +30,8 @@ RMapsTileSource::~RMapsTileSource()
     m_qCount.reset();
 }
 
+// Construye el WHERE comun de las consultas de rango, usando los NOMBRES de
+// columna reales del dataset e incluyendo la columna 's' solo si existe.
 QString RMapsTileSource::whereClause() const
 {
     QString w = QStringLiteral("WHERE %1 = :z AND %2 BETWEEN :x1 AND :x2 "
@@ -39,6 +42,7 @@ QString RMapsTileSource::whereClause() const
     return w;
 }
 
+// Rellena los parametros del WHERE (z guardado, rango de x/y, y 's' si toca).
 void RMapsTileSource::bindCommon(QSqlQuery &q, int storedZ,
                                  int xMin, int xMax,
                                  int yMinStored, int yMaxStored) const
@@ -52,6 +56,8 @@ void RMapsTileSource::bindCommon(QSqlQuery &q, int storedZ,
         q.bindValue(QStringLiteral(":s"), m_ds.sValue);
 }
 
+// Traduce un rango de Y LOGICO (XYZ) al rango de Y de ALMACENAMIENTO. En TMS la
+// conversion invierte el orden, por eso hay que recalcular min y max.
 void RMapsTileSource::storageYRange(int z, int yMin, int yMax,
                                     int *outMin, int *outMax) const
 {
@@ -61,6 +67,9 @@ void RMapsTileSource::storageYRange(int z, int yMin, int yMax,
     *outMax = std::max(a, b);
 }
 
+// Abre la BD (solo lectura, via el pool por hilo) y PREPARA las cuatro consultas
+// reutilizables: una tesela, un rango (con imagen), disponibilidad (sin imagen) y
+// conteo por zoom. Resuelve aqui los nombres de columna reales. Idempotente.
 bool RMapsTileSource::open()
 {
     if (m_open)
@@ -129,6 +138,8 @@ bool RMapsTileSource::open()
     return true;
 }
 
+// UNA tesela: traduce el TileKey logico a la fila real (storedZ, Y del esquema,
+// s) y devuelve el BLOB de imagen, o vacio si no existe/da error.
 QByteArray RMapsTileSource::fetch(const TileKey &key)
 {
     if (!m_open && !open())
@@ -157,6 +168,9 @@ QByteArray RMapsTileSource::fetch(const TileKey &key)
     return blob;
 }
 
+// MUCHAS teselas de un golpe (un viewport): una sola consulta por rango. Devuelve
+// un mapa TileKey(logico) -> imagen. Resuelve las columnas por nombre (no por
+// posicion) y reconvierte la Y almacenada a logica.
 QHash<TileKey, QByteArray> RMapsTileSource::fetchRange(int z,
                                                        int xMin, int xMax,
                                                        int yMin, int yMax)
@@ -206,6 +220,8 @@ QHash<TileKey, QByteArray> RMapsTileSource::fetchRange(int z,
     return out;
 }
 
+// QUE teselas EXISTEN en un rango, SIN traer la imagen (solo x,y). Mas barato que
+// fetchRange; sirve para saber huecos y precargar la "escalera de respaldo".
 QSet<TileKey> RMapsTileSource::available(int z,
                                          int xMin, int xMax,
                                          int yMin, int yMax)
@@ -244,6 +260,64 @@ QSet<TileKey> RMapsTileSource::available(int z,
     return out;
 }
 
+// Histograma de cobertura: una sola consulta que, agrupando por la tesela
+// RESUMEN (x>>shift, y>>shift) a un zoom dado, cuenta cuantas teselas hay en cada
+// celda gruesa. El 'shift' se inyecta como literal (es un entero propio, no texto
+// de usuario) para no repetir el mismo parametro con nombre en dos sitios. Las
+// coords salen en almacenamiento (la conversion a y logico la hace el llamador,
+// pues un bloque de 2^shift y almacenadas corresponde al bloque de la celda
+// resumen tanto en XYZ como en TMS).
+QVector<RMapsTileSource::CoverageCell>
+RMapsTileSource::coverageHistogram(int logicalZ, int shift)
+{
+    QVector<CoverageCell> out;
+    if (!m_open && !open())
+        return out;
+    if (!m_ds.zoomInRange(logicalZ))
+        return out;
+    if (shift < 0)
+        shift = 0;
+
+    QSqlDatabase db = SqliteConnectionPool::connectionFor(
+        m_ds.id, m_ds.filePath, SqliteConnectionPool::Mode::ReadOnly);
+    if (!db.isOpen())
+        return out;
+
+    QString sql = QStringLiteral(
+        "SELECT (%1 >> %5) AS bx, (%2 >> %5) AS by, COUNT(*) AS c "
+        "FROM %3 WHERE %4 = :z")
+        .arg(m_ds.colX, m_ds.colY, m_ds.tableName, m_ds.colZ)
+        .arg(shift);
+    if (m_ds.hasSColumn)
+        sql += QStringLiteral(" AND %1 = :s").arg(m_ds.colS);
+    sql += QStringLiteral(" GROUP BY bx, by");
+
+    QSqlQuery q(db);
+    if (!q.prepare(sql)) {
+        m_lastError = q.lastError().text();
+        qCWarning(lcMapaTiles) << "coverageHistogram prepare fallo:" << m_lastError;
+        return out;
+    }
+    q.bindValue(QStringLiteral(":z"), m_ds.storedZ(logicalZ));
+    if (m_ds.hasSColumn)
+        q.bindValue(QStringLiteral(":s"), m_ds.sValue);
+    if (!q.exec()) {
+        m_lastError = q.lastError().text();
+        qCWarning(lcMapaTiles) << "coverageHistogram fallo:" << m_lastError;
+        return out;
+    }
+    while (q.next()) {
+        CoverageCell c;
+        c.bx = q.value(0).toInt();
+        c.by = q.value(1).toInt();
+        c.count = q.value(2).toInt();
+        out.append(c);
+    }
+    return out;
+}
+
+// Cuantas teselas hay guardadas a un zoom (COUNT por z). -1 si error. Lo usan la
+// sonda y las estadisticas de relleno.
 qint64 RMapsTileSource::tileCount(int z)
 {
     if (!m_open && !open())
@@ -257,6 +331,60 @@ qint64 RMapsTileSource::tileCount(int z)
     const qint64 n = m_qCount->value(0).toLongLong();
     m_qCount->finish();
     return n;
+}
+
+// COUNT(*) sobre el mismo WHERE que fetchRange/available (incluida 's'), asi
+// que usa el indice (z,x,y,s). No se guarda preparada: es una consulta de
+// diagnostico (check_data), no del camino caliente del dibujo.
+qint64 RMapsTileSource::countInRange(int z, int xMin, int xMax, int yMin, int yMax)
+{
+    if (!m_open && !open())
+        return -1;
+    if (xMax < xMin || yMax < yMin)
+        return 0;
+
+    int sy1 = 0, sy2 = 0;
+    storageYRange(z, yMin, yMax, &sy1, &sy2);
+
+    QSqlQuery q(SqliteConnectionPool::connectionFor(
+        m_ds.id, m_ds.filePath, SqliteConnectionPool::Mode::ReadOnly));
+    if (!q.prepare(QStringLiteral("SELECT COUNT(*) FROM %1 %2")
+                       .arg(m_ds.tableName, whereClause()))) {
+        m_lastError = q.lastError().text();
+        return -1;
+    }
+    bindCommon(q, m_ds.storedZ(z), xMin, xMax, sy1, sy2);
+    if (!q.exec() || !q.next()) {
+        m_lastError = q.lastError().text();
+        return -1;
+    }
+    return q.value(0).toLongLong();
+}
+
+// Primera tesela que encuentre SQLite en ese zoom (con la 's' del dataset si la
+// hay). LIMIT 1: no importa cual, solo que exista y se pueda decodificar.
+QByteArray RMapsTileSource::anyTile(int z)
+{
+    if (!m_open && !open())
+        return QByteArray();
+
+    QString where = QStringLiteral("WHERE %1 = :z").arg(m_ds.colZ);
+    if (m_ds.hasSColumn)
+        where += QStringLiteral(" AND %1 = :s").arg(m_ds.colS);
+
+    QSqlQuery q(SqliteConnectionPool::connectionFor(
+        m_ds.id, m_ds.filePath, SqliteConnectionPool::Mode::ReadOnly));
+    if (!q.prepare(QStringLiteral("SELECT %1 FROM %2 %3 LIMIT 1")
+                       .arg(m_ds.colImage, m_ds.tableName, where))) {
+        m_lastError = q.lastError().text();
+        return QByteArray();
+    }
+    q.bindValue(QStringLiteral(":z"), m_ds.storedZ(z));
+    if (m_ds.hasSColumn)
+        q.bindValue(QStringLiteral(":s"), m_ds.sValue);
+    if (!q.exec() || !q.next())
+        return QByteArray();
+    return q.value(0).toByteArray();
 }
 
 } // namespace libmapa

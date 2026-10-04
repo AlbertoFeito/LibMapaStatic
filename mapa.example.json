@@ -1,0 +1,70 @@
+{
+    "format": "libmapa-package",
+    "version": 2,
+
+    "package": {
+        "id": "cuba",
+        "name": "Cuba",
+        "dataVersion": "2026.10",
+        "created": "2026-10-03",
+        "description": "Mapas OSM, satelital (CID3 y Esri Clarity), costas vectoriales y elevacion SRTM 30 m",
+        "bounds": { "north": 23.3, "west": -85.0, "south": 19.7, "east": -74.0 },
+        "attribution": "© colaboradores de OpenStreetMap · Imágenes: Esri, Maxar, Earthstar Geographics · Elevación: SRTM (NASA)"
+    },
+
+    "start": { "layer": "osm", "center": [21.5, -79.5], "zoom": 7 },
+
+    "datasets": [
+        {
+            "id": "osm",
+            "displayName": "Open Street Map",
+            "filePath": "Cuba_OSM_CID3.sqlitedb",
+            "zFactor": 1, "zOffset": 1, "scheme": "XYZ",
+            "minZoom": 3, "maxZoom": 16, "recommendedMaxZoom": 15, "baseZoom": 3,
+            "typicalFill": 1.0,
+            "sValue": 2686452
+        },
+        {
+            "id": "satelital",
+            "displayName": "Satelital",
+            "filePath": "Cuba_Satelital_CID3.sqlitedb",
+            "zFactor": -1, "zOffset": 17, "scheme": "XYZ",
+            "minZoom": 3, "maxZoom": 18, "recommendedMaxZoom": 16, "baseZoom": 3,
+            "typicalFill": 0.32,
+            "sValue": 0
+        },
+        {
+            "id": "clarity",
+            "displayName": "Satelital (Esri Clarity)",
+            "filePath": "Nueva_Clarity.sqlitedb",
+            "zFactor": 1, "zOffset": 0, "scheme": "XYZ",
+            "minZoom": 3, "maxZoom": 14, "recommendedMaxZoom": 14, "baseZoom": 4,
+            "typicalFill": 1.0,
+            "hasSColumn": false
+        },
+        {
+            "id": "costas",
+            "displayName": "Costas de Cuba",
+            "filePath": "Cuba_Vector.sqlitedb",
+            "zFactor": 1, "zOffset": 0, "scheme": "XYZ",
+            "minZoom": 4, "maxZoom": 15, "recommendedMaxZoom": 15, "baseZoom": 4,
+            "typicalFill": 1.0,
+            "hasSColumn": false
+        }
+    ],
+
+    "elevation": { "file": "cuba_dem.sqlitedb" },
+
+    "overlays": [
+        { "id": "aguas", "name": "Aguas jurisdiccionales", "file": "Aguas.geo", "zOrder": 1,
+          "style": { "lineColor": "#1565c0", "fillColor": "#00000000", "lineWidth": 2 } },
+        { "id": "fir", "name": "FIR", "file": "FIR.geo", "zOrder": 2,
+          "style": { "lineColor": "#6a1b9a", "fillColor": "#00000000", "lineWidth": 2 } },
+        { "id": "corredores", "name": "Corredores", "file": "Corredores.geo", "zOrder": 3,
+          "style": { "lineColor": "#ef6c00", "lineWidth": 2 } },
+        { "id": "ejercitos", "name": "Ejércitos", "file": "Ejercitos.geo", "zOrder": 4,
+          "style": { "lineColor": "#2e7d32", "lineWidth": 2 } }
+    ],
+
+    "features": { "file": "entidades.db" }
+}

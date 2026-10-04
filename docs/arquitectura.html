@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>LibMapaStatic — Documentación técnica</title>
+<style>
+  @page { size: A4; margin: 20mm 16mm; }
+  :root{
+    --azul:#145374; --azul2:#1b6d97; --tinta:#1c2430; --gris:#5b6b7b;
+    --linea:#d7dee6; --fondo:#f4f7fa; --code:#0f2b3a;
+  }
+  *{box-sizing:border-box}
+  body{font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--tinta);
+       font-size:10.6pt; line-height:1.5; margin:0}
+  h1,h2,h3,h4{color:var(--azul); line-height:1.2; margin:0 0 .4em}
+  h1{font-size:22pt} h2{font-size:15pt; border-bottom:2px solid var(--azul); padding-bottom:3px; margin-top:0}
+  h3{font-size:12pt; color:var(--azul2)} h4{font-size:10.6pt; color:var(--tinta)}
+  p{margin:.35em 0} ul,ol{margin:.3em 0 .3em 1.1em; padding:0} li{margin:.15em 0}
+  code,.mono{font-family:"Consolas","DejaVu Sans Mono",monospace; font-size:9.3pt}
+  code{background:var(--fondo); padding:1px 4px; border-radius:3px; color:var(--code)}
+  pre{background:var(--fondo); border:1px solid var(--linea); border-radius:6px;
+      padding:8px 10px; overflow:auto; font-size:8.9pt; line-height:1.35}
+  .sec{page-break-before:always}
+  .tag{display:inline-block;background:var(--azul);color:#fff;border-radius:4px;
+       padding:1px 7px;font-size:8pt;letter-spacing:.3px;vertical-align:middle}
+  table{border-collapse:collapse;width:100%;margin:.5em 0;font-size:9.2pt}
+  th,td{border:1px solid var(--linea);padding:5px 7px;text-align:left;vertical-align:top}
+  th{background:var(--azul);color:#fff;font-weight:600}
+  tr:nth-child(even) td{background:var(--fondo)}
+  .cls{font-family:"Consolas",monospace;font-weight:700;color:var(--azul)}
+  .muted{color:var(--gris)}
+  .card{border:1px solid var(--linea);border-left:4px solid var(--azul);border-radius:6px;
+        padding:8px 12px;margin:.6em 0;background:#fff}
+  .note{background:#fff8e6;border:1px solid #ecd9a0;border-radius:6px;padding:7px 10px;margin:.5em 0}
+  figure{margin:.8em 0;text-align:center} figcaption{font-size:8.6pt;color:var(--gris);margin-top:3px}
+  .cover{height:247mm;display:flex;flex-direction:column;justify-content:center;
+         page-break-after:always;background:linear-gradient(160deg,#0e3550,#1b6d97)}
+  .cover .box{color:#fff;padding:0 18mm}
+  .cover h1{color:#fff;font-size:34pt;margin:0}
+  .cover .sub{font-size:14pt;opacity:.92;margin-top:8px}
+  .cover .meta{margin-top:40px;font-size:10.5pt;opacity:.9;border-top:1px solid rgba(255,255,255,.3);padding-top:12px}
+  .toc a{color:var(--tinta);text-decoration:none}
+  .toc li{margin:.25em 0}
+  .kv td:first-child{white-space:nowrap;font-family:Consolas,monospace;color:var(--azul);width:34%}
+  svg{max-width:100%}
+</style>
+</head>
+<body>
+
+<!-- ===================== PORTADA ===================== -->
+<div class="cover"><div class="box">
+  <h1>LibMapaStatic</h1>
+  <div class="sub">Librería de mapas por teselas para Qt&nbsp;— arquitectura, clases y herramientas</div>
+  <div class="meta">
+    Documentación técnica &nbsp;·&nbsp; Qt&nbsp;5.14 / 5.15 / 6.x (MinGW · MSVC · GCC)<br>
+    Núcleo de teselas RMaps/XYZ · Widget de mapa (QCustomPlot) · Herramientas de línea de comandos y con mapa
+  </div>
+</div></div>
+
+<!-- ===================== ÍNDICE ===================== -->
+<h2>Índice</h2>
+<ol class="toc">
+  <li>Visión general — qué es y qué resuelve</li>
+  <li>Arquitectura por capas</li>
+  <li>Tipos y modelos de datos</li>
+  <li>Módulo <b>geo</b> — geodesia y teselas</li>
+  <li>Módulo <b>db</b> — SQLite</li>
+  <li>Módulo <b>tiles</b> — motor de teselas</li>
+  <li>Módulo <b>widget</b> — el mapa en pantalla</li>
+  <li>Módulo <b>io</b> — ficheros .geo</li>
+  <li>Flujos de interacción entre objetos</li>
+  <li>Codificación de teselas (la matemática)</li>
+  <li>Herramientas desarrolladas</li>
+  <li>Motor de descarga <span class="mono">TileFiller</span> y auto-freno</li>
+  <li>Decisiones de diseño e historia</li>
+  <li>Cómo compilar y usar</li>
+</ol>
+
+<!-- ===================== 1. VISIÓN GENERAL ===================== -->
+<h2 class="sec">1 · Visión general</h2>
+<p><b>LibMapaStatic</b> es una librería en C++/Qt para mostrar mapas basados en
+<b>teselas</b> (imágenes de 256×256 px organizadas por zoom/x/y) guardadas en bases
+de datos <b>SQLite</b> del tipo <i>RMaps/XYZ</i>, y para dibujar encima entidades
+vectoriales (puntos, líneas, polígonos) y <b>objetivos móviles</b> en tiempo real.
+Nace de reescribir una aplicación previa («EstacionTerrena») separando con claridad
+el <b>núcleo</b> (datos, geodesia, teselas) del <b>dibujo</b>, de modo que el núcleo
+se pueda probar sin ventanas.</p>
+
+<div class="card">
+<b>Qué hace, en una frase por área:</b>
+<ul>
+  <li><b>Teselas base:</b> abre una o varias BD de teselas (OSM, satélite…), las cachea y las pinta fluido según navegas.</li>
+  <li><b>Entidades:</b> dibuja y edita puntos/líneas/polígonos en capas, con guardado/carga en SQLite y carga de ficheros <code>.geo</code>.</li>
+  <li><b>Objetivos móviles:</b> cientos de móviles con traza y etiqueta, actualizables varias veces por segundo, en una capa que se repinta sola.</li>
+  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), y <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa).</li>
+</ul>
+</div>
+
+<p>El diseño evita los defectos del código original: jerarquías con punteros crudos
+y <code>void*</code>, macros de zoom dispersas, y una clase de dibujo que exponía
+300&nbsp;KB de cabecera de QCustomPlot a todo el que la usara. Aquí la identidad de
+cada entidad es un <b>entero</b>, el mapeo de zoom vive en <b>datos</b>
+(<code>datasets.json</code>), y QCustomPlot queda <b>oculto</b> tras un PIMPL.</p>
+
+<!-- ===================== 2. ARQUITECTURA ===================== -->
+<h2 class="sec">2 · Arquitectura por capas</h2>
+<p>El código se organiza en dos bibliotecas estáticas y un conjunto de aplicaciones.
+El <b>núcleo</b> no depende de Widgets ni de QCustomPlot; el <b>widget</b> añade el
+mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
+
+<figure>
+<svg viewBox="0 0 760 430" font-family="Segoe UI, sans-serif" font-size="12">
+  <!-- apps -->
+  <rect x="20" y="20" width="720" height="86" rx="8" fill="#eaf2f8" stroke="#1b6d97"/>
+  <text x="30" y="40" fill="#145374" font-weight="700">Aplicaciones / Herramientas</text>
+  <g font-size="11">
+    <rect x="34" y="52" width="96" height="42" rx="5" fill="#fff" stroke="#9db8cc"/><text x="42" y="70">demo / miapp</text><text x="42" y="85" fill="#5b6b7b" font-size="9">(mapa)</text>
+    <rect x="140" y="52" width="96" height="42" rx="5" fill="#fff" stroke="#9db8cc"/><text x="150" y="70">fill_map</text><text x="150" y="85" fill="#5b6b7b" font-size="9">(mapa)</text>
+    <rect x="246" y="52" width="104" height="42" rx="5" fill="#fff" stroke="#9db8cc"/><text x="256" y="70">fill_tiles</text><text x="256" y="85" fill="#5b6b7b" font-size="9">(consola)</text>
+    <rect x="360" y="52" width="100" height="42" rx="5" fill="#fff" stroke="#9db8cc"/><text x="370" y="70">probe_db</text><text x="370" y="85" fill="#5b6b7b" font-size="9">(consola)</text>
+    <rect x="470" y="52" width="120" height="42" rx="5" fill="#fff" stroke="#9db8cc"/><text x="480" y="70">geo_to_tiles</text><text x="480" y="85" fill="#5b6b7b" font-size="9">(consola)</text>
+    <rect x="600" y="52" width="128" height="42" rx="5" fill="#fff" stroke="#9db8cc"/><text x="610" y="70">render/vector/bench</text><text x="610" y="85" fill="#5b6b7b" font-size="9">(utilidades)</text>
+  </g>
+  <!-- widget lib -->
+  <rect x="20" y="126" width="430" height="120" rx="8" fill="#e7f0ea" stroke="#2e7d54"/>
+  <text x="30" y="146" fill="#22603f" font-weight="700">libmapa_widget &nbsp;<tspan font-weight="400" font-size="9">(Widgets + QCustomPlot)</tspan></text>
+  <g font-size="10">
+    <rect x="34" y="158" width="120" height="34" rx="5" fill="#fff" stroke="#8fbfa3"/><text x="42" y="179">MapWidget (PIMPL)</text>
+    <rect x="162" y="158" width="90" height="34" rx="5" fill="#fff" stroke="#8fbfa3"/><text x="170" y="179">MapView</text>
+    <rect x="260" y="158" width="180" height="34" rx="5" fill="#fff" stroke="#8fbfa3"/><text x="268" y="179">TileLayer · FeatureLayer · TargetLayer</text>
+    <rect x="34" y="200" width="200" height="34" rx="5" fill="#fff" stroke="#8fbfa3"/><text x="42" y="221">OverlayModel · TargetModel</text>
+  </g>
+  <!-- core lib -->
+  <rect x="20" y="266" width="720" height="150" rx="8" fill="#eef0f4" stroke="#5b6b7b"/>
+  <text x="30" y="286" fill="#39424e" font-weight="700">libmapa_core &nbsp;<tspan font-weight="400" font-size="9">(sin ventanas: Core · Gui · Sql · Positioning)</tspan></text>
+  <g font-size="10">
+    <rect x="34" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="42" y="316" fill="#145374" font-weight="700">tiles</text><text x="42" y="332" font-size="8.5">TileService·Loader·Cache·Source·Planner·Probe</text>
+    <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·TileKey</text>
+    <rect x="338" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="346" y="316" fill="#145374" font-weight="700">db</text><text x="346" y="332" font-size="8.5">ConnectionPool·Schema·VectorRepository</text>
+    <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · Elevation</text>
+    <rect x="622" y="298" width="106" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="630" y="316" fill="#145374" font-weight="700">tipos</text><text x="630" y="332" font-size="8.5">MapFeature·MapTarget</text>
+    <rect x="34" y="352" width="694" height="30" rx="5" fill="#f7f9fb" stroke="#c4ccd6"/><text x="42" y="371" fill="#5b6b7b">Qt: QGeoCoordinate · QImage · QSqlDatabase · QCache · QThread</text>
+  </g>
+  <!-- flechas -->
+  <g stroke="#5b6b7b" stroke-width="1.4" fill="none" marker-end="url(#ar)">
+    <path d="M120 106 V126"/><path d="M188 106 V126"/><path d="M300 106 V266"/><path d="M420 106 V266"/><path d="M235 246 V266"/>
+  </g>
+  <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#5b6b7b"/></marker></defs>
+</svg>
+<figcaption>Figura 1 — Capas: las apps usan el widget o directamente el núcleo; el widget se apoya en el núcleo; el núcleo solo depende de Qt.</figcaption>
+</figure>
+
+<div class="note"><b>Motivo de la separación:</b> el núcleo (teselas, geodesia, BD) se
+compila y prueba <b>sin QCustomPlot ni Widgets</b>. Así 14 de los 17 tests automáticos
+validan la lógica sin QCustomPlot ni ventanas, y quien solo quiera leer teselas no
+arrastra el motor de dibujo.</div>
+
+<!-- ===================== 3. TIPOS ===================== -->
+<h2 class="sec">3 · Tipos y modelos de datos</h2>
+<p>Antes que las clases con lógica, conviene conocer los <b>tipos de valor</b> que se
+pasan por toda la librería. Son <i>structs</i> simples (sin herencia), identificados
+por un entero cuando hace falta.</p>
+
+<table class="kv">
+<tr><th>Tipo</th><th>Rol</th></tr>
+<tr><td>TileKey</td><td>Identidad de una tesela: <code>{z, x, y}</code> lógicos. Se usa como clave del caché (con <code>qHash</code>).</td></tr>
+<tr><td>TileDataset</td><td>Todo lo que se sabe de una BD de teselas: ruta, tabla, mapeo de zoom (<code>zFactor/zOffset</code>), esquema (XYZ/TMS), columnas, <code>hasSColumn/sValue</code>, min/max/recommended zoom, relleno típico. Se lee de <code>datasets.json</code>.</td></tr>
+<tr><td>MapFeature</td><td>Entidad vectorial: geometría multi-parte (puntos/líneas/polígonos), estilo (<code>FeatureStyle</code>), etiqueta y «tipo de dominio». Identidad = <code>qint64</code>.</td></tr>
+<tr><td>MapTarget</td><td>Objetivo móvil: posición, rumbo, color, etiqueta, visibilidad de traza. Pensado para tiempo real.</td></tr>
+<tr><td>LayerInfo / BaseLayerInfo</td><td>Descriptor de una capa (de entidades / base) para poblar menús.</td></tr>
+<tr><td>GeoPath</td><td>Un trazado leído de un fichero <code>.geo</code> (lista de coordenadas + si cierra).</td></tr>
+<tr><td>Measurement / MapPoint / MapVehicle…</td><td>Tipos auxiliares de la API pública (medición, puntos, vehículos, rutas).</td></tr>
+</table>
+<p class="muted">Regla de diseño: la identidad es un entero que devuelve la librería al añadir el objeto, no un puntero a una jerarquía. Esto elimina los <code>QList&lt;void*&gt;</code> y castes del código original.</p>
+
+<!-- ===================== 4. GEO ===================== -->
+<h2 class="sec">4 · Módulo <span class="mono">geo</span> — geodesia y teselas</h2>
+<p>Convierte entre coordenadas geográficas (lat/lon) y el sistema de teselas Web
+Mercator. Es matemática pura, sin estado ni Qt más allá de <code>QGeoCoordinate</code>.</p>
+
+<h3><span class="cls">WebMercator</span> <span class="tag">geo/WebMercator.h</span></h3>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">forward(coord) → QPointF</td><td>Lat/lon → metros Web Mercator (EPSG:3857).</td></tr>
+<tr><td class="mono">inverse(x,y) → QGeoCoordinate</td><td>Metros → lat/lon (la usa <code>geo_to_tiles</code> al leer <code>.xyz</code>).</td></tr>
+<tr><td class="mono">clampLatitude(lat)</td><td>Acota la latitud al máximo de Mercator (~±85,05°) para que la proyección no se dispare.</td></tr>
+</table>
+
+<h3><span class="cls">TileMatrix</span> <span class="tag">geo/TileMatrix.h</span></h3>
+<p>El corazón geométrico: relaciona lat/lon con índices de tesela a cada zoom. Todo
+<i>static</i>.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">tilesPerSide(z)</td><td><code>2^z</code>: cuántas teselas por lado tiene el mundo a ese zoom.</td></tr>
+<tr><td class="mono">longitudeToTileX / latitudeToTileY</td><td>Coordenada → índice de tesela (fraccionario) en X / Y.</td></tr>
+<tr><td class="mono">tileXToLongitude / tileYToLatitude</td><td>La inversa: índice de tesela → coordenada del borde.</td></tr>
+<tr><td class="mono">tileAt(coord, z) → TileKey</td><td>Qué tesela contiene una coordenada a un zoom.</td></tr>
+<tr><td class="mono">tileBounds / tileNorthWest / tileSouthEast</td><td>Rectángulo geográfico que cubre una tesela.</td></tr>
+<tr><td class="mono">rangeFor(nw, se, z, margen)</td><td>Rango de teselas <code>[xMin..xMax]×[yMin..yMax]</code> que cubre un rectángulo — la base para pedir el viewport.</td></tr>
+<tr><td class="mono">toStorageY / fromStorageY(y,z,esquema)</td><td>Convierte la Y entre <b>XYZ</b> (origen arriba) y <b>TMS</b> (origen abajo). Involutiva.</td></tr>
+<tr><td class="mono">latitudeToAxisY / axisYToLatitude</td><td>Lat ↔ «grados de Mercator» del eje lineal de QCustomPlot (imprescindible para overlays).</td></tr>
+<tr><td class="mono">bestZoomFor(span, anchoPx)</td><td>Elige el zoom natural para un ancho de mundo visible.</td></tr>
+</table>
+
+<h3><span class="cls">TileKey</span> <span class="tag">tiles/TileKey.h</span></h3>
+<p>Struct <code>{z,x,y}</code> con <code>operator==</code> y <code>qHash</code> para servir de
+clave en el caché. En Qt&nbsp;6 el <code>qHash</code> se adapta (guarda de versión legítima).</p>
+
+<!-- ===================== 5. DB ===================== -->
+<h2 class="sec">5 · Módulo <span class="mono">db</span> — SQLite</h2>
+
+<h3><span class="cls">SqliteConnectionPool</span> <span class="tag">db/SqliteConnectionPool.h</span></h3>
+<p>Da a cada hilo su propia conexión SQLite (Qt exige que una <code>QSqlDatabase</code> no
+se comparta entre hilos). Reutiliza conexiones por (fichero, hilo) y las nombra de
+forma única.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">connectionFor(id, ruta)</td><td>Devuelve/crea la conexión para ese fichero en el hilo actual.</td></tr>
+<tr><td class="mono">openConnectionCount()</td><td>Cuántas conexiones vivas hay (diagnóstico y tests).</td></tr>
+</table>
+
+<h3><span class="cls">Transaction</span> <span class="tag">db/Transaction.h</span></h3>
+<p>Envoltura RAII de <code>BEGIN/COMMIT/ROLLBACK</code>: <code>commit()</code> confirma; si el
+objeto muere sin confirmar, hace <i>rollback</i>. Evita transacciones a medias.</p>
+
+<h3><span class="cls">Schema</span> <span class="tag">db/Schema.h</span></h3>
+<p>Crea/verifica el esquema de la BD de <b>entidades</b> (capas, geometrías, estilos)
+que usa <code>VectorRepository</code>.</p>
+
+<h3><span class="cls">VectorRepository</span> <span class="tag">db/VectorRepository.h · QObject</span></h3>
+<p>Persiste entidades vectoriales y capas en SQLite: guardar/cargar todo el mapa de
+entidades. Emite <code>errorOccurred</code>. Lo usa <code>MapWidget</code> en
+<code>saveFeaturesTo()/loadFeaturesFrom()</code>. Con <code>MapConfig.featuresDbFile</code>
+(o <code>setFeaturesDbFile()</code>) el widget hace <b>persistencia automática</b>:
+carga al abrir y guarda solo lo dibujado/editado/borrado con un <b>antirebote</b>
+(~500 ms) que agrupa las ráfagas — volcado completo, reutilizando
+<code>saveFeaturesTo</code>. Los objetivos móviles no se persisten.</p>
+
+<!-- ===================== 6. TILES ===================== -->
+<h2 class="sec">6 · Módulo <span class="mono">tiles</span> — motor de teselas</h2>
+<p>Es el subsistema más grande: abrir BD de teselas, decidir qué pedir, leerlas en un
+hilo aparte, cachearlas y entregar un «plan de dibujo». Todo alrededor del
+<code>TileDataset</code>, que describe cada BD.</p>
+
+<h3><span class="cls">TileDataset</span> <span class="tag">tiles/TileDataset.h</span></h3>
+<p>Descriptor de una BD. Sustituye a los <code>#define</code> invertidos y parches de
+zoom del código original. Métodos clave:</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">storedZ(zLógico)</td><td><code>zFactor·z + zOffset</code>: el valor que va en la columna <code>z</code> de la BD.</td></tr>
+<tr><td class="mono">logicalZ(zGuardado)</td><td>La inversa.</td></tr>
+<tr><td class="mono">effectiveBaseZoom()</td><td>Nivel de fondo garantizado, acotado al rango real.</td></tr>
+<tr><td class="mono">zoomInRange / zoomRecommended</td><td>Si un zoom existe / si conviene ofrecerlo en la interfaz.</td></tr>
+<tr><td class="mono">fromJson / toJson</td><td>Lee/escribe el descriptor en <code>datasets.json</code>.</td></tr>
+</table>
+
+<h3><span class="cls">ITileSource</span> / <span class="cls">RMapsTileSource</span> <span class="tag">tiles/RMapsTileSource.h</span></h3>
+<p><code>ITileSource</code> es la interfaz «dame la imagen de esta <code>TileKey</code>».
+<code>RMapsTileSource</code> la implementa sobre una BD SQLite RMaps/XYZ: traduce el
+<code>TileKey</code> lógico a la fila real (con <code>storedZ</code>, la Y del esquema y la
+columna <code>s</code> si existe) y devuelve el BLOB de imagen.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">open()</td><td>Abre la BD y prepara las consultas (resuelve nombres de columna reales).</td></tr>
+<tr><td class="mono">fetch(key)</td><td>Una tesela: <code>SELECT image WHERE z=storedZ AND x AND y [AND s]</code>.</td></tr>
+<tr><td class="mono">fetchRange(z, rango)</td><td>Muchas teselas de un golpe (un viewport).</td></tr>
+<tr><td class="mono">availableInRange(...)</td><td>Qué teselas existen (sin traer la imagen), para saber huecos.</td></tr>
+</table>
+
+<h3><span class="cls">TileCache</span> <span class="tag">tiles/TileCache.h</span></h3>
+<p>Caché LRU de imágenes ya decodificadas (basada en <code>QCache</code>). Guarda el
+coste en <b>KiB</b> (no bytes, para no desbordar el <code>int</code> con 2&nbsp;GiB), tiene
+un área <b>anclada</b> (el nivel de fondo, que no se expulsa) y una lista de teselas
+«que no existen» para no volver a pedirlas.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">take(key)</td><td>Copia (compartida) de la imagen si está; si no, cuenta un fallo.</td></tr>
+<tr><td class="mono">insert / insertImage</td><td>Mete una tesela (decodificando o ya decodificada), con o sin anclar.</td></tr>
+<tr><td class="mono">markMissing / isKnownMissing</td><td>Marca/consulta que una tesela no existe en la BD.</td></tr>
+<tr><td class="mono">countCached(...)</td><td>Cuántas del rango están «resueltas» (en caché o marcadas ausentes).</td></tr>
+<tr><td class="mono">clear() / setMaxBytes()</td><td>Vaciar (p. ej. tras <code>reloadBaseLayer</code>) / cambiar el presupuesto.</td></tr>
+</table>
+
+<h3><span class="cls">TileLoader</span> <span class="tag">tiles/TileLoader.h · QObject (hilo)</span></h3>
+<p>Lee teselas <b>en un hilo aparte</b> para no bloquear la interfaz. Recibe
+<code>TileRequest</code> (un rango + zoom + id), consulta la <code>ITileSource</code>, e
+informa con <code>LoadedTile</code>. El id de petición permite descartar respuestas
+viejas cuando el usuario ya se movió.</p>
+
+<h3><span class="cls">TilePlanner</span> <span class="tag">tiles/TilePlanner.h</span></h3>
+<p>Calcula el <b>plan de dibujo</b>: qué teselas y con qué escala hay que pintar para
+cubrir el viewport, incluida la «escalera de respaldo» (usar teselas de zoom vecino
+mientras llega el detalle). Devuelve <code>TileDrawItem</code>s.</p>
+
+<h3><span class="cls">TileService</span> <span class="tag">tiles/TileService.h · QObject</span></h3>
+<p>La <b>fachada</b> del módulo: orquesta dataset activo + caché + loader + planner.
+Es lo que usa el widget.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">start(datasets, cacheMiB)</td><td>Arranca con la lista de datasets y el presupuesto de caché.</td></tr>
+<tr><td class="mono">loadDatasets(json) <span class="muted">[static]</span></td><td>Lee <code>datasets.json</code> → lista de <code>TileDataset</code>.</td></tr>
+<tr><td class="mono">setActiveDataset(id)</td><td>Cambia de capa base (osm↔satelital↔…).</td></tr>
+<tr><td class="mono">requestViewport(nw, se, z, margen)</td><td>Pide al loader las teselas visibles (con antirebote).</td></tr>
+<tr><td class="mono">planFor(nw, se, z)</td><td>Plan de dibujo con lo que haya en caché.</td></tr>
+<tr><td class="mono">cache()</td><td>Acceso al <code>TileCache</code> (p. ej. para vaciarlo).</td></tr>
+<tr><td class="mono">signal tilesReady(id, z, nuevas)</td><td>Llegaron teselas nuevas → repintar.</td></tr>
+</table>
+
+<h3><span class="cls">TileDatasetProbe</span> <span class="tag">tiles/TileDatasetProbe.h</span></h3>
+<p>Sonda: abre una BD «a ciegas» y <b>deduce</b> su configuración (mapeo de zoom,
+esquema, relleno, bbox) analizando qué hay en la tabla. Es el cerebro de
+<code>probe_db</code>. Devuelve <code>ProbeResult</code> con <code>ZoomLevelStats</code> por nivel.</p>
+
+<!-- ===================== 7. WIDGET ===================== -->
+<h2 class="sec">7 · Módulo <span class="mono">widget</span> — el mapa en pantalla</h2>
+<p>Convierte el motor de teselas en un <code>QWidget</code> embebible. El motor de
+dibujo es QCustomPlot, pero queda oculto.</p>
+
+<h3><span class="cls">MapWidget</span> <span class="tag">include/libmapa/MapWidget.h · QWidget (PIMPL)</span></h3>
+<p>La <b>cara pública</b> de toda la librería. No expone QCustomPlot: por dentro tiene
+un <code>Impl</code> con el <code>TileService</code> y el <code>MapView</code>. Agrupa toda
+la API que usa la aplicación:</p>
+<table><tr><th>Grupo</th><th>Funciones (ejemplos)</th></tr>
+<tr><td>Capa base</td><td class="mono">availableBaseLayers · baseLayerId · setBaseLayerId · reloadBaseLayer</td></tr>
+<tr><td>Navegación</td><td class="mono">center/setCenter · zoom/setZoom · zoomIn/Out · fitBounds · visibleNorthWest/SouthEast</td></tr>
+<tr><td>Capas de entidades</td><td class="mono">addFeatureLayer · setFeatureLayerVisible · setFeatureLayerZOrder</td></tr>
+<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer</td></tr>
+<tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
+<tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
+<tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
+<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetTrailLength</td></tr>
+<tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
+<tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
+<tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
+</table>
+
+<h3><span class="cls">MapView</span> <span class="tag">widget/MapView.h · QCustomPlot</span></h3>
+<p>El lienzo real: hereda de QCustomPlot, gestiona el ratón (arrastrar, rueda,
+herramientas), traduce píxeles↔coordenadas y coordina las capas.
+<code>requestVisibleTiles()</code> pide teselas del viewport; <code>refreshPlan()</code>
+rehace el plan y repinta. Aquí vive el rectángulo de <code>SelectArea</code> que se
+añadió para la descarga.</p>
+
+<h3>Capas de dibujo (QCPLayerable)</h3>
+<table><tr><th>Clase</th><th>Rol</th></tr>
+<tr><td class="cls">TileLayer</td><td>Pinta las teselas del plan (con la escalera de respaldo). Lee del <code>TileCache</code>.</td></tr>
+<tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar.</td></tr>
+<tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas.</td></tr>
+<tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
+</table>
+
+<h3>Modelos (QObject, sin dibujo)</h3>
+<table><tr><th>Clase</th><th>Rol</th></tr>
+<tr><td class="cls">OverlayModel</td><td>Guarda las entidades y capas, la selección y el historial de <b>deshacer/rehacer</b>. Separado del dibujo para poder probarlo sin ventanas.</td></tr>
+<tr><td class="cls">TargetModel</td><td>Guarda los objetivos y su traza (acotada). Operaciones O(1) por objetivo para el tiempo real; emite <code>changed()</code>.</td></tr>
+</table>
+
+<!-- ===================== 8. IO ===================== -->
+<h2 class="sec">8 · Módulo <span class="mono">io</span> — ficheros .geo y paquete de datos</h2>
+<p><span class="cls">GeoFile</span> <span class="tag">include/libmapa/GeoFile.h</span> lee/escribe
+ficheros <code>.geo</code>/<code>.xyz</code>: listas de coordenadas donde <code>0,0</code>
+separa trazados. Un fichero puede traer varios trazados (aguas jurisdiccionales,
+corredores, divisiones). <code>MapWidget::loadGeoAsLayer()</code> lo carga como <b>una
+entidad multi-parte</b>. También lo usa <code>geo_to_tiles</code> para rasterizar.</p>
+
+<h3><span class="cls">DataPackage</span> <span class="tag">io/DataPackage.h · público: DataPackageInfo</span></h3>
+<p>El producto final trabaja <b>sin conexión</b>: todos sus datos viajan en un
+<b>paquete</b>, una carpeta con un manifiesto <code>mapa.json</code> (formato
+<code>libmapa-package</code>, versión 2) y rutas <b>relativas</b> a ella.
+<code>DataPackage::load()</code> lo lee (carpeta o fichero), valida formato y versión,
+resuelve las rutas a absolutas y anota como <b>aviso</b>, sin fallar, lo que falte.
+Un <code>datasets.json</code> de la versión 1 se acepta como paquete mínimo.</p>
+<table class="kv">
+<tr><td>package</td><td>id, nombre, versión de los datos, fecha, zona (<code>bounds</code>) y atribución → <code>MapWidget::packageInfo()</code>.</td></tr>
+<tr><td>start</td><td>Capa, centro y zoom de arranque.</td></tr>
+<tr><td>datasets</td><td>Capas base (mismo formato que <code>datasets.json</code>; lo omitido toma su valor por defecto).</td></tr>
+<tr><td>elevation</td><td><code>file</code> (BD <code>.sqlitedb</code>) o <code>dir</code> (carpeta <code>.hgt</code>).</td></tr>
+<tr><td>overlays</td><td>Capas vectoriales <b>fijas</b> <code>.geo</code> con estilo: bloqueadas y excluidas del guardado de entidades (<code>fixedLayers</code>), para no duplicarse en cada arranque.</td></tr>
+<tr><td>features</td><td>BD de entidades del usuario. Relativa → <code>AppDataLocation/&lt;package.id&gt;/</code> (escribible), nunca la carpeta del paquete; <code>seed</code> se copia la primera vez.</td></tr>
+</table>
+<p><code>MapConfig::dataDir</code> es el único ajuste necesario; cualquier campo de
+<code>MapConfig</code> rellenado a mano tiene prioridad sobre el paquete.</p>
+
+<h3><span class="cls">PackageCheck</span> <span class="tag">io/PackageCheck.h</span></h3>
+<p>Comprueba que un paquete funcionará <b>sin conexión</b>: lo que falte no se podrá
+descargar después. Cada hallazgo lleva su gravedad: <b>Error</b> si una parte del
+mapa no se dibujará, <b>Warning</b> si funciona pero algo falta o no es portable,
+<b>Info</b> para el informe. No escribe nada (todo en solo lectura; la BD de
+entidades del usuario ni se abre, porque abrirla podría migrar su esquema).</p>
+<table class="kv">
+<tr><td>Qt</td><td>Driver <code>QSQLITE</code> disponible (sin él no abre nada).</td></tr>
+<tr><td>Capas base</td><td>El fichero existe, abre como base de teselas, y una tesela real del nivel de fondo <b>se decodifica</b>: detecta el plugin de imagen que falta al desplegar (<code>qjpeg</code>) y lo nombra.</td></tr>
+<tr><td>Cobertura</td><td>Solo en modo completo: por cada zoom, teselas presentes / esperadas dentro de <code>bounds</code>, con <code>RMapsTileSource::countInRange</code> (un <code>COUNT(*)</code> que usa el índice: ~0,2 s para 7 GB).</td></tr>
+<tr><td>Elevación / capas fijas</td><td>La BD tiene <code>dem_tiles</code> con datos; los <code>.geo</code> se leen.</td></tr>
+<tr><td>Paquete</td><td>Atribución y zona declaradas, capa de arranque existente, ids no repetidos, y todo <b>dentro</b> de la carpeta (lo de fuera no viaja).</td></tr>
+</table>
+<p>El modo <b>rápido</b> (sin cobertura) lo ejecuta <code>MapWidget</code> al abrir un
+paquete y deja los problemas en <code>dataWarnings()</code>; el mapa arranca igual con
+lo que funcione. El completo lo usa la herramienta <code>check_data</code>.</p>
+
+<!-- ===================== 8bis. DEM ===================== -->
+<h2 class="sec">8b · Módulo <span class="mono">dem</span> — elevación del terreno (HGT/SRTM)</h2>
+<p>Da la cota en metros de una coordenada, leyendo datos <b>SRTM</b>. Vive en
+<code>libmapa_core</code> (sin widgets): se consulta igual desde la ventana que
+desde consola o un test. Separa <i>de dónde salen las muestras</i> de <i>cómo se
+interpola</i>, con una interfaz al estilo de <code>ITileSource</code>:</p>
+<ul>
+  <li><span class="cls">IElevationSource</span> <span class="tag">src/dem/IElevationSource.h</span>: interfaz pura, un método <code>elevationAt(coord)→double</code> (contrato NaN).</li>
+  <li><span class="cls">GridElevation</span> <span class="tag">src/dem/GridElevation.h</span>: base que concentra lo común (caché LRU de tiles, lectura de muestra, <b>interpolación bilineal</b>, huecos→NaN); deja un solo hueco: <code>loadTile()</code>.</li>
+  <li><span class="cls">HgtElevation</span>: <code>loadTile()</code> lee el fichero <code>.hgt</code> de una carpeta.</li>
+  <li><span class="cls">SqliteElevation</span>: <code>loadTile()</code> consulta una base de datos <code>.sqlitedb</code> y descomprime el blob del tile — un <b>solo fichero</b>, cómodo para empaquetar en una app.</li>
+</ul>
+<p>El <code>.hgt</code> es crudo y <b>sin cabecera</b>: una rejilla <b>cuadrada</b>
+de muestras <code>int16</code> <b>big-endian</b> que cubre 1°×1°. El nombre marca
+la esquina suroeste (<code>N19W077.hgt</code> = 19–20 N, 77–76 O); la fila 0 es el
+borde <b>norte</b> y la columna 0 el <b>oeste</b>. La resolución no está escrita:
+se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m,
+3601 = 30 m).</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">elevationAt(coord) → double</td><td>Localiza el tile (floor de lat/lon), autodetecta el lado, lee big-endian e <b>interpola bilinealmente</b>. <b>NaN</b> si no hay dato (tile ausente, sin origen, o hueco SRTM <code>-32768</code>).</td></tr>
+<tr><td class="mono">loadTile(lat,lon,…)</td><td>El único método que cambia por origen: lee el fichero (<code>HgtElevation</code>) o el blob de la BD (<code>SqliteElevation</code>).</td></tr>
+</table>
+<p>El <code>.hgt</code> es crudo y <b>sin cabecera</b>: rejilla <b>cuadrada</b> de <code>int16</code> <b>big-endian</b> de 1°×1°, nombre = esquina SO (<code>N19W077.hgt</code>), fila 0 = norte, col 0 = oeste. La resolución se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m, 3601 = 30 m). La <b>BD</b> guarda esas mismas muestras <code>qCompress</code>-adas: <code>dem_tiles(lat,lon,side,data)</code> + <code>dem_meta</code>; se abre read-only por el <code>SqliteConnectionPool</code>.</p>
+<p><b>Propiedades:</b> <span class="tag">caché LRU</span> de tiles abiertos; <span class="tag">huecos→NaN</span> no inventa terreno; <span class="tag">dos orígenes</span> carpeta <code>.hgt</code> o BD empaquetable, misma cota. Se expone por la fachada: <code>MapConfig.elevationDir</code>/<code>elevationDbFile</code>, <code>MapWidget::elevationAt()</code> y <code>setElevationDir/Db()</code>; <code>fill_map</code> muestra la cota bajo el cursor (<code>--dem</code> carpeta, <code>--dem-db</code> base de datos, o el botón <b>DEM…</b>).</p>
+
+<!-- ===================== 9. FLUJOS ===================== -->
+<h2 class="sec">9 · Flujos de interacción entre objetos</h2>
+
+<h3>9.1 · Pintar el mapa mientras navegas</h3>
+<figure>
+<svg viewBox="0 0 760 300" font-family="Segoe UI" font-size="11">
+  <defs><marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#1b6d97"/></marker></defs>
+  <g>
+    <rect x="10"  y="20" width="110" height="34" rx="5" fill="#eaf2f8" stroke="#1b6d97"/><text x="20" y="41">Usuario arrastra</text>
+    <rect x="10"  y="80" width="110" height="34" rx="5" fill="#fff" stroke="#1b6d97"/><text x="30" y="101">MapView</text>
+    <rect x="10"  y="140" width="110" height="34" rx="5" fill="#fff" stroke="#1b6d97"/><text x="24" y="161">TileService</text>
+    <rect x="10"  y="200" width="110" height="34" rx="5" fill="#fff" stroke="#1b6d97"/><text x="18" y="221">TileLoader (hilo)</text>
+    <rect x="10"  y="260" width="110" height="34" rx="5" fill="#fff" stroke="#1b6d97"/><text x="12" y="281">RMapsTileSource</text>
+  </g>
+  <g stroke="#1b6d97" stroke-width="1.5" fill="none" marker-end="url(#a2)">
+    <path d="M65 54 V80"/><path d="M65 114 V140"/><path d="M65 174 V200"/><path d="M65 234 V260"/>
+  </g>
+  <g font-size="10" fill="#39424e">
+    <text x="130" y="100">① mueve el centro → requestVisibleTiles()</text>
+    <text x="130" y="160">② requestViewport(nw,se,z) con antirebote (~80&nbsp;ms)</text>
+    <text x="130" y="220">③ TileRequest(rango,z,id) al hilo lector</text>
+    <text x="130" y="280">④ SELECT image … por cada TileKey (storedZ, Y esquema, s)</text>
+  </g>
+  <!-- vuelta -->
+  <rect x="470" y="140" width="120" height="34" rx="5" fill="#e7f0ea" stroke="#2e7d54"/><text x="486" y="161">TileCache</text>
+  <rect x="620" y="140" width="120" height="34" rx="5" fill="#e7f0ea" stroke="#2e7d54"/><text x="642" y="161">TileLayer</text>
+  <g stroke="#2e7d54" stroke-width="1.5" fill="none" marker-end="url(#a3)">
+    <path d="M120 217 H540 V174"/><path d="M590 157 H620"/>
+  </g>
+  <defs><marker id="a3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#2e7d54"/></marker></defs>
+  <g font-size="10" fill="#22603f">
+    <text x="470" y="120">⑤ LoadedTile → insertImage()</text>
+    <text x="470" y="205">⑥ tilesReady → refreshPlan() → TileLayer repinta</text>
+  </g>
+</svg>
+<figcaption>Figura 2 — De un arrastre a la imagen en pantalla. El hilo lector nunca bloquea la interfaz; el caché evita releer.</figcaption>
+</figure>
+
+<h3>9.2 · Objetivos móviles en tiempo real</h3>
+<p><code>MapWidget::updateTarget(id, pos, rumbo)</code> → <code>TargetModel</code> actualiza
+posición y traza en O(1) y emite <code>changed()</code> → <code>TargetLayer</code>
+<b>agrupa</b> los avisos y repinta como mucho ~30 veces/segundo, y <b>solo</b> su capa
+(modo BUFFERED), sin tocar teselas ni entidades. Así aguanta cientos de móviles.</p>
+
+<h3>9.3 · Entidades y ficheros .geo</h3>
+<p><code>loadGeoAsLayer(ruta)</code> → <code>GeoFile</code> lee los trazados →
+<code>OverlayModel</code> crea una entidad multi-parte → <code>FeatureLayer</code> la
+pinta. <code>saveFeaturesTo()</code> vuelca todo con <code>VectorRepository</code>.</p>
+
+<!-- ===================== 10. CODIFICACIÓN ===================== -->
+<h2 class="sec">10 · Codificación de teselas (la matemática)</h2>
+<p>Cada BD guarda las teselas con su propio convenio. La librería lo captura en el
+<code>TileDataset</code> y traduce siempre igual. Dado un <b>tesela lógica</b>
+<code>(z, x, y)</code> en el estándar XYZ (origen arriba-izquierda):</p>
+<pre>z_guardado = zFactor · z + zOffset        (columna z de la tabla)
+x_guardado = x                            (igual)
+y_guardado = toStorageY(y, z, esquema)    XYZ: y   |   TMS: (2^z − 1) − y
+s          = sValue                        (si la BD tiene columna 's')</pre>
+<table>
+<tr><th>BD</th><th>zFactor</th><th>zOffset</th><th>esquema</th><th>columna s</th><th>Ejemplo z lógico 11</th></tr>
+<tr><td>OSM (Cuba)</td><td>1</td><td>1</td><td>XYZ</td><td>sí (2686452)</td><td>z_guardado = 12</td></tr>
+<tr><td>Satelital (Google)</td><td>−1</td><td>17</td><td>XYZ</td><td>sí (0)</td><td>z_guardado = 6</td></tr>
+<tr><td>Vector / base nueva</td><td>1</td><td>0</td><td>XYZ</td><td>no</td><td>z_guardado = 11</td></tr>
+</table>
+<div class="note">Este mapeo es <b>el mismo</b> que usan al leer el widget y al escribir las
+herramientas de descarga. Por eso una tesela bajada por <code>fill_tiles</code> aparece
+exactamente donde el mapa la espera.</div>
+
+<!-- ===================== 11. HERRAMIENTAS ===================== -->
+<h2 class="sec">11 · Herramientas desarrolladas</h2>
+<p>Programas de línea de comandos (y uno con mapa) que se apoyan en la librería.</p>
+
+<table>
+<tr><th>Herramienta</th><th>Tipo</th><th>Para qué</th></tr>
+<tr><td class="mono">probe_db</td><td>consola</td><td>Sonda una <code>.sqlitedb</code> y deduce su configuración; imprime el bloque para <code>datasets.json</code>.</td></tr>
+<tr><td class="mono">geo_to_tiles</td><td>consola (Gui)</td><td>Rasteriza un vector <code>.geo/.xyz</code> a una pirámide de teselas SQLite (capa base rápida).</td></tr>
+<tr><td class="mono">vector_db</td><td>consola</td><td>Utilidad sobre la BD de entidades vectoriales.</td></tr>
+<tr><td class="mono">render_map</td><td>utilidad (widget)</td><td>Renderiza el mapa a imagen sin interacción (pruebas/verificación).</td></tr>
+<tr><td class="mono">bench_tiles</td><td>consola</td><td>Mide el rendimiento de lectura/caché de teselas.</td></tr>
+<tr><td class="mono">fill_tiles</td><td>consola</td><td>Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave.</td></tr>
+<tr><td class="mono">fill_map</td><td>ventana + mapa</td><td>Lo mismo pero visual: marca el área en el mapa, rango de zoom, barra de progreso.</td></tr>
+<tr><td class="mono">fill_hgt</td><td>consola</td><td>Descarga <code>.hgt</code> de 30 m de AWS Skadi (sin clave) para una zona (<code>--bbox</code>/<code>--cuba</code>); descomprime gzip con <b>miniz</b> vendoreado (sin zlib externa); reanudable. Alimenta a <code>dem_to_db</code>.</td></tr>
+<tr><td class="mono">dem_to_db</td><td>consola</td><td>Construye la base de datos de elevación (<code>.sqlitedb</code>) desde una carpeta de <code>.hgt</code> (blobs <code>qCompress</code>, ~30 % del tamaño). La lee <code>SqliteElevation</code>.</td></tr>
+</table>
+<p><b>Pipeline de elevación empaquetable:</b> <code>fill_hgt --cuba</code> (baja 30 m sin clave) → <code>dem_to_db</code> (BD comprimida) → <code>fill_map --dem-db</code> o <code>MapWidget::elevationAt()</code> en tu app. El generador acepta también <code>.hgt</code> de 90 m ya existentes.</p>
+
+<p class="note" style="background:#eef4f9">A continuación, la <b>síntesis de comando y los argumentos de entrada de cada
+herramienta</b>. Las opciones entre <code>[…]</code> son opcionales; el resto,
+obligatorias. Los bbox siempre son <code>latN,lonO,latS,lonE</code> (norte, oeste,
+sur, este).</p>
+
+<h3>probe_db — sondar BD y generar datasets.json / mapa.json</h3>
+<p class="mono" style="font-size:12px">probe_db --id &lt;id&gt; --file &lt;ruta.sqlitedb&gt; [--id … --file …] [--ref-bbox latN,lonO,latS,lonE] [--out datasets.json] [--no-test] [--package [--dem ruta] [--overlay f.geo]… [--features nombre]]</p>
+<table class="kv">
+<tr><td>--id</td><td>Identificador de la capa. <b>Repetible</b>; en el mismo orden que los <code>--file</code>.</td></tr>
+<tr><td>--file</td><td>Ruta al <code>.sqlitedb</code> a sondar. <b>Repetible</b>, pareado con <code>--id</code>.</td></tr>
+<tr><td>--name</td><td>Nombre visible de la capa (opcional, repetible).</td></tr>
+<tr><td>--ref-bbox</td><td>Rectángulo de referencia para desempatar esquema XYZ vs TMS. Cuba: <code>23.3,-85.0,19.7,-74.0</code>.</td></tr>
+<tr><td>--out</td><td>Fichero JSON de salida (def. <code>datasets.json</code>). Las rutas se escriben <b>relativas a su carpeta</b>.</td></tr>
+<tr><td>--no-test</td><td>No verificar que la fuente lee de verdad (solo deduce).</td></tr>
+<tr><td>--package</td><td>Genera el manifiesto completo de paquete (<code>mapa.json</code> v2): <code>package</code> (id y nombre de la carpeta, fecha de hoy, zona del <code>--ref-bbox</code>), <code>start</code> y <code>features</code>.</td></tr>
+<tr><td>--dem</td><td>Con <code>--package</code>: BD de elevación o carpeta de <code>.hgt</code>.</td></tr>
+<tr><td>--overlay</td><td>Con <code>--package</code>: capa fija <code>.geo</code> (repetible).</td></tr>
+<tr><td>--features</td><td>Con <code>--package</code>: nombre de la BD de entidades del usuario (def. <code>entidades.db</code>).</td></tr>
+</table>
+
+<h3>check_data — comprobar un paquete antes de distribuirlo</h3>
+<p class="mono" style="font-size:12px">check_data &lt;carpeta_paquete | mapa.json&gt; [--quick] [--max-zoom N] [--strict]</p>
+<table class="kv">
+<tr><td>paquete</td><td>Carpeta del paquete o su <code>mapa.json</code>.</td></tr>
+<tr><td>--quick</td><td>Solo lo rápido (ficheros, apertura, decodificación); sin cobertura por zoom.</td></tr>
+<tr><td>--max-zoom</td><td>No medir cobertura por encima de este zoom.</td></tr>
+<tr><td>--strict</td><td>Salir con 1 también si hay avisos (por defecto solo con errores).</td></tr>
+<tr><td>--export</td><td>Si no hay errores, copia el <code>mapa.json</code> y solo los ficheros que referencia a esa carpeta (reanudable) y comprueba la copia.</td></tr>
+<tr><td>--verbose</td><td>Muestra también el registro interno de la librería.</td></tr>
+</table>
+<p>Imprime una ficha por capa (tamaño, formato de imagen y cobertura por zoom
+dentro de la zona) y los hallazgos de más a menos graves. Salida 0 = listo para
+distribuir, 1 = errores, 2 = argumentos mal; pensado para scripts.</p>
+
+<h3>geo_to_tiles — rasterizar vector a teselas</h3>
+<p class="mono" style="font-size:12px">geo_to_tiles --in &lt;fichero.geo&gt; --out &lt;salida.sqlitedb&gt; --id &lt;id&gt; --name "&lt;nombre&gt;" [--minzoom N] [--maxzoom N] [--color #hex] [--width f] [--fill] [--bg #hex]</p>
+<table class="kv">
+<tr><td>--in</td><td>Fichero de entrada <code>.geo</code>/<code>.xyz</code> (trazados separados por <code>0,0</code>).</td></tr>
+<tr><td>--out</td><td><code>.sqlitedb</code> de teselas a crear.</td></tr>
+<tr><td>--id / --name</td><td>Identificador y nombre de la capa generada.</td></tr>
+<tr><td>--minzoom / --maxzoom</td><td>Rango de zoom de la pirámide (def. 4..11).</td></tr>
+<tr><td>--color / --width</td><td>Color y grosor de línea del trazado.</td></tr>
+<tr><td>--fill / --bg</td><td>Rellenar polígonos / color de fondo.</td></tr>
+</table>
+
+<h3>vector_db — BD de entidades vectoriales</h3>
+<p class="mono" style="font-size:12px">vector_db --out &lt;mapdata.db&gt; [--dump]  ·  vector_db --file &lt;mapdata.db&gt; --dump</p>
+<table class="kv">
+<tr><td>--out</td><td>Crea una BD nueva con datos de ejemplo (la borra si existe).</td></tr>
+<tr><td>--file</td><td>Abre una BD existente sin tocarla (para inspección).</td></tr>
+<tr><td>--dump</td><td>Vuelca esquema y contenido (implícito al crear con <code>--out</code>).</td></tr>
+</table>
+
+<h3>render_map — mapa a imagen (sin ventana)</h3>
+<p class="mono" style="font-size:12px">render_map (--datasets &lt;datasets.json&gt; | --data &lt;carpeta_paquete&gt;) --out &lt;mapa.png&gt; [--layer id] [--center lat,lon] [--zoom N] [--size AnchoxAlto] [--wait ms] [--grid] [--features fichero.geo]</p>
+<table class="kv">
+<tr><td>--datasets / --out</td><td>Config de capas y PNG de salida (obligatorios).</td></tr>
+<tr><td>--data</td><td>En vez de <code>--datasets</code>: abre un paquete (<code>mapa.json</code>); capa, centro y zoom salen de su <code>start</code> salvo que se pasen, y dibuja sus capas fijas.</td></tr>
+<tr><td>--layer</td><td>Capa base a dibujar (def. la primera del JSON).</td></tr>
+<tr><td>--center / --zoom</td><td>Centro <code>lat,lon</code> y nivel de zoom.</td></tr>
+<tr><td>--size</td><td>Tamaño en píxeles, <code>1280x800</code>.</td></tr>
+<tr><td>--wait</td><td>Milisegundos de espera a que terminen de cargar las teselas.</td></tr>
+<tr><td>--grid</td><td>Dibuja la rejilla <code>z/x/y</code> (verde = propia, rojo = respaldo escalado).</td></tr>
+<tr><td>--features</td><td>Superpone las entidades de un <code>.geo</code>.</td></tr>
+</table>
+
+<h3>bench_tiles — medir rendimiento de lectura</h3>
+<p class="mono" style="font-size:12px">bench_tiles --datasets &lt;datasets.json&gt; [--zoom N] [--width N] [--height N] [--center lat,lon] [--pans N]</p>
+<table class="kv">
+<tr><td>--datasets</td><td>Config de capas a medir (obligatorio).</td></tr>
+<tr><td>--zoom</td><td>Nivel de zoom de la prueba.</td></tr>
+<tr><td>--width / --height</td><td>Tamaño del viewport simulado.</td></tr>
+<tr><td>--center</td><td>Centro <code>lat,lon</code> del barrido.</td></tr>
+<tr><td>--pans</td><td>Número de desplazamientos a simular.</td></tr>
+</table>
+
+<h3>fill_hgt — descargar elevación SRTM (30 m)</h3>
+<p class="mono" style="font-size:12px">fill_hgt (--cuba | --bbox latN,lonO,latS,lonE) --out &lt;carpeta&gt; [--url base] [--res 30]</p>
+<table class="kv">
+<tr><td>--cuba</td><td>Preset: bbox de Cuba (lat 19..24, lon −85..−74).</td></tr>
+<tr><td>--bbox</td><td>Zona a cubrir, <code>latN,lonO,latS,lonE</code> (alternativa a <code>--cuba</code>).</td></tr>
+<tr><td>--out</td><td>Carpeta donde dejar los <code>.hgt</code> (reanudable: salta los que ya están).</td></tr>
+<tr><td>--url</td><td>Base de la fuente (def. AWS Skadi <code>elevation-tiles-prod/skadi</code>).</td></tr>
+<tr><td>--res</td><td>Resolución; hoy solo <b>30</b> m (Skadi). Se acepta y se ignora.</td></tr>
+</table>
+
+<h3>dem_to_db — carpeta .hgt → base de datos de elevación</h3>
+<p class="mono" style="font-size:12px">dem_to_db &lt;carpeta_hgt&gt; --out &lt;dem.sqlitedb&gt; [--overwrite]</p>
+<table class="kv">
+<tr><td>&lt;carpeta_hgt&gt;</td><td>Carpeta con los <code>.hgt</code> (30 m o 90 m; la resolución se autodetecta por tile). Argumento posicional.</td></tr>
+<tr><td>--out</td><td>Base de datos <code>.sqlitedb</code> a crear (tablas <code>dem_tiles</code> + <code>dem_meta</code>, blobs <code>qCompress</code>).</td></tr>
+<tr><td>--overwrite</td><td>Rehacer la BD si ya existe.</td></tr>
+</table>
+
+<h3>fill_tiles — argumentos</h3>
+<table class="kv">
+<tr><td>--datasets / --id</td><td>Rellenar una BD existente: de <code>datasets.json</code> toma codificación y ruta de la capa.</td></tr>
+<tr><td>--new / --name</td><td>Crear una base nueva desde cero (codificación limpia XYZ, sin columna s).</td></tr>
+<tr><td>--bbox latN,lonO,latS,lonE</td><td>Rectángulo a cubrir.</td></tr>
+<tr><td>--poly "lat,lon;lat,lon;…"</td><td>Polígono (≥3 vértices): solo baja las teselas cuyo centro cae dentro. Alternativa a --bbox.</td></tr>
+<tr><td>--minzoom / --maxzoom</td><td>Rango de zoom.</td></tr>
+<tr><td>--url</td><td>Fuente XYZ (por defecto Esri «Clarity», sin clave).</td></tr>
+<tr><td>--rate / --conns</td><td>Ritmo (lanzamientos/seg, tope suave) y peticiones en vuelo a la vez (1..8, def. 2).</td></tr>
+<tr><td>--retries / --timeout</td><td>Reintentos por tesela y espera máxima por petición.</td></tr>
+<tr><td>--overwrite / --only-missing</td><td>Rebajar todo / (def.) solo lo que falta.</td></tr>
+<tr><td>--yes</td><td>No preguntar confirmación.</td></tr>
+</table>
+
+<h3>fill_map — cómo se usa</h3>
+<p class="mono" style="font-size:12px">fill_map [datasets.json] [--dem &lt;carpeta_hgt&gt;] [--dem-db &lt;dem.sqlitedb&gt;]</p>
+<p>El primer argumento posicional es el <code>datasets.json</code> (def.
+<code>./datasets.json</code>); <code>--dem</code> fija una carpeta de <code>.hgt</code> y
+<code>--dem-db</code> una base de datos de elevación. Todo lo demás se maneja desde
+la ventana:</p>
+<ul>
+  <li><b>Rellenar</b>: marca un rectángulo (o escribe el bbox) + rango de zoom → completa la capa activa.</li>
+  <li><b>Polígono</b>: marca un polígono clic a clic (doble clic / Enter lo cierra) y descarga solo las teselas de dentro. Excluyente con "Seleccionar área".</li>
+  <li><b>Nueva base…</b>: crea un <code>.sqlitedb</code> nuevo, todo de la fuente elegida, del área marcada.</li>
+  <li><b>Estimación de tamaño</b>: antes de confirmar, un muestreo rápido (<code>estimateSize</code>) dice cuántos MB ocupará, además del nº de teselas. Si no logra muestrear, da una cifra "aprox.".</li>
+  <li><b>Descargar al navegar</b>: mientras te mueves, baja lo que falte al zoom actual.</li>
+  <li>Tres formas de indicar el área: dibujar rectángulo, escribir <code>bbox</code>, o la vista actual.</li>
+  <li><b>Rejilla</b>: dibuja el borde de cada tesela con su <code>z/x/y</code> (verde = propia, rojo = respaldo escalado) para ver qué falta a este zoom.</li>
+  <li><b>Cobertura</b> (+ selector de zoom): mancha fija que muestra qué zonas de ESE zoom ya están en la BD, visible aunque mires a un zoom menor; se refresca sola mientras descargas (ver <code>CoverageLayer</code>).</li>
+  <li><b>DEM…</b> (o <code>--dem &lt;carpeta&gt;</code>): carga ficheros SRTM <code>.hgt</code> y muestra la <b>cota del terreno bajo el cursor</b> en la barra de estado; "—" si no hay dato (ver módulo <span class="mono">dem</span>).</li>
+</ul>
+<p><b>Orden de descarga</b> (<code>TileFiller::advanceCursor</code>): por nivel de
+zoom de menor a mayor (termina un nivel antes de pasar al siguiente, emitiendo
+<code>zoomFinished</code>); dentro de cada nivel, columna a columna de oeste a
+este y cada columna de norte a sur; saltando las teselas que ya existen (salvo
+<code>--overwrite</code>). Es un barrido sistemático del bbox, reanudable.</p>
+
+<!-- ===================== 12. TILEFILLER ===================== -->
+<h2 class="sec">12 · Motor de descarga <span class="mono">TileFiller</span></h2>
+<p>El corazón común de <code>fill_tiles</code> y <code>fill_map</code>
+(<code>tools/common/TileFiller.h</code>). Es un <code>QObject</code> <b>asíncrono</b>: no
+bloquea, se apoya en el bucle de eventos (un temporizador marca el ritmo y cada
+respuesta encadena la siguiente). Así el mismo motor —y la misma codificación
+probada— sirve para la consola y para la ventana con barra de progreso viva.</p>
+
+<figure>
+<svg viewBox="0 0 760 210" font-family="Segoe UI" font-size="11">
+  <defs><marker id="a4" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#145374"/></marker></defs>
+  <rect x="10" y="80" width="120" height="44" rx="6" fill="#eaf2f8" stroke="#145374"/><text x="26" y="100">prepare()</text><text x="18" y="115" font-size="8.5" fill="#5b6b7b">bbox+zoom → plan</text>
+  <rect x="170" y="80" width="120" height="44" rx="6" fill="#fff" stroke="#145374"/><text x="182" y="100">¿faltan?</text><text x="178" y="115" font-size="8.5" fill="#5b6b7b">query BD por nivel</text>
+  <rect x="330" y="80" width="130" height="44" rx="6" fill="#fff" stroke="#145374"/><text x="342" y="100">descargar</text><text x="342" y="115" font-size="8.5" fill="#5b6b7b">1 GET / tick (rate)</text>
+  <rect x="500" y="80" width="120" height="44" rx="6" fill="#e7f0ea" stroke="#2e7d54"/><text x="512" y="100">INSERT BD</text><text x="512" y="115" font-size="8.5" fill="#5b6b7b">codificación</text>
+  <rect x="660" y="80" width="90" height="44" rx="6" fill="#eaf2f8" stroke="#145374"/><text x="672" y="100">progress</text><text x="668" y="115" font-size="8.5" fill="#5b6b7b">/ finished</text>
+  <g stroke="#145374" stroke-width="1.5" fill="none" marker-end="url(#a4)">
+    <path d="M130 102 H170"/><path d="M290 102 H330"/><path d="M460 102 H500"/><path d="M620 102 H660"/>
+  </g>
+  <!-- auto-freno -->
+  <rect x="330" y="150" width="130" height="40" rx="6" fill="#fff8e6" stroke="#c99a2e"/><text x="342" y="167">auto-freno</text><text x="342" y="182" font-size="8.5" fill="#8a6d1f">8 fallos → pausa</text>
+  <path d="M395 124 V150" stroke="#c99a2e" stroke-width="1.4" fill="none" marker-end="url(#a4)"/>
+  <path d="M460 170 H700 V124" stroke="#c99a2e" stroke-width="1.4" fill="none" marker-end="url(#a4)"/>
+</svg>
+<figcaption>Figura 3 — Flujo de <span class="mono">TileFiller</span>: estima, descarga a ritmo, inserta con la codificación de la base y avisa; si hay muchos fallos seguidos, pausa y reanuda.</figcaption>
+</figure>
+
+<table><tr><th>Función / señal</th><th>Qué hace</th></tr>
+<tr><td class="mono">prepare(params, err)</td><td>Abre la BD (la crea si <code>createSchema</code>), calcula cuántas faltan por zoom. Sin red.</td></tr>
+<tr><td class="mono">estimateSize(n=12)</td><td>Muestreo asíncrono: baja <code>n</code> teselas repartidas por zoom (solo mide bytes, no escribe BD) y emite <code>sizeEstimated</code>. Entre <code>prepare()</code> y <code>start()</code>.</td></tr>
+<tr><td class="mono">signal sizeEstimated(KiB, bytesTotal, muestras)</td><td>Tamaño estimado ≈ media·total; <code>muestras=0</code> = heurística (sin red) ~20&nbsp;KiB/tesela.</td></tr>
+<tr><td class="mono">start() / cancel()</td><td>Empieza / corta la descarga asíncrona.</td></tr>
+<tr><td class="mono">signal progress(hechas,total,t/s)</td><td>Avance y velocidad media (barra + ETA).</td></tr>
+<tr><td class="mono">signal zoomFinished(z, nuevas)</td><td>Un nivel terminado.</td></tr>
+<tr><td class="mono">signal throttling(seg, racha)</td><td><b>Auto-freno</b>: la fuente limita; pausa <code>seg</code> y reanuda.</td></tr>
+<tr><td class="mono">signal message / finished</td><td>Motivo real de un fallo / fin con estadísticas.</td></tr>
+</table>
+<p><b>Propiedades clave:</b> <span class="tag">reanudable</span> solo baja lo que falta (se corta y se relanza sin repetir); <span class="tag">paralelo</span> hasta <code>connections</code> peticiones en vuelo a la vez (cada una con su <code>Pending</code> y su timeout), con <code>rate</code> como tope de lanzamientos/seg; <span class="tag">codificación exacta</span> inserta con <code>storedZ</code>/Y/s de la base; <span class="tag">polígono</span> descarta las teselas con centro fuera; <span class="tag">auto-freno</span> pausa con backoff creciente (30→60→120…→300&nbsp;s) ante rachas de fallos y reanuda al primer éxito; <span class="tag">busy_timeout</span> convive con el mapa leyendo la misma BD.</p>
+
+<!-- ===================== 13. DECISIONES ===================== -->
+<h2 class="sec">13 · Decisiones de diseño e historia</h2>
+<ul>
+  <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite probar el núcleo sin GUI (14 de los 17 tests) y no imponer QCustomPlot.</li>
+  <li><b>PIMPL en MapWidget.</b> QCustomPlot queda dentro; la cabecera pública es limpia.</li>
+  <li><b>Configuración en datos.</b> El mapeo de zoom, el esquema y las columnas viven en <code>datasets.json</code>, no cableados en el código.</li>
+  <li><b>Zoom hasta z15+.</b> <code>recommendedMaxZoom</code> separa «hasta dónde hay cobertura buena» de «hasta dónde hay teselas sueltas».</li>
+  <li><b>Compatibilidad Qt.</b> Objetivo actual <b>Qt&nbsp;5.14 / 5.15 / 6.x</b>; el código es C++17 y usa guardas <code>QT_VERSION</code> solo donde Qt5 y Qt6 difieren de verdad (redirecciones de red, <code>qHash</code>, <code>QWheelEvent::position</code>).</li>
+  <li><b>Fuente por defecto Esri «Clarity».</b> Comparada contra la base Google, Clarity es la fuente gratis sin clave que más se acerca en color (menos costuras al rellenar huecos).</li>
+  <li><b>Descarga responsable.</b> Ritmo configurable y <b>auto-freno</b>: los servicios gratis limitan el uso masivo; conviene z altos solo por zonas y ritmo suave.</li>
+</ul>
+
+<!-- ===================== 14. COMPILAR ===================== -->
+<h2 class="sec">14 · Cómo compilar y usar</h2>
+<h3>CMake (recomendado)</h3>
+<pre>cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+# Windows/MinGW:  cmake -G "MinGW Makefiles" -S . -B build ...</pre>
+<p class="muted">El widget (MapWidget, fill_map, demo) requiere <b>QCustomPlot</b> en
+<code>third_party/qcustomplot/</code> (gitignored). Sin él, se compila solo el núcleo
+y las herramientas de consola, y CMake lo avisa.</p>
+<h3>Usarla desde otra aplicación</h3>
+<pre>cmake --install build --prefix C:/libmapa
+# en la app:
+find_package(libmapa REQUIRED)        # CMAKE_PREFIX_PATH = C:/libmapa;&lt;Qt&gt;
+target_link_libraries(miapp PRIVATE libmapa::widget)</pre>
+<p>Bibliotecas estáticas, solo las cabeceras públicas, <code>libmapaConfig.cmake</code>
+(busca las mismas dependencias de Qt) y las herramientas. Plantilla:
+<code>examples/app_minima</code>. Una guarda en CMake impide que la librería enlace
+<code>Qt Network</code>: el producto trabaja sin conexión.</p>
+
+<h3>Llevarla a otro PC</h3>
+<pre>herramientas\desplegar.bat &lt;app.exe&gt; &lt;destino&gt; [carpeta del paquete]</pre>
+<p><code>windeployqt</code> sin los plugins de red, comprobación de
+<code>qwindows</code>/<code>qsqlite</code>/<code>qjpeg</code>, y
+<code>check_data --export</code>, que copia solo los ficheros del paquete a
+<code>&lt;destino&gt;\datos</code>. La carpeta resultante funciona sin Qt ni internet.</p>
+
+<h3>Qt 5.14 y qmake: el segundo juego de despliegue</h3>
+<p>Para quien no tiene CMake o compila con Qt 5, la librería también se
+compila e instala con qmake (Release y Debug), en una carpeta por versión
+de Qt:</p>
+<pre>qmake qmake/libmapa/libmapa.pro  &amp;&amp;  mingw32-make  &amp;&amp;  mingw32-make install
+#  -&gt; C:/libmapa/qt5  o  C:/libmapa/qt6
+# en el .pro de la app (elige sola la instalación del Qt del kit):
+include(C:/libmapa/qt$${QT_MAJOR_VERSION}/libmapa.pri)</pre>
+<p><code>libmapa.pri</code> se para si la app y la librería son de Qt distintos.
+Para desplegar una app de Qt 5 se usa <code>desplegar_qt5.bat</code>, con los
+mismos argumentos. Comprueba que el <code>.exe</code> es de Qt 5 y está en
+Release, quita a mano los plugins de red (el <code>windeployqt</code> de Qt 5 no
+tiene <code>--skip-plugin-types</code>) y avisa si algo sigue pidiendo
+<code>Qt5Network.dll</code>. Guía paso a paso para alguien sin experiencia:
+<code>docs/DESPLIEGUE.md</code>.</p>
+<pre>qmake qmake/fill_tiles.pro  &amp;&amp;  make      # herramientas sueltas: fill_map.pro / probe_db.pro ...</pre>
+
+<h3>Un flujo típico de datos</h3>
+<ol>
+  <li>Preparar los datos (con internet): <code>fill_tiles</code>/<code>fill_map</code> para teselas, <code>fill_hgt</code> → <code>dem_to_db</code> para la elevación.</li>
+  <li><code>probe_db --package</code> sobre la carpeta → genera su <code>mapa.json</code> (rutas relativas). Se ajusta a mano lo que haga falta (nombres, atribución, estilos).</li>
+  <li><code>check_data</code> sobre la carpeta: 0 errores → el paquete está listo.</li>
+  <li><code>desplegar.bat</code> (Qt 6) o <code>desplegar_qt5.bat</code> (Qt 5) con la app y el paquete → carpeta lista para otro PC.</li>
+  <li>Se copia la carpeta junto a la aplicación. La app solo necesita <code>cfg.dataDir = …/datos</code>: el producto final <b>no usa internet</b>.</li>
+</ol>
+
+<p style="margin-top:28px;color:#5b6b7b;font-size:9pt;border-top:1px solid #d7dee6;padding-top:8px">
+LibMapaStatic — documentación técnica generada a partir del código de la rama de trabajo.
+Núcleo (geo · db · tiles · io) + widget (QCustomPlot) + herramientas (probe_db · geo_to_tiles · fill_tiles · fill_map).</p>
+
+</body>
+</html>

@@ -21,6 +21,8 @@ FeatureLayer::FeatureLayer(QCustomPlot *parent, OverlayModel *model)
 
 FeatureLayer::~FeatureLayer() = default;
 
+// Inyecta la funcion lat/lon -> eje (proyeccion de Mercator, la aporta MapView) e
+// invalida la cache para repintar con la nueva proyeccion.
 void FeatureLayer::setAxisMapper(
     std::function<QPointF(const QGeoCoordinate &)> toAxis)
 {
@@ -28,6 +30,8 @@ void FeatureLayer::setAxisMapper(
     markDirty();
 }
 
+// Fija (o quita, con nullptr) la geometria "en construccion" que se dibuja
+// discontinua mientras el usuario dibuja una entidad nueva. Pide un repintado.
 void FeatureLayer::setDraft(const MapFeature *draft)
 {
     if (draft) {
@@ -41,6 +45,8 @@ void FeatureLayer::setDraft(const MapFeature *draft)
         parentPlot()->replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Actualiza la posicion del cursor durante el dibujo, para pintar el "lado de
+// goma" que se anadiria al siguiente clic. 'visible' lo enciende o apaga.
 void FeatureLayer::setDraftCursor(const QPoint &pixel, bool visible)
 {
     m_draftCursor = pixel;
@@ -49,6 +55,8 @@ void FeatureLayer::setDraftCursor(const QPoint &pixel, bool visible)
         parentPlot()->replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Invalida la cache (pixmap) de esta capa y encola un repintado. Se llama cuando
+// cambia el modelo o la proyeccion: el proximo draw() reconstruira el pixmap.
 void FeatureLayer::markDirty()
 {
     m_dirty = true;
@@ -56,6 +64,8 @@ void FeatureLayer::markDirty()
         parentPlot()->replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Coordenada geografica -> pixel de pantalla (via el mapeador de eje y los ejes
+// de QCustomPlot). Punto nulo si no hay plot o la coordenada no es valida.
 QPointF FeatureLayer::screenPos(const QGeoCoordinate &c) const
 {
     QCustomPlot *plot = parentPlot();
@@ -68,11 +78,13 @@ QPointF FeatureLayer::screenPos(const QGeoCoordinate &c) const
                    plot->yAxis->coordToPixel(eje.y()));
 }
 
+// Geometria (primera parte) de una entidad convertida a poligono de pixeles.
 QPolygonF FeatureLayer::screenPolygon(const MapFeature &f) const
 {
     return screenPolygonOf(f.geometry);
 }
 
+// Convierte una lista de coordenadas a un poligono de pixeles de pantalla.
 QPolygonF FeatureLayer::screenPolygonOf(const QVector<QGeoCoordinate> &pts) const
 {
     QPolygonF poly;
@@ -82,11 +94,18 @@ QPolygonF FeatureLayer::screenPolygonOf(const QVector<QGeoCoordinate> &pts) cons
     return poly;
 }
 
+// Gancho de QCustomPlot: aplica el hint de antialiasing de esta capa.
 void FeatureLayer::applyDefaultAntialiasingHint(QCPPainter *painter) const
 {
     applyAntialiasingHint(painter, mAntialiased, QCP::aeAll);
 }
 
+// Pinta las entidades vectoriales. Clave del rendimiento: dibuja sobre un pixmap
+// propio que se REUTILIZA mientras no cambien ni el modelo ni la vista (mismo
+// viewport y mismos rangos de eje). Asi los objetivos en movimiento (otra capa)
+// no obligan a redibujar las zonas estaticas. Si la cache vale, la vuelca y solo
+// repinta el borrador; si no, reconstruye el pixmap capa a capa por zOrder. El
+// borrador (draft) se dibuja siempre encima, fuera de la cache.
 void FeatureLayer::draw(QCPPainter *painter)
 {
     QCustomPlot *plot = parentPlot();
@@ -150,6 +169,9 @@ void FeatureLayer::draw(QCPPainter *painter)
     drawDraft(painter);
 }
 
+// Pinta UNA entidad completa: cada parte de su geometria (punto o trazado), los
+// tiradores de vertices si esta seleccionada/editable (solo una parte) y su
+// etiqueta (junto al punto, o en el centro del rectangulo que la contiene toda).
 void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
                                bool selected) const
 {
@@ -184,6 +206,9 @@ void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
     }
 }
 
+// Dibuja una entidad de tipo PUNTO: su icono si lo tiene, o un circulo con el
+// estilo. Si esta seleccionada anade un resalte en PIXELES (no en grados, para no
+// deformarse con el zoom ni la latitud).
 void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f,
                                  const QVector<QGeoCoordinate> &part,
                                  bool selected) const
@@ -216,6 +241,10 @@ void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f,
     }
 }
 
+// Dibuja una parte de tipo LINEA o POLIGONO: relleno + contorno para poligonos,
+// polilinea para lineas. Si esta seleccionada, primero traza un halo blanco mas
+// grueso y luego la linea normal encima. Tiradores y etiqueta los pone
+// drawFeature una sola vez (no por parte).
 void FeatureLayer::drawPathPart(QPainter *painter, const MapFeature &f,
                                 const QVector<QGeoCoordinate> &part,
                                 bool selected) const
@@ -263,6 +292,8 @@ void FeatureLayer::drawPathPart(QPainter *painter, const MapFeature &f,
     // parte.
 }
 
+// Dibuja los tiradores (cuadraditos blancos) sobre cada vertice de una entidad
+// seleccionada/editable, para poder arrastrarlos.
 void FeatureLayer::drawVertices(QPainter *painter, const MapFeature &f) const
 {
     const QPolygonF poly = screenPolygon(f);
@@ -272,6 +303,9 @@ void FeatureLayer::drawVertices(QPainter *painter, const MapFeature &f) const
         painter->drawRect(QRectF(v.x() - 4, v.y() - 4, 8, 8));
 }
 
+// Dibuja la geometria "en construccion" mientras el usuario traza una entidad:
+// los lados ya fijados (discontinuos), el lado de goma hasta el cursor (y el de
+// cierre si es poligono) y un tirador en cada vertice puesto.
 void FeatureLayer::drawDraft(QPainter *painter) const
 {
     if (!m_hasDraft || m_draft.geometry.isEmpty())
@@ -297,6 +331,10 @@ void FeatureLayer::drawDraft(QPainter *painter) const
         painter->drawLine(poly.last(), QPointF(m_draftCursor));
         if (m_draft.kind == GeometryKind::Polygon && poly.size() >= 2)
             painter->drawLine(QPointF(m_draftCursor), poly.first());
+    } else if (m_draft.kind == GeometryKind::Polygon && poly.size() >= 3) {
+        // Sin linea de goma (borrador en reposo o seleccion ya cerrada): se
+        // cierra el poligono dibujando el lado ultimo->primero.
+        painter->drawLine(poly.last(), poly.first());
     }
 
     // Los vertices ya puestos, como tiradores.
@@ -308,6 +346,8 @@ void FeatureLayer::drawDraft(QPainter *painter) const
     painter->restore();
 }
 
+// Dibuja la etiqueta (nombre) de una entidad en 'anchor', con un fondo claro
+// redondeado detras para que se lea sobre fotografia aerea.
 void FeatureLayer::drawLabel(QPainter *painter, const MapFeature &f,
                              const QPointF &anchor) const
 {
@@ -327,6 +367,8 @@ void FeatureLayer::drawLabel(QPainter *painter, const MapFeature &f,
 
 // ----------------------------------------------------------- localizacion --
 
+// Distancia (en pixeles) de un punto p al segmento a-b: proyecta p sobre la recta,
+// la acota al segmento [a,b] y mide. Base de todas las pruebas de "cerca de".
 double FeatureLayer::distanceToSegment(const QPointF &p, const QPointF &a,
                                        const QPointF &b)
 {
@@ -341,6 +383,10 @@ double FeatureLayer::distanceToSegment(const QPointF &p, const QPointF &a,
     return std::hypot(p.x() - proy.x(), p.y() - proy.y());
 }
 
+// Entidad "bajo el cursor": id de la entidad seleccionable mas cercana al pixel
+// dentro de la tolerancia, o -1. Recorre de la capa mas alta a la mas baja (lo de
+// arriba gana) y prueba parte a parte; para poligonos, caer DENTRO del area es un
+// acierto directo. En cuanto una capa da un acierto, no baja mas.
 qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
 {
     if (!m_model)
@@ -401,6 +447,9 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
     return mejor;
 }
 
+// Indice del segmento (lado) de una entidad mas cercano al pixel dentro de la
+// tolerancia, o -1. Sirve para insertar un vertice donde el usuario pincha. En un
+// poligono, el lado de cierre tambien cuenta.
 int FeatureLayer::segmentAt(const MapFeature &feature, const QPoint &pixel,
                             double tolerancePx) const
 {
@@ -430,6 +479,8 @@ int FeatureLayer::segmentAt(const MapFeature &feature, const QPoint &pixel,
     return mejor;
 }
 
+// Indice del vertice de una entidad mas cercano al pixel dentro de la tolerancia,
+// o -1. Sirve para saber que tirador esta agarrando el usuario.
 int FeatureLayer::vertexAt(qint64 featureId, const QPoint &pixel,
                            double tolerancePx) const
 {

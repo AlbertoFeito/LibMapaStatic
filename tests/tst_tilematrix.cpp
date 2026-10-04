@@ -1,3 +1,4 @@
+#include "geo/GeoMath.h"
 #include "geo/TileMatrix.h"
 #include "geo/WebMercator.h"
 
@@ -46,6 +47,9 @@ private slots:
      * intercambiables: usar unos con el otro nivel apunta a otro sitio.
      */
     void offByOneZoomPointsElsewhere();
+
+    // --- GeoMath::pointInPolygon (filtro de descarga por poligono) ---------
+    void pointInPolygonBasic();
 };
 
 void TstTileMatrix::mercatorRoundTrip_data()
@@ -264,6 +268,32 @@ void TstTileMatrix::offByOneZoomPointsElsewhere()
     const TileKey wrong{11, k10.x, k10.y};
     const QGeoCoordinate wrongNW = TileMatrix::tileNorthWest(wrong);
     QVERIFY(qAbs(wrongNW.longitude() - p.longitude()) > 1.0);
+}
+
+// El filtro de descarga por poligono: dentro, fuera, y el caso degenerado.
+void TstTileMatrix::pointInPolygonBasic()
+{
+    // Cuadrado lon[-80,-78] lat[20,22] (vertices en orden).
+    const QVector<QGeoCoordinate> cuadrado{
+        {20.0, -80.0}, {22.0, -80.0}, {22.0, -78.0}, {20.0, -78.0}};
+
+    // Dentro (centro).
+    QVERIFY(GeoMath::pointInPolygon(-79.0, 21.0, cuadrado));
+    // Fuera por cada lado.
+    QVERIFY(!GeoMath::pointInPolygon(-81.0, 21.0, cuadrado));
+    QVERIFY(!GeoMath::pointInPolygon(-77.0, 21.0, cuadrado));
+    QVERIFY(!GeoMath::pointInPolygon(-79.0, 19.0, cuadrado));
+    QVERIFY(!GeoMath::pointInPolygon(-79.0, 23.0, cuadrado));
+
+    // Triangulo: apice en (lon-79,lat22), base en lat20 de lon-80 a -78.
+    // Un punto dentro y otro dentro del bbox pero FUERA del triangulo.
+    const QVector<QGeoCoordinate> triangulo{
+        {20.0, -80.0}, {22.0, -79.0}, {20.0, -78.0}};
+    QVERIFY(GeoMath::pointInPolygon(-79.0, 20.5, triangulo));   // dentro
+    QVERIFY(!GeoMath::pointInPolygon(-79.8, 21.5, triangulo));  // en bbox, fuera
+
+    // Menos de 3 vertices: no es poligono, no filtra (devuelve true).
+    QVERIFY(GeoMath::pointInPolygon(0.0, 0.0, QVector<QGeoCoordinate>{}));
 }
 
 QTEST_MAIN(TstTileMatrix)

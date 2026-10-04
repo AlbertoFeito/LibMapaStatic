@@ -3,6 +3,12 @@
 namespace libmapa {
 namespace schema {
 
+// Devuelve, EN ORDEN, las sentencias DDL necesarias para llevar una BD desde la
+// version 'from' a la actual. Cada bloque "if (from < N)" agrupa la migracion que
+// sube a la version N: si la BD ya esta en la version N esos CREATE se omiten, de
+// modo que aplicar la lista completa es seguro tanto en una BD nueva (from = 0)
+// como en una que ya paso migraciones anteriores. El llamador ejecuta todas estas
+// sentencias dentro de una unica transaccion y actualiza user_version al final.
 QStringList migrations(int from)
 {
     QStringList sql;

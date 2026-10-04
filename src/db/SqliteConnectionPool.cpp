@@ -21,6 +21,9 @@ namespace {
 // Es thread_local, asi que cada hilo lleva su propia contabilidad sin mutex.
 thread_local QSet<QString> g_threadConnections;
 
+// Identificador hexadecimal del hilo actual. Se usa para que cada hilo tenga su
+// PROPIO nombre de conexion aunque comparta datasetId: una QSqlConnection no se
+// puede usar desde un hilo distinto al que la abrio.
 QString threadTag()
 {
     return QString::number(reinterpret_cast<quintptr>(QThread::currentThreadId()), 16);
@@ -28,11 +31,18 @@ QString threadTag()
 
 } // namespace
 
+// Nombre unico de conexion para (dataset, hilo). Al incluir el tag del hilo, dos
+// hilos que abran el mismo dataset obtienen conexiones separadas, cada una
+// propiedad de su hilo (requisito de Qt SQL).
 QString SqliteConnectionPool::connectionName(const QString &datasetId)
 {
     return QStringLiteral("libmapa_%1_%2").arg(datasetId, threadTag());
 }
 
+// Ajusta los PRAGMA de rendimiento segun el modo. En solo lectura desactiva
+// journal y fsync (la BD no cambia); en escritura usa WAL para permitir lecturas
+// concurrentes. Dimensiona mmap al tamano del fichero (o un valor prudente en 32
+// bits) y fija cache y almacenamiento temporal en memoria.
 void SqliteConnectionPool::applyPragmas(QSqlDatabase &db, Mode mode)
 {
     QSqlQuery q(db);
@@ -72,6 +82,11 @@ void SqliteConnectionPool::applyPragmas(QSqlDatabase &db, Mode mode)
     q.exec(QStringLiteral("PRAGMA temp_store = MEMORY"));
 }
 
+// Devuelve una conexion abierta para (dataset, hilo actual), creandola la primera
+// vez y reutilizandola despues. Valida existencia del fichero/directorio y del
+// driver, abre con QSQLITE (solo lectura si se pide, con busy_timeout para tolerar
+// lectura concurrente durante una descarga) y aplica los PRAGMA. Devuelve una
+// QSqlDatabase invalida si algo falla. Corre siempre en el hilo que la usara.
 QSqlDatabase SqliteConnectionPool::connectionFor(const QString &datasetId,
                                                  const QString &filePath,
                                                  Mode mode)
@@ -137,6 +152,10 @@ QSqlDatabase SqliteConnectionPool::connectionFor(const QString &datasetId,
     return db;
 }
 
+// Cierra y da de baja TODAS las conexiones abiertas por este hilo. Debe llamarse
+// en el propio hilo trabajador antes de que termine (una conexion solo se puede
+// cerrar desde su hilo). El scope interno garantiza que no quede viva ninguna
+// copia de la QSqlDatabase al llamar a removeDatabase.
 void SqliteConnectionPool::closeAllForCurrentThread()
 {
     const QSet<QString> names = g_threadConnections;
@@ -158,6 +177,7 @@ void SqliteConnectionPool::closeAllForCurrentThread()
     }
 }
 
+// Cuantas conexiones tiene abiertas ESTE hilo (diagnostico y pruebas de fugas).
 int SqliteConnectionPool::openConnectionCount()
 {
     // size() es qsizetype en Qt 6; el numero de conexiones cabe de sobra en int.

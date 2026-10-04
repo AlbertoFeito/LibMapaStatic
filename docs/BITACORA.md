@@ -1778,3 +1778,1062 @@ s = <valor>` y **no devolviera ninguna tesela** aunque la fuente abriera bien.
 Sin columna `s`, ese filtro no existe.
 
 **Estado: 13 tests + la herramienta `geo_to_tiles`, 0 avisos, Qt 5.15 y Qt 6.4.**
+
+---
+
+## 31. Qt moderno: fuera 5.7, objetivo 5.14 / 5.15 / 6.x
+
+Un compañero intentó compilar en Qt 5.7 con MinGW 5.3 y el proyecto reventaba.
+En vez de arrastrar compatibilidad con un Qt de 2016, se decidió **abandonar
+5.7** y fijar el objetivo en **Qt 5.14 / 5.15 / 6.x** (MinGW, MSVC, GCC), que es
+lo que usan de verdad. Se eliminó de todo el repo cualquier rastro de 5.7.
+
+Dos cosas concretas que salieron de ahí:
+
+- Se **quitó el flag `-Wnull-dereference`**. No es de 5.7, pero su activación
+  producía falsos positivos dentro de las cabeceras de Qt y de QCustomPlot
+  (inalcanzables para nosotros) que inundaban la salida del compilador del
+  compañero. Un flag que solo avisa de código que no es tuyo no aporta.
+- Qt5 solo **declara** `QVariant` en `qsqlquery.h` (Qt6 sí lo incluye). Sin un
+  `#include <QVariant>` explícito, `bindValue()` no compila en 5.14 porque
+  `QVariant` es tipo incompleto. Se añadió donde hacía falta.
+
+**Estado: 13 tests verdes en Qt 5.15 y Qt 6.4, sin avisos propios.**
+
+---
+
+## 32. Rellenar los huecos: `fill_tiles`, `fill_map` y el motor `TileFiller`
+
+La capa satelital tiene `typicalFill ≈ 0.32`: dos tercios de la rejilla están
+vacíos. Hacía falta **descargar las teselas que faltan**, y el usuario pidió la
+vía fácil: **gratis y sin API key**. Resultado: un motor común y dos carcasas.
+
+- **`TileFiller`** (`tools/common`) es un `QObject` **asíncrono** que no bloquea:
+  se apoya en el bucle de eventos (un temporizador marca el ritmo, cada respuesta
+  encadena la siguiente). El mismo motor —y la misma codificación probada— sirve
+  para la consola (`fill_tiles`) y para la ventana con mapa (`fill_map`).
+- **Fuente por defecto: Esri "Clarity"** (World Imagery), sin clave. Se eligió
+  porque, de las fuentes sin clave probadas, es la que mejor **casa en color**
+  con la base satelital de Google del usuario. Plantilla `{z}/{x}/{y}`, editable.
+- **`prepare()`** abre la BD y cuenta cuántas faltan por zoom **sin red**, para
+  poder avisar del total y pedir confirmación antes de una descarga enorme.
+  **`start()`** descarga e **inserta con la codificación exacta de la base**
+  (`storedZ`, Y según esquema, columna `s`). Es **reanudable**: solo baja lo que
+  falta, así que se corta y se relanza sin repetir.
+- **Orden de descarga** (`advanceCursor`): por nivel de zoom de menor a mayor
+  (termina un nivel antes de pasar al siguiente); dentro de cada nivel, columna
+  a columna de oeste a este y cada columna de norte a sur; saltando lo que ya
+  existe. Barrido sistemático del bbox, no espiral desde el centro.
+- **Base nueva** (`--new` / botón "Nueva base…"): crea un `.sqlitedb` desde cero
+  con codificación **limpia** (XYZ, `z` = z lógico, sin columna `s`) y, al
+  terminar, imprime el bloque listo para pegar en `datasets.json`.
+- **Auto-freno**: si se acumulan fallos SEGUIDOS (la fuente está limitando), se
+  pausa con backoff creciente (30→60→120→…→300 s) y se reanuda al primer éxito,
+  en vez de insistir hasta que bloqueen la IP.
+- **Diagnóstico TLS**: en Windows faltaba OpenSSL y toda descarga HTTPS fallaba
+  en silencio. Se avisa al arrancar si `QSslSocket::supportsSsl()` es falso
+  (qué DLLs copiar), y se dejó de leer el cuerpo de respuestas con error, que
+  provocaba el cosmético `QIODevice::read: device not open`.
+
+Sobre OSM: el servidor oficial **prohíbe** la descarga masiva de teselas; por eso
+la fuente por defecto es satélite de Esri, no OSM.
+
+**Estado: dos herramientas nuevas (consola y ventana) sobre un motor común;
+13 tests verdes, Qt 5.15 y Qt 6.4.**
+
+---
+
+## 33. Ver qué falta en la base: rejilla y mancha de cobertura
+
+Descargar a ciegas no dice qué tienes. Dos ayudas visuales, de menos a más útil:
+
+- **Rejilla** (`TileLayer::setDebugGridVisible`, la misma de `render_map --grid`):
+  dibuja el borde de cada tesela con su `z/x/y`, verde si es propia y rojo si se
+  está viendo con un ancestro escalado. Pero es **efímera** y solo muestra el
+  **zoom actual** bajo la vista.
+- **Mancha de cobertura** (`CoverageLayer`): lo que de verdad hacía falta. Fija
+  un **zoom objetivo** (p.ej. 14) y pinta, sobre el mapa, qué zonas de ese zoom
+  están en la BD —**visible aunque estés mirando a z9**—, coloreadas por
+  **completitud** (ámbar = a medias, verde = llena).
+
+Lo delicado era no traer un millón de filas para pintarla. Se resolvió con
+**`RMapsTileSource::coverageHistogram(z, shift)`**: una sola consulta
+`GROUP BY (x>>shift, y>>shift)` que agrega las teselas presentes del nivel a una
+rejilla gruesa (zoom resumen = objetivo − 3). Agrupar por `y_almacenada>>shift`
+es correcto para la completitud tanto en XYZ como en TMS, porque un bloque de
+`2^shift` valores de Y almacenada contiene exactamente los `4^shift` hijos de la
+celda resumen. Se expone por la fachada `MapWidget`
+(`setCoverageVisible/Zoom`, `refreshCoverage`), como el resto de capas.
+
+La mancha se **refresca sola mientras descargas** si está encendida (limitado a
+una vez cada ~2.5 s, que la consulta es un `GROUP BY`), y el estado exacto final
+lo deja el refresco de `finished`. El botón quedó solo como mostrar/ocultar.
+
+De paso, al empezar una descarga se **sale del modo "seleccionar área"** para
+poder desplazar el mapa (deshabilitar el botón no cambiaba la herramienta activa).
+
+**Estado: capa nueva `CoverageLayer` + consulta de cobertura; 13 tests verdes,
+Qt 6.4.**
+
+---
+
+## 34. Documentación: comentarios por función, PDF y convenciones
+
+- **Comentario `//` en español encima de CADA función** de toda la librería y las
+  herramientas (módulos geo, tiles, db, io, core, widget y tools): qué hace y por
+  qué, no lo obvio de la firma. El header documenta el API; el `.cpp`, la
+  implementación. Es la norma del proyecto para todo código nuevo.
+- **`docs/arquitectura.html` + PDF** (`docs/LibMapaStatic_Documentacion.pdf`):
+  documento técnico con arquitectura por capas, módulos, flujos de interacción,
+  codificación de teselas, herramientas y el motor de descarga. El PDF se genera
+  con **Chromium headless** (no hay pandoc/weasyprint en el entorno):
+  `chrome --headless --print-to-pdf=... arquitectura.html`.
+- **`Doxyfile`** para generar la referencia del API a partir de las cabeceras.
+- **`CLAUDE.md`** (raíz) y la skill **`.claude/skills/libmapa-docs`** fijan las
+  convenciones aprendidas (rama y atribución de commits, estilo de comentarios,
+  Qt 5.14/5.15/6.x, QCustomPlot 2.1.1 gitignored, fachada, codificación de
+  teselas, build + 13 tests *offscreen* antes de commitear, y este mismo flujo
+  de documentación) para que cualquier sesión futura las cumpla.
+
+**Estado: documentación al día; sin cambios de código, no requiere build.**
+
+---
+
+## 35. Qué falta — hoja de ruta
+
+> **Superada:** los puntos 1 (persistencia, §44) y 4 (elevación, §39–42) ya
+> están hechos. La hoja de ruta vigente está en §46.
+
+Lo que la librería **todavía no tiene**, por prioridad. Es una lista de trabajo,
+no una promesa de orden.
+
+**Alta (funcionalidad central incompleta):**
+
+1. **Persistencia automática de entidades.** Se dibujan y editan en el mapa pero
+   **no se guardan solas**: falta enlazar `MapWidget` con `VectorRepository`
+   (altas/bajas/cambios → BD, y recarga al abrir). Ya lo reconoce el README.
+2. **Objetivos/vehículos en vivo desde la BD.** `VectorRepository` tiene
+   `vehiculo`/`buque_ais`/`trayectoria` y existe `TargetModel`/`TargetLayer`,
+   pero no están conectados: la capa de datos y la de tiempo real van por
+   separado.
+3. **Rutas interactivas.** La BD guarda `ruta`/`ruta_punto`, pero no hay
+   herramienta ni capa para dibujarlas/editarlas en el mapa.
+
+**Media:**
+
+4. **Altura del terreno (DEM).** No existe (ni almacenamiento, ni consulta por
+   coordenada, ni relieve). Opción que encaja: teselas Terrarium/Terrain-RGB
+   (`z/x/y` PNG) descargables con `fill_tiles`, más un decodificador RGB→metros.
+5. **Fusionar bases regionales** (`merge_tiles`): unir varias `.sqlitedb` en una
+   (relevante para bajar OSM por países y unificar).
+6. **Medición de área/perímetro.** Hoy solo hay distancia entre dos puntos.
+7. **Tests del código nuevo.** `TileFiller` (descarga) y la cobertura no tienen
+   tests; los 13 actuales no los cubren.
+
+**Baja (acabado cartográfico):**
+
+8. Barra de escala, flecha norte, cuadrícula de coordenadas y leyenda.
+9. Búsqueda por lugar/coordenada (geocoding).
+10. **Soporte vectorial OSM** (`.pbf`/MVT): el tema grande en pausa. Hoy todo es
+    ráster; servir vector requeriría un decodificador MVT y un renderizador de
+    estilo nuevos (ver el análisis del `.txt` de OSM).
+11. Publicar la referencia Doxygen e internacionalización (cadenas en español
+    sin ficheros `.ts`).
+
+**Estado: la librería cubre el ciclo ver→navegar→dibujar→descargar; cerrar
+dibujar→guardar→recargar y conectar objetivos/rutas con la BD es el siguiente
+salto natural.**
+
+---
+
+## 36. Acercarnos a SAS.Planet (1/4): selección por polígono
+
+Comparando la descarga con **SAS.Planet**, nuestra herramienta era sólida e
+integrada pero le faltaban cuatro cosas: selección por polígono, descarga en
+paralelo, estimación de tamaño y elevación del terreno. Se abordan una a una;
+esta es la primera.
+
+Hasta ahora solo se podía marcar un **rectángulo** (`SelectArea`), y bajar un
+bbox sobre una costa o una isla desperdicia muchas teselas de mar. Ahora se
+puede marcar un **polígono** y descargar **solo lo de dentro**.
+
+- `MapTool::SelectPolygon`: se marca clic a clic (doble clic o Enter lo cierra),
+  reutilizando el borrador de `FeatureLayer` que ya dibujaba los polígonos de
+  entidad —no se crea ninguna entidad, es una selección transitoria—. Emite
+  `polygonSelected(QVector<QGeoCoordinate>)` y deja el contorno visible.
+- El filtro es `GeoMath::pointInPolygon` (ray-casting sobre lon/lat), puesto en
+  el núcleo para poder **probarlo** (test en `tst_tilematrix`). No corrige la
+  distorsión de la proyección, pero para elegir qué teselas bajar en un área del
+  tamaño de un país sobra.
+- `TileFiller` admite `Params::polygon`: el **bbox de barrido** sale de los
+  vértices y, tesela a tesela, se descarta la que tenga su **centro fuera** del
+  polígono —tanto al contar en `prepare()` como al descargar en `advanceCursor()`—.
+- En las herramientas: `fill_tiles --poly "lat,lon;lat,lon;..."` (alternativa a
+  `--bbox`) y, en `fill_map`, el botón **"Polígono"** (excluyente con
+  "Seleccionar área"); marcar un rectángulo o escribir un bbox anula el polígono
+  y viceversa. La mancha de cobertura sigue usando el bbox.
+
+Decisión: el polígono es una **selección**, no una entidad del mapa; por eso se
+reaprovecha el borrador (líneas, cierre, tiradores) sin tocar el `OverlayModel`.
+
+**Estado: 13 tests verdes (con un caso nuevo `pointInPolygonBasic` dentro de
+`tst_tilematrix`), Qt 6.4.**
+
+---
+
+## 37. Acercarnos a SAS.Planet (2/4): descarga en paralelo limitada
+
+`TileFiller` bajaba **una tesela cada vez**: lanzaba una petición y, al volver,
+encadenaba la siguiente. Con la latencia de un servidor remoto eso deja la
+conexión parada entre tesela y tesela. SAS.Planet usa muchos hilos; aquí basta
+con tener **unas pocas peticiones en vuelo a la vez** (sin hilos nuevos: todo en
+el bucle de eventos).
+
+El cambio de fondo fue sacar el estado de "qué tesela" de variables **globales**
+(`m_cx/m_cy/m_curStoredY/m_attempt/m_reply`) a una `struct Pending` **por
+petición**, guardada en `m_active` (`QHash<QNetworkReply*,Pending>`). Así varias
+peticiones conviven sin pisarse las coordenadas.
+
+- `advanceCursor()` → **`nextTile(Pending&)`**: produce la siguiente tesela que
+  falta (cursor global de nivel+celda, con el filtro de polígono/present); marca
+  `m_exhausted` al acabar.
+- `pump()` → **`schedule()`**: mientras no esté cancelado ni en pausa y queden
+  huecos (`m_active.size() < connections`), lanza —de la cola de reintentos
+  primero, si no de `nextTile()`— respetando el **ritmo** (`--rate`, tope de
+  lanzamientos/seg; si es pronto se re-arma solo). `launch()` crea la petición,
+  su timeout propio y la registra.
+- `onReplyDone(reply)`: busca su `Pending`, clasifica igual que antes e **inserta
+  con las coords de esa `Pending`**. Un fallo con reintentos vuelve a la cola tras
+  su backoff (contados en `m_pendingRetries` para no terminar antes de tiempo). El
+  **auto-freno** y las estadísticas son compartidos; al dispararse pone
+  `m_paused` y reanuda tras la pausa. Termina cuando no hay nada en vuelo, ni
+  reintentos, ni cursor.
+
+Decisión de semántica: `--rate` sigue siendo el **tope suave** de lanzamientos
+por segundo (para no abusar de la fuente) y `--conns` (por defecto 2, máx 8) las
+**peticiones simultáneas** que ocultan la latencia. Para ir realmente rápido se
+sube `--rate`; el auto-freno y la **reanudabilidad** quedan intactos.
+
+Verificado end-to-end sobre Esri Clarity: 20/20 teselas con `--conns 3` (progreso
+a ráfagas), 0 al reanudar, y con `--poly` + `--conns 2` el triángulo baja solo 3
+de las 20 del bbox.
+
+En las herramientas: `fill_tiles --conns N` y, en `fill_map`, el selector
+**"Conex"** (1..8).
+
+**Estado: 13 tests verdes; descarga en paralelo verificada contra la fuente
+real, Qt 6.4.**
+
+## 38. Acercarnos a SAS.Planet (3/4): estimación de tamaño (MB)
+
+Antes de confirmar sabíamos **cuántas** teselas íbamos a bajar, pero no **cuánto
+ocupaban**. SAS.Planet enseña un tamaño aproximado; aquí añadimos lo mismo con un
+**muestreo pequeño y asíncrono**, sin descargar todo ni escribir la BD.
+
+Nuevo método `TileFiller::estimateSize(int samples = 12)`:
+
+- `collectSamples(n)`: recorre los niveles del plan (sin tocar el cursor real ni
+  emitir `zoomFinished`) y reparte las `n` muestras entre los zooms. En cada nivel
+  salta con un **stride** por el rango de teselas para no coger todas del mismo
+  rincón, aplicando el mismo filtro de **polígono/present** que la descarga (solo
+  muestrea teselas que de verdad faltan). Devuelve una lista de `Pending` ligeras
+  (basta z/x/y para construir la URL).
+- Un mini-descargador propio (`m_sampNam` independiente del de la descarga real,
+  con su `QSet` de peticiones en vuelo y su cap = `connections`) que **solo mide
+  los bytes** de cada respuesta y **no inserta nada** en la BD. Las muestras se
+  vuelven a bajar luego en `start()`; es poca cosa.
+- Al volver todas, promedia los bytes de las que salieron bien y emite
+  **`sizeEstimated(double avgKiB, qint64 estBytesTotal, int sampled)`** con
+  `estBytesTotal ≈ media · totalToDownload()`. Si no logra muestrear nada (sin
+  red, o todo presente), cae a una **heurística de ~20 KiB/tesela** y marca
+  `sampled = 0` para que la interfaz avise de que es aproximado.
+
+Es un paso **previo** y opcional: no interfiere con `start()` (su estado de red es
+aparte) y se llama entre `prepare()` y `start()`.
+
+Integración en las herramientas:
+
+- `fill_tiles`: tras `prepare()` y antes del prompt, lanza `estimateSize()` y
+  espera el `sizeEstimated` con un `QEventLoop` local (la consola puede bloquear);
+  imprime `Tamano estimado: ~X MB (media Y KiB/tesela, muestreo de N)`.
+- `fill_map`: igual, pero el `QEventLoop` es un **bucle anidado** (como un diálogo
+  modal: la ventana sigue viva mientras se muestrea) y el resultado se añade a la
+  confirmación: `Se descargaran N teselas (~X MB).`; si el muestreo falló se marca
+  "aprox.".
+
+Verificado sobre Esri Clarity en un área pequeña (zoom 14–16, 145 teselas): el
+estimado fue **~3.6 MB** (media 25.4 KiB, muestreo de 12) y la BD real quedó en
+**3.50 MB** — mismo orden, diferencia ~3 % (y la BD incluye el propio formato
+SQLite, así que la suma de imágenes casa aún mejor).
+
+**Estado: 13 tests verdes; estimación verificada contra la descarga real, Qt 6.4.**
+
+## 39. Acercarnos a SAS.Planet (4/4): elevación del terreno (HGT/SRTM)
+
+La librería manejaba teselas raster pero no sabía nada de la **altura del
+terreno**. SAS.Planet puede mostrar la cota del punto; aquí añadimos lo mismo
+leyendo ficheros **SRTM `.hgt`** locales (el usuario ya tiene los de 90 m de Cuba
+en su PC; para las pruebas en el contenedor usé los de 30 m de AWS Skadi, mismo
+formato).
+
+El `.hgt` es un formato crudo sin cabecera: una rejilla **cuadrada** de muestras
+`int16` **big-endian** que cubre un tile de 1°×1°. El nombre da la esquina
+suroeste (`N19W077.hgt` = de 19N a 20N y de 77O a 76O). La fila 0 es el borde
+**norte** y la columna 0 el **oeste**. La resolución no está escrita en ningún
+sitio: se **deduce del tamaño** del fichero (`lado = isqrt(bytes/2)` → 1201 = 90 m,
+3601 = 30 m).
+
+Nuevo módulo de núcleo **`src/dem/HgtElevation`** (sin widgets, en
+`libmapa_core`):
+- `setDirectory(dir)` / `elevationAt(QGeoCoordinate) → double` (metros, o
+  **NaN** si no hay dato: tile ausente, fuera de la carpeta, o hueco SRTM).
+- Localiza el tile por el `floor` de lat/lon, lo carga con una **cache LRU**
+  pequeña (no releer el disco al mover el ratón), autodetecta el lado, lee las
+  muestras con `qFromBigEndian<qint16>` e **interpola bilinealmente** entre los 4
+  nodos que rodean el punto. Si alguno es el valor de hueco (`-32768`) → NaN: no
+  se inventa terreno. No había `isqrt` ni lector big-endian reutilizable, así que
+  el módulo trae los suyos.
+
+Se expone por la **fachada** `MapWidget`: nuevo `MapConfig.elevationDir`,
+`MapWidget::elevationAt(coord)` y `setElevationDir(dir)` (para cambiarla en
+caliente). En **`fill_map`**: opción `--dem <carpeta>`, un botón **"DEM…"** que
+abre el selector de carpeta, y una etiqueta en la barra de estado que muestra la
+**cota bajo el cursor** (conectada a `MapWidget::mouseMoved`); "—" cuando no hay
+dato.
+
+Prueba automática (`tst_hgtelevation`, el test nº 14): sin meter un `.hgt` real
+(decenas de MB) en el repo, escribe `.hgt` **sintéticos** pequeños en un temporal
+(lados 7 y 5, rampa conocida, con un hueco) y comprueba el valor exacto en un
+nodo, la **autodetección** del lado, la **interpolación** bilineal, el hueco→NaN
+y el tile ausente→NaN.
+
+Prueba manual sobre el tile real de 30 m `N19W077` (Sierra Maestra): el barrido
+de la zona da **1970.8 m** en 19.99N, 76.836O — el **Pico Turquino** (cumbre real
+1974 m; SRTM 30 m lee ~1971). Confirma orientación norte/oeste, descodificación
+big-endian y bilineal correctas.
+
+**Estado: 14 tests verdes (13 + `tst_hgtelevation`); lectura HGT verificada
+contra un tile SRTM real, Qt 6.4.**
+
+## 40. Elevación en base de datos (1/3): interfaz y lector SQLite
+
+La elevación por ficheros `.hgt` sueltos (§39) está bien para consultar en el PC,
+pero el usuario va a **empaquetar la elevación dentro de una app**: para eso
+quiere **un solo fichero** portable, no cientos de `.hgt`. Se decidió guardarla en
+una **base de datos SQLite**, coherente con cómo el proyecto ya guarda las
+teselas. Este paso añade **leer** de esa BD; generarla y descargar vienen después.
+
+Para no duplicar la matemática, se separa *de dónde salen las muestras* de *cómo
+se interpola*, con una interfaz al estilo de `ITileSource`:
+
+- **`IElevationSource`** (`src/dem/IElevationSource.h`): interfaz pura, un único
+  método `double elevationAt(QGeoCoordinate) const` con el contrato NaN.
+- **`GridElevation`** (`src/dem/GridElevation.{h,cpp}`): base abstracta que
+  concentra TODO lo común de una fuente SRTM en rejilla —`struct Tile`, la **caché
+  LRU**, `sampleAt`, `isqrtExact`, el valor de hueco y la **interpolación
+  bilineal** con su contrato NaN— y deja un único hueco por implementar:
+  `virtual bool loadTile(latFloor, lonFloor, data, side)`.
+- **`HgtElevation`** ahora **hereda de `GridElevation`**: solo implementa
+  `loadTile` leyendo el fichero `.hgt`. Su comportamiento público no cambia, así
+  que `tst_hgtelevation` sigue en verde sin tocarlo.
+- **`SqliteElevation`** (`src/dem/SqliteElevation.{h,cpp}`): implementa `loadTile`
+  consultando la BD y descomprimiendo el blob. Abre la BD **en solo lectura por
+  hilo** con `SqliteConnectionPool` (ya fija `QSQLITE_OPEN_READONLY` y
+  `busy_timeout`).
+
+**Esquema de la BD** (lo fija el lector; lo escribirá `dem_to_db`):
+```sql
+CREATE TABLE dem_tiles (lat INTEGER, lon INTEGER, side INTEGER, data BLOB,
+                        PRIMARY KEY(lat,lon));
+CREATE TABLE dem_meta  (key TEXT PRIMARY KEY, value TEXT);
+```
+`data` son **las MISMAS muestras** `int16` big-endian que el `.hgt`, solo que
+`qCompress`-adas (el terreno comprime bien y el mar casi a cero). Al leer,
+`qUncompress` reproduce el `Tile` exacto → la bilineal es la misma → **idéntica
+cota** que el lector de ficheros. (`qCompress`/`qUncompress`, de QtCore, no se
+usaban aún en el repo.)
+
+**Fachada:** `MapConfig` gana `elevationDbFile` (prioritaria sobre
+`elevationDir`); el miembro de la `Impl` pasa a `std::unique_ptr<IElevationSource>`
+y el constructor elige la implementación; nuevos `MapWidget::setElevationDb()` y
+`setElevationDir()` cambian el origen en caliente. En **`fill_map`**: opción
+`--dem-db <fichero>` y el botón **DEM…** pasa a un menú (carpeta `.hgt` **o** BD
+`.sqlitedb`).
+
+**Test nº 15 (`tst_sqliteelevation`)**: construye en un temporal el mismo tile
+sintético como `.hgt` y como BD (blob `qCompress`-ado) y comprueba que
+`SqliteElevation` da **exactamente lo mismo** que `HgtElevation` en varios puntos
+(nodo, intermedio bilineal), más hueco→NaN y tile ausente→NaN.
+
+**Estado: 15 tests verdes; lector de BD verificado contra el lector de ficheros
+(misma cota). Faltan las herramientas `dem_to_db` y `fill_hgt` (siguientes pasos).**
+
+## 41. Elevación en base de datos (2/3): generador `dem_to_db`
+
+Con el lector de BD ya hecho (§40), falta **construir** esa base de datos. Nueva
+herramienta de consola **`dem_to_db`** (solo `libmapa_core`, patrón de
+`geo_to_tiles`):
+
+```
+dem_to_db <carpeta_hgt> --out cuba_dem.sqlitedb [--overwrite]
+```
+
+Recorre los `.hgt` de la carpeta, saca `(lat,lon)` del nombre
+(`N19W077` → 19, −77, con una `QRegularExpression`), detecta el lado por el
+tamaño, **comprime** las muestras con `qCompress` nivel 9 e inserta cada tile en
+`dem_tiles` dentro de una `Transaction` (una sola, rápida). Escribe `dem_meta`
+(resolución, fuente, nº de tiles, fecha) y un resumen con el ahorro de tamaño.
+Avisa y salta ficheros con nombre o tamaño raros, sin abortar. **Sin red y sin
+gzip**: trabaja sobre `.hgt` ya descomprimidos, así que vale tal cual para los
+90 m del usuario.
+
+Verificado con el tile real de 30 m `N19W077` (24,7 MB): la BD queda en **7,5 MB
+(30 % del crudo)** y `SqliteElevation` lee de ella **exactamente** lo mismo que el
+lector de ficheros (diff 0,0 en todos los puntos; Pico Turquino **1970.8 m**). A
+90 m la relación es parecida, así que una BD de Cuba entera ronda las pocas
+decenas de MB.
+
+En CMake se añade como `dem_to_db` (como `vector_db`); hay `.pro` equivalente
+(`qmake/dem_to_db.pro`, solo QtCore+QtSql, usa el header `Transaction.h`).
+
+**Estado: 15 tests verdes; `dem_to_db` verificado (BD = ficheros, 30 % de tamaño).
+Falta el descargador `fill_hgt` (último paso).**
+
+## 42. Elevación en base de datos (3/3): descargador `fill_hgt`
+
+Último paso del pipeline: conseguir los `.hgt` sin tenerlos ya. Nueva herramienta
+de consola **`fill_hgt`** que baja tiles SRTM de **30 m** de **AWS Skadi** (sin
+clave), para una zona:
+
+```
+fill_hgt --cuba --out carpeta
+fill_hgt --bbox latN,lonO,latS,lonE --out carpeta
+```
+
+Recorre los tiles de 1°×1° del bbox (o el preset `--cuba`), y por cada uno que
+**falte** baja `…/skadi/N19/N19W077.hgt.gz`, lo **descomprime al vuelo con zlib**
+(`inflateInit2` en modo gzip, en memoria, sin ficheros temporales) y valida que
+el `.hgt` resultante es un cuadrado perfecto de `int16`. Es **reanudable** (salta
+los `.hgt` que ya están), reintenta los fallos de red con backoff, y **salta los
+404** (tiles de mar abierto que la fuente no tiene) sin contarlos como error.
+
+Es la única pieza que estrena una dependencia (**zlib**), porque Skadi solo sirve
+`.hgt.gz`; el núcleo y `dem_to_db` siguen sin zlib (trabajan sobre `.hgt` ya
+descomprimidos). En CMake se añade con `find_package(ZLIB)` y enlace `ZLIB::ZLIB`;
+`.pro` equivalente con `LIBS += -lz`.
+
+Verificado de punta a punta: `fill_hgt --bbox 21,-77.9,19.1,-76.1` baja 6 tiles
+reales de 30 m (0 fallidos), la segunda pasada no baja nada (reanudable),
+`dem_to_db` genera la BD (37,6 MB vs 148 MB crudos) y `SqliteElevation` da el
+**Pico Turquino a 1970.8 m** y NaN fuera de cobertura. Pipeline completo:
+**`fill_hgt` → `dem_to_db` → `fill_map --dem-db`**.
+
+**Estado: 15 tests verdes; pipeline DEM-en-BD cerrado (descarga 30 m → BD
+comprimida → consulta), verificado contra datos reales, Qt 6.4.**
+
+> **Corrección (zlib → miniz, `fill_hgt` autónomo):** la primera versión usaba
+> `find_package(ZLIB REQUIRED)`, que **abortaba toda** la configuración de CMake
+> donde no hubiera zlib de desarrollo (p.ej. **Qt MinGW en Windows**:
+> *"Could NOT find ZLIB"*). La solución definitiva **elimina la dependencia de
+> zlib**: se vendoriza **miniz** (descompresor DEFLATE en un solo fichero,
+> **dominio público**, en `third_party/miniz/`, commiteado —a diferencia de
+> QCustomPlot—). `fill_hgt` descomprime el gzip parseando a mano la cabecera
+> (RFC 1952) y usando `tinfl` de miniz, así que **compila en cualquier sitio sin
+> instalar nada**. Detalles: se habilita el lenguaje **C** en `project()` (miniz
+> es C; su `extern "C"` enlaza con el `main.cpp` en C++), se le aplica `-w` (es de
+> terceros) y los tres avisos solo-C++ (`-Woverloaded-virtual`,
+> `-Wnon-virtual-dtor`, `-Wold-style-cast`) se limitan a CXX con generator
+> expressions. Verificado: la salida de miniz es **byte a byte idéntica** a la de
+> zlib (mismo md5 del `.hgt`). (De paso, un `-Wconversion` latente en
+> `GeoMath::pointInPolygon` —`int(poly.size())`— que solo salía en build limpio.)
+
+## 43. Documentación: referencia de comandos por herramienta
+
+Para que quede claro cómo se invoca cada aplicación, se añade una **referencia
+completa de comando + argumentos de entrada** de las diez herramientas
+(`probe_db`, `geo_to_tiles`, `vector_db`, `render_map`, `bench_tiles`,
+`fill_tiles`, `fill_map`, `fill_hgt`, `dem_to_db`, `demo`):
+
+- En **`README.md`**, un bloque "Referencia de comandos" con la sintaxis de cada
+  una (opciones `[…]` opcionales; bbox siempre `latN,lonO,latS,lonE`).
+- En **`docs/arquitectura.html`** (§11) + **PDF**, una tabla por herramienta
+  explicando cada argumento, además de las secciones que ya había de `fill_tiles`
+  y `fill_map`, y la síntesis de línea de comandos de `fill_map`.
+
+Los argumentos se tomaron directamente del parseo real de cada `main.cpp` (no
+inventados). Cambio solo de documentación: no toca el build ni los tests.
+
+**Estado: 15 tests verdes (sin cambios de código); documentación de comandos al día.**
+
+## 44. Persistencia automática de entidades
+
+Hasta ahora las entidades (puntos/líneas/polígonos) se **dibujaban y editaban**
+pero **no se guardaban solas**: solo había un guardado/carga manual
+(`saveFeaturesTo`/`loadFeaturesFrom`). Se cierra el ciclo *dibujar → **guardar
+solo** → recargar al abrir*, como capacidad de la **librería** (cualquier app la
+hereda con solo configurarla).
+
+Diseño — **autosave por volcado completo con antirebote** (reutiliza lo ya
+probado, sin refactors arriesgados):
+
+- `MapConfig.featuresDbFile`: si viene, el `MapWidget` **carga** esa BD de
+  entidades al abrir y **guarda solo** lo que se dibuje/edite/borre. Vacío =
+  apagado. También se puede encender en caliente con
+  `MapWidget::setFeaturesDbFile(ruta)`; `saveFeaturesNow()` fuerza un guardado
+  (p.ej. al cerrar la app).
+- El guardado escucha las señales del modelo (`featureAdded`/`featureUpdated`/
+  `featureRemoved`/`layersChanged` — cubren el 100 % de cambios, tanto por ratón
+  como por API) y **rearranca un `QTimer` de antirebote (~500 ms)**: una ráfaga
+  (arrastrar un vértice emite muchos `featureUpdated`) se agrupa en **un solo**
+  volcado (`saveFeaturesTo(featuresDbFile)`: borra y reescribe).
+- **Sin bucles**: `loadFeaturesFrom` usa `setContents`, que **no** reemite
+  `featureAdded` por entidad; además la carga inicial se hace con un guard
+  (`suppressAutosave`) para que su `layersChanged` no programe un guardado.
+
+Por qué volcado completo y no incremental: `VectorRepository::writeFeature`
+**siempre hace INSERT** (no UPSERT) e ignora `f.id`, y el id del `OverlayModel`
+(contador en memoria) ≠ id de la tabla `entidad`. Un guardado incremental por
+`featureUpdated` **duplicaría filas**. El volcado completo con antirebote es
+correcto y simple para un mapa de trabajo (cientos de entidades). El UPSERT real
+por id queda como mejora futura si algún día hay miles.
+
+Los **objetivos móviles** (TargetModel) NO se persisten: llegan a decenas por
+segundo y no tiene sentido escribirlos en disco.
+
+Test (nº 15, `tst_mapwidget`, 3 casos nuevos): con un `featuresDbFile` en un
+temporal, (1) añadir + `saveFeaturesNow()` deja la entidad en la BD (leída con un
+`VectorRepository` aparte); (2) un segundo `MapWidget` con ese fichero
+**autocarga** (`featureCount()==2`); (3) solo añadir y dejar correr el bucle de
+eventos — el **antirebote** dispara el guardado solo (`QTest::qWait(900)`).
+
+**Estado: 15 tests verdes (tst_mapwidget con 3 casos nuevos); persistencia
+automática verificada, sin avisos, Qt 6.4.**
+
+## 45. `demo`: cobertura por zoom, cota del terreno y persistencia
+
+La app `demo` es la vitrina de la librería, pero se había quedado atrás: no
+mostraba ni la **mancha de cobertura** ni la **cota del terreno** (vivían solo en
+`fill_map`), ni usaba la **persistencia automática** recién añadida. Se llevan a
+`demo` reutilizando exactamente la misma API pública (sin tocar el build: `demo`
+ya enlaza `libmapa_widget`, que trae `CoverageLayer` y el DEM; no necesita
+`Qt::Network`, que es solo para descargar).
+
+- **Cobertura:** acción «Cobertura» (checkable) + selector de zoom en la barra de
+  mapa → `setCoverageZoom` + `setCoverageVisible` (igual que en `fill_map`). Pinta
+  qué zonas del zoom elegido ya están en la BD, visible aunque mires a otro zoom.
+- **Cota:** botón **DEM…** con menú (carpeta `.hgt` / BD `.sqlitedb`) → `setElevationDir`/
+  `setElevationDb`; la cota bajo el cursor sale en la barra de estado (junto a las
+  coordenadas que ya había), "—" si no hay dato. También por CLI: `--dem`/`--dem-db`.
+- **Persistencia automática:** opción `--features <db>` que rellena
+  `MapConfig.featuresDbFile` → lo que dibujes se **guarda solo** y se recarga al
+  abrir (los botones manuales Guardar/Abrir siguen para exportar a otro fichero).
+
+Así `demo` demuestra de un vistazo lo último hecho: ver cobertura, consultar
+altura y persistir entidades, sin la parte de descarga (esa sigue en `fill_map`).
+Cambio de aplicación de ejemplo (no de librería): los 15 tests no se tocan.
+
+**Estado: 15 tests verdes; `demo` enriquecido (cobertura + cota + persistencia),
+build sin avisos, Qt 6.4.**
+
+## 46. Repaso de la documentación y hoja de ruta actualizada
+
+Una revisión completa de los documentos frente al código encontró que se habían
+ido quedando atrás respecto a lo construido en §36–45. Ninguna incoherencia
+afectaba al build, pero varias **contradecían** el estado real:
+
+- **README:** la sección «Estado» seguía diciendo que las entidades «no se
+  guardan solas» justo después de §44; faltaba `geo_to_tiles` en la tabla de
+  herramientas; la «Estructura» no listaba `src/dem/` ni `src/io/` y describía
+  `widget/` como «MapView y capa de teselas»; la nota «sin QCustomPlot» omitía
+  `fill_map`; y la tabla de fases terminaba en la 8. Corregido todo, con las
+  fases 9–11 (descarga avanzada, elevación, persistencia).
+- **§35** proponía como pendiente lo que ya está hecho (persistencia, DEM) y
+  hablaba de 13 tests. Se marca como superada y se sustituye por la lista de
+  abajo, en vez de reescribirla: la bitácora es cronológica.
+- **Skill `libmapa-docs`:** decía «13 tests» (son 15).
+- **Comentarios de `fill_hgt`** (`main.cpp` y `qmake/fill_hgt.pro`): aún decían
+  que descomprime con zlib; desde la corrección de §42 es miniz.
+- **`CLAUDE.md` y la skill** solo describían el contenedor Linux en la nube. Se
+  añade el entorno local (Windows, Qt 6.11.2 MinGW, Qt Creator): dónde está el
+  build, cómo correr los tests y cómo generar el PDF con el Chrome/Edge de
+  Windows.
+- **Atribución:** `CLAUDE.md` prohibía poner un identificador de modelo en el
+  repo y a la vez exigía una línea `Co-Authored-By` que lo lleva. Se aclara que
+  esa línea final del commit es la **única** excepción, y se actualiza.
+- `.qtcreator/` (configuración local de Qt Creator) va al `.gitignore`.
+
+**Hoja de ruta vigente** (sustituye a §35):
+
+*Alta:*
+1. **Objetivos en vivo desde la BD:** conectar `vehiculo`/`buque_ais`/
+   `trayectoria` de `VectorRepository` con `TargetModel`/`TargetLayer`.
+2. **Rutas interactivas:** la BD guarda `ruta`/`ruta_punto`, pero no hay
+   herramienta ni capa para dibujarlas o editarlas.
+3. **Tests del código sin cubrir:** `TileFiller` (descarga) y `CoverageLayer`.
+
+*Media:*
+4. **Guardado incremental por id (UPSERT)** en `VectorRepository`, para que la
+   persistencia de §44 escale a miles de entidades sin volcado completo.
+5. **Fusionar bases regionales** (`merge_tiles`).
+6. **Medición de área y perímetro** (hoy solo distancia entre dos puntos).
+7. **Relieve a partir del DEM** (sombreado), ahora que ya hay elevación.
+
+*Baja:*
+8. Barra de escala, flecha norte, cuadrícula de coordenadas y leyenda.
+9. Búsqueda por lugar/coordenada (geocoding).
+10. Soporte vectorial OSM (`.pbf`/MVT).
+11. Publicar la referencia Doxygen e internacionalización (`.ts`).
+
+**Estado: cambio solo de documentación y comentarios, no requiere build;
+15 tests verdes.**
+
+## 47. Paquete de datos sin conexión: `mapa.json` y `MapConfig.dataDir`
+
+**Cambio de rumbo.** Se aclaró el uso real: el producto final **no usa
+internet**; solo trabaja con datos locales que viajan con la aplicación.
+Internet queda para las herramientas que **preparan** esos datos (`fill_tiles`,
+`fill_map`, `fill_hgt`). Eso reordena las prioridades: lo importante deja de ser
+«leer más fuentes» (servidor de teselas, MBTiles) y pasa a ser que el conjunto de
+datos **se instale, se encuentre y funcione** sin sorpresas. La hoja de ruta de
+§46 queda en segundo plano; su punto 1 (objetivos desde la BD) se aparca porque
+nadie lo necesita todavía: las tablas `vehiculo`/`buque_ais`/`trayectoria`
+vienen copiadas del EstacionTerrena original (§25), no de un requisito.
+
+**Lo que lo hacía difícil:**
+
+- `probe_db` escribía **rutas absolutas** (`D:/QtPro/Recursos/...`): el
+  `datasets.json` no servía en otro PC aunque el lector ya aceptaba relativas.
+- Los datos estaban **repartidos** en tres ajustes de `MapConfig`
+  (`datasetsFile`, `elevationDbFile`, `featuresDbFile`) sin idea de conjunto.
+- La BD de entidades necesita **escribir**, y una app instalada en
+  `Program Files` no puede escribir en su propia carpeta.
+- Nada describía el conjunto: ni versión, ni zona, ni atribución.
+
+**El paquete.** Una carpeta con todo y un manifiesto `mapa.json` (formato
+`libmapa-package`, versión 2) con rutas **relativas** a ella:
+
+- `package`: id, nombre, versión de los datos, fecha, zona (`bounds`) y
+  **atribución** (OSM la exige; la app la lee con `MapWidget::packageInfo()`).
+- `start`: capa, centro y zoom de arranque (la app ya no cablea La Habana).
+- `datasets`: lo mismo que `datasets.json`; los campos omitidos toman su valor
+  por defecto, así que ya no hace falta repetir `colZ`, `tableName`…
+- `elevation`: `file` (BD) o `dir` (`.hgt`).
+- `overlays`: capas vectoriales **fijas** `.geo` con su estilo.
+- `features`: la BD de entidades del usuario y, opcional, una `seed` de partida.
+
+Las claves van **en inglés**, como las del `datasets.json` que ya existía. Un
+`datasets.json` versión 1 sigue valiendo (es un paquete con solo capas base), y
+un manifiesto de una versión **futura** se rechaza con un mensaje claro en vez
+de abrirse a medias.
+
+**Decisiones:**
+
+- **Un solo ajuste:** `MapConfig::dataDir`. Lo que la app rellene a mano **gana**
+  al paquete. Para poder distinguir «no puesto» de «puesto», `initialCenter`
+  pasa a ser inválido por defecto e `initialZoom` a −1; si nadie los pone se usan
+  los de siempre (La Habana, 10), así que ninguna app existente cambia.
+- **Lo que falta avisa, no rompe:** una capa base, la elevación o un `.geo`
+  ausentes se anotan como aviso (log) y el resto del mapa funciona. Solo es
+  fatal no tener manifiesto, que no sea JSON, otro formato/versión, o cero
+  datasets.
+- **Entidades fuera del paquete:** una ruta relativa en `features.file` se
+  resuelve contra `AppDataLocation/<package.id>/` (escribible), **nunca** contra
+  la carpeta del paquete. El id separa paquetes distintos. La `seed` se copia
+  la primera vez y se le devuelven los permisos de escritura (la copia hereda el
+  solo-lectura del original instalado). Nunca se pisa lo ya guardado.
+- **Capas fijas que no se duplican:** se cargan en el `OverlayModel` como el
+  resto (reutilizando `loadGeoAsLayer`), pero el widget recuerda sus ids
+  (`fixedLayers`) y `saveFeaturesTo` las **salta**: si se guardaran, en cada
+  arranque aparecerían dos veces. Quedan bloqueadas (capa no editable, entidad
+  no seleccionable) y su carga no entra en el historial de deshacer. Como
+  `setContents` reemplaza todo el modelo, `loadFeaturesFrom` las vuelve a poner,
+  dentro del mismo grupo de deshacer.
+- El lector (`src/io/DataPackage`) va en el **núcleo** (sin widgets) para
+  probarlo sin pantalla; lo público es solo `DataPackageInfo`
+  (`include/libmapa/DataPackage.h`), sin exponer `TileDataset`.
+
+**Herramientas:** `probe_db` escribe las rutas **relativas a la carpeta del
+`--out`** y, con `--package` (+ `--dem`, `--overlay`, `--features`), genera el
+manifiesto completo con la zona del `--ref-bbox` y la fecha de hoy.
+`render_map --data <carpeta>` y `demo <carpeta>` abren un paquete entero.
+
+**El paquete real** `D:\QtPro\Recursos\mapa.json` (plantilla en el repo:
+`mapa.example.json`) lleva los **cuatro** datasets que hay en `Recursos`
+(`Cuba_OSM_CID3`, `Cuba_Satelital_CID3`, `Nueva_Clarity`, `Cuba_Vector`), la
+elevación `cuba_dem.sqlitedb` y los cuatro `.geo` como capas fijas (`Aguas`,
+`FIR`, `Corredores`, `Ejercitos`). Se respetaron los ajustes hechos a mano en el
+`datasets.json` anterior, que la sonda no reproduce (zoom mínimo/fondo 3 en
+`satelital`, 3/4 en `clarity`, `typicalFill` 1.0 en `costas`).
+`render_map --data D:\QtPro\Recursos` lo dibuja entero con una sola opción.
+
+**Tests:** nuevo `tst_datapackage` (todos los bloques, carpeta o fichero,
+valores por defecto, versión 1, formato/versión ajenos, avisos por ficheros que
+faltan, entidades en `AppData` con copia de la semilla) y tres casos en
+`tst_mapwidget` (abrir solo con `dataDir`; la capa fija ni se guarda ni se
+duplica al reabrir; lo manual gana al paquete; error claro si falta).
+
+**Siguiente (pasos 2 y 3 del plan):** comprobar un paquete antes de
+distribuirlo (ficheros, apertura, zonas y zooms cubiertos) y desplegar la
+librería en otra app sin sorpresas (`install()`/`find_package`, plugins
+`qsqlite`/imágenes, y un test que vigile que la librería no enlaza `Qt Network`).
+
+**Estado: 16 tests verdes (13 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW.**
+
+## 48. Comprobar el paquete: `check_data` y `MapWidget::dataWarnings()`
+
+Con datos solo locales, lo que falte en el paquete **no se puede descargar
+después**. Y lo que falla al instalar en otro PC falla en silencio: si falta el
+plugin de imagen `qjpeg` (lo más típico al copiar una app Qt sin
+`windeployqt`), las bases abren pero ninguna tesela se decodifica, y el mapa sale
+**en blanco sin ningún mensaje**. Hacía falta decirlo antes de distribuir y
+también al abrir.
+
+**`PackageCheck`** (`src/io/`, núcleo sin widgets) recorre el paquete y anota
+hallazgos con gravedad: **Error** si una parte del mapa no se dibujará
+(fichero ausente, base que no abre o sin teselas, imágenes que no se decodifican,
+BD de elevación inválida, `.geo` ilegible, ids repetidos, sin driver `QSQLITE`),
+**Warning** si funciona pero hay algo que arreglar (sin atribución, sin zona,
+capa de arranque inexistente, un fichero **fuera** de la carpeta que no viajará,
+un nivel declarado sin ninguna tesela en la zona) e **Info** para el informe.
+No escribe nada; la BD de entidades del usuario ni se abre (abrirla con
+`VectorRepository` podría migrar su esquema).
+
+Decisiones:
+
+- **Decodificar una tesela de verdad**, no solo abrir la BD: es la única forma de
+  detectar el plugin que falta. Se lee una tesela cualquiera del nivel de fondo
+  (`RMapsTileSource::anyTile`, `LIMIT 1`) y se pasa por `QImageReader`. Si falla,
+  el formato se identifica por los primeros bytes (sin el plugin, Qt ni siquiera
+  lo reconoce) para que el mensaje diga **cuál** falta.
+- **Cobertura por zoom con `COUNT(*)`** (`RMapsTileSource::countInRange`, mismo
+  `WHERE` que la lectura, incluida `s`), no trayendo las claves: usa el índice
+  `(z,x,y,s)`. Sobre el paquete real (6,7 GiB, cuatro capas, hasta z16) el informe
+  completo tarda **~0,2 s**.
+- **Dos modos.** El completo (cobertura) es para `check_data`. El rápido lo hace
+  `MapWidget` al abrir un paquete (unos ms) y lo deja en `dataWarnings()`, además
+  del log; el mapa **arranca igual** con lo que funcione y la aplicación decide si
+  avisar (`demo` muestra un diálogo). Que falte una capa no debe impedir usar las
+  demás.
+- En `DataPackage::load` lo que falta era solo un aviso (para poder abrir el
+  resto); en la comprobación es un **error** con su gravedad real.
+
+**`check_data <paquete> [--quick] [--max-zoom N] [--strict]`** imprime una ficha
+por capa (tamaño, formato, cobertura por zoom) y los hallazgos; sale con 1 si hay
+errores (o avisos, con `--strict`) para usarlo en un script de empaquetado.
+
+Lo que dice del paquete real `D:\QtPro\Recursos`: **0 errores, 0 avisos**;
+OSM completo al 100 % hasta z15 (incluye mar); satelital completo hasta z12 y
+~31 % desde z13 (solo tierra), **6,2 % a z16**; Clarity completo hasta z13 y 54,5 %
+a z14; costas, solo la franja costera (5 % a z14, como corresponde). El dato de
+z16 sugiere que `recommendedMaxZoom` de la satelital debería ser 15: a 16 casi
+todo se vería ampliado desde el nivel anterior.
+
+**Tests:** nuevo `tst_packagecheck` (paquete correcto sin hallazgos; cobertura
+exacta en la zona; modo rápido sin cobertura; ficheros ausentes como errores;
+BLOB que parece JPEG y no lo es → error que nombra el formato; BD de elevación
+inválida; fuera de la carpeta / sin atribución / arranque inexistente como
+avisos; nivel vacío en la zona; sin manifiesto) y un caso en `tst_mapwidget`
+(paquete incompleto: arranca y `dataWarnings()` nombra lo que falta).
+
+**Estado: 17 tests verdes (14 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW.**
+
+## 49. Desplegar: `find_package(libmapa)`, `desplegar.bat` y nada de red
+
+Con el paquete de datos resuelto (§47–48) faltaba lo otro: que una aplicación
+**de fuera** use la librería sin copiar sus fuentes, y que esa aplicación se
+pueda llevar a un PC **sin Qt y sin internet**.
+
+**Instalación y `find_package`.** El CMake gana reglas de instalación
+(`cmake --install build --prefix C:/libmapa`): las dos bibliotecas, solo las
+cabeceras **públicas** (`include/libmapa`; `src/` es interno), un
+`libmapaConfig.cmake` (desde `cmake/libmapaConfig.cmake.in`) que busca las
+mismas dependencias de Qt con las que se compiló (5 o 6; Widgets/PrintSupport
+solo si hay widget), y las herramientas. Los targets se ven como
+`libmapa::core` y `libmapa::widget`, también con `add_subdirectory` (alias).
+Las bibliotecas siguen siendo **estáticas**: no hay una DLL propia que
+repartir ni versiones que casar. Se renombraron a `libmapa_core.a` /
+`libmapa_widget.a` (salía `liblibmapa_core.a`).
+
+`examples/app_minima` es la plantilla de producto: un proyecto aparte que solo
+hace `find_package(libmapa)` y `cfg.dataDir = <exe>/datos`. Con `--comprobar`
+no abre ventana: dice si el mapa arranca y lista `dataWarnings()`, y sale con 0
+si todo está bien. Verificado: compilado contra la instalación (sin acceso a
+las fuentes), abre el paquete real con 4 capas y 0 avisos.
+
+**`herramientas/desplegar.bat <app.exe> <destino> [paquete]`:** copia el
+`.exe`, ejecuta `windeployqt` y **comprueba** los tres plugins sin los que el
+mapa falla en silencio (`platforms/qwindows`, `sqldrivers/qsqlite`,
+`imageformats/qjpeg`), copiándolos a mano si faltan. Con el paquete, llama a
+`check_data --quick --export <destino>\datos`.
+
+**`check_data --export <carpeta>`:** si no hay errores, copia el `mapa.json` y
+**solo** los ficheros que referencia (`DataPackage::files()`), respetando sus
+rutas relativas. `Recursos` tiene además PDF, iconos y estilos que el mapa no
+usa: copiar la carpeta entera los arrastraría. Es reanudable (lo ya copiado
+con el mismo tamaño se salta), se niega si algún fichero queda fuera de la
+carpeta, y al final comprueba la copia. `check_data` deja de mostrar el
+registro interno de la librería salvo con `--verbose`.
+
+**Sin red, verificado.** `objdump` sobre los binarios: la librería, `demo` y
+`render_map` **no importan `Qt6Network.dll`** (solo `fill_map`, herramienta de
+descarga, como debe ser); `Qt6Positioning` solo depende de `Qt6Core`. Pero
+`windeployqt` **sí** copiaba `Qt6Network.dll`: la arrastraban plugins que el
+mapa no usa (`tls`, `networkinformation`, `generic`) y el de posición `nmea`
+pedía además `Qt6SerialPort`. Se excluyen con `--skip-plugin-types`; la
+entrega ya no lleva nada de red. Y una guarda en CMake para el futuro: si
+`libmapa_core` o `libmapa_widget` enlazan algo con `Network`, la configuración
+se para con un mensaje claro.
+
+**Prueba de despliegue:** `app_minima` desplegada y ejecutada con un `PATH`
+reducido a `C:\Windows` (sin Qt) → arranca, 4 capas, 0 avisos. Quitando
+`qjpeg.dll` de la copia → arranca igual y `dataWarnings()` dice que
+**satelital y clarity** (JPEG) no se pueden decodificar por falta del plugin,
+mientras OSM y costas (PNG) siguen funcionando. Es exactamente el fallo que
+antes dejaba el mapa en blanco sin explicación.
+
+(Un tropiezo de la prueba: lanzar la copia con `-platform offscreen` aborta,
+porque `windeployqt` solo despliega el plugin de plataforma de Windows. No es un
+fallo del despliegue; en un PC real no se pide `offscreen`.)
+
+**Estado: 17 tests verdes (14 sin QCustomPlot), sin avisos, Qt 6.11.2 MinGW;
+instalación, `find_package` y despliegue verificados de punta a punta.**
+
+## 50. Segundo juego de despliegue: Qt 5.14 con qmake, y una guía para cualquiera
+
+Un compañero trabaja con **Qt 5.14**, y el despliegue de §49 solo servía para
+Qt 6. Fallaba en tres puntos:
+
+- **`desplegar.bat`** tiene fijos Qt 6.11.2 y MinGW 13.1, y usa
+  `windeployqt --skip-plugin-types`. Esa opción no existe en el `windeployqt`
+  de Qt 5, que se pararía con «opción desconocida».
+- **Las bibliotecas estáticas dependen del Qt y del compilador.** Un `.a`
+  compilado con GCC 13 contra Qt 6 no enlaza en una app de Qt 5.14 con
+  MinGW 7.3. Hay que compilar la librería en el PC del compañero.
+- **`find_package` necesita CMake**, y alguien con Qt 5.14 y qmake no tiene
+  por qué tenerlo. Además, la app de prueba de esta máquina también es de qmake,
+  y hasta ahora se integraba copiando líneas a mano en su `.pro`.
+
+Se decidió **no tocar** el despliegue de Qt 6, que ya funciona y está
+verificado, y añadir un segundo juego con ficheros nuevos:
+
+**`qmake/libmapa/` (librería con qmake).** `libmapa.pro` (subdirs) compila
+`core`, `widget` y `check_data` sin CMake, con Qt 5.14, 5.15 o 6.x. Las
+bibliotecas salen en **Release y Debug** (`mapa_core` / `mapa_cored`). En
+Qt 5 MinGW, una app Debug usa otras DLL (`Qt5Cored.dll`), y mezclarla con una
+biblioteca compilada contra las de Release cargaría dos copias de Qt. `make
+install` las deja por defecto en `C:/libmapa/qt5` o `C:/libmapa/qt6`, para
+poder tener las dos en el mismo PC, con la misma forma que la instalación de
+CMake (`include/`, `lib/`, `bin/check_data.exe`, `share/libmapa/`). Instala
+también el script de despliegue que corresponde a ese Qt. A los `.bat`
+instalados hay que ponerles `CONFIG += nostrip`, porque si no qmake les
+pasa `strip` como a un ejecutable.
+
+**`libmapa.pri` (integración en una línea).** Tiene el mismo papel que el
+`libmapaConfig.cmake`: `QT +=`, `DEFINES`, `INCLUDEPATH` y `LIBS` en el orden
+correcto (el widget antes que el núcleo), las versiones `d` en Debug, y
+`PRE_TARGETDEPS` para volver a enlazar si se reinstala la librería. Con
+`include(C:/libmapa/qt$${QT_MAJOR_VERSION}/libmapa.pri)`, la misma línea elige
+la instalación del Qt del kit. Junto a él se instala `libmapa_qt.pri`, con el
+Qt con el que se compiló (lo genera `write_file`). Si la app es de otro Qt,
+qmake se para con un mensaje que lo explica, en lugar de dar cientos de
+errores de enlace. `examples/app_minima/app_minima.pro` es la plantilla qmake.
+
+**`herramientas/desplegar_qt5.bat`.** Tiene los mismos argumentos y pasos que
+`desplegar.bat`, con estas diferencias:
+
+1. Antes de copiar nada, mira qué DLL de Qt importa el `.exe` (`findstr` sobre
+   el binario):
+   - `Qt5Core.dll`: Qt 5 Release, se sigue.
+   - `Qt5Cored.dll`: Debug, se para y pide Release.
+   - `Qt6Core.dll`: se para y remite a `desplegar.bat`.
+2. Los plugins de red no se pueden excluir en `windeployqt`, así que se borran
+   después:
+   - `bearer` y `generic` (TUIO), que arrastran `Qt5Network`;
+   - `position`, que arrastra `Qt5SerialPort`. El mapa no lee GPS: no hay
+     ningún `QGeoPositionInfoSource` en el código.
+3. Al final, recorre la entrega buscando quién importa todavía
+   `Qt5Network.dll`, y **avisa** sin pararse. Sobre la entrega de Qt 6 esta
+   búsqueda no da falsos positivos. Sin quitar esos plugins, en Qt 6 sí detecta
+   `tls` y `networkinformation`, lo que demuestra que funciona.
+4. Comprueba que el `check_data` que va a usar también es de Qt 5. Uno de Qt 6
+   no arrancaría con las DLL de Qt 5.
+5. Qt y MinGW por defecto: `C:\Qt\5.14.2\mingw73_64` y
+   `C:\Qt\Tools\mingw730_64`. Se cambian con `QTDIR` y `MINGW_BIN`, por ejemplo
+   para 5.15.2 con MinGW 8.1.
+
+**`docs/DESPLIEGUE.md`.** Es una guía para alguien sin experiencia, con un
+glosario, una tabla para elegir el juego, pasos numerados con lo que se debe
+ver en cada uno, y una tabla de problemas frecuentes. Esa tabla recoge errores
+reales de esta sesión:
+
+- lanzar el `.bat` desde Git Bash, que se come las `\`;
+- pensar que la copia se ha parado, porque Windows reserva el tamaño final del
+  fichero desde el primer momento.
+
+**Verificado en este PC (Qt 6.11.2):**
+
+- `libmapa.pro` compila e instala, siguiendo la guía al pie de la letra en la
+  consola «Qt 6.11.2 (MinGW 13.1.0 64-bit)».
+- `app_minima.pro` enlaza en Release y en Debug contra la instalación y abre el
+  paquete real: 4 capas, 0 avisos.
+- Saltan las tres guardas de qmake: falta la instalación, Qt distinto y falta
+  QCustomPlot.
+- Con el `desplegar.bat` sin modificar sobre esa instalación, la copia
+  funciona con un `PATH` sin Qt y no lleva DLL de red.
+- De `desplegar_qt5.bat` se han probado:
+  - sus dos guardas reales: no hay Qt 5 instalado, y la app es de Qt 6;
+  - el resto de su lógica, en una copia adaptada a Qt 6 y con un paquete
+    pequeño: plugins, aviso de red, `check_data` y copia del paquete.
+
+**No verificado:** no hay ningún Qt 5.14 en esta máquina. Falta compilar y
+desplegar con un Qt 5.14 real en el PC del compañero. El código de la librería
+ya tenía en cuenta Qt 5 (§31), pero desde §36 solo se ha compilado con Qt 6.
+
+**Estado: sin cambios en el código de la librería (siguen valiendo los 17 tests de §49); juego Qt 6
+por qmake verificado de punta a punta con Qt 6.11.2 MinGW; juego Qt 5
+preparado y pendiente de probar con Qt 5.14.**
+
+## 51. El juego Qt 5 compila con un Qt 5 real, y la guía queda clara de punta a punta
+
+§50 dejó el juego Qt 5 «preparado pero sin probar con un Qt 5 real». Esta
+sesión lo ha probado hasta donde se puede sin Windows, y ha repasado
+`docs/DESPLIEGUE.md` para que no falte ningún paso.
+
+**El juego Qt 5 compila e instala con un Qt 5 de verdad.** En el contenedor se
+instaló Qt 5.15.13 (`qtbase5-dev qtpositioning5-dev qtbase5-dev-tools`) y se
+siguió el paso 2 de la guía con ese Qt:
+
+- `qmake -qt=5 qmake/libmapa/libmapa.pro PREFIX=…` genera los Makefile sin que
+  salte la guarda de «Qt 5.14 o posterior».
+- `make` compila `mapa_core`/`mapa_cored` y `mapa_widget`/`mapa_widgetd` (las
+  cuatro `.a`) limpio.
+- `make install` deja la instalación con la forma esperada: `include/libmapa/`,
+  `lib/*.a`, `bin/check_data`, `libmapa.pri`, `share/libmapa/desplegar_qt5.bat`
+  y, sobre todo, `libmapa_qt.pri` con `LIBMAPA_QT_MAJOR = 5` y
+  `LIBMAPA_QT_VERSION = 5.15.13` escrito por `write_file` al instalar.
+- `examples/app_minima/app_minima.pro`, compilado con el mismo Qt 5 contra esa
+  instalación, enlaza y **arranca** (sin pantalla, con `offscreen`).
+- `check_data` de esa instalación funciona (uso y error ante un `mapa.json`
+  ausente).
+
+Con eso, de todo el juego Qt 5 solo queda sin ejecutar en un Windows real el
+propio `desplegar_qt5.bat`, porque usa `windeployqt`, que no existe en Linux.
+El resto de su lógica ya se había validado en §50 sobre una copia adaptada.
+De paso se comprobó que el camino de CMake (`find_package(libmapa)`) sigue
+bien bajo Qt 6, y que los 17 tests de §49 siguen verdes.
+
+**`docs/DESPLIEGUE.md` más claro.** Era una petición explícita: que la guía
+quede bien clara con todos sus pasos. Cambios:
+
+- Un **resumen de los pasos (0–6) de un vistazo** al principio, con la nota de
+  qué se hace una sola vez (0, 1, 2) y qué en cada entrega (3–6). Así se ve el
+  mapa del proceso antes de entrar en el detalle.
+- El **aviso del juego Qt 5** ya no dice «sin probar»: explica qué está
+  verificado (compila, instala, el ejemplo enlaza y arranca, `check_data`, con
+  Qt 5.15; el código es el mismo para 5.14) y acota lo único pendiente de un
+  Windows real (el `windeployqt` de `desplegar_qt5.bat`).
+- En el paso 1 (requisitos), una línea para quien **aún no tenga `mapa.json`**:
+  se genera con `probe_db --package` (detalle en el README).
+
+Es un cambio **solo de documentación** (`.md`), así que no necesita build ni
+tests, y `DESPLIEGUE.md` no es `arquitectura.html`: tampoco hay que regenerar
+el PDF.
+
+**Estado: sin cambios en el código ni en los 17 tests; juego Qt 6 verificado de
+punta a punta (Qt 6.11.2); juego Qt 5 verificado hasta compilar, instalar,
+enlazar el ejemplo y `check_data` con un Qt 5.15 real, pendiente solo de
+`desplegar_qt5.bat` en un Windows con Qt 5.14; guía de despliegue repasada.**
+
+## 52. El juego Qt 6, verificado en el PC real del usuario (no solo en el contenedor)
+
+Hasta §51 el juego **Qt 6** estaba verificado «en este PC» entendiendo por eso
+el **contenedor Linux** (build con CMake y qmake, 17 tests). Faltaba el único
+escenario que importa de verdad para entregar: **Windows real con Qt 6.11.2
+MinGW**. El usuario lo ha recorrido ahora, paso a paso siguiendo
+`docs/DESPLIEGUE.md`, y ha funcionado de punta a punta:
+
+- **Instalar la librería (paso 2).** En la consola «Qt 6.11.2 (MinGW 13.1.0
+  64-bit)»: `qmake ..\qmake\libmapa\libmapa.pro`, `mingw32-make -j4` y
+  `mingw32-make install`. Quedó en `C:\libmapa\qt6` con la forma esperada: las
+  cuatro `.a` (Release y Debug), `include\libmapa\*.h`, `bin\check_data.exe`,
+  `libmapa.pri`, `libmapa_qt.pri` y `share\libmapa\desplegar.bat`.
+- **Usar la librería desde una app (paso 3).** Abrió `examples/app_minima` con
+  el mismo kit Qt 6; enlazó contra la instalación por la única línea
+  `include(C:/libmapa/qt$${QT_MAJOR_VERSION}/libmapa.pri)`, sin tocar nada más.
+  Apuntado a su paquete `D:\QtPro\Recursos` (pasado como **argumento de
+  ejecución**), dibujó el mapa.
+- **Release + desplegar (pasos 4–5).** Recompiló en Release y lanzó
+  `desplegar.bat <app_minima.exe> D:\Entrega D:\QtPro\Recursos` desde `cmd`:
+  terminó con `Listo: D:\Entrega` (el `.exe`, las DLL de Qt sin las de red, los
+  plugins y el paquete de datos filtrado por `check_data`).
+
+Con esto, del lado **Qt 6** ya no queda nada «no verificado en Windows real».
+
+**Un detalle que la guía no recogía.** Al ejecutar el ejemplo **sin argumento**
+salió `libmapa.render: "No se encuentra el manifiesto …\datos\mapa.json"`.
+Parece un error, pero es justo lo contrario: demuestra que la librería **está
+enlazada y corriendo** (es ella quien emite el mensaje); lo único que falta es
+decirle **dónde están los datos**. Sin argumento busca una carpeta `datos`
+junto al `.exe` —que en el build no existe— mientras que `app_minima` toma esa
+carpeta como argumento (`app_minima <carpeta>`), que en Qt Creator se pone en
+*Proyectos → Ejecución → Argumentos de la línea de órdenes*. Confundir ese
+mensaje con un fallo de instalación es fácil, así que se documenta.
+
+**Afinado de `docs/DESPLIEGUE.md`** (solo documentación):
+
+- Nuevo apartado **3.3 «Probar con el ejemplo `app_minima`»**: cómo verlo con
+  datos sin escribir código, pasando la carpeta del paquete como argumento de
+  ejecución; el antiguo «Comprobar que compila» pasa a 3.4. En 3.2 se aclara que
+  editar `cfg.dataDir` es para **tu** app, no para el ejemplo.
+- La aclaración del mensaje de `mapa.json` queda en 3.3 y la fila de *Problemas
+  frecuentes* se amplía con los tres casos (ejemplo en Qt Creator / tu app / la
+  entrega).
+- Nota en el paso 2: para **reinstalar** tras un cambio basta
+  `mingw32-make -j4 && mingw32-make install` dentro de `build-qt6`; el `qmake`
+  solo se repite si se borra esa carpeta.
+- Aviso al principio del paso 1 para quien **clona el repo**: QCustomPlot y el
+  paquete de datos **no vienen en git** (licencia y tamaño), hay que
+  conseguirlos aparte; el resto sí llega con el `git clone`. Pensado para el
+  compañero que montará el juego Qt 5 en su PC.
+- Nuevo `docs/RESUMEN_QT5.md`: la versión corta del juego Qt 5 (clonar →
+  compilar/instalar → probar el ejemplo → desplegar), para que el compañero la
+  tenga con el `git clone` sin depender de un reenvío por chat. `DESPLIEGUE.md`
+  enlaza a él desde el resumen de pasos.
+
+Cambio **solo de documentación** (`.md`): no toca código ni tests, y
+`DESPLIEGUE.md` no es `arquitectura.html`, así que no hay que regenerar el PDF.
+
+**Estado: sin cambios en el código ni en los 17 tests; juego Qt 6 verificado de
+punta a punta también en Windows real (Qt 6.11.2 MinGW): instalar, usar desde
+`app_minima` y desplegar con `desplegar.bat`; juego Qt 5 como en §51 (pendiente
+solo de `desplegar_qt5.bat` en un Windows con Qt 5.14); guía con el paso 3
+afinado.**
+
+## 53. Integración continua: compilar y pasar los 17 tests en cada push/PR (Qt 6 y Qt 5)
+
+De cara a pasar a `main`, el repo no tenía **CI**: nada verificaba de forma
+automática que compila y pasa los tests, y menos aún el objetivo **multi-Qt**
+(5.14/5.15/6.x), que hasta ahora solo se comprobaba a mano. Se añade
+`.github/workflows/ci.yml` (GitHub Actions):
+
+- **Matriz de dos jobs en paralelo**, uno con **Qt 6** y otro con **Qt 5**, en
+  `ubuntu-latest`. Cada job instala **solo su Qt** por `apt`
+  (`qt6-base-dev …` / `qtbase5-dev …` + `*-positioning-dev` y el driver
+  `*sql*-sqlite`), de modo que `find_package(QT NAMES Qt6 Qt5 …)` del
+  `CMakeLists.txt` detecta la versión sin ambigüedad.
+- **QCustomPlot 2.1.1** no está en git (GPLv3): el workflow lo **descarga** de
+  `qcustomplot.com` y copia `qcustomplot.{h,cpp}` a `third_party/qcustomplot/`,
+  como indica `CLAUDE.md`. Así compilan también el widget y sus 3 tests (17 en
+  total; sin QCustomPlot serían 14).
+- Compila en Release y corre `ctest` con `QT_QPA_PLATFORM=offscreen` (el runner
+  no tiene pantalla, igual que el contenedor).
+- Dispara en push a `main` y a ramas `claude/**`, en PR hacia `main` y a mano
+  (`workflow_dispatch`). `concurrency` cancela runs superados de la misma rama.
+
+También se añade el **badge de CI** al principio del `README.md`. Es el primer
+fichero bajo `.github/`; no cambia el código de la librería (siguen los 17
+tests) y no toca `arquitectura.html` (sin PDF que regenerar).
+
+**Estado: CI en marcha (Qt 6 y Qt 5, 17 tests offscreen); sin cambios en el
+código de la librería; queda, para `main`, validar `desplegar_qt5.bat` en un
+Windows con Qt 5.14 real y abrir el PR de la rama con su resumen.**

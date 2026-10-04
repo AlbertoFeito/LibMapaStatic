@@ -1,7 +1,9 @@
 #include "SyntheticTileDb.h"
 
 #include "libmapa/MapWidget.h"
+#include "libmapa/MapFeature.h"
 #include "db/SqliteConnectionPool.h"
+#include "db/VectorRepository.h"
 #include "widget/MapView.h"
 #include "geo/TileMatrix.h"
 
@@ -125,7 +127,30 @@ private slots:
     //! La cabecera publica no debe arrastrar QCustomPlot.
     void publicHeaderHasNoQCustomPlot();
 
+    // --- Persistencia automatica de entidades ----------------------------
+    //! Con featuresDbFile, lo que se anade se guarda (saveFeaturesNow).
+    void autoPersistsFeatures();
+    //! Al abrir con featuresDbFile existente, se recargan las entidades.
+    void reloadsFeaturesOnOpen();
+    //! El antirebote dispara el guardado solo tras un cambio (sin saveFeaturesNow).
+    void debouncedAutosaveTriggers();
+
+    // --- Paquete de datos (mapa.json) ------------------------------------
+    //! Solo con dataDir: capas base, arranque, capa fija bloqueada y entidades;
+    //! la capa fija no se guarda ni se duplica al reabrir.
+    void opensDataPackageWithOneSetting();
+    //! Lo rellenado a mano en MapConfig gana sobre el paquete.
+    void explicitConfigWinsOverPackage();
+    //! Paquete inexistente: no arranca y el error dice que falta mapa.json.
+    void reportsMissingDataPackage();
+    //! Paquete incompleto: arranca con lo que hay y dataWarnings() dice que falta.
+    void reportsDataWarningsButStillOpens();
+
 private:
+    //! Monta un paquete en 'carpeta' sobre las BD sinteticas del test, con una
+    //! capa fija .geo y la BD de entidades en 'entidades' (ruta absoluta).
+    QString makePackage(const QString &carpeta, const QString &entidades);
+
     QString m_jsonPath;
     QTemporaryDir m_dir;
 };
@@ -1701,6 +1726,240 @@ void TstMapWidget::drawsManyMovingTargets()
     QCOMPARE(w.targetCount(), N - 1);
     w.clearTargets();
     QCOMPARE(w.targetCount(), 0);
+}
+
+// Crea una entidad de punto minima (como el helper de tst_overlaymodel).
+static MapFeature puntoDe(const QString &nombre, double lat, double lon)
+{
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.name = nombre;
+    f.geometry = {QGeoCoordinate(lat, lon)};
+    return f;
+}
+
+// Con featuresDbFile activo, anadir una entidad y forzar el guardado deja la
+// entidad en la BD (comprobado leyendola con un VectorRepository aparte).
+void TstMapWidget::autoPersistsFeatures()
+{
+    const QString ruta = m_dir.filePath(QStringLiteral("feats_auto.sqlitedb"));
+    QFile::remove(ruta);
+    {
+        MapWidget w(baseConfig(m_jsonPath));
+        QVERIFY(w.isReady());
+        w.setFeaturesDbFile(ruta);
+        QVERIFY(w.addFeature(puntoDe(QStringLiteral("Morro"), 23.15, -82.36)) > 0);
+        w.saveFeaturesNow();
+    }
+    VectorRepository repo;
+    QVERIFY(repo.open(ruta));
+    const QVector<MapFeature> leidas = repo.loadFeatures();
+    QCOMPARE(leidas.size(), 1);
+    QCOMPARE(leidas.first().name, QStringLiteral("Morro"));
+}
+
+// Un MapWidget creado con un featuresDbFile que YA tiene entidades las carga
+// solo al abrir.
+void TstMapWidget::reloadsFeaturesOnOpen()
+{
+    const QString ruta = m_dir.filePath(QStringLiteral("feats_reload.sqlitedb"));
+    QFile::remove(ruta);
+    {
+        MapWidget w(baseConfig(m_jsonPath));
+        w.setFeaturesDbFile(ruta);
+        w.addFeature(puntoDe(QStringLiteral("A"), 23.1, -82.3));
+        w.addFeature(puntoDe(QStringLiteral("B"), 23.2, -82.4));
+        w.saveFeaturesNow();
+    }
+    MapConfig cfg = baseConfig(m_jsonPath);
+    cfg.featuresDbFile = ruta;
+    MapWidget w2(cfg);
+    QVERIFY(w2.isReady());
+    QCOMPARE(w2.featureCount(), qint64(2));
+}
+
+// Sin llamar a saveFeaturesNow: solo anadir y dejar correr el bucle de eventos;
+// el antirebote (~500 ms) debe disparar el guardado por si mismo.
+void TstMapWidget::debouncedAutosaveTriggers()
+{
+    const QString ruta = m_dir.filePath(QStringLiteral("feats_debounce.sqlitedb"));
+    QFile::remove(ruta);
+    MapWidget w(baseConfig(m_jsonPath));
+    w.setFeaturesDbFile(ruta);
+    w.addFeature(puntoDe(QStringLiteral("Tardia"), 23.0, -82.0));
+    QTest::qWait(900);   // deja correr el bucle de eventos > antirebote (500 ms)
+    VectorRepository repo;
+    QVERIFY(repo.open(ruta));
+    QCOMPARE(repo.loadFeatures().size(), 1);
+}
+
+// Paquete de prueba: las rutas a las BD sinteticas son RELATIVAS ("../osm...")
+// para comprobar que se resuelven contra la carpeta del paquete. La BD de
+// entidades va con ruta absoluta para no tocar la carpeta de datos del usuario.
+QString TstMapWidget::makePackage(const QString &carpeta, const QString &entidades)
+{
+    const QString dir = m_dir.filePath(carpeta);
+    QDir().mkpath(dir);
+
+    QFile geo(dir + QStringLiteral("/corredores.geo"));
+    if (geo.open(QIODevice::WriteOnly)) {
+        geo.write("-81.436057,23.098419,\n-81.597725,21.611786,\n0.0,0.0\n"
+                  "-78.862989,22.378492,\n-78.918099,21.477315,\n0.0,0.0\n");
+        geo.close();
+    }
+
+    QJsonObject osm;
+    osm[QStringLiteral("id")] = QStringLiteral("osm");
+    osm[QStringLiteral("filePath")] = QStringLiteral("../osm.sqlitedb");
+    osm[QStringLiteral("minZoom")] = 3;
+    osm[QStringLiteral("maxZoom")] = 12;
+    osm[QStringLiteral("baseZoom")] = 3;
+    QJsonObject sat;
+    sat[QStringLiteral("id")] = QStringLiteral("satelital");
+    sat[QStringLiteral("filePath")] = QStringLiteral("../sat.sqlitedb");
+    sat[QStringLiteral("zFactor")] = -1;
+    sat[QStringLiteral("zOffset")] = 17;
+    sat[QStringLiteral("minZoom")] = 3;
+    sat[QStringLiteral("maxZoom")] = 12;
+    sat[QStringLiteral("recommendedMaxZoom")] = 11;
+    sat[QStringLiteral("baseZoom")] = 3;
+    sat[QStringLiteral("typicalFill")] = 0.32;
+
+    QJsonObject corredores;
+    corredores[QStringLiteral("id")] = QStringLiteral("corredores");
+    corredores[QStringLiteral("name")] = QStringLiteral("Corredores");
+    corredores[QStringLiteral("file")] = QStringLiteral("corredores.geo");
+
+    QJsonObject root;
+    root[QStringLiteral("format")] = QStringLiteral("libmapa-package");
+    root[QStringLiteral("version")] = 2;
+    root[QStringLiteral("package")] = QJsonObject{
+        {QStringLiteral("id"), QStringLiteral("prueba")},
+        {QStringLiteral("name"), QStringLiteral("Paquete de prueba")},
+        {QStringLiteral("attribution"), QStringLiteral("Sintetico")}};
+    root[QStringLiteral("start")] = QJsonObject{
+        {QStringLiteral("layer"), QStringLiteral("satelital")},
+        {QStringLiteral("center"), QJsonArray{21.0, -80.0}},
+        {QStringLiteral("zoom"), 9}};
+    root[QStringLiteral("datasets")] = QJsonArray{osm, sat};
+    root[QStringLiteral("overlays")] = QJsonArray{corredores};
+    root[QStringLiteral("features")] = QJsonObject{{QStringLiteral("file"), entidades}};
+
+    QFile f(dir + QStringLiteral("/mapa.json"));
+    if (f.open(QIODevice::WriteOnly))
+        f.write(QJsonDocument(root).toJson());
+    return dir;
+}
+
+// Con SOLO dataDir el widget sale configurado del paquete: capa y punto de
+// arranque, la capa fija cargada y bloqueada, y la BD de entidades del usuario.
+// Lo dibujado se guarda SIN la capa fija, y al reabrir no se duplica.
+void TstMapWidget::opensDataPackageWithOneSetting()
+{
+    const QString entidades = m_dir.filePath(QStringLiteral("paquete_entidades.db"));
+    QFile::remove(entidades);
+    MapConfig cfg;
+    cfg.dataDir = makePackage(QStringLiteral("paquete"), entidades);
+    cfg.cacheMiB = 32;
+    cfg.debounceMs = 0;
+
+    {
+        MapWidget w(cfg);
+        QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+        QCOMPARE(w.baseLayerId(), QStringLiteral("satelital"));
+        QCOMPARE(w.zoom(), 9);
+        QVERIFY(qAbs(w.center().latitude() - 21.0) < 0.05);
+        QVERIFY(qAbs(w.center().longitude() + 80.0) < 0.05);
+
+        QVERIFY(w.packageInfo().isValid());
+        QCOMPARE(w.packageInfo().name, QStringLiteral("Paquete de prueba"));
+        QCOMPARE(w.packageInfo().attribution, QStringLiteral("Sintetico"));
+
+        const QVector<MapFeature> fijas = w.featuresInLayer(QStringLiteral("corredores"));
+        QCOMPARE(fijas.size(), 1);
+        QVERIFY(!fijas.first().selectable);
+        QVERIFY(!w.canUndo());                 // cargar la capa fija no se "deshace"
+
+        QVERIFY(w.addFeature(puntoDe(QStringLiteral("Propia"), 22.0, -80.0)) > 0);
+        w.saveFeaturesNow();
+    }
+
+    VectorRepository repo;
+    QVERIFY(repo.open(entidades));
+    const QVector<MapFeature> guardadas = repo.loadFeatures();
+    QCOMPARE(guardadas.size(), 1);
+    QCOMPARE(guardadas.first().name, QStringLiteral("Propia"));
+    for (const LayerInfo &c : repo.loadLayers())
+        QVERIFY(c.id != QStringLiteral("corredores"));
+    repo.close();
+
+    MapWidget w2(cfg);
+    QVERIFY(w2.isReady());
+    QCOMPARE(w2.featuresInLayer(QStringLiteral("corredores")).size(), 1);
+    QCOMPARE(w2.featureCount(), 2);           // la propia + la fija, sin duplicar
+}
+
+// La regla de prioridad: lo que la aplicacion pone a mano gana al paquete.
+void TstMapWidget::explicitConfigWinsOverPackage()
+{
+    const QString entidades = m_dir.filePath(QStringLiteral("paquete2_entidades.db"));
+    QFile::remove(entidades);
+    MapConfig cfg;
+    cfg.dataDir = makePackage(QStringLiteral("paquete2"), entidades);
+    cfg.initialLayerId = QStringLiteral("osm");
+    cfg.initialZoom = 11;
+    cfg.cacheMiB = 32;
+    cfg.debounceMs = 0;
+
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+    QCOMPARE(w.baseLayerId(), QStringLiteral("osm"));
+    QCOMPARE(w.zoom(), 11);
+    QVERIFY(qAbs(w.center().latitude() - 21.0) < 0.05);   // el centro, del paquete
+}
+
+// Un dataDir que no existe no arranca, y el error nombra el manifiesto que falta.
+void TstMapWidget::reportsMissingDataPackage()
+{
+    MapConfig cfg;
+    cfg.dataDir = m_dir.filePath(QStringLiteral("no_hay_paquete"));
+    MapWidget w(cfg);
+    QVERIFY(!w.isReady());
+    QVERIFY(w.lastError().contains(QStringLiteral("mapa.json")));
+    QVERIFY(!w.packageInfo().isValid());
+}
+
+// Un paquete al que le falta la capa fija y una de las bases: el widget arranca
+// con lo que si hay, y dataWarnings() nombra exactamente lo que falta (en vez de
+// dejar esa parte del mapa en blanco sin explicacion).
+void TstMapWidget::reportsDataWarningsButStillOpens()
+{
+    const QString entidades = m_dir.filePath(QStringLiteral("paquete3_entidades.db"));
+    MapConfig cfg;
+    cfg.dataDir = makePackage(QStringLiteral("paquete3"), entidades);
+    cfg.cacheMiB = 32;
+    cfg.debounceMs = 0;
+    QFile::remove(cfg.dataDir + QStringLiteral("/corredores.geo"));
+
+    // Se anade una tercera capa base que apunta a un fichero inexistente.
+    QFile f(cfg.dataDir + QStringLiteral("/mapa.json"));
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    f.close();
+    QJsonArray capas = root.value(QStringLiteral("datasets")).toArray();
+    capas.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("perdida")},
+                             {QStringLiteral("filePath"), QStringLiteral("no_esta.sqlitedb")}});
+    root[QStringLiteral("datasets")] = capas;
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(QJsonDocument(root).toJson());
+    f.close();
+
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));      // arranca igual
+    const QString avisos = w.dataWarnings().join(QLatin1Char('\n'));
+    QVERIFY2(avisos.contains(QStringLiteral("no_esta.sqlitedb")), qPrintable(avisos));
+    QVERIFY2(avisos.contains(QStringLiteral("corredores.geo")), qPrintable(avisos));
+    QVERIFY(w.featuresInLayer(QStringLiteral("corredores")).isEmpty());
 }
 
 QTEST_MAIN(TstMapWidget)

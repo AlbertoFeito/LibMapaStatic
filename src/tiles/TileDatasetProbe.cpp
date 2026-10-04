@@ -35,6 +35,8 @@ double overlap(double a1, double a2, double b1, double b2)
 
 } // namespace
 
+// Detecta los NOMBRES reales de las columnas de la tabla de teselas (z/x/y/imagen
+// y si hay 's') y su valor tipico, para no dar por hecho un esquema fijo.
 bool TileDatasetProbe::detectColumns(QSqlDatabase &db, TileDataset &ds,
                                      QStringList &warnings)
 {
@@ -93,6 +95,9 @@ int bitsNeededFor(int maxIndex)
 
 } // namespace
 
+// Deduce el mapeo de zoom: si la columna z esta invertida y con que desplazamiento
+// (zFactor/zOffset), analizando cuantas teselas hay por nivel y, si se da una bbox
+// de referencia, afinando por solape en longitud. Es la parte mas delicada.
 bool TileDatasetProbe::detectZMapping(QSqlDatabase &db, TileDataset &ds,
                                       ProbeResult &result,
                                       const QGeoRectangle &reference)
@@ -385,6 +390,8 @@ bool TileDatasetProbe::detectZMapping(QSqlDatabase &db, TileDataset &ds,
     return true;
 }
 
+// Deduce el esquema del eje Y (XYZ vs TMS) comparando donde caen las teselas con
+// la referencia geografica: si TMS encaja mejor que XYZ, se marca TMS.
 void TileDatasetProbe::detectScheme(QSqlDatabase &db, TileDataset &ds,
                                     ProbeResult &result,
                                     const QGeoRectangle &reference)
@@ -559,6 +566,7 @@ void TileDatasetProbe::detectScheme(QSqlDatabase &db, TileDataset &ds,
     }
 }
 
+// Averigua el lado de la tesela (256, 512...) decodificando una imagen de muestra.
 void TileDatasetProbe::detectTileSize(QSqlDatabase &db, TileDataset &ds,
                                       ProbeResult &result)
 {
@@ -599,6 +607,10 @@ void TileDatasetProbe::detectTileSize(QSqlDatabase &db, TileDataset &ds,
     }
 }
 
+// Punto de entrada: abre la BD y encadena todas las detecciones (columnas, mapeo
+// de zoom, esquema, tamano, estadisticas por nivel) para devolver un TileDataset
+// completo y un ProbeResult. std::nullopt si la BD no sirve. Es el cerebro de
+// probe_db.
 std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
                                                    const QString &id,
                                                    const QGeoRectangle &reference)
@@ -662,6 +674,7 @@ std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
     return result;
 }
 
+// Da formato legible al resultado de la sonda (para imprimir por consola).
 QString TileDatasetProbe::formatReport(const ProbeResult &r)
 {
     QString s;

@@ -12,8 +12,10 @@
 QT += core gui sql positioning
 QT -= widgets
 
-CONFIG += console c++17
+CONFIG += console
 CONFIG -= app_bundle
+
+CONFIG += c++17
 
 TARGET = probe_db
 TEMPLATE = app

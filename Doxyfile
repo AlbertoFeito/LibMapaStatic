@@ -1,0 +1,52 @@
+# Doxyfile para LibMapaStatic
+# --------------------------------------------------------------------------
+# Genera la referencia de API (HTML) a partir de los comentarios Doxygen que
+# ya llevan las cabeceras publicas y las clases del nucleo/widget/herramientas.
+#
+#   Instala doxygen y ejecuta:   doxygen Doxyfile
+#   Resultado en:                docs/api/html/index.html
+#
+# Complementa al documento de arquitectura (docs/LibMapaStatic_Documentacion.pdf),
+# que explica las capas y la interaccion entre clases; esto da el detalle por
+# clase y funcion navegable.
+# --------------------------------------------------------------------------
+
+PROJECT_NAME           = "LibMapaStatic"
+PROJECT_BRIEF          = "Libreria de mapas por teselas para Qt (nucleo + widget + herramientas)"
+OUTPUT_DIRECTORY       = docs/api
+OUTPUT_LANGUAGE        = Spanish
+CREATE_SUBDIRS         = NO
+
+# Entradas: cabeceras publicas, nucleo, widget y herramientas.
+INPUT                  = include src tools README.md
+FILE_PATTERNS          = *.h *.cpp *.md
+RECURSIVE              = YES
+# QCustomPlot es de terceros: no documentar.
+EXCLUDE_PATTERNS       = */third_party/* */legacy/* */build/*
+
+# Extraer todo, aunque falte comentario, para tener el mapa completo de la API.
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+BUILTIN_STL_SUPPORT    = YES
+MARKDOWN_SUPPORT       = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# Diagramas de clases/colaboracion e includes (si hay Graphviz 'dot').
+HAVE_DOT               = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+INCLUDE_GRAPH          = YES
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+DOT_IMAGE_FORMAT       = svg
+
+# Salida.
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+SORT_MEMBER_DOCS       = NO
+WARN_IF_UNDOCUMENTED   = NO
+QUIET                  = YES

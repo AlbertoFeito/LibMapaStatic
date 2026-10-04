@@ -50,6 +50,8 @@ TileService::~TileService()
     }
 }
 
+// Arranca el servicio: valida los datasets, crea un TileCache por capa (repartiendo
+// el presupuesto), levanta el hilo lector (TileLoader) y activa la primera capa.
 bool TileService::start(const QVector<TileDataset> &datasets, int cacheMiB)
 {
     if (m_started) {
@@ -105,6 +107,8 @@ bool TileService::start(const QVector<TileDataset> &datasets, int cacheMiB)
     return true;
 }
 
+// [static] Lee datasets.json -> lista de TileDataset. Resuelve las rutas relativas
+// respecto al propio JSON (para poder mover el fichero junto a los datos).
 QVector<TileDataset> TileService::loadDatasets(const QString &jsonPath,
                                                QString *error)
 {
@@ -151,6 +155,7 @@ QVector<TileDataset> TileService::loadDatasets(const QString &jsonPath,
  * compartida, al cambiar de capa se veian teselas de la otra mezcladas con
  * las nuevas. El README llego a afirmar que compartirla era seguro; no lo era.
  */
+// Caché de una capa concreta (cada dataset tiene la suya). Uso interno.
 TileCache &TileService::cacheFor(const QString &datasetId)
 {
     auto it = m_caches.find(datasetId);
@@ -165,32 +170,39 @@ TileCache &TileService::cacheFor(const QString &datasetId)
     return *it->second;
 }
 
+// Caché de la capa ACTIVA (mutable). La usa MapWidget::reloadBaseLayer() para
+// vaciarla tras modificar la BD por fuera.
 TileCache &TileService::cache()
 {
     return cacheFor(m_activeId);
 }
 
+// Caché de la capa activa (solo lectura).
 const TileCache &TileService::cache() const
 {
     return const_cast<TileService *>(this)->cacheFor(m_activeId);
 }
 
+// Ids de todas las capas cargadas (para poblar el selector de capa base).
 QStringList TileService::datasetIds() const
 {
     return m_datasets.keys();
 }
 
+// Descriptor de una capa por id, o nullptr si no existe.
 const TileDataset *TileService::dataset(const QString &id) const
 {
     auto it = m_datasets.constFind(id);
     return it == m_datasets.constEnd() ? nullptr : &it.value();
 }
 
+// Descriptor de la capa activa (o nullptr si aun no hay ninguna).
 const TileDataset *TileService::activeDataset() const
 {
     return dataset(m_activeId);
 }
 
+// Cambia la capa base activa (osm<->satelital<->...). Emite activeDatasetChanged.
 bool TileService::setActiveDataset(const QString &id)
 {
     if (id == m_activeId)
@@ -217,6 +229,9 @@ bool TileService::setActiveDataset(const QString &id)
     return true;
 }
 
+// Cuantos peldanos de "escalera de respaldo" precargar. Si esta en automatico
+// (-1), lo decide segun el relleno tipico de la capa (una BD llena casi no la
+// necesita; una con muchos huecos si).
 int TileService::effectiveFallbackLevels() const
 {
     if (m_fallbackLevels >= 0)
@@ -234,6 +249,10 @@ int TileService::effectiveFallbackLevels() const
     return 3;
 }
 
+// Pide las teselas del viewport actual. Agrupa las peticiones (antirebote) para
+// no inundar el hilo lector al arrastrar, y prepara las rejillas (nivel pedido +
+// escalera de respaldo). Devuelve el id de peticion (para descartar respuestas
+// viejas). Es la puerta de entrada desde el widget.
 quint64 TileService::requestViewport(const QGeoCoordinate &northWest,
                                      const QGeoCoordinate &southEast,
                                      int zoom,
@@ -331,6 +350,7 @@ quint64 TileService::requestViewport(const QGeoCoordinate &northWest,
     return id;
 }
 
+// Envia de verdad al hilo lector la peticion que el antirebote tenia en espera.
 void TileService::flushPendingRequest()
 {
     if (!m_hasPending || !m_loader)
@@ -343,6 +363,8 @@ void TileService::flushPendingRequest()
                               Q_ARG(libmapa::TileRequest, req));
 }
 
+// Llegaron teselas del hilo lector: si la peticion sigue vigente, las mete en la
+// caché de esa capa y avisa (tilesReady) para repintar. Descarta las obsoletas.
 void TileService::onTilesLoaded(quint64 requestId, const QString &datasetId,
                                 const TileMatrix::TileRange &range,
                                 const QVector<LoadedTile> &tiles)
@@ -395,6 +417,8 @@ void TileService::onTilesLoaded(quint64 requestId, const QString &datasetId,
     }
 }
 
+// Marca como "ausentes" las teselas que se pidieron pero la BD no devolvio, para
+// no volver a pedirlas y para que el plan las resuelva por respaldo.
 void TileService::repairGapsIfNeeded()
 {
     const TileDataset *ds = activeDataset();
@@ -470,12 +494,15 @@ void TileService::repairGapsIfNeeded()
                               Q_ARG(libmapa::TileRequest, req));
 }
 
+// El hilo lector reporto un fallo de carga: se registra y se propaga como error.
 void TileService::onLoadFailed(quint64 requestId, const QString &message)
 {
     qCWarning(lcMapaTiles) << "Peticion" << requestId << "fallo:" << message;
     emit errorOccurred(message);
 }
 
+// Plan de dibujo para el viewport con lo que HAYA en caché ahora mismo (no pide
+// nada). Lo llama el widget para repintar. Delega en TilePlanner.
 TilePlanner::Plan TileService::planFor(const QGeoCoordinate &northWest,
                                        const QGeoCoordinate &southEast,
                                        int zoom,
@@ -504,6 +531,7 @@ TilePlanner::Plan TileService::planFor(const QGeoCoordinate &northWest,
     return m_planner.plan(range, cache(), ds->effectiveBaseZoom(), maxDepth);
 }
 
+// Zoom natural para un ancho de mundo visible, acotado al rango de la capa activa.
 int TileService::bestZoomFor(double spanLongitudeDeg, int viewportWidthPx) const
 {
     const TileDataset *ds = activeDataset();

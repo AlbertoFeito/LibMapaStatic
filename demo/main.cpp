@@ -37,6 +37,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
@@ -60,6 +61,7 @@ namespace {
 //! Roles para distinguir capas de entidades en el arbol.
 constexpr int RolCapa = Qt::UserRole;        //!< id de capa (en ambos)
 constexpr int RolEntidad = Qt::UserRole + 1; //!< id de entidad (solo hojas)
+
 } // namespace
 
 class Ventana : public QMainWindow
@@ -67,15 +69,29 @@ class Ventana : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit Ventana(const QString &datasetsFile)
+    //! \a origen es un datasets.json o, si \a esPaquete, la carpeta de un
+    //! paquete de datos (mapa.json), que ya trae elevacion, capas fijas y
+    //! entidades: entonces basta con esa linea.
+    explicit Ventana(const QString &origen, bool esPaquete,
+                     const QString &demDir = QString(),
+                     const QString &demDb = QString(),
+                     const QString &featuresDb = QString())
     {
         // --- Asi se crea el mapa. Esto es todo. -------------------------
         MapConfig cfg;
-        cfg.datasetsFile = datasetsFile;
-        cfg.initialCenter = QGeoCoordinate(23.1136, -82.3666);   // La Habana
-        cfg.initialZoom = 11;
+        if (esPaquete) {
+            cfg.dataDir = origen;           // el resto lo pone el paquete
+        } else {
+            cfg.datasetsFile = origen;
+            cfg.initialCenter = QGeoCoordinate(23.1136, -82.3666);   // La Habana
+            cfg.initialZoom = 11;
+        }
+        cfg.elevationDir = demDir;          // carpeta .hgt para la cota (opcional)
+        cfg.elevationDbFile = demDb;        // BD de elevacion (prioritaria si viene)
+        cfg.featuresDbFile = featuresDb;    // persistencia automatica (opcional)
         cfg.cacheMiB = 192;
 
+        m_demActivo = esPaquete || !demDir.isEmpty() || !demDb.isEmpty();
         m_mapa = new MapWidget(cfg, this);
         setCentralWidget(m_mapa);
         actualizarTitulo();
@@ -84,8 +100,9 @@ public:
         if (!m_mapa->isReady()) {
             QMessageBox::critical(this, tr("Error"),
                 tr("No se pudo iniciar el mapa:\n%1\n\n"
-                   "Genera datasets.json con probe_db y pasa su ruta como "
-                   "argumento.").arg(m_mapa->lastError()));
+                   "Pasa como argumento la carpeta de un paquete de datos "
+                   "(con su mapa.json, ver probe_db --package) o un "
+                   "datasets.json.").arg(m_mapa->lastError()));
             return;
         }
 
@@ -103,6 +120,14 @@ public:
         conectarSenales();
         aplicarEstiloAlTrazo();
         reconstruirPanel();
+
+        // Asi deberia hacerlo una app real: el mapa arranca con lo que funcione
+        // y avisa de lo que no (fichero que falta, imagenes sin plugin...).
+        const QStringList problemas = m_mapa->dataWarnings();
+        if (!problemas.isEmpty())
+            QMessageBox::warning(this, tr("Datos del mapa"),
+                tr("El paquete de datos tiene problemas; el mapa usara lo que "
+                   "funcione:\n\n%1").arg(problemas.join(QLatin1Char('\n'))));
     }
 
 private:
@@ -135,6 +160,42 @@ private:
         auto *rejilla = barra->addAction(tr("Rejilla"));
         rejilla->setCheckable(true);
         connect(rejilla, &QAction::toggled, m_mapa, &MapWidget::setDebugGridVisible);
+
+        // Mancha de COBERTURA por zoom (como en fill_map, pero sin descarga):
+        // muestra que zonas del zoom elegido ya estan en la BD, visible aunque
+        // mires a otro zoom. Verde = llena, ambar = a medias.
+        auto *cobertura = barra->addAction(tr("Cobertura"));
+        cobertura->setCheckable(true);
+        cobertura->setToolTip(tr("Mancha fija de las zonas que ya tienen teselas\n"
+                                 "del zoom elegido al lado (verde: llena; ambar: a medias)."));
+        barra->addWidget(new QLabel(tr(" z:")));
+        m_zCobertura = new QSpinBox(this);
+        m_zCobertura->setRange(0, 22);
+        m_zCobertura->setValue(14);
+        m_zCobertura->setToolTip(tr("Zoom cuya cobertura se dibuja en la mancha."));
+        barra->addWidget(m_zCobertura);
+        connect(cobertura, &QAction::toggled, this, [this](bool on) {
+            m_mapa->setCoverageZoom(m_zCobertura->value());
+            m_mapa->setCoverageVisible(on);
+        });
+        connect(m_zCobertura, QOverload<int>::of(&QSpinBox::valueChanged),
+                this, [this, cobertura](int v) {
+            if (cobertura->isChecked())
+                m_mapa->setCoverageZoom(v);
+        });
+
+        // Elevacion del terreno: elige una CARPETA de `.hgt` o una BASE DE DATOS
+        // `.sqlitedb`; la cota aparece bajo el cursor en la barra de estado.
+        m_btnDem = new QPushButton(tr("DEM..."), this);
+        m_btnDem->setToolTip(tr("Origen de elevacion: carpeta de .hgt o base de "
+                                "datos .sqlitedb. Muestra la cota bajo el cursor."));
+        QMenu *menuDem = new QMenu(m_btnDem);
+        connect(menuDem->addAction(tr("Carpeta de .hgt...")),
+                &QAction::triggered, this, &Ventana::alElegirDemCarpeta);
+        connect(menuDem->addAction(tr("Base de datos .sqlitedb...")),
+                &QAction::triggered, this, &Ventana::alElegirDemDb);
+        m_btnDem->setMenu(menuDem);
+        barra->addWidget(m_btnDem);
 
         barra->addSeparator();
         // Persistencia: guardar y abrir un fichero SQLite de entidades.
@@ -407,6 +468,7 @@ private:
                     m_coords->setText(QStringLiteral("  %1, %2  ")
                         .arg(p.latitude(), 0, 'f', 5)
                         .arg(p.longitude(), 0, 'f', 5));
+                    mostrarCota(p);
                 });
 
         connect(m_mapa, &MapWidget::zoomChanged, this, &Ventana::actualizarEstado);
@@ -453,9 +515,53 @@ private:
                 [this] { statusBar()->showMessage(tr("Trazado cancelado"), 3000); });
 
         m_coords = new QLabel(this);
+        m_cota = new QLabel(this);
+        m_cota->setMinimumWidth(80);
+        m_cota->setToolTip(tr("Altura del terreno bajo el cursor (necesita DEM)."));
         m_info = new QLabel(this);
         statusBar()->addPermanentWidget(m_coords);
+        statusBar()->addPermanentWidget(m_cota);
         statusBar()->addPermanentWidget(m_info);
+    }
+
+    // Muestra la cota del terreno bajo el cursor (o "—" si no hay DEM/dato).
+    void mostrarCota(const QGeoCoordinate &p)
+    {
+        if (!m_cota)
+            return;
+        if (!m_demActivo) {
+            m_cota->clear();
+            return;
+        }
+        const double m = m_mapa->elevationAt(p);
+        m_cota->setText(std::isnan(m)
+            ? QStringLiteral("  --- m  ")
+            : QStringLiteral("  %1 m  ").arg(m, 0, 'f', 0));
+    }
+
+    // Elige una CARPETA de ficheros `.hgt` como origen de elevacion (en caliente).
+    void alElegirDemCarpeta()
+    {
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, tr("Carpeta de ficheros de elevacion (.hgt)"));
+        if (dir.isEmpty())
+            return;
+        m_mapa->setElevationDir(dir);
+        m_demActivo = true;
+        statusBar()->showMessage(tr("Elevacion (carpeta): %1").arg(dir), 4000);
+    }
+
+    // Elige una BASE DE DATOS `.sqlitedb` de elevacion como origen (en caliente).
+    void alElegirDemDb()
+    {
+        const QString file = QFileDialog::getOpenFileName(
+            this, tr("Base de datos de elevacion"), QString(),
+            tr("Base de datos de elevacion (*.sqlitedb *.db);;Todos (*)"));
+        if (file.isEmpty())
+            return;
+        m_mapa->setElevationDb(file);
+        m_demActivo = true;
+        statusBar()->showMessage(tr("Elevacion (BD): %1").arg(file), 4000);
     }
 
     // ==================================================== arbol ===========
@@ -856,7 +962,10 @@ private:
     {
         const QString f = m_archivoActual.isEmpty()
             ? tr("(sin guardar)") : QFileInfo(m_archivoActual).fileName();
-        setWindowTitle(tr("libmapa - demostracion  -  %1").arg(f));
+        const DataPackageInfo paquete = m_mapa ? m_mapa->packageInfo() : DataPackageInfo();
+        const QString datos = paquete.isValid()
+            ? tr("  -  datos: %1 %2").arg(paquete.name, paquete.dataVersion) : QString();
+        setWindowTitle(tr("libmapa - demostracion  -  %1%2").arg(f, datos));
     }
 
     // ============================================ datos / simulacion ======
@@ -1020,7 +1129,11 @@ private:
     QCheckBox *m_aplicarAlTrazo = nullptr;
 
     QLabel *m_coords = nullptr;
+    QLabel *m_cota = nullptr;
     QLabel *m_info = nullptr;
+    QSpinBox *m_zCobertura = nullptr;
+    QPushButton *m_btnDem = nullptr;
+    bool m_demActivo = false;
 
     bool m_actualizandoPropiedades = false;
     QColor m_colorLinea = QColor(0xd3, 0x2f, 0x2f);
@@ -1051,11 +1164,35 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
 
-    const QString datasets = (argc > 1)
-        ? QString::fromLocal8Bit(argv[1])
-        : QDir::currentPath() + QStringLiteral("/datasets.json");
+    // Primer positional: la carpeta de un paquete de datos (o su mapa.json), o un
+    // datasets.json. Opcionales: --dem <carpeta> / --dem-db <fichero>
+    // (elevacion) y --features <fichero> (persistencia automatica de entidades:
+    // lo que dibujes se guarda y recarga solo); con paquete, mandan sobre el suyo.
+    QString datasets;
+    QString demDir, demDb, featuresDb;
+    for (int i = 1; i < argc; ++i) {
+        const QString a = QString::fromLocal8Bit(argv[i]);
+        if (a == QLatin1String("--dem-db") && i + 1 < argc)
+            demDb = QString::fromLocal8Bit(argv[++i]);
+        else if ((a == QLatin1String("--dem") || a == QLatin1String("--elev"))
+                 && i + 1 < argc)
+            demDir = QString::fromLocal8Bit(argv[++i]);
+        else if (a == QLatin1String("--features") && i + 1 < argc)
+            featuresDb = QString::fromLocal8Bit(argv[++i]);
+        else if (datasets.isEmpty() && !a.startsWith(QLatin1String("--")))
+            datasets = a;
+    }
+    // Sin argumento: un mapa.json en la carpeta actual, si lo hay; si no, el
+    // datasets.json de siempre.
+    if (datasets.isEmpty())
+        datasets = QFile::exists(QDir::currentPath() + QStringLiteral("/mapa.json"))
+            ? QDir::currentPath()
+            : QDir::currentPath() + QStringLiteral("/datasets.json");
+    const QFileInfo origen(datasets);
+    const bool esPaquete = origen.isDir()
+        || origen.fileName().compare(QLatin1String("mapa.json"), Qt::CaseInsensitive) == 0;
 
-    Ventana v(datasets);
+    Ventana v(datasets, esPaquete, demDir, demDb, featuresDb);
     v.show();
     return app.exec();
 }

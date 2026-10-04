@@ -19,21 +19,29 @@ TileLayer::TileLayer(QCustomPlot *parent, TileService *service)
 
 TileLayer::~TileLayer() = default;
 
+// Guarda el plan de dibujo (que teselas pintar y con que respaldo) que preparo
+// TilePlanner. No repinta: solo actualiza el estado; QCustomPlot llamara a draw().
 void TileLayer::setPlan(const TilePlanner::Plan &plan)
 {
     m_plan = plan;
 }
 
+// Imagen de una tesela concreta desde la cache del servicio (o nula si no esta).
 QImage TileLayer::imageFor(const TileKey &key) const
 {
     return m_service ? m_service->cache().take(key) : QImage();
 }
 
+// Gancho de QCustomPlot: aplica el hint de antialiasing de esta capa al pintor.
 void TileLayer::applyDefaultAntialiasingHint(QCPPainter *painter) const
 {
     applyAntialiasingHint(painter, mAntialiased, QCP::aeAll);
 }
 
+// Rectangulo EN PIXELES de pantalla que ocupa una tesela. Se calcula en
+// coordenadas de EJE (x = longitud, y = ordenada de Mercator en grados), que son
+// lineales en el indice de tesela, para que el cuadro salga exacto y sin
+// deformar; pasar por la latitud encogeria/estiraria las teselas segun su fila.
 QRectF TileLayer::screenRectFor(const TileKey &key) const
 {
     QCustomPlot *plot = parentPlot();
@@ -61,6 +69,12 @@ QRectF TileLayer::screenRectFor(const TileKey &key) const
     return QRectF(QPointF(left, top), QPointF(right, bottom)).normalized();
 }
 
+// Pinta la capa de teselas. Primero rellena todo con el color "sin datos" (azul
+// mar, que sobre oceano es el resultado correcto y no un hueco), y luego dibuja
+// cada item del plan de gruesa a fina, de modo que las teselas exactas tapen a
+// sus respaldos ampliados sin parpadeo. Reescala el rectangulo de origen si la
+// imagen no mide lo que dice el descriptor, y opcionalmente dibuja la rejilla de
+// depuracion. Guarda en m_lastDrawn cuantas teselas se pintaron.
 void TileLayer::draw(QCPPainter *painter)
 {
     m_lastDrawn = 0;

@@ -4,6 +4,8 @@
 
 namespace libmapa {
 
+// Ancestro de una tesela 'depth' niveles mas grueso: al bajar de zoom, cada
+// tesela cubre 2 en cada eje, asi que basta desplazar x/y a la derecha 'depth'.
 TileKey TilePlanner::ancestorOf(const TileKey &key, int depth)
 {
     if (depth <= 0)
@@ -11,6 +13,9 @@ TileKey TilePlanner::ancestorOf(const TileKey &key, int depth)
     return TileKey{key.z - depth, key.x >> depth, key.y >> depth};
 }
 
+// Que TROZO del ancestro corresponde a esta tesela: al usar una tesela gruesa como
+// respaldo, solo se pinta el sub-rectangulo que le toca (su celda dentro del
+// ancestro). Con ancestorDepth 0 es la tesela entera.
 QRectF TilePlanner::sourceRectFor(const TileKey &slot, int ancestorDepth) const
 {
     const double size = static_cast<double>(m_tileSize);
@@ -27,6 +32,10 @@ QRectF TilePlanner::sourceRectFor(const TileKey &slot, int ancestorDepth) const
     return QRectF(offsetX * side, offsetY * side, side, side);
 }
 
+// Calcula el PLAN DE DIBUJO de un rango: por cada tesela, si esta en cache la pinta
+// exacta; si no, la anota como "que falta" y busca el ancestro mas cercano que si
+// este para pintarlo escalado (la "escalera de respaldo"). Ordena de gruesa a fina
+// para que lo nitido quede encima y no haya parpadeo. Devuelve items + contadores.
 TilePlanner::Plan TilePlanner::plan(const TileMatrix::TileRange &range,
                                     const TileCache &cache,
                                     int minZoom,

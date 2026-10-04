@@ -1,0 +1,7 @@
+Dataset 'clarity'  BD: F.sqlitedb
+Esquema XYZ  storedZ = 1*z + 0
+BBox latN=23.3 lonO=-85 latS=19.7 lonE=-74  zoom 8..8
+  z=8: 36 faltan
+TOTAL a descargar: 36 teselas (de 36 en la zona)
+
+  [auto-freno] 8 fallos seguidos: la fuente parece limitar. Pauso 30 s y reanudo...

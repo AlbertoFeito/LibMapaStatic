@@ -5,6 +5,7 @@
 
 #include "libmapa/MapTypes.h"
 #include "tiles/TileService.h"
+#include "widget/CoverageLayer.h"
 #include "widget/FeatureLayer.h"
 #include "widget/OverlayModel.h"
 #include "widget/TargetLayer.h"
@@ -45,6 +46,7 @@ public:
     OverlayModel *overlayModel() const { return m_model; }
     TargetModel *targetModel() const { return m_targetModel; }
     TargetLayer *targetLayer() const { return m_targetLayer; }
+    CoverageLayer *coverageLayer() const { return m_coverageLayer; }
 
     QGeoCoordinate center() const;
     void setCenter(const QGeoCoordinate &center);
@@ -99,6 +101,9 @@ public:
     //! Pide al servicio las teselas del viewport actual.
     void requestVisibleTiles();
 
+    //! Oculta el recuadro de SelectArea, si lo hay.
+    void clearAreaSelection();
+
     //! Capa donde se crean las entidades nuevas.
     void setActiveFeatureLayer(const QString &id) { m_activeLayer = id; }
     QString activeFeatureLayer() const { return m_activeLayer; }
@@ -127,6 +132,8 @@ signals:
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);
+    //! Poligono cerrado con la herramienta SelectPolygon (vertices en orden).
+    void polygonSelected(const QVector<QGeoCoordinate> &polygon);
     void pointPicked(const QGeoCoordinate &position);
 
 protected:
@@ -171,6 +178,7 @@ private:
     FeatureLayer *m_featureLayer = nullptr;
     TargetModel *m_targetModel = nullptr;
     TargetLayer *m_targetLayer = nullptr;
+    CoverageLayer *m_coverageLayer = nullptr;
 
     int m_zoom = 10;
     QGeoCoordinate m_center{23.1136, -82.3666};
@@ -192,6 +200,9 @@ private:
 
     MapFeature m_draft;
     bool m_drafting = false;
+    //! El borrador actual es un POLIGONO DE SELECCION (SelectPolygon), no una
+    //! entidad: al cerrarlo se emite polygonSelected y no se crea nada.
+    bool m_draftIsSelection = false;
 
     //! Vertice que se esta arrastrando, o -1.
     int m_editVertex = -1;

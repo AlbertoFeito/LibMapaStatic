@@ -8,6 +8,11 @@
  *   render_map --datasets datasets.json --out mapa.png
  *              [--layer satelital] [--center 23.1136,-82.3666] [--zoom 12]
  *              [--size 1280x800] [--wait 5000] [--grid]
+ *
+ *   render_map --data <carpeta del paquete> --out mapa.png [...]
+ *     Abre un paquete de datos (mapa.json): capa, centro y zoom salen de su
+ *     bloque "start" salvo que se pasen --layer/--center/--zoom, y se dibujan
+ *     sus capas fijas. No guarda nada en la BD de entidades del usuario.
  */
 
 #include "libmapa/MapWidget.h"
@@ -23,6 +28,12 @@
 
 using namespace libmapa;
 
+// Punto de entrada: crea un MapWidget sin mostrarlo, lo centra/zooma segun los
+// argumentos, opcionalmente anade entidades de ejemplo o la rejilla de depuracion,
+// deja un tiempo para que la carga asincrona de teselas llegue, y vuelca el
+// QCustomPlot a un PNG. Ademas imprime un diagnostico del plan de dibujo para
+// poder verificar el resultado sin abrir la imagen. Util en servidores sin
+// pantalla y en scripts de comprobacion.
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
@@ -58,11 +69,16 @@ int main(int argc, char *argv[])
         QStringLiteral("Dibujar la rejilla de teselas con z/x/y"));
     QCommandLineOption oFeatures(QStringLiteral("features"),
         QStringLiteral("Anadir entidades de ejemplo: puntos, area y trazado"));
+    QCommandLineOption oData(QStringLiteral("data"),
+        QStringLiteral("Carpeta de un paquete de datos (mapa.json) en vez de --datasets"),
+        QStringLiteral("carpeta"));
 
     p.addOption(oDatasets); p.addOption(oOut); p.addOption(oLayer);
     p.addOption(oCenter); p.addOption(oZoom); p.addOption(oSize);
     p.addOption(oWait); p.addOption(oGrid); p.addOption(oFeatures);
+    p.addOption(oData);
     p.process(app);
+    const bool conPaquete = p.isSet(oData);
 
     const QStringList c = p.value(oCenter).split(QLatin1Char(','));
     if (c.size() != 2) {
@@ -75,10 +91,16 @@ int main(int argc, char *argv[])
         return 2;
     }
 
+    // Con paquete, centro y zoom solo si se piden: si no, los de su "start".
     MapConfig cfg;
-    cfg.datasetsFile = p.value(oDatasets);
-    cfg.initialCenter = QGeoCoordinate(c[0].toDouble(), c[1].toDouble());
-    cfg.initialZoom = p.value(oZoom).toInt();
+    if (conPaquete)
+        cfg.dataDir = p.value(oData);
+    else
+        cfg.datasetsFile = p.value(oDatasets);
+    if (!conPaquete || p.isSet(oCenter))
+        cfg.initialCenter = QGeoCoordinate(c[0].toDouble(), c[1].toDouble());
+    if (!conPaquete || p.isSet(oZoom))
+        cfg.initialZoom = p.value(oZoom).toInt();
     cfg.debounceMs = 0;
     cfg.cacheMiB = 256;
     if (p.isSet(oLayer))
@@ -89,14 +111,25 @@ int main(int argc, char *argv[])
         err << "No se pudo iniciar el mapa: " << mapa.lastError() << "\n";
         return 1;
     }
+    // Es una herramienta de dibujo: las entidades de ejemplo (--features) no
+    // deben acabar en la BD de entidades del usuario que declara el paquete.
+    mapa.setFeaturesDbFile(QString());
+    if (conPaquete) {
+        const DataPackageInfo info = mapa.packageInfo();
+        out << "Paquete " << info.name << " (" << info.id << ", datos "
+            << info.dataVersion << ") en " << info.directory << "\n";
+        // Lo que la comprobacion rapida vio mal (p. ej. un plugin que falta).
+        for (const QString &aviso : mapa.dataWarnings())
+            out << "  AVISO " << aviso << "\n";
+    }
 
     mapa.resize(s[0].toInt(), s[1].toInt());
 
     if (p.isSet(oFeatures)) {
         // Entidades de ejemplo alrededor del centro, para comprobar que se
         // dibujan donde deben y con el estilo pedido.
-        const double lat = cfg.initialCenter.latitude();
-        const double lon = cfg.initialCenter.longitude();
+        const double lat = mapa.center().latitude();
+        const double lon = mapa.center().longitude();
         const double d = 0.02;
 
         mapa.addFeatureLayer(QStringLiteral("zonas"),

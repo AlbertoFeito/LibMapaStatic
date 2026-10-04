@@ -10,6 +10,9 @@ TargetModel::TargetModel(QObject *parent)
 {
 }
 
+// Recorta la traza (rastro) de un objetivo segun el limite m_trailMax:
+// < 0 la deja entera, 0 la borra, > 0 conserva solo las ultimas N posiciones
+// (elimina por delante las mas viejas).
 void TargetModel::podarTraza(Entry &e)
 {
     if (m_trailMax < 0)
@@ -23,6 +26,10 @@ void TargetModel::podarTraza(Entry &e)
         e.trail.remove(0, e.trail.size() - m_trailMax);
 }
 
+// Inserta o actualiza un objetivo. Si viene sin id (< 0) le asigna uno nuevo; si
+// trae id, mantiene el contador por encima de el. Extiende la traza con la nueva
+// posicion (si cambio) y emite changed() para que la vista repinte. Devuelve el
+// id, o -1 si la coordenada no es valida.
 qint64 TargetModel::upsert(MapTarget target)
 {
     if (!target.position.isValid())
@@ -46,6 +53,9 @@ qint64 TargetModel::upsert(MapTarget target)
     return target.id;
 }
 
+// Mueve un objetivo existente a una nueva posicion (y rumbo, si no es NaN),
+// alargando su traza. Camino rapido para refrescar posiciones sin reconstruir el
+// objetivo entero. Devuelve false si el id no existe o la posicion no es valida.
 bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
                          double headingDeg)
 {
@@ -68,6 +78,7 @@ bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
     return true;
 }
 
+// Cambia la etiqueta de texto de un objetivo. false si el id no existe.
 bool TargetModel::setLabel(qint64 id, const QString &text)
 {
     auto it = m_targets.find(id);
@@ -78,6 +89,7 @@ bool TargetModel::setLabel(qint64 id, const QString &text)
     return true;
 }
 
+// Cambia el color de un objetivo. false si el id no existe.
 bool TargetModel::setColor(qint64 id, const QColor &color)
 {
     auto it = m_targets.find(id);
@@ -88,6 +100,7 @@ bool TargetModel::setColor(qint64 id, const QColor &color)
     return true;
 }
 
+// Elimina un objetivo (con su traza). false si no habia ninguno con ese id.
 bool TargetModel::remove(qint64 id)
 {
     if (m_targets.remove(id) == 0)
@@ -96,6 +109,7 @@ bool TargetModel::remove(qint64 id)
     return true;
 }
 
+// Elimina TODOS los objetivos. No emite changed() si ya estaba vacio.
 void TargetModel::clear()
 {
     if (m_targets.isEmpty())
@@ -104,6 +118,7 @@ void TargetModel::clear()
     emit changed();
 }
 
+// Vacia la traza de un objetivo dejando solo su posicion actual como semilla.
 void TargetModel::clearTrail(qint64 id)
 {
     auto it = m_targets.find(id);
@@ -114,6 +129,7 @@ void TargetModel::clearTrail(qint64 id)
     emit changed();
 }
 
+// Devuelve el objetivo de un id, o nullopt si no existe.
 std::optional<MapTarget> TargetModel::target(qint64 id) const
 {
     auto it = m_targets.constFind(id);
@@ -122,6 +138,7 @@ std::optional<MapTarget> TargetModel::target(qint64 id) const
     return it->target;
 }
 
+// Copia todos los objetivos (sin sus trazas) en un vector para la vista.
 QVector<MapTarget> TargetModel::targets() const
 {
     QVector<MapTarget> out;
@@ -131,6 +148,7 @@ QVector<MapTarget> TargetModel::targets() const
     return out;
 }
 
+// Devuelve la traza (rastro de posiciones) de un objetivo, vacia si no existe.
 QVector<QGeoCoordinate> TargetModel::trail(qint64 id) const
 {
     auto it = m_targets.constFind(id);
@@ -139,6 +157,8 @@ QVector<QGeoCoordinate> TargetModel::trail(qint64 id) const
     return it->trail;
 }
 
+// Fija el limite de puntos de traza para TODOS los objetivos y reajusta las
+// trazas actuales al nuevo limite (< 0 ilimitada, 0 sin traza, > 0 ultimas N).
 void TargetModel::setTrailMaxPoints(int maxPoints)
 {
     // < 0 = traza ilimitada (toda); 0 = sin traza; > 0 = ultimas N posiciones.

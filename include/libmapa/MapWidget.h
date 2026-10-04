@@ -1,6 +1,7 @@
 #ifndef LIBMAPA_MAPWIDGET_H_
 #define LIBMAPA_MAPWIDGET_H_
 
+#include "libmapa/DataPackage.h"
 #include "libmapa/GeoFile.h"
 #include "libmapa/MapFeature.h"
 #include "libmapa/MapTarget.h"
@@ -10,6 +11,7 @@
 #include <QGeoCoordinate>
 #include <QPointF>
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 #include <limits>
 #include <memory>
@@ -21,6 +23,19 @@ namespace libmapa {
 struct MapConfig
 {
     /*!
+     * \brief Carpeta del PAQUETE DE DATOS (la que contiene `mapa.json`), o la
+     *        ruta del propio manifiesto. Es la forma recomendada:
+     *
+     *     cfg.dataDir = QCoreApplication::applicationDirPath() + "/datos";
+     *
+     * Con eso salen las capas base, la elevacion, las capas fijas, la BD de
+     * entidades del usuario y el punto de arranque. Cualquier otro campo de
+     * esta estructura que se rellene a mano TIENE PRIORIDAD sobre el paquete.
+     * Vacio = sin paquete (configuracion clasica con datasetsFile).
+     */
+    QString dataDir;
+
+    /*!
      * \brief Ruta al datasets.json generado por probe_db.
      *
      * Ahi estan las convenciones de cada BD: el mapeo de zoom, el esquema del
@@ -29,9 +44,23 @@ struct MapConfig
      */
     QString datasetsFile;
 
-    QString initialLayerId;                    //!< Vacio = el primero del JSON.
-    QGeoCoordinate initialCenter{23.1136, -82.3666};
-    int initialZoom = 10;
+    //! Carpeta con ficheros de elevacion SRTM `.hgt` (nombres tipo `N19W077.hgt`).
+    //! Vacia = sin elevacion por carpeta. Opcional.
+    QString elevationDir;
+
+    //! Base de datos de elevacion (`.sqlitedb` generada por `dem_to_db`). Si viene,
+    //! TIENE PRIORIDAD sobre elevationDir. Vacia = no se usa. Opcional.
+    QString elevationDbFile;
+
+    //! Base de datos de ENTIDADES (puntos/lineas/poligonos dibujados). Si viene,
+    //! el widget la carga al abrir y guarda SOLO lo que se dibuje/edite/borre
+    //! (con antirebote). Vacia = sin persistencia automatica. Opcional.
+    QString featuresDbFile;
+
+    QString initialLayerId;                    //!< Vacio = el del paquete o el primero del JSON.
+    //! Invalido = el del paquete ("start.center"), o La Habana si no hay paquete.
+    QGeoCoordinate initialCenter;
+    int initialZoom = -1;                      //!< < 0 = el del paquete, o 10.
 
     int cacheMiB = 128;         //!< Memoria para teselas ya decodificadas.
     int debounceMs = 80;        //!< Agrupacion de peticiones al arrastrar.
@@ -47,7 +76,7 @@ struct MapConfig
  * Se usa asi, y esto es todo lo que hace falta:
  *
  *     libmapa::MapConfig cfg;
- *     cfg.datasetsFile = QDir::currentPath() + "/datasets.json";
+ *     cfg.dataDir = QCoreApplication::applicationDirPath() + "/datos";
  *
  *     auto *mapa = new libmapa::MapWidget(cfg, this);
  *     ui->contenedor->layout()->addWidget(mapa);
@@ -81,6 +110,23 @@ public:
     bool isReady() const;
     QString lastError() const;
 
+    //! Paquete de datos abierto (nombre, version, atribucion...). Invalido si el
+    //! widget se configuro sin MapConfig::dataDir.
+    DataPackageInfo packageInfo() const;
+
+    /*!
+     * \brief Problemas encontrados en los datos al abrir el paquete, uno por
+     *        linea ("satelital: ..."). Vacio = todo bien.
+     *
+     * Con MapConfig::dataDir el widget hace una comprobacion RAPIDA (milisegundos)
+     * de lo que dejaria el mapa en blanco sin decir nada: que falte un fichero,
+     * que una base no abra o que sus imagenes no se puedan decodificar (falta el
+     * plugin de imagen de Qt al desplegar). El mapa arranca igual con lo que si
+     * funciona; la aplicacion decide si avisar. Para el informe completo,
+     * con cobertura por zoom, esta la herramienta check_data.
+     */
+    QStringList dataWarnings() const;
+
     // --- Capa base -------------------------------------------------------
     QVector<BaseLayerInfo> availableBaseLayers() const;
     QString baseLayerId() const;
@@ -94,6 +140,18 @@ public:
     void setZoom(int zoom);
     int minZoom() const;
     int maxZoom() const;
+
+    /*!
+     * \brief Olvida las teselas en cache y vuelve a pedir las del viewport.
+     *
+     * Util despues de MODIFICAR la base de teselas por fuera (p. ej. tras
+     * rellenar huecos con la herramienta de descarga): sin esto, la cache
+     * seguiria mostrando lo de antes -incluidas las marcas de "no existe"-.
+     */
+    void reloadBaseLayer();
+
+    //! Quita el recuadro dibujado con la herramienta SelectArea.
+    void clearAreaSelection();
 
     void zoomIn();
     void zoomOut();
@@ -149,14 +207,31 @@ public:
 
     // --- Guardar y cargar ------------------------------------------------
     /*!
-     * \brief Vuelca todas las entidades y capas a un fichero SQLite.
+     * \brief Vuelca todas las entidades y capas a un fichero SQLite (manual).
      *
-     * El widget NO guarda solo. Los objetivos en movimiento llegan a decenas
-     * por segundo y una escritura en disco por cada actualizacion de posicion
-     * no tiene sentido: cuando guardar lo decide la aplicacion.
+     * Volcado COMPLETO (borra y reescribe). Es la via manual: la app decide
+     * cuando. Para guardado AUTOMATICO ver \ref setFeaturesDbFile.
      */
     bool saveFeaturesTo(const QString &databasePath);
     bool loadFeaturesFrom(const QString &databasePath);
+
+    // --- Persistencia automatica de entidades ----------------------------
+    /*!
+     * \brief Enciende el guardado AUTOMATICO de entidades en \a databasePath.
+     *
+     * Si el fichero existe, lo carga ahora (reemplaza el contenido). A partir de
+     * aqui, cada alta/edicion/borrado de entidad o capa se guarda SOLO, con un
+     * pequeno antirebote que agrupa las rafagas (p.ej. arrastrar un vertice).
+     * Cadena vacia = apaga la persistencia automatica (no borra el fichero).
+     * Se puede fijar tambien al arrancar con \c MapConfig::featuresDbFile.
+     *
+     * NOTA: los OBJETIVOS en movimiento (TargetModel) no se persisten; esto es
+     * solo para entidades dibujadas, que cambian a mano y en poco volumen.
+     */
+    void setFeaturesDbFile(const QString &databasePath);
+    //! Fuerza un guardado inmediato al fichero de persistencia (si hay). Util al
+    //! cerrar la app para no perder lo que estuviera en el antirebote.
+    void saveFeaturesNow();
 
     // --- Ficheros .geo ---------------------------------------------------
     /*!
@@ -215,6 +290,16 @@ public:
     //! Entidad bajo un punto de la pantalla, o -1.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
 
+    // --- Elevacion -------------------------------------------------------
+    //! Cota del terreno (metros) en \a position leida del origen de elevacion
+    //! configurado (carpeta `.hgt` o base de datos), o NaN si no hay dato (sin
+    //! origen, tile ausente o hueco). Comprueba el resultado con std::isnan.
+    double elevationAt(const QGeoCoordinate &position) const;
+    //! Usa en caliente una CARPETA de ficheros `.hgt` como origen (vacia = quita).
+    void setElevationDir(const QString &dir);
+    //! Usa en caliente una BASE DE DATOS `.sqlitedb` como origen (vacia = quita).
+    void setElevationDb(const QString &dbFile);
+
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;
     void setActiveTool(MapTool tool);
@@ -238,6 +323,22 @@ public:
     //! Porcentaje de la pantalla resuelto con teselas propias (no ancestros).
     double exactCoverage() const;
     void setDebugGridVisible(bool visible);
+
+    /*!
+     * \brief Mancha de COBERTURA: que zonas de un zoom OBJETIVO hay ya en la BD.
+     *
+     * Dibuja una capa traslucida FIJA (visible aunque se mire a un zoom menor)
+     * que agrega la cobertura del zoom objetivo a una rejilla gruesa y la colorea
+     * por completitud (ambar = a medias, verde = llena). A diferencia de la
+     * rejilla de depuracion, no depende del zoom actual de la vista.
+     */
+    void setCoverageVisible(bool on);
+    bool isCoverageVisible() const;
+    //! Zoom cuya cobertura se muestra. Recomputa si la mancha esta visible.
+    void setCoverageZoom(int targetZoom);
+    int coverageZoom() const;
+    //! Vuelve a consultar la BD y redibuja la mancha (p.ej. tras una descarga).
+    void refreshCoverage();
 
     /*!
      * \brief Geografico -> coordenadas de los ejes del QCustomPlot interno.
@@ -282,6 +383,8 @@ signals:
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);
+    //! Poligono cerrado con la herramienta SelectPolygon.
+    void polygonSelected(const QVector<QGeoCoordinate> &polygon);
     void pointPicked(const QGeoCoordinate &position);
     void errorOccurred(const QString &message);
 
