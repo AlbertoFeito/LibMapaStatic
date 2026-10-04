@@ -2995,3 +2995,35 @@ los atributos se ven por ahora vía la etiqueta.
 **Estado: motor de seguimiento completo y demostrado en `demo` (Fases 1–5
 hechas); 17 tests en verde. Queda, cuando toque, la Fase 4 (corte limpio del
 esquema naval legado), que encaja mejor al reimplementar Estación Terrena.**
+
+## 58. Hit-testing de objetivos: clic en un objetivo → sus datos
+
+Cerraba el ciclo "ver → seleccionar → consultar": se podían ver los objetivos
+pero no **pinchar uno y leer sus `attributes`**. Es lo que piden las apps de
+seguimiento (seleccionar un contacto y ver su ficha). Se añade como capacidad de
+la librería, reusando el patrón de `featureClicked`.
+
+- `MapView`: `targetAt(pixel, tolPx=14)` proyecta cada objetivo a pantalla (misma
+  transformación que `TargetLayer`) y devuelve el más cercano dentro de la
+  tolerancia, o -1. En `mousePressEvent`, caso `MapTool::None`: si el clic cae
+  sobre un objetivo, lo **selecciona** y emite `targetClicked(id, pos)` **sin**
+  iniciar el arrastre; sobre mapa vacío, arrastra como siempre. `setSelectedTarget`
+  guarda el id y lo pasa a la capa.
+- `TargetLayer`: `setSelected(id)`; el objetivo resaltado se dibuja con un **halo**
+  ámbar y se le **fuerza la etiqueta** aunque el nivel de detalle o el declutter
+  las hayan apagado (para poder leer su ficha en zona densa).
+- `MapWidget`: reenvíos `targetAt`, `setSelectedTarget`, `selectedTarget` y la
+  señal `targetClicked(id, pos)`.
+- `demo`: al recibir `targetClicked`, muestra `kind` + `attributes` del objetivo
+  en la barra de estado (el resaltado lo pone ya la librería).
+- `tests/tst_mapwidget.cpp`: caso `selectsTargetByClick` (targetAt acierta encima
+  y da -1 lejos; un clic emite `targetClicked` con el id correcto y deja
+  `selectedTarget()` fijado). 17 tests en verde, sin warnings.
+- Docs: README (sección de seguimiento) y `arquitectura.html` + PDF.
+
+API **aditivo**. Sin cambios en CMake/qmake (solo edición de ficheros ya
+listados).
+
+**Estado: ciclo de seguimiento completo (ver, simbología, escala, y ahora
+selección/consulta por clic); 17 tests en verde. Pendiente opcional: Fase 4
+(corte limpio del dominio naval legado) y consolidar la rama en `main`.**

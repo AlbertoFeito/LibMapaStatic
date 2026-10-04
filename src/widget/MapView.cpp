@@ -320,6 +320,42 @@ QGeoCoordinate MapView::coordinateAt(const QPoint &pixel) const
                                   yAxis->pixelToCoord(pixel.y())));
 }
 
+// Objetivo movil mas cercano al pixel dado, dentro de tolPx. Proyecta cada
+// objetivo a pantalla con la misma transformacion que usa TargetLayer (toAxis +
+// coordToPixel) y se queda con el mas proximo. O(n) sobre los objetivos, que es
+// de sobra para un clic ocasional.
+qint64 MapView::targetAt(const QPoint &pixel, double tolPx) const
+{
+    if (!m_targetModel)
+        return -1;
+    qint64 mejor = -1;
+    double mejorD2 = tolPx * tolPx;
+    for (auto it = m_targetModel->entries().constBegin();
+         it != m_targetModel->entries().constEnd(); ++it) {
+        const MapTarget &t = it->target;
+        if (!t.position.isValid())
+            continue;
+        const QPointF a = toAxis(t.position);
+        const double dx = xAxis->coordToPixel(a.x()) - pixel.x();
+        const double dy = yAxis->coordToPixel(a.y()) - pixel.y();
+        const double d2 = dx * dx + dy * dy;
+        if (d2 <= mejorD2) {
+            mejorD2 = d2;
+            mejor = t.id;
+        }
+    }
+    return mejor;
+}
+
+// Fija el objetivo resaltado y lo propaga a la capa (que dibuja el halo y le
+// fuerza la etiqueta). No emite senal: la seleccion es decision de quien llama.
+void MapView::setSelectedTarget(qint64 id)
+{
+    m_selectedTarget = id;
+    if (m_targetLayer)
+        m_targetLayer->setSelected(id);
+}
+
 // Coordenada geografica -> punto de EJE (x = longitud, y = grados de Mercator).
 // Es la proyeccion que comparten todas las capas para pintar sobre el mapa.
 QPointF MapView::toAxis(const QGeoCoordinate &c)
@@ -630,12 +666,21 @@ void MapView::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         switch (m_tool) {
-        case MapTool::None:
+        case MapTool::None: {
+            // Sin herramienta, un clic sobre un objetivo lo SELECCIONA (no inicia
+            // arrastre); sobre el mapa vacio, arrastra para desplazar.
+            const qint64 tid = targetAt(event->pos());
+            if (tid >= 0) {
+                setSelectedTarget(tid);
+                emit targetClicked(tid, coordinateAt(event->pos()));
+                break;
+            }
             m_dragging = true;
             m_dragStartPx = event->pos();
             m_dragStartGeo = m_center;
             setCursor(Qt::ClosedHandCursor);
             break;
+        }
 
         case MapTool::AreaZoom:
         case MapTool::SelectArea:

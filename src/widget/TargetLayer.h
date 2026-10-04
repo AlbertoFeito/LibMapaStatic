@@ -45,6 +45,10 @@ public:
     //! estado + rotacion por rumbo). Sin proveedor, se usa el galon por defecto.
     void setSymbolProvider(TargetSymbolProvider provider);
 
+    //! Objetivo resaltado (-1 = ninguno): se le dibuja un halo y se le fuerza la
+    //! etiqueta aunque el nivel de detalle las haya apagado.
+    void setSelected(qint64 id);
+
     //! Nivel de detalle para escalar a MILES de objetivos: si en un repintado
     //! hay mas objetivos visibles que \a maxLabels no se dibuja ninguna etiqueta
     //! (a esa densidad se solaparian en una mancha ilegible); igual con las
@@ -73,7 +77,7 @@ private:
     // ya ocupadas por una etiqueta para no solaparlas (declutter).
     void drawTarget(QPainter *painter, const TargetModel::Entry &e,
                     const QPointF &pos, bool drawTrail, bool drawLabel,
-                    QSet<qint64> &labelCells) const;
+                    bool selected, QSet<qint64> &labelCells) const;
 
     TargetModel *m_model = nullptr;
     std::function<QPointF(const QGeoCoordinate &)> m_toAxis;
@@ -82,6 +86,7 @@ private:
     double m_symbolPx = 7.0;
     int m_labelBudget = 150;         //!< Tope de etiquetas visibles (nivel detalle).
     int m_trailBudget = 400;         //!< Tope de trazas visibles (nivel detalle).
+    qint64 m_selected = -1;          //!< Objetivo resaltado (-1 = ninguno).
     QTimer m_repintar;               //!< Agrupa avisos: como mucho ~30 fps.
     mutable int m_lastDrawn = 0;
     mutable int m_lastLabels = 0;

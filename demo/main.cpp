@@ -1096,6 +1096,25 @@ private:
 
         // Con miles de objetivos se dejan de rotular/trazar al amontonarse.
         m_mapa->setTargetDetailBudget(200, 600);
+
+        // Clic sobre un objetivo -> la libreria lo resalta y emite targetClicked;
+        // aqui mostramos sus datos de dominio (sus attributes) en la barra de
+        // estado. Es el cierre del ciclo ver -> seleccionar -> consultar.
+        connect(m_mapa, &MapWidget::targetClicked, this,
+                [this](qint64 id, const QGeoCoordinate &) {
+                    const auto t = m_mapa->target(id);
+                    if (!t)
+                        return;
+                    QStringList datos;
+                    for (auto it = t->attributes.constBegin();
+                         it != t->attributes.constEnd(); ++it)
+                        datos << QStringLiteral("%1=%2")
+                                     .arg(it.key(), it.value().toString());
+                    statusBar()->showMessage(
+                        tr("Objetivo %1 [%2]  %3")
+                            .arg(id).arg(t->kind, datos.join(QStringLiteral("   "))),
+                        8000);
+                });
     }
 
     void alternarSimulacion(bool on)

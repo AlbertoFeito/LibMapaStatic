@@ -305,6 +305,15 @@ public:
     //! Muestra u oculta la capa de objetivos entera.
     void setTargetsVisible(bool visible);
 
+    //! Objetivo movil mas cercano a un punto de la pantalla (coords del widget)
+    //! dentro de \a tolerancePx, o -1. Para "clic en un objetivo -> sus datos".
+    qint64 targetAt(const QPoint &pixelPos, double tolerancePx = 14.0) const;
+    //! Resalta un objetivo (-1 = ninguno): un halo y su etiqueta forzada. Sin
+    //! herramienta activa, un clic sobre un objetivo ya lo selecciona y emite
+    //! \ref targetClicked; esto permite hacerlo tambien desde codigo.
+    void setSelectedTarget(qint64 id);
+    qint64 selectedTarget() const;
+
     // --- Seleccion -------------------------------------------------------
     qint64 selectedFeature() const;
     void selectFeature(qint64 id);
@@ -395,6 +404,8 @@ signals:
     void featureUpdated(qint64 id);
     void featureRemoved(qint64 id);
     void featureSelected(qint64 id);      //!< -1 al deseleccionar
+    //! Clic sobre un objetivo movil sin herramienta activa (ya queda resaltado).
+    void targetClicked(qint64 id, const QGeoCoordinate &position);
     void featureLayersChanged();
     //! Emitida al crear una entidad con el raton.
     void featureCreated(qint64 id);

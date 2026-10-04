@@ -106,6 +106,9 @@ private slots:
     //! Miles de objetivos: el nivel de detalle apaga etiquetas/trazas a densidad
     //! alta y el declutter evita el amontonamiento; mide el tiempo de render.
     void scalesToThousandsOfTargets();
+    //! targetAt encuentra el objetivo bajo el pixel; un clic lo selecciona y
+    //! emite targetClicked.
+    void selectsTargetByClick();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -1846,6 +1849,54 @@ void TstMapWidget::scalesToThousandsOfTargets()
     qInfo() << "Render de" << visibles << "objetivos visibles en" << ms
             << "ms (nivel de detalle minimo);" << capa->lastLabelsDrawn()
             << "etiquetas tras declutter con presupuesto holgado";
+}
+
+void TstMapWidget::selectsTargetByClick()
+{
+    // "Clic en un objetivo -> sus datos": targetAt localiza el objetivo bajo el
+    // pixel y, sin herramienta activa, un clic lo selecciona y emite targetClicked.
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(11);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+
+    MapTarget t;
+    t.position = centro;
+    t.kind = QStringLiteral("buque");
+    t.attributes.insert(QStringLiteral("mmsi"), QStringLiteral("224123000"));
+    const qint64 id = w.addTarget(t);
+    QVERIFY(id > 0);
+
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+
+    // Pixel exacto del objetivo (misma proyeccion que usa la capa).
+    const QPointF ax = MapView::toAxis(centro);
+    const QPoint px(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                    int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+
+    QCOMPARE(w.targetAt(px), id);                       // justo encima
+    QVERIFY(w.targetAt(px + QPoint(200, 200)) < 0);     // lejos -> ninguno
+
+    // Un clic sin herramienta selecciona y emite targetClicked (al pulsar).
+    QSignalSpy clic(&w, &MapWidget::targetClicked);
+    w.setActiveTool(MapTool::None);
+    QMouseEvent pulsar = mouseEvent(QEvent::MouseButtonPress, px,
+                                    Qt::LeftButton, Qt::LeftButton);
+    QMouseEvent soltar = mouseEvent(QEvent::MouseButtonRelease, px,
+                                    Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &pulsar);
+    QCoreApplication::sendEvent(vista, &soltar);
+
+    QCOMPARE(clic.count(), 1);
+    QCOMPARE(clic.first().at(0).toLongLong(), id);
+    QCOMPARE(w.selectedTarget(), id);
+
+    // Deseleccionar desde codigo.
+    w.setSelectedTarget(-1);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

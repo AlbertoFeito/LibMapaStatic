@@ -80,6 +80,18 @@ Escala a **miles** de objetivos (culling por vista, nivel de detalle y declutter
 de etiquetas). La app de ejemplo `demo` lo demuestra: su botón de simulación
 mueve buques, aeronaves y UAVs con su icono orientado al rumbo.
 
+**Clic en un objetivo → sus datos.** Sin herramienta activa, pulsar sobre un
+objetivo lo resalta y emite `targetClicked(id, pos)`; desde ahí lees sus
+`attributes`. También a mano: `targetAt(pixel)` da el objetivo bajo un punto y
+`setSelectedTarget(id)` lo resalta.
+
+```cpp
+connect(mapa, &libmapa::MapWidget::targetClicked, this, [=](qint64 id, auto){
+    auto t = mapa->target(id);                 // t->kind, t->attributes...
+    panel->mostrar(t->attributes);
+});
+```
+
 ## El paquete de datos
 
 Una carpeta con todo lo que el mapa necesita sin conexión y un manifiesto

@@ -62,6 +62,15 @@ public:
 
     QGeoCoordinate coordinateAt(const QPoint &pixel) const;
 
+    //! Objetivo movil mas cercano al pixel dado dentro de \a tolPx pixeles, o -1
+    //! si ninguno. Trabaja en pantalla (el simbolo tiene tamano en pixeles).
+    qint64 targetAt(const QPoint &pixel, double tolPx = 14.0) const;
+
+    //! Objetivo resaltado (-1 = ninguno). Lo dibuja TargetLayer con un halo y le
+    //! fuerza la etiqueta aunque el nivel de detalle las haya apagado.
+    void setSelectedTarget(qint64 id);
+    qint64 selectedTarget() const { return m_selectedTarget; }
+
     //! Geografico <-> coordenadas de eje (lon, mercatorY). Las necesita
     //! cualquier overlay que se dibuje con coordenadas de eje.
     static QPointF toAxis(const QGeoCoordinate &c);
@@ -125,6 +134,7 @@ signals:
     void zoomChanged(int zoom);
     void featureCreated(qint64 id);
     void featureClicked(qint64 id, const QGeoCoordinate &position);
+    void targetClicked(qint64 id, const QGeoCoordinate &position);
     void drawingCancelled();
     void centerChanged(const QGeoCoordinate &center);
     void mouseMovedTo(const QGeoCoordinate &position);
@@ -182,6 +192,7 @@ private:
 
     int m_zoom = 10;
     QGeoCoordinate m_center{23.1136, -82.3666};
+    qint64 m_selectedTarget = -1;    //!< Objetivo resaltado (-1 = ninguno).
 
     MapTool m_tool = MapTool::None;
     bool m_dragging = false;

@@ -53,6 +53,15 @@ void TargetLayer::setSymbolProvider(TargetSymbolProvider provider)
     programarRepintado();
 }
 
+// Fija el objetivo resaltado y repinta.
+void TargetLayer::setSelected(qint64 id)
+{
+    if (m_selected == id)
+        return;
+    m_selected = id;
+    programarRepintado();
+}
+
 // Fija el nivel de detalle para escalar a miles: topes de etiquetas y trazas.
 void TargetLayer::setDetailBudget(int maxLabels, int maxTrails)
 {
@@ -123,9 +132,11 @@ void TargetLayer::draw(QCPPainter *painter)
     m_labelCells.clear();
 
     // --- Pasada 2: dibujo ----------------------------------------------------
-    for (const auto &v : m_visibles)
-        drawTarget(painter, *v.first, v.second, conTrazas, conEtiquetas,
+    for (const auto &v : m_visibles) {
+        const bool sel = (v.first->target.id == m_selected);
+        drawTarget(painter, *v.first, v.second, conTrazas, conEtiquetas, sel,
                    m_labelCells);
+    }
 }
 
 // Dibuja UN objetivo ya situado en 'pos': su traza (si drawTrail), su simbolo
@@ -133,9 +144,18 @@ void TargetLayer::draw(QCPPainter *painter)
 // de pantalla esta libre: declutter). El culling ya lo hizo draw().
 void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
                              const QPointF &pos, bool drawTrail, bool drawLabel,
-                             QSet<qint64> &labelCells) const
+                             bool selected, QSet<qint64> &labelCells) const
 {
     const MapTarget &t = e.target;
+
+    // Halo del objetivo resaltado: un aro bajo el simbolo para que se vea cual
+    // esta seleccionado.
+    if (selected) {
+        const double rr = m_symbolPx * 1.9;
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(QPen(QColor(255, 210, 0), 2.2));
+        painter->drawEllipse(pos, rr, rr);
+    }
 
     // --- Traza -------------------------------------------------------------
     if (drawTrail && t.trailVisible && e.trail.size() >= 2) {
@@ -211,16 +231,20 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
     }
 
     // --- Etiqueta (multilinea: un parametro por linea) ---------------------
-    if (drawLabel && t.labelVisible && !t.label.isEmpty()) {
-        // Declutter: una sola etiqueta por celda de pantalla (~40 px). Si ya hay
-        // una etiqueta en la celda de este objetivo, se omite la suya para que a
-        // densidad alta no se solapen en una mancha ilegible.
-        const double CELDA = 40.0;
-        const qint64 celda = qint64(std::floor(pos.x() / CELDA)) * 100000
-                           + qint64(std::floor(pos.y() / CELDA));
-        if (labelCells.contains(celda))
-            return;
-        labelCells.insert(celda);
+    // El objetivo seleccionado muestra SIEMPRE su etiqueta (salta el presupuesto
+    // y el declutter), para poder leer sus datos aunque este en una zona densa.
+    if ((drawLabel || selected) && t.labelVisible && !t.label.isEmpty()) {
+        if (!selected) {
+            // Declutter: una sola etiqueta por celda de pantalla (~40 px). Si ya
+            // hay una etiqueta en la celda de este objetivo, se omite la suya
+            // para que a densidad alta no se solapen en una mancha ilegible.
+            const double CELDA = 40.0;
+            const qint64 celda = qint64(std::floor(pos.x() / CELDA)) * 100000
+                               + qint64(std::floor(pos.y() / CELDA));
+            if (labelCells.contains(celda))
+                return;
+            labelCells.insert(celda);
+        }
         ++m_lastLabels;
 
         const QStringList lineas =

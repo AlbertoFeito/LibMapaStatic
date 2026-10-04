@@ -274,6 +274,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(modelo, &OverlayModel::featureRemoved, this, &MapWidget::featureRemoved);
     connect(modelo, &OverlayModel::selectionChanged, this, &MapWidget::featureSelected);
     connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
+    connect(d->view, &MapView::targetClicked, this, &MapWidget::targetClicked);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
     connect(d->view, &MapView::drawingCancelled, this, &MapWidget::drawingCancelled);
 
@@ -822,6 +823,25 @@ void MapWidget::setTargetDetailBudget(int maxLabels, int maxTrails)
 {
     if (d->view && d->view->targetLayer())
         d->view->targetLayer()->setDetailBudget(maxLabels, maxTrails);
+}
+
+// Objetivo movil mas cercano a un punto de la pantalla, o -1.
+qint64 MapWidget::targetAt(const QPoint &pixelPos, double tolerancePx) const
+{
+    return d->view ? d->view->targetAt(pixelPos, tolerancePx) : -1;
+}
+
+// Resalta un objetivo (-1 = ninguno).
+void MapWidget::setSelectedTarget(qint64 id)
+{
+    if (d->view)
+        d->view->setSelectedTarget(id);
+}
+
+// Objetivo resaltado, o -1.
+qint64 MapWidget::selectedTarget() const
+{
+    return d->view ? d->view->selectedTarget() : -1;
 }
 
 // Elimina un objetivo.

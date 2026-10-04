@@ -321,7 +321,7 @@ la API que usa la aplicación:</p>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
-<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength</td></tr>
+<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
 <tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
@@ -462,7 +462,10 @@ posición y traza en O(1) y emite <code>changed()</code> → <code>TargetLayer</
 detalle y declutter escala a <b>miles</b> de móviles. Cada objetivo es agnóstico
 del dominio (<code>kind</code> + <code>attributes</code> libres) y la app pone su
 simbología por un hook; la app de ejemplo <code>demo</code> lo demuestra moviendo
-buques, aeronaves y UAVs con su icono orientado al rumbo.</p>
+buques, aeronaves y UAVs con su icono orientado al rumbo. Un clic sobre un
+objetivo (sin herramienta) lo resalta y emite <code>targetClicked(id, pos)</code>
+(<code>targetAt(pixel)</code> hace el hit-test); la app lee entonces sus
+<code>attributes</code> para mostrarlos.</p>
 
 <h3>9.3 · Entidades y ficheros .geo</h3>
 <p><code>loadGeoAsLayer(ruta)</code> → <code>GeoFile</code> lee los trazados →
