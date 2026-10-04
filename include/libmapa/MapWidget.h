@@ -5,6 +5,7 @@
 #include "libmapa/GeoFile.h"
 #include "libmapa/MapFeature.h"
 #include "libmapa/MapTarget.h"
+#include "libmapa/TargetSymbol.h"
 #include "libmapa/MapTypes.h"
 #include "libmapa/libmapa_export.h"
 
@@ -284,6 +285,13 @@ public:
     std::optional<MapTarget> target(qint64 id) const;
     QVector<MapTarget> targets() const;
     int targetCount() const;
+
+    //! Registra como dibuja la APP el simbolo de cada objetivo: recibe el
+    //! MapTarget (con kind/attributes) y devuelve un TargetSymbol (icono +
+    //! rotacion por rumbo + escala). Sin proveedor, la libreria usa un galon por
+    //! defecto. El juego de iconos lo trae la app, asi la libreria sigue siendo
+    //! agnostica del dominio (buques, aeronaves, UAVs).
+    void setTargetSymbolProvider(TargetSymbolProvider provider);
 
     //! Longitud de la traza de cada objetivo: < 0 = toda (ilimitada),
     //! 0 = sin traza, > 0 = las ultimas N posiciones (p. ej. 10, 100, 500).

@@ -809,6 +809,14 @@ QVariant MapWidget::targetAttribute(qint64 id, const QString &key) const
     return d->view ? d->view->targetModel()->attribute(id, key) : QVariant();
 }
 
+// Registra el proveedor de simbolos de la app (icono por tipo/estado + rotacion
+// por rumbo). Lo gestiona la capa de objetivos; sin el, se usa el galon.
+void MapWidget::setTargetSymbolProvider(TargetSymbolProvider provider)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setSymbolProvider(std::move(provider));
+}
+
 // Elimina un objetivo.
 bool MapWidget::removeTarget(qint64 id)
 {

@@ -3,6 +3,7 @@
 
 #include "qcustomplot.h"
 
+#include "libmapa/TargetSymbol.h"
 #include "widget/TargetModel.h"
 
 #include <QGeoCoordinate>
@@ -37,6 +38,10 @@ public:
     //! Tamano del simbolo del objetivo, en pixeles.
     void setSymbolSizePx(double px) { m_symbolPx = px; }
 
+    //! Registra como dibuja la APP el simbolo de cada objetivo (icono por tipo o
+    //! estado + rotacion por rumbo). Sin proveedor, se usa el galon por defecto.
+    void setSymbolProvider(TargetSymbolProvider provider);
+
     //! Objetivos dibujados en el ultimo repintado (los que caian en pantalla).
     int lastDrawnCount() const { return m_lastDrawn; }
 
@@ -54,6 +59,7 @@ private:
 
     TargetModel *m_model = nullptr;
     std::function<QPointF(const QGeoCoordinate &)> m_toAxis;
+    TargetSymbolProvider m_symbolProvider;   //!< Lo pone la app; vacio = galon.
 
     double m_symbolPx = 7.0;
     QTimer m_repintar;               //!< Agrupa avisos: como mucho ~30 fps.

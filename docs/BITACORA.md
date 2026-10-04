@@ -2879,3 +2879,41 @@ legado (4) y ejemplo de seguimiento + contrato público (5).
 **Estado: 17 tests en verde (Qt 6 local; el CI los repite en Qt 6 y Qt 5);
 `MapTarget` ya es extensible por la app. Siguiente: Fase 2 (simbología por
 hooks).**
+
+## 55. Simbología por hooks: la app trae los iconos (Fase 2 del alcance)
+
+Hasta ahora la capa de objetivos pintaba un símbolo fijo (un galón girado por el
+rumbo). Para que la librería siga siendo **agnóstica del dominio** pero cada app
+(naval, aérea, UAV) muestre sus propios iconos, la simbología pasa a ser un
+**hook**: la app registra un proveedor y la librería se limita a colocar y girar
+lo que ese proveedor devuelva.
+
+Cambios:
+
+- Nueva cabecera pública `include/libmapa/TargetSymbol.h`: `struct TargetSymbol`
+  (`QPixmap icon`; `bool rotateWithHeading`; `double scale`; `QPointF anchor`) y
+  el typedef `TargetSymbolProvider = std::function<TargetSymbol(const MapTarget&)>`.
+  El proveedor recibe el objetivo COMPLETO (con `kind`/`attributes`), así que la
+  app elige icono por tipo, por estado o por cualquier dato suyo. Icono nulo =>
+  la librería usa el galón por defecto (un proveedor puede decorar solo algunos
+  tipos y dejar el resto genérico).
+- `src/widget/TargetLayer.{h,cpp}`: guarda el proveedor (`setSymbolProvider`) y,
+  en `drawTarget`, si devuelve un icono lo dibuja (trasladado a la posición,
+  girado por el rumbo si se pide, escalado y anclado; respeta el
+  `devicePixelRatio` para HiDPI); si no, cae al galón de antes.
+- `include/libmapa/MapWidget.{h,cpp}`: reenvío `setTargetSymbolProvider`, que lo
+  pasa a la capa de objetivos vía `MapView::targetLayer()`.
+- `tests/tst_mapwidget.cpp`: caso `usesTargetSymbolProvider` (coloca un objetivo
+  en el centro, registra un proveedor que cuenta invocaciones y da un icono por
+  `kind`, fuerza el render con `grab()` y comprueba que el proveedor se llamó con
+  el objetivo completo). 17 tests en verde, sin warnings.
+- Docs: `arquitectura.html` (bullet de objetivos, fila de API y de `TargetLayer`)
+  + PDF regenerado; README con la simbología por hooks.
+
+API **aditivo**: sin proveedor, el comportamiento es el de antes. No se añadió
+ningún `.cpp` (la cabecera nueva es header-only), así que CMake y qmake no
+cambian.
+
+**Estado: 17 tests en verde; la app ya puede traer su juego de iconos. Siguiente:
+Fase 3 (escala a miles: culling por vista, nivel de detalle y poda de traza, con
+un banco que lo mida).**

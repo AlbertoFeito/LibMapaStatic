@@ -44,6 +44,14 @@ void TargetLayer::setAxisMapper(
     programarRepintado();
 }
 
+// Registra el proveedor de simbolos de la aplicacion. Al cambiarlo se repinta
+// para que el nuevo juego de iconos se vea de inmediato.
+void TargetLayer::setSymbolProvider(TargetSymbolProvider provider)
+{
+    m_symbolProvider = std::move(provider);
+    programarRepintado();
+}
+
 // Pide un repintado coalescido: arranca el temporizador de 33 ms si no corre ya,
 // de modo que una rafaga de actualizaciones se dibuje una sola vez (~30 fps).
 void TargetLayer::programarRepintado()
@@ -125,23 +133,46 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
         painter->setRenderHint(QPainter::Antialiasing, true);
     }
 
-    // --- Simbolo, orientado por el rumbo -----------------------------------
-    // Un galon (chevron) que apunta al norte y se gira en sentido horario
-    // segun el rumbo. En pantalla la Y crece hacia abajo, y QPainter::rotate
-    // gira en horario para angulos positivos: el norte queda arriba.
+    // --- Simbolo -----------------------------------------------------------
+    // Si la app registro un proveedor y devuelve un icono, lo dibuja ella (la
+    // libreria solo lo coloca, lo gira por el rumbo si se pide y lo escala). Si
+    // no hay proveedor o el icono es nulo, se cae al galon por defecto.
     const double r = m_symbolPx;
-    painter->save();
-    painter->translate(pos);
-    painter->rotate(t.headingDeg);
-    QPolygonF simbolo;
-    simbolo << QPointF(0.0, -r)              // proa
-            << QPointF(r * 0.7, r * 0.8)     // popa derecha
-            << QPointF(0.0, r * 0.4)         // muesca
-            << QPointF(-r * 0.7, r * 0.8);   // popa izquierda
-    painter->setPen(QPen(Qt::black, 0.8));
-    painter->setBrush(t.color);
-    painter->drawPolygon(simbolo);
-    painter->restore();
+    TargetSymbol sym;
+    if (m_symbolProvider)
+        sym = m_symbolProvider(t);
+
+    if (!sym.icon.isNull()) {
+        // Icono de la app. El devicePixelRatio permite iconos nitidos en HiDPI:
+        // el tamano logico es width()/dpr.
+        const double dpr = sym.icon.devicePixelRatio();
+        const double w = sym.icon.width() / dpr * sym.scale;
+        const double h = sym.icon.height() / dpr * sym.scale;
+        painter->save();
+        painter->translate(pos);
+        if (sym.rotateWithHeading)
+            painter->rotate(t.headingDeg);
+        // El anchor (0..1) dice que punto del icono cae sobre la posicion.
+        const QRectF destino(-w * sym.anchor.x(), -h * sym.anchor.y(), w, h);
+        painter->drawPixmap(destino, sym.icon, QRectF(sym.icon.rect()));
+        painter->restore();
+    } else {
+        // Galon por defecto: apunta al norte y se gira en horario segun el rumbo.
+        // En pantalla la Y crece hacia abajo y QPainter::rotate gira en horario
+        // para angulos positivos, asi que el norte queda arriba.
+        painter->save();
+        painter->translate(pos);
+        painter->rotate(t.headingDeg);
+        QPolygonF simbolo;
+        simbolo << QPointF(0.0, -r)              // proa
+                << QPointF(r * 0.7, r * 0.8)     // popa derecha
+                << QPointF(0.0, r * 0.4)         // muesca
+                << QPointF(-r * 0.7, r * 0.8);   // popa izquierda
+        painter->setPen(QPen(Qt::black, 0.8));
+        painter->setBrush(t.color);
+        painter->drawPolygon(simbolo);
+        painter->restore();
+    }
 
     // --- Etiqueta (multilinea: un parametro por linea) ---------------------
     if (t.labelVisible && !t.label.isEmpty()) {

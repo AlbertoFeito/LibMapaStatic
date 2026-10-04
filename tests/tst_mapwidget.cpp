@@ -100,6 +100,8 @@ private slots:
     void loadsGeoWithSeveralPolylines();
     void savesAndLoadsMultiPartFeature();
     void drawsManyMovingTargets();
+    //! El proveedor de simbolos de la app se invoca al dibujar los objetivos.
+    void usesTargetSymbolProvider();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -1726,6 +1728,44 @@ void TstMapWidget::drawsManyMovingTargets()
     QCOMPARE(w.targetCount(), N - 1);
     w.clearTargets();
     QCOMPARE(w.targetCount(), 0);
+}
+
+void TstMapWidget::usesTargetSymbolProvider()
+{
+    // La simbologia la pone la app por un hook: la libreria llama al proveedor
+    // por cada objetivo visible al dibujar. Se comprueba que se invoca (con el
+    // objetivo completo, para poder elegir por kind) y que el render no revienta.
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(400, 300);
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+
+    MapTarget t;
+    t.position = centro;                      // en el centro: pasa el culling
+    t.kind = QStringLiteral("uav");
+    const qint64 id = w.addTarget(t);
+    QVERIFY(id > 0);
+
+    QPixmap icono(16, 16);
+    icono.fill(Qt::red);
+    int llamadas = 0;
+    QString kindVisto;
+    w.setTargetSymbolProvider([&](const MapTarget &obj) {
+        ++llamadas;
+        kindVisto = obj.kind;                 // la app recibe el objetivo completo
+        TargetSymbol s;
+        if (obj.kind == QStringLiteral("uav"))
+            s.icon = icono;                   // icono por tipo
+        s.rotateWithHeading = true;
+        return s;
+    });
+
+    const QPixmap px = w.grab();              // fuerza el render -> TargetLayer::draw
+    QVERIFY(!px.isNull());
+    QVERIFY2(llamadas > 0, "El proveedor de simbolo no se invoco al dibujar");
+    QCOMPARE(kindVisto, QStringLiteral("uav"));
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).
