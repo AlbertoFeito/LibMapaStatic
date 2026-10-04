@@ -16,6 +16,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir
+- **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
 
 ## Uso
 
@@ -40,6 +41,56 @@ Con esa línea de `dataDir` salen las capas base, la elevación, las capas fijas
 la BD de entidades del usuario y el punto de arranque. Lo que se rellene a mano
 en `MapConfig` (`initialZoom`, `elevationDbFile`…) **manda sobre el paquete**.
 La configuración clásica con `datasetsFile` sigue funcionando.
+
+## Seguimiento de objetivos móviles
+
+La librería **representa** objetos móviles sobre el mapa (naval, aéreo, UAVs…) y
+es **agnóstica del dominio**: no sabe de protocolos ni de dónde vienen los datos.
+Tu aplicación conecta a su fuente (AIS, ADS-B, MAVLink…) y le va diciendo dónde
+está cada objetivo; los **comandos y el control** (p. ej. a un UAV) son de la
+app, no de la librería.
+
+```cpp
+// 1) Tu juego de iconos: la librería lo coloca y lo gira por el rumbo.
+mapa->setTargetSymbolProvider([&](const libmapa::MapTarget &t) {
+    libmapa::TargetSymbol s;
+    if (t.kind == "buque")         s.icon = iconoBuque;
+    else if (t.kind == "aeronave") s.icon = iconoAvion;
+    else if (t.kind == "uav")                       // icono por ESTADO:
+        s.icon = t.attributes["bateria"].toInt() < 20 ? iconoUavAlerta : iconoUav;
+    s.rotateWithHeading = true;                     // icono nulo => galón por defecto
+    return s;
+});
+mapa->setTargetDetailBudget(200, 600);              // a miles, ralea etiquetas/trazas
+
+// 2) Alta de un objetivo con sus datos de dominio (la librería no los interpreta).
+libmapa::MapTarget t;
+t.position = QGeoCoordinate(23.1, -82.3);
+t.headingDeg = 270;
+t.kind = "buque";
+t.attributes["mmsi"] = "224123000";
+qint64 id = mapa->addTarget(t);
+
+// 3) Desde tu feed, vía rápida de tiempo real (entra en la traza):
+mapa->updateTarget(id, nuevaPos, nuevoRumbo);
+mapa->setTargetAttribute(id, "velocidad", 12.4);
+```
+
+Escala a **miles** de objetivos (culling por vista, nivel de detalle y declutter
+de etiquetas). La app de ejemplo `demo` lo demuestra: su botón de simulación
+mueve buques, aeronaves y UAVs con su icono orientado al rumbo.
+
+**Clic en un objetivo → sus datos.** Sin herramienta activa, pulsar sobre un
+objetivo lo resalta y emite `targetClicked(id, pos)`; desde ahí lees sus
+`attributes`. También a mano: `targetAt(pixel)` da el objetivo bajo un punto y
+`setSelectedTarget(id)` lo resalta.
+
+```cpp
+connect(mapa, &libmapa::MapWidget::targetClicked, this, [=](qint64 id, auto){
+    auto t = mapa->target(id);                 // t->kind, t->attributes...
+    panel->mostrar(t->attributes);
+});
+```
 
 ## El paquete de datos
 

@@ -2837,3 +2837,193 @@ tests) y no toca `arquitectura.html` (sin PDF que regenerar).
 **Estado: CI en marcha (Qt 6 y Qt 5, 17 tests offscreen); sin cambios en el
 código de la librería; queda, para `main`, validar `desplegar_qt5.bat` en un
 Windows con Qt 5.14 real y abrir el PR de la rama con su resumen.**
+
+## 54. Objetivo móvil extensible: `kind` + `attributes` (Fase 1 del alcance)
+
+Tras acordar el **alcance** de la librería (motor de representación de objetos
+móviles sobre mapa offline, agnóstico del dominio, para apps de seguimiento
+naval/aéreo/UAV), esta es la primera fase. El objetivo: que un mismo `MapTarget`
+sirva a cualquier dominio sin que la librería conozca su semántica.
+
+Hallazgo que facilitó todo: la fachada **ya era agnóstica** (`MapTarget` y
+`addTarget/updateTarget/...` no sabían de barcos). El dominio naval (`vehiculo`,
+`buque_ais`) vive solo en el esquema SQLite legado, aparte del motor de tracks.
+Así que la Fase 1 fue aditiva, sin tocar el dominio.
+
+Cambios:
+
+- `include/libmapa/MapTarget.h`: dos campos nuevos. `QString kind` (clase que la
+  app asigna: "buque", "aeronave", "uav"…, para elegir símbolo o filtrar) y
+  `QVariantMap attributes` (datos libres del objetivo: mmsi/imo para AIS,
+  callsign/squawk para ADS-B, batería/enlace para un UAV). La librería los lleva
+  y los devuelve **tal cual, sin interpretarlos**. Se incluye `<QVariant>` (no
+  `<QVariantMap>`, que como cabecera suelta no existe en Qt 5.14; el typedef
+  viene de `<QVariant>`).
+- `src/widget/TargetModel.{h,cpp}`: `upsert` ya guardaba el `MapTarget` completo,
+  así que `kind`/`attributes` viajan sin cambios y la vía rápida `update` (solo
+  posición/rumbo) **no los pierde**. Añadidos `setAttribute(id, clave, valor)` y
+  `attribute(id, clave)` para colgar/leer datos de dominio en caliente.
+- `include/libmapa/MapWidget.h` + `src/widget/MapWidget.cpp`: reenvíos finos
+  `setTargetAttribute` / `targetAttribute`, en línea con `setTargetLabel`.
+- `tests/tst_targetmodel.cpp`: caso nuevo `carriesKindAndAttributes` (upsert con
+  kind+atributos, que `update` los conserva, set/get en caliente, e id/clave
+  inexistentes → QVariant inválido / false). Siguen los **17 tests** en verde,
+  sin warnings (`-Wall -Wextra -Wconversion -Wold-style-cast`).
+- Docs: `arquitectura.html` (descripción de `MapTarget` y fila de API) + **PDF
+  regenerado**; README con una línea de "seguimiento agnóstico del dominio".
+
+Es cambio de **API público** (solo aditivo: no rompe nada existente). Fases que
+siguen: simbología por hooks (2), escala a miles (3), corte limpio del dominio
+legado (4) y ejemplo de seguimiento + contrato público (5).
+
+**Estado: 17 tests en verde (Qt 6 local; el CI los repite en Qt 6 y Qt 5);
+`MapTarget` ya es extensible por la app. Siguiente: Fase 2 (simbología por
+hooks).**
+
+## 55. Simbología por hooks: la app trae los iconos (Fase 2 del alcance)
+
+Hasta ahora la capa de objetivos pintaba un símbolo fijo (un galón girado por el
+rumbo). Para que la librería siga siendo **agnóstica del dominio** pero cada app
+(naval, aérea, UAV) muestre sus propios iconos, la simbología pasa a ser un
+**hook**: la app registra un proveedor y la librería se limita a colocar y girar
+lo que ese proveedor devuelva.
+
+Cambios:
+
+- Nueva cabecera pública `include/libmapa/TargetSymbol.h`: `struct TargetSymbol`
+  (`QPixmap icon`; `bool rotateWithHeading`; `double scale`; `QPointF anchor`) y
+  el typedef `TargetSymbolProvider = std::function<TargetSymbol(const MapTarget&)>`.
+  El proveedor recibe el objetivo COMPLETO (con `kind`/`attributes`), así que la
+  app elige icono por tipo, por estado o por cualquier dato suyo. Icono nulo =>
+  la librería usa el galón por defecto (un proveedor puede decorar solo algunos
+  tipos y dejar el resto genérico).
+- `src/widget/TargetLayer.{h,cpp}`: guarda el proveedor (`setSymbolProvider`) y,
+  en `drawTarget`, si devuelve un icono lo dibuja (trasladado a la posición,
+  girado por el rumbo si se pide, escalado y anclado; respeta el
+  `devicePixelRatio` para HiDPI); si no, cae al galón de antes.
+- `include/libmapa/MapWidget.{h,cpp}`: reenvío `setTargetSymbolProvider`, que lo
+  pasa a la capa de objetivos vía `MapView::targetLayer()`.
+- `tests/tst_mapwidget.cpp`: caso `usesTargetSymbolProvider` (coloca un objetivo
+  en el centro, registra un proveedor que cuenta invocaciones y da un icono por
+  `kind`, fuerza el render con `grab()` y comprueba que el proveedor se llamó con
+  el objetivo completo). 17 tests en verde, sin warnings.
+- Docs: `arquitectura.html` (bullet de objetivos, fila de API y de `TargetLayer`)
+  + PDF regenerado; README con la simbología por hooks.
+
+API **aditivo**: sin proveedor, el comportamiento es el de antes. No se añadió
+ningún `.cpp` (la cabecera nueva es header-only), así que CMake y qmake no
+cambian.
+
+**Estado: 17 tests en verde; la app ya puede traer su juego de iconos. Siguiente:
+Fase 3 (escala a miles: culling por vista, nivel de detalle y poda de traza, con
+un banco que lo mida).**
+
+## 56. Escala a miles de objetivos: culling, nivel de detalle y declutter (Fase 3)
+
+El alcance fija **miles** de móviles (ADS-B regional). El dibujo ya hacía culling
+por objetivo, pero a esa densidad lo caro y lo ilegible son las **etiquetas**
+(cada una con 8 trazos de halo) y las **trazas** (una polilínea por objetivo).
+`TargetLayer` se reescribe en dos pasadas:
+
+- **Pasada 1 (culling):** recorre el modelo una vez y recoge en un buffer
+  reusado solo los objetivos cuya posición cae en pantalla (con margen de 256
+  px) junto con su posición ya proyectada.
+- **Pasada 2 (dibujo) con nivel de detalle:** según cuántos quedaron visibles,
+  decide si dibujar etiquetas y trazas. Por encima de un **presupuesto**
+  (`setTargetDetailBudget`, por defecto 150 etiquetas / 400 trazas) se apagan
+  (el símbolo se dibuja siempre). Además:
+  - **Declutter de etiquetas:** una sola etiqueta por celda de pantalla (~40 px),
+    para que no se amontonen; el resto se omite.
+  - **Decimación de traza:** se saltan los puntos a menos de 2 px del último
+    dibujado (una traza larga al alejar el zoom son muchos puntos pegados).
+- Contadores `lastLabelsDrawn()`/`lastTrailsDrawn()` para diagnóstico y test.
+
+Fachada: `MapWidget::setTargetDetailBudget(maxLabels, maxTrails)`.
+
+Banco/medida: en vez de una herramienta aparte, el test
+`tst_mapwidget::scalesToThousandsOfTargets` monta **3025 objetivos** en el área
+visible (con etiqueta y traza), fuerza el repintado de la capa (BUFFERED, vía
+`QCPLayer::replot`) y comprueba de forma **determinista** el nivel de detalle:
+con presupuesto bajo, 0 etiquetas y 0 trazas; con presupuesto holgado, vuelven
+pero el declutter deja muchas menos etiquetas (~108) que objetivos (3025). Deja
+en el log el tiempo del render (del orden de ~20 ms en el contenedor). 17 tests
+en verde, sin warnings (se corrigió un `-Wconversion` de `size()`).
+
+API **aditivo**; la cabecera de símbolos sigue siendo header-only, así que CMake
+y qmake no cambian.
+
+**Estado: 17 tests en verde; el motor de objetivos escala a miles con nivel de
+detalle. Con esto el motor de seguimiento está completo (Fases 1–3). Siguiente:
+Fase 4 (corte limpio del dominio naval legado) o Fase 5 (ejemplo de seguimiento
++ contrato público).**
+
+## 57. Ejemplo de seguimiento en `demo` y contrato público (Fase 5)
+
+Las Fases 1–3 dejaron el motor de seguimiento completo pero **invisible**: nada
+en el repo lo usaba. Esta fase lo hace demostrable enriqueciendo el `demo` (que
+ya tenía un simulador de objetivos) y documentando cómo se usa. **Solo cambia la
+app de ejemplo y la documentación; la librería y su API no se tocan.**
+
+En `demo/main.cpp`:
+
+- El simulador crea objetivos de tres clases con `kind` **"buque" / "aeronave" /
+  "uav"**, cada uno con sus **attributes** de dominio (buque: `mmsi`, `eslora`;
+  aeronave: `callsign`, `squawk`, `fl`; uav: `bateria`, `enlace`). La etiqueta se
+  compone de esos atributos → se ven en pantalla (Fase 1).
+- `prepararSeguimiento()` dibuja el **juego de iconos en código** (sin ficheros:
+  un casco, una silueta de avión y un cuadricóptero, con `QPainter` → `QPixmap`)
+  y registra `setTargetSymbolProvider`: elige el icono por `kind` y, para un UAV
+  con `bateria` < 20, una variante **en rojo** → "icono por estado" (Fase 2). Un
+  `kind` sin icono caería al galón por defecto.
+- Fija `setTargetDetailBudget(200, 600)`; el spinbox ya llegaba a 5000, así que
+  subir la cantidad enseña el nivel de detalle a miles (Fase 3).
+
+Documentación del **contrato público**: nueva sección «Seguimiento de objetivos
+móviles» en el README con el patrón mínimo (proveedor de símbolos, alta con
+`kind`+`attributes`, actualización desde el feed, presupuesto de detalle) y la
+frase clave —la librería **representa**; los protocolos (AIS/ADS-B/MAVLink) y el
+control los pone la app—; una línea en `arquitectura.html` + **PDF regenerado**.
+
+Verificación: `demo` compila; los **17 tests** siguen en verde (la librería no
+cambió), sin warnings. La validación visual la hace el usuario en su PC
+(arrancar `demo` → simular → buques/aeronaves/UAVs con su icono y datos).
+
+Fuera de alcance (anotado): "clic en un objetivo → panel con sus datos" pediría
+hit-testing de objetivos en la librería (hoy la selección es solo de entidades);
+los atributos se ven por ahora vía la etiqueta.
+
+**Estado: motor de seguimiento completo y demostrado en `demo` (Fases 1–5
+hechas); 17 tests en verde. Queda, cuando toque, la Fase 4 (corte limpio del
+esquema naval legado), que encaja mejor al reimplementar Estación Terrena.**
+
+## 58. Hit-testing de objetivos: clic en un objetivo → sus datos
+
+Cerraba el ciclo "ver → seleccionar → consultar": se podían ver los objetivos
+pero no **pinchar uno y leer sus `attributes`**. Es lo que piden las apps de
+seguimiento (seleccionar un contacto y ver su ficha). Se añade como capacidad de
+la librería, reusando el patrón de `featureClicked`.
+
+- `MapView`: `targetAt(pixel, tolPx=14)` proyecta cada objetivo a pantalla (misma
+  transformación que `TargetLayer`) y devuelve el más cercano dentro de la
+  tolerancia, o -1. En `mousePressEvent`, caso `MapTool::None`: si el clic cae
+  sobre un objetivo, lo **selecciona** y emite `targetClicked(id, pos)` **sin**
+  iniciar el arrastre; sobre mapa vacío, arrastra como siempre. `setSelectedTarget`
+  guarda el id y lo pasa a la capa.
+- `TargetLayer`: `setSelected(id)`; el objetivo resaltado se dibuja con un **halo**
+  ámbar y se le **fuerza la etiqueta** aunque el nivel de detalle o el declutter
+  las hayan apagado (para poder leer su ficha en zona densa).
+- `MapWidget`: reenvíos `targetAt`, `setSelectedTarget`, `selectedTarget` y la
+  señal `targetClicked(id, pos)`.
+- `demo`: al recibir `targetClicked`, muestra `kind` + `attributes` del objetivo
+  en la barra de estado (el resaltado lo pone ya la librería).
+- `tests/tst_mapwidget.cpp`: caso `selectsTargetByClick` (targetAt acierta encima
+  y da -1 lejos; un clic emite `targetClicked` con el id correcto y deja
+  `selectedTarget()` fijado). 17 tests en verde, sin warnings.
+- Docs: README (sección de seguimiento) y `arquitectura.html` + PDF.
+
+API **aditivo**. Sin cambios en CMake/qmake (solo edición de ficheros ya
+listados).
+
+**Estado: ciclo de seguimiento completo (ver, simbología, escala, y ahora
+selección/consulta por clic); 17 tests en verde. Pendiente opcional: Fase 4
+(corte limpio del dominio naval legado) y consolidar la rama en `main`.**

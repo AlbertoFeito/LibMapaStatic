@@ -91,7 +91,7 @@ se pueda probar sin ventanas.</p>
 <ul>
   <li><b>Teselas base:</b> abre una o varias BD de teselas (OSM, satélite…), las cachea y las pinta fluido según navegas.</li>
   <li><b>Entidades:</b> dibuja y edita puntos/líneas/polígonos en capas, con guardado/carga en SQLite y carga de ficheros <code>.geo</code>.</li>
-  <li><b>Objetivos móviles:</b> cientos de móviles con traza y etiqueta, actualizables varias veces por segundo, en una capa que se repinta sola.</li>
+  <li><b>Objetivos móviles:</b> móviles con traza y etiqueta, actualizables varias veces por segundo, en una capa que se repinta sola. <b>Agnósticos del dominio</b>: cada objetivo lleva un <code>kind</code> y un juego de <code>attributes</code> libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta, así el mismo modelo sirve a seguimiento naval, aéreo o de UAVs. La <b>simbología va por hooks</b>: la app registra un proveedor (<code>setTargetSymbolProvider</code>) que elige el icono de cada objetivo según su <code>kind</code>/estado; la librería lo coloca y lo gira por el rumbo, y sin proveedor usa un galón por defecto. <b>Escala a miles</b> (ADS-B regional): culling por vista, <b>nivel de detalle</b> (por encima de un presupuesto se apagan etiquetas y trazas, que a esa densidad son ilegibles), <b>declutter</b> de etiquetas (una por celda) y decimación de la traza.</li>
   <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), y <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa).</li>
 </ul>
 </div>
@@ -166,7 +166,7 @@ por un entero cuando hace falta.</p>
 <tr><td>TileKey</td><td>Identidad de una tesela: <code>{z, x, y}</code> lógicos. Se usa como clave del caché (con <code>qHash</code>).</td></tr>
 <tr><td>TileDataset</td><td>Todo lo que se sabe de una BD de teselas: ruta, tabla, mapeo de zoom (<code>zFactor/zOffset</code>), esquema (XYZ/TMS), columnas, <code>hasSColumn/sValue</code>, min/max/recommended zoom, relleno típico. Se lee de <code>datasets.json</code>.</td></tr>
 <tr><td>MapFeature</td><td>Entidad vectorial: geometría multi-parte (puntos/líneas/polígonos), estilo (<code>FeatureStyle</code>), etiqueta y «tipo de dominio». Identidad = <code>qint64</code>.</td></tr>
-<tr><td>MapTarget</td><td>Objetivo móvil: posición, rumbo, color, etiqueta, visibilidad de traza. Pensado para tiempo real.</td></tr>
+<tr><td>MapTarget</td><td>Objetivo móvil: posición, rumbo, velocidad, color, etiqueta, visibilidad de traza, más <code>kind</code> y un <code>QVariantMap attributes</code> libre para datos de dominio (AIS/ADS-B/telemetría) que la librería no interpreta. Pensado para tiempo real y agnóstico del dominio.</td></tr>
 <tr><td>LayerInfo / BaseLayerInfo</td><td>Descriptor de una capa (de entidades / base) para poblar menús.</td></tr>
 <tr><td>GeoPath</td><td>Un trazado leído de un fichero <code>.geo</code> (lista de coordenadas + si cierra).</td></tr>
 <tr><td>Measurement / MapPoint / MapVehicle…</td><td>Tipos auxiliares de la API pública (medición, puntos, vehículos, rutas).</td></tr>
@@ -321,7 +321,7 @@ la API que usa la aplicación:</p>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
-<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetTrailLength</td></tr>
+<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
 <tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
@@ -338,7 +338,7 @@ añadió para la descarga.</p>
 <table><tr><th>Clase</th><th>Rol</th></tr>
 <tr><td class="cls">TileLayer</td><td>Pinta las teselas del plan (con la escalera de respaldo). Lee del <code>TileCache</code>.</td></tr>
 <tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar.</td></tr>
-<tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas.</td></tr>
+<tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas. El símbolo lo decide el proveedor de la app (icono + rotación por rumbo + escala); sin proveedor, un galón por defecto. Para miles de objetivos: culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza.</td></tr>
 <tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
 </table>
 
@@ -458,7 +458,14 @@ se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m,
 <p><code>MapWidget::updateTarget(id, pos, rumbo)</code> → <code>TargetModel</code> actualiza
 posición y traza en O(1) y emite <code>changed()</code> → <code>TargetLayer</code>
 <b>agrupa</b> los avisos y repinta como mucho ~30 veces/segundo, y <b>solo</b> su capa
-(modo BUFFERED), sin tocar teselas ni entidades. Así aguanta cientos de móviles.</p>
+(modo BUFFERED), sin tocar teselas ni entidades. Con culling por vista, nivel de
+detalle y declutter escala a <b>miles</b> de móviles. Cada objetivo es agnóstico
+del dominio (<code>kind</code> + <code>attributes</code> libres) y la app pone su
+simbología por un hook; la app de ejemplo <code>demo</code> lo demuestra moviendo
+buques, aeronaves y UAVs con su icono orientado al rumbo. Un clic sobre un
+objetivo (sin herramienta) lo resalta y emite <code>targetClicked(id, pos)</code>
+(<code>targetAt(pixel)</code> hace el hit-test); la app lee entonces sus
+<code>attributes</code> para mostrarlos.</p>
 
 <h3>9.3 · Entidades y ficheros .geo</h3>
 <p><code>loadGeoAsLayer(ruta)</code> → <code>GeoFile</code> lee los trazados →

@@ -24,6 +24,7 @@ static QMouseEvent mouseEvent(QEvent::Type tipo, const QPoint &pos,
 }
 #include <cmath>
 
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -100,6 +101,14 @@ private slots:
     void loadsGeoWithSeveralPolylines();
     void savesAndLoadsMultiPartFeature();
     void drawsManyMovingTargets();
+    //! El proveedor de simbolos de la app se invoca al dibujar los objetivos.
+    void usesTargetSymbolProvider();
+    //! Miles de objetivos: el nivel de detalle apaga etiquetas/trazas a densidad
+    //! alta y el declutter evita el amontonamiento; mide el tiempo de render.
+    void scalesToThousandsOfTargets();
+    //! targetAt encuentra el objetivo bajo el pixel; un clic lo selecciona y
+    //! emite targetClicked.
+    void selectsTargetByClick();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -1726,6 +1735,168 @@ void TstMapWidget::drawsManyMovingTargets()
     QCOMPARE(w.targetCount(), N - 1);
     w.clearTargets();
     QCOMPARE(w.targetCount(), 0);
+}
+
+void TstMapWidget::usesTargetSymbolProvider()
+{
+    // La simbologia la pone la app por un hook: la libreria llama al proveedor
+    // por cada objetivo visible al dibujar. Se comprueba que se invoca (con el
+    // objetivo completo, para poder elegir por kind) y que el render no revienta.
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(400, 300);
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+
+    MapTarget t;
+    t.position = centro;                      // en el centro: pasa el culling
+    t.kind = QStringLiteral("uav");
+    const qint64 id = w.addTarget(t);
+    QVERIFY(id > 0);
+
+    QPixmap icono(16, 16);
+    icono.fill(Qt::red);
+    int llamadas = 0;
+    QString kindVisto;
+    w.setTargetSymbolProvider([&](const MapTarget &obj) {
+        ++llamadas;
+        kindVisto = obj.kind;                 // la app recibe el objetivo completo
+        TargetSymbol s;
+        if (obj.kind == QStringLiteral("uav"))
+            s.icon = icono;                   // icono por tipo
+        s.rotateWithHeading = true;
+        return s;
+    });
+
+    const QPixmap px = w.grab();              // fuerza el render -> TargetLayer::draw
+    QVERIFY(!px.isNull());
+    QVERIFY2(llamadas > 0, "El proveedor de simbolo no se invoco al dibujar");
+    QCOMPARE(kindVisto, QStringLiteral("uav"));
+}
+
+void TstMapWidget::scalesToThousandsOfTargets()
+{
+    // Requisito del alcance: miles de objetivos (ADS-B regional) sin ahogarse.
+    // El motor dibuja siempre el simbolo pero, por encima de un presupuesto,
+    // APAGA etiquetas y trazas (lo mas caro y lo que a esa densidad se vuelve
+    // una mancha ilegible). Se comprueba ese nivel de detalle de forma
+    // determinista y se mide el tiempo de un render completo.
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    w.setCenter(QGeoCoordinate(22.0, -79.5));
+
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    TargetLayer *capa = vista->targetLayer();
+    QVERIFY(capa != nullptr);
+
+    // Rejilla de ~3000 objetivos dentro del area visible, con etiqueta y, tras
+    // una actualizacion, una traza de 2 puntos.
+    const int lado = 55;                       // 55*55 = 3025
+    QVector<qint64> ids;
+    ids.reserve(lado * lado);
+    for (int i = 0; i < lado; ++i)
+        for (int j = 0; j < lado; ++j) {
+            MapTarget t;
+            t.position = QGeoCoordinate(21.8 + i * (0.4 / lado),
+                                        -79.8 + j * (0.6 / lado));
+            t.label = QStringLiteral("T%1-%2").arg(i).arg(j);
+            const qint64 id = w.addTarget(t);
+            QVERIFY(id > 0);
+            ids.append(id);
+        }
+    // Un salto perceptible (>2 px a este zoom) para que la traza sobreviva a la
+    // decimacion; en uso real el movimiento entre refrescos es de ese orden.
+    for (qint64 id : ids) {
+        const auto t = w.target(id);
+        QVERIFY(w.updateTarget(id, QGeoCoordinate(t->position.latitude() + 0.02,
+                                                  t->position.longitude())));
+    }
+
+    // La capa es BUFFERED: para forzar un repintado sincrono se replota su capa
+    // (lo mismo que hace su temporizador), que ejecuta TargetLayer::draw ya.
+    QCPLayer *buffer = capa->layer();
+    QVERIFY(buffer != nullptr);
+
+    // Densidad alta: con presupuestos pequenos no se dibuja ninguna etiqueta ni
+    // traza, pero si todos los simbolos de los que caen en pantalla.
+    w.setTargetDetailBudget(100, 100);
+    QElapsedTimer reloj;
+    reloj.start();
+    buffer->replot();
+    const qint64 ms = reloj.elapsed();
+
+    const int visibles = capa->lastDrawnCount();
+    QVERIFY2(visibles > 1000,
+             qPrintable(QStringLiteral("solo %1 objetivos visibles; se esperaban "
+                                       "miles").arg(visibles)));
+    QCOMPARE(capa->lastLabelsDrawn(), 0);      // etiquetas apagadas por densidad
+    QCOMPARE(capa->lastTrailsDrawn(), 0);      // trazas apagadas por densidad
+
+    // Con presupuesto holgado vuelven, pero el declutter deja MENOS etiquetas
+    // que objetivos (una por celda de pantalla), que es justo lo que evita la
+    // mancha ilegible.
+    w.setTargetDetailBudget(1000000, 1000000);
+    buffer->replot();
+    QVERIFY(capa->lastLabelsDrawn() > 0);
+    QVERIFY2(capa->lastLabelsDrawn() < visibles,
+             "El declutter no redujo las etiquetas respecto a los objetivos");
+    QVERIFY(capa->lastTrailsDrawn() > 0);      // ahora si hay trazas
+
+    qInfo() << "Render de" << visibles << "objetivos visibles en" << ms
+            << "ms (nivel de detalle minimo);" << capa->lastLabelsDrawn()
+            << "etiquetas tras declutter con presupuesto holgado";
+}
+
+void TstMapWidget::selectsTargetByClick()
+{
+    // "Clic en un objetivo -> sus datos": targetAt localiza el objetivo bajo el
+    // pixel y, sin herramienta activa, un clic lo selecciona y emite targetClicked.
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(11);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+
+    MapTarget t;
+    t.position = centro;
+    t.kind = QStringLiteral("buque");
+    t.attributes.insert(QStringLiteral("mmsi"), QStringLiteral("224123000"));
+    const qint64 id = w.addTarget(t);
+    QVERIFY(id > 0);
+
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+
+    // Pixel exacto del objetivo (misma proyeccion que usa la capa).
+    const QPointF ax = MapView::toAxis(centro);
+    const QPoint px(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                    int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+
+    QCOMPARE(w.targetAt(px), id);                       // justo encima
+    QVERIFY(w.targetAt(px + QPoint(200, 200)) < 0);     // lejos -> ninguno
+
+    // Un clic sin herramienta selecciona y emite targetClicked (al pulsar).
+    QSignalSpy clic(&w, &MapWidget::targetClicked);
+    w.setActiveTool(MapTool::None);
+    QMouseEvent pulsar = mouseEvent(QEvent::MouseButtonPress, px,
+                                    Qt::LeftButton, Qt::LeftButton);
+    QMouseEvent soltar = mouseEvent(QEvent::MouseButtonRelease, px,
+                                    Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &pulsar);
+    QCoreApplication::sendEvent(vista, &soltar);
+
+    QCOMPARE(clic.count(), 1);
+    QCOMPARE(clic.first().at(0).toLongLong(), id);
+    QCOMPARE(w.selectedTarget(), id);
+
+    // Deseleccionar desde codigo.
+    w.setSelectedTarget(-1);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

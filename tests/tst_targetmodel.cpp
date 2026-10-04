@@ -17,6 +17,7 @@ private slots:
     void trailOptionsWholeOrNone();
     void updateRejectsUnknownOrInvalid();
     void labelAndRemoveAndClear();
+    void carriesKindAndAttributes();
     void scalesToManyTargets();
 };
 
@@ -130,6 +131,44 @@ void TstTargetModel::labelAndRemoveAndClear()
     m.upsert(objetivo(23.1, -82.1));
     m.clear();
     QCOMPARE(m.count(), 0);
+}
+
+void TstTargetModel::carriesKindAndAttributes()
+{
+    // El modelo es agnostico del dominio: lleva 'kind' y un saco de atributos
+    // libres (AIS/ADS-B/telemetria) sin interpretarlos, para que el mismo
+    // MapTarget sirva a un buque, una aeronave o un UAV.
+    TargetModel m;
+
+    MapTarget t = objetivo(23.0, -82.0, QStringLiteral("Buque 1"));
+    t.kind = QStringLiteral("buque");
+    t.attributes.insert(QStringLiteral("mmsi"), QStringLiteral("224123000"));
+    t.attributes.insert(QStringLiteral("eslora_m"), 180);
+    const qint64 id = m.upsert(t);
+    QVERIFY(id > 0);
+
+    // upsert guarda kind y atributos completos.
+    auto g = m.target(id);
+    QVERIFY(g.has_value());
+    QCOMPARE(g->kind, QStringLiteral("buque"));
+    QCOMPARE(g->attributes.value(QStringLiteral("mmsi")).toString(),
+             QStringLiteral("224123000"));
+    QCOMPARE(g->attributes.value(QStringLiteral("eslora_m")).toInt(), 180);
+
+    // La via rapida de tiempo real (update de posicion) NO pierde los atributos.
+    QVERIFY(m.update(id, QGeoCoordinate(23.01, -82.0), 45.0));
+    g = m.target(id);
+    QCOMPARE(g->attributes.value(QStringLiteral("mmsi")).toString(),
+             QStringLiteral("224123000"));
+
+    // set/get de un atributo en caliente.
+    QVERIFY(m.setAttribute(id, QStringLiteral("rumbo_ais"), 270));
+    QCOMPARE(m.attribute(id, QStringLiteral("rumbo_ais")).toInt(), 270);
+
+    // Atributo o id inexistentes -> QVariant invalido; set sobre id ausente -> false.
+    QVERIFY(!m.attribute(id, QStringLiteral("no_existe")).isValid());
+    QVERIFY(!m.attribute(9999, QStringLiteral("mmsi")).isValid());
+    QVERIFY(!m.setAttribute(9999, QStringLiteral("x"), 1));
 }
 
 void TstTargetModel::scalesToManyTargets()

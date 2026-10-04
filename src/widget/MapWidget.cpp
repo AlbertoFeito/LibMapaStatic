@@ -274,6 +274,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(modelo, &OverlayModel::featureRemoved, this, &MapWidget::featureRemoved);
     connect(modelo, &OverlayModel::selectionChanged, this, &MapWidget::featureSelected);
     connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
+    connect(d->view, &MapView::targetClicked, this, &MapWidget::targetClicked);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
     connect(d->view, &MapView::drawingCancelled, this, &MapWidget::drawingCancelled);
 
@@ -794,6 +795,53 @@ bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
 bool MapWidget::setTargetLabel(qint64 id, const QString &text)
 {
     return d->view && d->view->targetModel()->setLabel(id, text);
+}
+
+// Cuelga un dato de dominio (AIS, ADS-B, telemetria...) en un objetivo. La
+// libreria no lo interpreta; solo lo guarda y lo devuelve tal cual.
+bool MapWidget::setTargetAttribute(qint64 id, const QString &key, const QVariant &value)
+{
+    return d->view && d->view->targetModel()->setAttribute(id, key, value);
+}
+
+// Devuelve el valor de un atributo de un objetivo (invalido si no existe).
+QVariant MapWidget::targetAttribute(qint64 id, const QString &key) const
+{
+    return d->view ? d->view->targetModel()->attribute(id, key) : QVariant();
+}
+
+// Registra el proveedor de simbolos de la app (icono por tipo/estado + rotacion
+// por rumbo). Lo gestiona la capa de objetivos; sin el, se usa el galon.
+void MapWidget::setTargetSymbolProvider(TargetSymbolProvider provider)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setSymbolProvider(std::move(provider));
+}
+
+// Fija el nivel de detalle de la capa de objetivos (topes de etiquetas/trazas).
+void MapWidget::setTargetDetailBudget(int maxLabels, int maxTrails)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setDetailBudget(maxLabels, maxTrails);
+}
+
+// Objetivo movil mas cercano a un punto de la pantalla, o -1.
+qint64 MapWidget::targetAt(const QPoint &pixelPos, double tolerancePx) const
+{
+    return d->view ? d->view->targetAt(pixelPos, tolerancePx) : -1;
+}
+
+// Resalta un objetivo (-1 = ninguno).
+void MapWidget::setSelectedTarget(qint64 id)
+{
+    if (d->view)
+        d->view->setSelectedTarget(id);
+}
+
+// Objetivo resaltado, o -1.
+qint64 MapWidget::selectedTarget() const
+{
+    return d->view ? d->view->selectedTarget() : -1;
 }
 
 // Elimina un objetivo.

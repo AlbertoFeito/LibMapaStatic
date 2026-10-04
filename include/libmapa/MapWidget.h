@@ -5,6 +5,7 @@
 #include "libmapa/GeoFile.h"
 #include "libmapa/MapFeature.h"
 #include "libmapa/MapTarget.h"
+#include "libmapa/TargetSymbol.h"
 #include "libmapa/MapTypes.h"
 #include "libmapa/libmapa_export.h"
 
@@ -12,6 +13,7 @@
 #include <QPointF>
 #include <QString>
 #include <QStringList>
+#include <QVariant>
 #include <QWidget>
 #include <limits>
 #include <memory>
@@ -269,6 +271,14 @@ public:
                       double headingDeg = std::numeric_limits<double>::quiet_NaN());
 
     bool setTargetLabel(qint64 id, const QString &text);
+
+    //! Cuelga (o reemplaza) un dato de dominio en un objetivo: AIS (mmsi, imo),
+    //! ADS-B (callsign, squawk), telemetria de un UAV... La libreria los guarda
+    //! y los devuelve tal cual, sin interpretarlos. false si el id no existe.
+    bool setTargetAttribute(qint64 id, const QString &key, const QVariant &value);
+    //! Valor de un atributo de un objetivo, o QVariant() invalido si no existe.
+    QVariant targetAttribute(qint64 id, const QString &key) const;
+
     bool removeTarget(qint64 id);
     void clearTargets();
 
@@ -276,11 +286,33 @@ public:
     QVector<MapTarget> targets() const;
     int targetCount() const;
 
+    //! Registra como dibuja la APP el simbolo de cada objetivo: recibe el
+    //! MapTarget (con kind/attributes) y devuelve un TargetSymbol (icono +
+    //! rotacion por rumbo + escala). Sin proveedor, la libreria usa un galon por
+    //! defecto. El juego de iconos lo trae la app, asi la libreria sigue siendo
+    //! agnostica del dominio (buques, aeronaves, UAVs).
+    void setTargetSymbolProvider(TargetSymbolProvider provider);
+
+    //! Nivel de detalle para escalar a MILES de objetivos: si en un repintado
+    //! hay mas visibles que \a maxLabels no se dibuja ninguna etiqueta (se
+    //! solaparian), e igual con las trazas y \a maxTrails. El simbolo se dibuja
+    //! siempre. Por defecto 150 y 400. Sube los topes si tu equipo va sobrado.
+    void setTargetDetailBudget(int maxLabels, int maxTrails);
+
     //! Longitud de la traza de cada objetivo: < 0 = toda (ilimitada),
     //! 0 = sin traza, > 0 = las ultimas N posiciones (p. ej. 10, 100, 500).
     void setTargetTrailLength(int maxPoints);
     //! Muestra u oculta la capa de objetivos entera.
     void setTargetsVisible(bool visible);
+
+    //! Objetivo movil mas cercano a un punto de la pantalla (coords del widget)
+    //! dentro de \a tolerancePx, o -1. Para "clic en un objetivo -> sus datos".
+    qint64 targetAt(const QPoint &pixelPos, double tolerancePx = 14.0) const;
+    //! Resalta un objetivo (-1 = ninguno): un halo y su etiqueta forzada. Sin
+    //! herramienta activa, un clic sobre un objetivo ya lo selecciona y emite
+    //! \ref targetClicked; esto permite hacerlo tambien desde codigo.
+    void setSelectedTarget(qint64 id);
+    qint64 selectedTarget() const;
 
     // --- Seleccion -------------------------------------------------------
     qint64 selectedFeature() const;
@@ -372,6 +404,8 @@ signals:
     void featureUpdated(qint64 id);
     void featureRemoved(qint64 id);
     void featureSelected(qint64 id);      //!< -1 al deseleccionar
+    //! Clic sobre un objetivo movil sin herramienta activa (ya queda resaltado).
+    void targetClicked(qint64 id, const QGeoCoordinate &position);
     void featureLayersChanged();
     //! Emitida al crear una entidad con el raton.
     void featureCreated(qint64 id);
