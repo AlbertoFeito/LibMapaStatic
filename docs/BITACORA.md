@@ -2692,3 +2692,54 @@ ya tenía en cuenta Qt 5 (§31), pero desde §36 solo se ha compilado con Qt 6.
 **Estado: sin cambios en el código de la librería (siguen valiendo los 17 tests de §49); juego Qt 6
 por qmake verificado de punta a punta con Qt 6.11.2 MinGW; juego Qt 5
 preparado y pendiente de probar con Qt 5.14.**
+
+## 51. El juego Qt 5 compila con un Qt 5 real, y la guía queda clara de punta a punta
+
+§50 dejó el juego Qt 5 «preparado pero sin probar con un Qt 5 real». Esta
+sesión lo ha probado hasta donde se puede sin Windows, y ha repasado
+`docs/DESPLIEGUE.md` para que no falte ningún paso.
+
+**El juego Qt 5 compila e instala con un Qt 5 de verdad.** En el contenedor se
+instaló Qt 5.15.13 (`qtbase5-dev qtpositioning5-dev qtbase5-dev-tools`) y se
+siguió el paso 2 de la guía con ese Qt:
+
+- `qmake -qt=5 qmake/libmapa/libmapa.pro PREFIX=…` genera los Makefile sin que
+  salte la guarda de «Qt 5.14 o posterior».
+- `make` compila `mapa_core`/`mapa_cored` y `mapa_widget`/`mapa_widgetd` (las
+  cuatro `.a`) limpio.
+- `make install` deja la instalación con la forma esperada: `include/libmapa/`,
+  `lib/*.a`, `bin/check_data`, `libmapa.pri`, `share/libmapa/desplegar_qt5.bat`
+  y, sobre todo, `libmapa_qt.pri` con `LIBMAPA_QT_MAJOR = 5` y
+  `LIBMAPA_QT_VERSION = 5.15.13` escrito por `write_file` al instalar.
+- `examples/app_minima/app_minima.pro`, compilado con el mismo Qt 5 contra esa
+  instalación, enlaza y **arranca** (sin pantalla, con `offscreen`).
+- `check_data` de esa instalación funciona (uso y error ante un `mapa.json`
+  ausente).
+
+Con eso, de todo el juego Qt 5 solo queda sin ejecutar en un Windows real el
+propio `desplegar_qt5.bat`, porque usa `windeployqt`, que no existe en Linux.
+El resto de su lógica ya se había validado en §50 sobre una copia adaptada.
+De paso se comprobó que el camino de CMake (`find_package(libmapa)`) sigue
+bien bajo Qt 6, y que los 17 tests de §49 siguen verdes.
+
+**`docs/DESPLIEGUE.md` más claro.** Era una petición explícita: que la guía
+quede bien clara con todos sus pasos. Cambios:
+
+- Un **resumen de los pasos (0–6) de un vistazo** al principio, con la nota de
+  qué se hace una sola vez (0, 1, 2) y qué en cada entrega (3–6). Así se ve el
+  mapa del proceso antes de entrar en el detalle.
+- El **aviso del juego Qt 5** ya no dice «sin probar»: explica qué está
+  verificado (compila, instala, el ejemplo enlaza y arranca, `check_data`, con
+  Qt 5.15; el código es el mismo para 5.14) y acota lo único pendiente de un
+  Windows real (el `windeployqt` de `desplegar_qt5.bat`).
+- En el paso 1 (requisitos), una línea para quien **aún no tenga `mapa.json`**:
+  se genera con `probe_db --package` (detalle en el README).
+
+Es un cambio **solo de documentación** (`.md`), así que no necesita build ni
+tests, y `DESPLIEGUE.md` no es `arquitectura.html`: tampoco hay que regenerar
+el PDF.
+
+**Estado: sin cambios en el código ni en los 17 tests; juego Qt 6 verificado de
+punta a punta (Qt 6.11.2); juego Qt 5 verificado hasta compilar, instalar,
+enlazar el ejemplo y `check_data` con un Qt 5.15 real, pendiente solo de
+`desplegar_qt5.bat` en un Windows con Qt 5.14; guía de despliegue repasada.**

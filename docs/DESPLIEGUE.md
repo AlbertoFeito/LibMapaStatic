@@ -8,6 +8,19 @@ Qt y los mapas. Esa carpeta se copia a cualquier PC con Windows (con un
 pendrive, por ejemplo) y el programa funciona **sin instalar Qt y sin
 internet**.
 
+**Los pasos, de un vistazo** (cada uno tiene su apartado más abajo):
+
+0. **Elige tu juego** (Qt 5 o Qt 6): todo lo demás depende de él.
+1. **Comprueba que tienes todo** (Qt, las fuentes, QCustomPlot, los datos).
+2. **Compila e instala libmapa** una vez, con tu Qt. Queda en `C:\libmapa\qtX`.
+3. **Prepara tu aplicación**: una línea en el `.pro` y unas líneas de código.
+4. **Compila en Release.**
+5. **Despliega**: un script crea la carpeta de entrega con el `.exe`, Qt y los datos.
+6. **Pruébalo en otro PC** copiando esa carpeta.
+
+Los pasos 0, 1 y 2 se hacen **una sola vez** por PC. Del 3 al 6 son los de cada
+vez que entregas una versión nueva (y si no has tocado nada, el 3 ya está).
+
 ---
 
 ## Antes de empezar: cinco palabras
@@ -40,9 +53,14 @@ qué carpetas hay en `C:\Qt` (por ejemplo `C:\Qt\6.11.2` o `C:\Qt\5.14.2`).
 
 Donde la guía ponga `qtX`, cambia la X por **5** o por **6** según tu juego.
 
-> **Aviso:** el juego Qt 5 está preparado, pero todavía no se ha probado con
-> un Qt 5.14 real (en el PC donde se escribió no lo había). Si algo falla,
-> el apartado *Problemas frecuentes* dice qué mirar.
+> **Aviso:** el juego Qt 5 se ha comprobado hasta donde se puede sin Windows.
+> La librería **se compila e instala** con qmake (paso 2), la aplicación de
+> ejemplo **enlaza** contra ella y **arranca**, y `check_data` funciona —todo
+> probado con **Qt 5.15** sobre Linux, y el código es el mismo para 5.14. Lo
+> único que queda por probar en un Windows real es el script
+> `desplegar_qt5.bat` del paso 5, que usa `windeployqt` (una herramienta de
+> Windows que no existe en Linux). Si ahí algo falla, el apartado *Problemas
+> frecuentes* dice qué mirar.
 
 ---
 
@@ -59,6 +77,8 @@ Donde la guía ponga `qtX`, cambia la X por **5** o por **6** según tu juego.
    dentro de `LibMapaStatic\third_party\qcustomplot\`. No vienen en el
    repositorio por su licencia. Cómo conseguirlos: ver el `LEEME.md` de esa carpeta.
 4. **El paquete de datos**: la carpeta con `mapa.json` (aquí, `D:\QtPro\Recursos`).
+   Si aún no tienes el `mapa.json`, se genera a partir de tus mapas con
+   `probe_db --package` (ver el README, apartado «Paquete de datos»).
 
 ---
 
