@@ -352,8 +352,9 @@ pinta la app.
 
 La app de ejemplo `demo` lo demuestra en su barra **Elevación** (con un DEM activo):
 **Perfil** dibuja el corte del terreno de la línea seleccionada; **Visión A→B** traza
-la línea de visión entre sus extremos (verde si hay, roja con el obstáculo si no), con
-Alt1/Alt2 de antena; **Viewshed** pinta la zona de visibilidad real (con sus huecos) a la altura Alt2
+la línea de visión entre sus extremos con Alt1/Alt2 de antena, en **azul el tramo
+visible y en rojo el oculto** tras el obstáculo, que se marca con su distancia;
+**Viewshed** pinta la zona de visibilidad real (con sus huecos) a la altura Alt2
 desde el vértice seleccionado (o el centro del mapa).
 
 ## Referencia de comandos (argumentos por herramienta)

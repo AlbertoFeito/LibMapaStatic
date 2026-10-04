@@ -3307,3 +3307,23 @@ Corrección (el usuario eligió «zona real con huecos»):
 **Estado: la ZVD del viewshed es la zona de visibilidad real (con huecos) y
 concuerda, azimut a azimut, con la línea de visión; 18 tests en verde, sin
 warnings.**
+
+## 65. Visión A→B: tramo visible/oculto en dos colores y distancia del obstáculo
+
+Probando la Visión A→B, el usuario pidió más detalle (distancia del obstáculo) y
+que quedara claro qué color es visible. Mejora SOLO del `demo` (`analizarVision`),
+sin tocar la librería:
+
+- Si hay visión directa, la línea va entera en **azul**.
+- Si está bloqueada, se parte en el obstáculo (`blockPosition`): el tramo
+  observador→obstáculo en **azul** (hasta aquí llega la vista) y el tramo
+  obstáculo→B en **rojo discontinuo** (oculto por detrás). El punto del obstáculo
+  lleva en su etiqueta la **distancia** y cuántos metros falta de altura
+  (`blockDistanceM`, `−clearanceM`).
+- La barra de estado lo resume: en directa, distancia, holgura mínima y dónde está
+  el paso más justo; en bloqueada, obstáculo a X km de Y km, metros que faltan y la
+  leyenda «azul = visible, rojo = oculto».
+
+Convención de color coherente con el viewshed (azul = visible). Compila sin
+warnings; la librería no cambia, así que **siguen 18 tests** en verde. README al
+día; sin cambios de API, no se regenera el PDF.

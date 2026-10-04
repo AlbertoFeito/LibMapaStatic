@@ -878,27 +878,58 @@ private:
         }
 
         prepararCapa(kCapaVision, tr("Análisis: visión"), 50);
-        const QColor color = v.clear ? QColor(0x2e, 0x7d, 0x32)
-                                     : QColor(0xc6, 0x28, 0x28);
-        MapFeature linea;
-        linea.layerId = kCapaVision;
-        linea.kind = GeometryKind::Polyline;
-        linea.type = QStringLiteral("linea_vision");
-        linea.name = v.clear ? tr("Visión directa") : tr("Bloqueada");
-        linea.geometry = { a, b };
-        linea.style.lineColor = color;
-        linea.style.lineWidth = 3.0;
-        linea.selectable = false;
-        m_mapa->addFeature(linea);
+        const QColor azul(0x15, 0x65, 0xc0);        // VISIBLE (llega la vista)
+        const QColor rojo(0xc6, 0x28, 0x28);        // OCULTO (tras el obstáculo)
 
-        if (!v.clear && v.blockPosition.isValid()) {
+        if (v.clear || !v.blockPosition.isValid()) {
+            // Visión directa: toda la línea en azul.
+            MapFeature linea;
+            linea.layerId = kCapaVision;
+            linea.kind = GeometryKind::Polyline;
+            linea.type = QStringLiteral("linea_vision");
+            linea.name = tr("Visión directa");
+            linea.geometry = { a, b };
+            linea.style.lineColor = azul;
+            linea.style.lineWidth = 3.0;
+            linea.selectable = false;
+            m_mapa->addFeature(linea);
+        } else {
+            // Bloqueada: tramo VISIBLE (azul) hasta el obstáculo y tramo OCULTO
+            // (rojo, discontinuo) por detrás, para que se vea dónde corta la vista.
+            MapFeature visible;
+            visible.layerId = kCapaVision;
+            visible.kind = GeometryKind::Polyline;
+            visible.type = QStringLiteral("vision_visible");
+            visible.name = tr("Visible");
+            visible.geometry = { a, v.blockPosition };
+            visible.style.lineColor = azul;
+            visible.style.lineWidth = 3.0;
+            visible.style.labelVisible = false;
+            visible.selectable = false;
+            m_mapa->addFeature(visible);
+
+            MapFeature oculto;
+            oculto.layerId = kCapaVision;
+            oculto.kind = GeometryKind::Polyline;
+            oculto.type = QStringLiteral("vision_oculta");
+            oculto.name = tr("Oculto");
+            oculto.geometry = { v.blockPosition, b };
+            oculto.style.lineColor = rojo;
+            oculto.style.lineWidth = 2.0;
+            oculto.style.lineStyle = Qt::DashLine;
+            oculto.style.labelVisible = false;
+            oculto.selectable = false;
+            m_mapa->addFeature(oculto);
+
             MapFeature corte;
             corte.layerId = kCapaVision;
             corte.kind = GeometryKind::Point;
             corte.type = QStringLiteral("obstaculo");
-            corte.name = tr("Obstáculo");
+            corte.name = tr("Obstáculo a %1 km (falta %2 m)")
+                             .arg(v.blockDistanceM / 1000.0, 0, 'f', 2)
+                             .arg(-v.clearanceM, 0, 'f', 0);
             corte.geometry = { v.blockPosition };
-            corte.style.lineColor = QColor(0xc6, 0x28, 0x28);
+            corte.style.lineColor = rojo;
             corte.style.pointRadiusPx = 7.0;
             corte.selectable = false;
             m_mapa->addFeature(corte);
@@ -906,13 +937,17 @@ private:
 
         statusBar()->showMessage(
             v.clear
-                ? tr("Visión DIRECTA · %1 km · holgura mínima %2 m")
+                ? tr("Visión DIRECTA (azul) · distancia %1 km · holgura mínima %2 m "
+                     "· paso más justo a %3 km")
                       .arg(v.totalDistanceM / 1000.0, 0, 'f', 2)
                       .arg(v.clearanceM, 0, 'f', 0)
-                : tr("BLOQUEADA a %1 km · faltan %2 m de altura en el obstáculo")
                       .arg(v.blockDistanceM / 1000.0, 0, 'f', 2)
+                : tr("BLOQUEADA · obstáculo a %1 km de %2 km · faltan %3 m de altura "
+                     "· azul = visible, rojo = oculto")
+                      .arg(v.blockDistanceM / 1000.0, 0, 'f', 2)
+                      .arg(v.totalDistanceM / 1000.0, 0, 'f', 2)
                       .arg(-v.clearanceM, 0, 'f', 0),
-            8000);
+            9000);
     }
 
     // Viewshed 360° desde el vértice de la entidad seleccionada (o el centro del
