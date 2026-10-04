@@ -2917,3 +2917,42 @@ cambian.
 **Estado: 17 tests en verde; la app ya puede traer su juego de iconos. Siguiente:
 Fase 3 (escala a miles: culling por vista, nivel de detalle y poda de traza, con
 un banco que lo mida).**
+
+## 56. Escala a miles de objetivos: culling, nivel de detalle y declutter (Fase 3)
+
+El alcance fija **miles** de móviles (ADS-B regional). El dibujo ya hacía culling
+por objetivo, pero a esa densidad lo caro y lo ilegible son las **etiquetas**
+(cada una con 8 trazos de halo) y las **trazas** (una polilínea por objetivo).
+`TargetLayer` se reescribe en dos pasadas:
+
+- **Pasada 1 (culling):** recorre el modelo una vez y recoge en un buffer
+  reusado solo los objetivos cuya posición cae en pantalla (con margen de 256
+  px) junto con su posición ya proyectada.
+- **Pasada 2 (dibujo) con nivel de detalle:** según cuántos quedaron visibles,
+  decide si dibujar etiquetas y trazas. Por encima de un **presupuesto**
+  (`setTargetDetailBudget`, por defecto 150 etiquetas / 400 trazas) se apagan
+  (el símbolo se dibuja siempre). Además:
+  - **Declutter de etiquetas:** una sola etiqueta por celda de pantalla (~40 px),
+    para que no se amontonen; el resto se omite.
+  - **Decimación de traza:** se saltan los puntos a menos de 2 px del último
+    dibujado (una traza larga al alejar el zoom son muchos puntos pegados).
+- Contadores `lastLabelsDrawn()`/`lastTrailsDrawn()` para diagnóstico y test.
+
+Fachada: `MapWidget::setTargetDetailBudget(maxLabels, maxTrails)`.
+
+Banco/medida: en vez de una herramienta aparte, el test
+`tst_mapwidget::scalesToThousandsOfTargets` monta **3025 objetivos** en el área
+visible (con etiqueta y traza), fuerza el repintado de la capa (BUFFERED, vía
+`QCPLayer::replot`) y comprueba de forma **determinista** el nivel de detalle:
+con presupuesto bajo, 0 etiquetas y 0 trazas; con presupuesto holgado, vuelven
+pero el declutter deja muchas menos etiquetas (~108) que objetivos (3025). Deja
+en el log el tiempo del render (del orden de ~20 ms en el contenedor). 17 tests
+en verde, sin warnings (se corrigió un `-Wconversion` de `size()`).
+
+API **aditivo**; la cabecera de símbolos sigue siendo header-only, así que CMake
+y qmake no cambian.
+
+**Estado: 17 tests en verde; el motor de objetivos escala a miles con nivel de
+detalle. Con esto el motor de seguimiento está completo (Fases 1–3). Siguiente:
+Fase 4 (corte limpio del dominio naval legado) o Fase 5 (ejemplo de seguimiento
++ contrato público).**

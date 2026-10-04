@@ -817,6 +817,13 @@ void MapWidget::setTargetSymbolProvider(TargetSymbolProvider provider)
         d->view->targetLayer()->setSymbolProvider(std::move(provider));
 }
 
+// Fija el nivel de detalle de la capa de objetivos (topes de etiquetas/trazas).
+void MapWidget::setTargetDetailBudget(int maxLabels, int maxTrails)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setDetailBudget(maxLabels, maxTrails);
+}
+
 // Elimina un objetivo.
 bool MapWidget::removeTarget(qint64 id)
 {

@@ -293,6 +293,12 @@ public:
     //! agnostica del dominio (buques, aeronaves, UAVs).
     void setTargetSymbolProvider(TargetSymbolProvider provider);
 
+    //! Nivel de detalle para escalar a MILES de objetivos: si en un repintado
+    //! hay mas visibles que \a maxLabels no se dibuja ninguna etiqueta (se
+    //! solaparian), e igual con las trazas y \a maxTrails. El simbolo se dibuja
+    //! siempre. Por defecto 150 y 400. Sube los topes si tu equipo va sobrado.
+    void setTargetDetailBudget(int maxLabels, int maxTrails);
+
     //! Longitud de la traza de cada objetivo: < 0 = toda (ilimitada),
     //! 0 = sin traza, > 0 = las ultimas N posiciones (p. ej. 10, 100, 500).
     void setTargetTrailLength(int maxPoints);
