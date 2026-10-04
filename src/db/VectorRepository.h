@@ -2,7 +2,6 @@
 #define LIBMAPA_DB_VECTORREPOSITORY_H_
 
 #include "libmapa/MapFeature.h"
-#include "libmapa/MapFeature.h"
 #include "libmapa/MapTypes.h"
 
 #include <QObject>
@@ -14,23 +13,24 @@
 namespace libmapa {
 
 /*!
- * \brief Acceso a los datos vectoriales: puntos, vehiculos, poligonos, rutas.
+ * \brief Persistencia de las entidades de dibujo (puntos, polilineas y
+ *        poligonos) y sus capas, en SQLite.
  *
- * Sustituye a CBDatos. Diferencias de fondo:
+ * Es el almacen que usa MapWidget para guardar y recargar lo que el usuario
+ * dibuja (ver `saveFeaturesTo`/`loadFeaturesFrom`). Una sola tabla de
+ * entidades: la geometria va aparte y el resto del dominio en 'atributos',
+ * como JSON, de modo que la libreria no conoce ningun dominio concreto.
  *
- *  - Tipos de VALOR en la interfaz, no QList<void*>. El original devolvia
- *    punteros sin tipo y el llamador hacia ((CBarco*)p)->... sin comprobar
- *    nada; si la tabla no era la esperada, comportamiento indefinido.
+ * Diferencias de fondo respecto al CBDatos original:
  *
- *  - CERO DDL en tiempo de ejecucion. No se crean tablas a partir del nombre
+ *  - Tipos de VALOR en la interfaz (MapFeature), no QList<void*> con castes a
+ *    mano en cada uso.
+ *  - CERO DDL en tiempo de ejecucion: no se crean tablas a partir del nombre
  *    que escriba el usuario.
- *
- *  - Toda escritura compuesta va en una transaccion. Guardar un poligono de
- *    200 vertices eran 200 commits con su fsync cada uno.
- *
+ *  - Toda escritura compuesta va en una transaccion (un .geo de 200 vertices
+ *    era un fsync por vertice).
  *  - Los errores se propagan: cada operacion devuelve si salio bien y emite
- *    errorOccurred con el detalle. El original hacia
- *    "if (Consulta.prepare(x)) Consulta.exec();" y descartaba el resultado.
+ *    errorOccurred con el detalle.
  */
 class VectorRepository : public QObject
 {
@@ -48,40 +48,6 @@ public:
     QString filePath() const { return m_filePath; }
     int schemaVersion() const;
     QString lastError() const { return m_lastError; }
-
-    // --- Puntos ----------------------------------------------------------
-    std::optional<qint64> insertPoint(const MapPoint &point);
-    bool updatePoint(const MapPoint &point);
-    bool removePoint(qint64 id);
-    QVector<MapPoint> loadPoints() const;
-    std::optional<MapPoint> findPointByName(const QString &name) const;
-
-    // --- Vehiculos -------------------------------------------------------
-    //! Inserta el punto y su fila de vehiculo en una sola transaccion.
-    std::optional<qint64> insertVehicle(const MapVehicle &vehicle);
-    bool updateVehicle(const MapVehicle &vehicle);
-    QVector<MapVehicle> loadVehicles() const;
-
-    /*!
-     * \brief Buques AIS actualizados desde \a sinceUtcMs.
-     *
-     * Con las fechas guardadas como enteros esto es un WHERE normal. En el
-     * original, las fechas eran TEXT "dd/MM/yyyy hh:mm:ss" y el filtro del
-     * ultimo dia se hacia comparando dia y mes a mano en C++.
-     */
-    QVector<MapVehicle> loadVesselsUpdatedSince(qint64 sinceUtcMs) const;
-
-    // --- Trayectorias ----------------------------------------------------
-    bool appendTrack(qint64 pointId, const TrackSample &sample);
-    bool appendTrackBatch(qint64 pointId, const QVector<TrackSample> &samples);
-    QVector<TrackSample> loadTrack(qint64 pointId, int limit = 500) const;
-    //! Deja solo las \a keep muestras mas recientes.
-    bool pruneTrack(qint64 pointId, int keep);
-
-    // --- Poligonos -------------------------------------------------------
-    std::optional<qint64> insertPolygon(const MapPolygon &polygon);
-    bool removePolygon(qint64 id);
-    QVector<MapPolygon> loadPolygons() const;
 
     /*!
      * \name Entidades de dibujo
@@ -105,11 +71,6 @@ public:
     bool saveLayer(const LayerInfo &layer);
     QVector<LayerInfo> loadLayers() const;
     //@}
-
-    // --- Rutas -----------------------------------------------------------
-    std::optional<qint64> insertRoute(const MapRoute &route);
-    bool removeRoute(qint64 id);
-    QVector<MapRoute> loadRoutes() const;
 
 signals:
     void errorOccurred(const QString &context, const QString &message);

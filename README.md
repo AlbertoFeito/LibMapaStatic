@@ -257,7 +257,6 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `check_data` | Comprueba un paquete de datos antes de distribuirlo: ficheros, que abran, que sus imágenes se decodifiquen, cobertura por zoom en la zona y tamaño total |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
-| `vector_db` | Crea e inspecciona la BD de puntos, rutas y polígonos |
 | `geo_to_tiles` | Rasteriza un fichero vectorial `.geo` a una base de teselas, para usarlo como capa base |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
@@ -309,9 +308,6 @@ check_data   <carpeta_paquete | mapa.json> [--quick] [--max-zoom N] [--strict]
 
 geo_to_tiles --in <f.geo> --out <salida.sqlitedb> --id <id> --name "<nombre>"
              [--minzoom N] [--maxzoom N] [--color #hex] [--width f] [--fill] [--bg #hex]
-
-vector_db    --out <mapdata.db> [--dump]            (crea con datos de ejemplo)
-             --file <mapdata.db> --dump             (solo inspecciona)
 
 render_map   (--datasets <datasets.json> | --data <carpeta_paquete>) --out <mapa.png>
              [--layer id] [--center lat,lon] [--zoom N] [--size AnchoxAlto]

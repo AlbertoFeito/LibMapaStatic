@@ -234,9 +234,6 @@ if(LIBMAPA_BUILD_TOOLS)
     add_executable(bench_tiles tools/bench_tiles/main.cpp)
     target_link_libraries(bench_tiles PRIVATE libmapa_core)
 
-    add_executable(vector_db tools/vector_db/main.cpp)
-    target_link_libraries(vector_db PRIVATE libmapa_core)
-
     # Construye una BD de elevacion (.sqlitedb) desde una carpeta de `.hgt`.
     add_executable(dem_to_db tools/dem_to_db/main.cpp)
     target_link_libraries(dem_to_db PRIVATE libmapa_core)
@@ -455,7 +452,7 @@ if(LIBMAPA_INSTALL)
 
     # Herramientas de consola que existan en esta configuracion.
     foreach(_libmapa_tool check_data probe_db render_map dem_to_db fill_hgt
-                          fill_tiles fill_map geo_to_tiles vector_db bench_tiles)
+                          fill_tiles fill_map geo_to_tiles bench_tiles)
         if(TARGET ${_libmapa_tool})
             install(TARGETS ${_libmapa_tool} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
         endif()
