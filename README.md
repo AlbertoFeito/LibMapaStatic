@@ -262,7 +262,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
 | `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura |
-| `demo` | Aplicación de ejemplo: capas, dibujo/edición, cobertura por zoom, cota del terreno y persistencia automática |
+| `demo` | Aplicación de ejemplo: capas, dibujo/edición, cobertura por zoom, cota del terreno, **análisis de elevación** (perfil, visión A→B, viewshed) y persistencia automática |
 
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
 tesela propia, rojo si viene de un nivel superior escalado.
@@ -342,6 +342,12 @@ añade el perfil completo de cada rayo cuando se necesita dibujar un corte. Un v
 de 360° a 30 m y 50 km tarda ~0,1 s. La librería devuelve los datos; la gráfica la
 pinta la app.
 
+La app de ejemplo `demo` lo demuestra en su barra **Elevación** (con un DEM activo):
+**Perfil** dibuja el corte del terreno de la línea seleccionada; **Visión A→B** traza
+la línea de visión entre sus extremos (verde si hay, roja con el obstáculo si no), con
+Alt1/Alt2 de antena; **Viewshed** pinta el polígono de visibilidad a la altura Alt2
+desde el vértice seleccionado (o el centro del mapa).
+
 ## Referencia de comandos (argumentos por herramienta)
 
 Opciones entre `[…]` opcionales; el resto, obligatorias. Los bbox son siempre
@@ -385,7 +391,7 @@ dem_to_db    <carpeta_hgt> --out <dem.sqlitedb> [--overwrite]
 
 demo         [carpeta_paquete | mapa.json | datasets.json]
              [--dem <carpeta>] [--dem-db <db>] [--features <db>]
-             (app de ejemplo: capas, dibujo, cobertura, cota, persistencia)
+             (app de ejemplo: capas, dibujo, cobertura, cota, elevación, persistencia)
 ```
 
 ## Estructura

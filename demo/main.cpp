@@ -22,9 +22,12 @@
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
+#include <QDialog>
 #include <QDir>
+#include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
@@ -55,6 +58,7 @@
 #include <QtMath>
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 using namespace libmapa;
 
@@ -134,6 +138,95 @@ QPixmap iconoUav(const QColor &c)
     return pm;
 }
 
+// --- Perfil de elevacion: dibujo del corte del terreno --------------------
+// Pinta un ElevationProfile (distancia en X, cota en Y) como un corte relleno.
+// Las muestras sin dato (NaN) dejan hueco. Es SOLO de la app: la libreria da los
+// numeros, el dibujo lo pone quien la usa.
+class PerfilWidget : public QWidget
+{
+public:
+    explicit PerfilWidget(const ElevationProfile &p, QWidget *parent = nullptr)
+        : QWidget(parent), m_p(p)
+    {
+        setMinimumSize(560, 240);
+        setAutoFillBackground(true);
+        QPalette pal = palette();
+        pal.setColor(QPalette::Window, QColor(0xf7, 0xf7, 0xf7));
+        setPalette(pal);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter g(this);
+        g.setRenderHint(QPainter::Antialiasing, true);
+        g.fillRect(rect(), palette().window());
+        const QRectF area = QRectF(rect()).adjusted(56, 14, -16, -28);
+
+        if (m_p.samples.size() < 2 || std::isnan(m_p.maxElevation)) {
+            g.setPen(Qt::darkGray);
+            g.drawText(rect(), Qt::AlignCenter,
+                       QStringLiteral("Sin datos de elevacion en la ruta"));
+            return;
+        }
+
+        const double dMax = m_p.totalDistanceM > 0.0 ? m_p.totalDistanceM : 1.0;
+        double yMin = m_p.minElevation, yMax = m_p.maxElevation;
+        if (yMax - yMin < 1.0) { yMax += 0.5; yMin -= 0.5; }   // rango minimo
+        const double margen = (yMax - yMin) * 0.1;
+        yMin -= margen; yMax += margen;
+
+        auto px = [&](double d) { return area.left() + area.width() * (d / dMax); };
+        auto py = [&](double e) {
+            return area.bottom() - area.height() * ((e - yMin) / (yMax - yMin));
+        };
+
+        // Ejes y rotulos (cota arriba/abajo, distancia a la derecha).
+        g.setPen(QColor(0xaa, 0xaa, 0xaa));
+        g.drawLine(area.topLeft(), area.bottomLeft());
+        g.drawLine(area.bottomLeft(), area.bottomRight());
+        g.setPen(QColor(0x55, 0x55, 0x55));
+        g.drawText(QRectF(0, area.top() - 7, 50, 14),
+                   Qt::AlignRight | Qt::AlignVCenter,
+                   QStringLiteral("%1 m").arg(m_p.maxElevation, 0, 'f', 0));
+        g.drawText(QRectF(0, area.bottom() - 7, 50, 14),
+                   Qt::AlignRight | Qt::AlignVCenter,
+                   QStringLiteral("%1 m").arg(m_p.minElevation, 0, 'f', 0));
+        g.drawText(QRectF(area.right() - 90, area.bottom() + 8, 90, 16),
+                   Qt::AlignRight,
+                   QStringLiteral("%1 km").arg(dMax / 1000.0, 0, 'f', 1));
+        g.drawText(QRectF(area.left(), area.bottom() + 8, 60, 16),
+                   Qt::AlignLeft, QStringLiteral("0"));
+
+        // Corte: un poligono relleno por cada tramo continuo (cortado en los NaN).
+        const QColor relleno(0x2e, 0x7d, 0x32, 110);
+        const QColor linea(0x1b, 0x5e, 0x20);
+        QPolygonF tramo;
+        auto cerrar = [&] {
+            if (tramo.size() >= 2) {
+                QPolygonF poly = tramo;
+                poly << QPointF(poly.last().x(), area.bottom())
+                     << QPointF(poly.first().x(), area.bottom());
+                g.setPen(Qt::NoPen);
+                g.setBrush(relleno);
+                g.drawPolygon(poly);
+                g.setBrush(Qt::NoBrush);
+                g.setPen(QPen(linea, 1.6));
+                g.drawPolyline(tramo);
+            }
+            tramo.clear();
+        };
+        for (const ElevationSample &s : m_p.samples) {
+            if (std::isnan(s.elevation)) { cerrar(); continue; }
+            tramo << QPointF(px(s.distanceM), py(s.elevation));
+        }
+        cerrar();
+    }
+
+private:
+    ElevationProfile m_p;
+};
+
 } // namespace
 
 class Ventana : public QMainWindow
@@ -188,6 +281,7 @@ public:
         construirBarraMapa();
         construirBarraEntidades();
         construirBarraDatos();
+        construirBarraElevacion();
         construirPanel();
         conectarSenales();
         aplicarEstiloAlTrazo();
@@ -635,6 +729,264 @@ private:
         m_mapa->setElevationDb(file);
         m_demActivo = true;
         statusBar()->showMessage(tr("Elevacion (BD): %1").arg(file), 4000);
+    }
+
+    // ============================================= analisis de elevacion ==
+    // Barra para PROBAR los tres calculos nuevos sobre el DEM activo: perfil de
+    // una ruta, linea de vision entre dos puntos y viewshed 360. La libreria
+    // devuelve los datos; aqui se dibujan (dialogo del perfil; linea de vision y
+    // poligono de visibilidad como entidades sobre el mapa).
+    void construirBarraElevacion()
+    {
+        auto *barra = addToolBar(tr("Elevacion"));
+        barra->setObjectName(QStringLiteral("barraElevacion"));
+        barra->setMovable(false);
+
+        barra->addWidget(new QLabel(tr("  Alt1:")));
+        m_altA = new QDoubleSpinBox(this);
+        m_altA->setRange(0.0, 20000.0);
+        m_altA->setValue(10.0);
+        m_altA->setSuffix(tr(" m"));
+        m_altA->setToolTip(tr("Visión: antena en A.  Viewshed: altura del observador."));
+        barra->addWidget(m_altA);
+
+        barra->addWidget(new QLabel(tr(" Alt2:")));
+        m_altB = new QDoubleSpinBox(this);
+        m_altB->setRange(0.0, 20000.0);
+        m_altB->setValue(10.0);
+        m_altB->setSuffix(tr(" m"));
+        m_altB->setToolTip(tr("Visión: antena en B.  Viewshed: altura del objetivo."));
+        barra->addWidget(m_altB);
+
+        barra->addWidget(new QLabel(tr(" Alcance:")));
+        m_alcanceKm = new QDoubleSpinBox(this);
+        m_alcanceKm->setRange(1.0, 300.0);
+        m_alcanceKm->setValue(40.0);
+        m_alcanceKm->setSuffix(tr(" km"));
+        m_alcanceKm->setToolTip(tr("Alcance (radio) de los rayos del viewshed."));
+        barra->addWidget(m_alcanceKm);
+
+        barra->addSeparator();
+        auto *perfil = barra->addAction(tr("Perfil"));
+        perfil->setToolTip(tr("Perfil del terreno a lo largo de la LÍNEA o polígono "
+                              "seleccionado (dibuja una línea y selecciónala)."));
+        connect(perfil, &QAction::triggered, this, &Ventana::analizarPerfil);
+
+        auto *vision = barra->addAction(tr("Visión A→B"));
+        vision->setToolTip(tr("Línea de visión entre el primer y el último vértice "
+                              "de la línea seleccionada, con Alt1/Alt2 de antena."));
+        connect(vision, &QAction::triggered, this, &Ventana::analizarVision);
+
+        auto *viewshed = barra->addAction(tr("Viewshed"));
+        viewshed->setToolTip(tr("Zona de visibilidad 360° desde el vértice de la "
+                                "entidad seleccionada (o el centro del mapa)."));
+        connect(viewshed, &QAction::triggered, this, &Ventana::analizarViewshed);
+
+        auto *limpiar = barra->addAction(tr("Limpiar análisis"));
+        limpiar->setToolTip(tr("Quita las capas de visión y viewshed."));
+        connect(limpiar, &QAction::triggered, this, [this] {
+            m_mapa->removeFeatureLayer(kCapaVision);
+            m_mapa->removeFeatureLayer(kCapaViewshed);
+            statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
+        });
+    }
+
+    // Comprueba que hay DEM; si no, avisa y devuelve false.
+    bool exigirDem()
+    {
+        if (m_demActivo)
+            return true;
+        statusBar()->showMessage(
+            tr("No hay elevación activa: carga un DEM con «DEM…» primero."), 5000);
+        return false;
+    }
+
+    // Entidad seleccionada (o vacía si no hay ninguna).
+    std::optional<MapFeature> entidadSeleccionada() const
+    {
+        const qint64 id = m_mapa->selectedFeature();
+        return id >= 0 ? m_mapa->feature(id) : std::nullopt;
+    }
+
+    // (Re)crea vacía una capa donde volcar un resultado de análisis.
+    void prepararCapa(const QString &id, const QString &nombre, int z)
+    {
+        if (!m_mapa->addFeatureLayer(id, nombre, z))
+            m_mapa->clearFeatureLayer(id);
+    }
+
+    // Perfil del terreno a lo largo de la ruta seleccionada -> diálogo con el corte.
+    void analizarPerfil()
+    {
+        if (!exigirDem())
+            return;
+        const auto f = entidadSeleccionada();
+        if (!f || f->geometry.size() < 2) {
+            statusBar()->showMessage(
+                tr("Selecciona una LÍNEA o polígono (≥2 vértices) para su perfil."),
+                5000);
+            return;
+        }
+        const ElevationProfile p = m_mapa->elevationProfile(f->geometry);
+        if (!p.isValid() || std::isnan(p.maxElevation)) {
+            statusBar()->showMessage(
+                tr("La ruta no tiene cota en el DEM activo (fuera de cobertura)."),
+                5000);
+            return;
+        }
+
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Perfil del terreno — %1")
+                               .arg(f->name.isEmpty() ? tr("ruta") : f->name));
+        auto *lay = new QVBoxLayout(&dlg);
+        lay->addWidget(new QLabel(
+            tr("Distancia %1 km   ·   mín %2 m   máx %3 m   ·   "
+               "subida +%4 m   bajada −%5 m")
+                .arg(p.totalDistanceM / 1000.0, 0, 'f', 2)
+                .arg(p.minElevation, 0, 'f', 0)
+                .arg(p.maxElevation, 0, 'f', 0)
+                .arg(p.gain, 0, 'f', 0)
+                .arg(p.loss, 0, 'f', 0), &dlg));
+        lay->addWidget(new PerfilWidget(p, &dlg), 1);
+        auto *botones = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+        connect(botones, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        lay->addWidget(botones);
+        dlg.resize(660, 340);
+        dlg.exec();
+    }
+
+    // Línea de visión entre el 1º y el último vértice de la línea seleccionada.
+    void analizarVision()
+    {
+        if (!exigirDem())
+            return;
+        const auto f = entidadSeleccionada();
+        if (!f || f->geometry.size() < 2) {
+            statusBar()->showMessage(
+                tr("Selecciona una LÍNEA (se usan su 1º y último vértice como A y B)."),
+                5000);
+            return;
+        }
+        const QGeoCoordinate a = f->geometry.first();
+        const QGeoCoordinate b = f->geometry.last();
+        const LineOfSightResult v =
+            m_mapa->lineOfSight(a, b, m_altA->value(), m_altB->value());
+        if (!v.isValid()) {
+            statusBar()->showMessage(
+                tr("No se pudo calcular la visión (falta cota en A o B)."), 5000);
+            return;
+        }
+
+        prepararCapa(kCapaVision, tr("Análisis: visión"), 50);
+        const QColor color = v.clear ? QColor(0x2e, 0x7d, 0x32)
+                                     : QColor(0xc6, 0x28, 0x28);
+        MapFeature linea;
+        linea.layerId = kCapaVision;
+        linea.kind = GeometryKind::Polyline;
+        linea.type = QStringLiteral("linea_vision");
+        linea.name = v.clear ? tr("Visión directa") : tr("Bloqueada");
+        linea.geometry = { a, b };
+        linea.style.lineColor = color;
+        linea.style.lineWidth = 3.0;
+        linea.selectable = false;
+        m_mapa->addFeature(linea);
+
+        if (!v.clear && v.blockPosition.isValid()) {
+            MapFeature corte;
+            corte.layerId = kCapaVision;
+            corte.kind = GeometryKind::Point;
+            corte.type = QStringLiteral("obstaculo");
+            corte.name = tr("Obstáculo");
+            corte.geometry = { v.blockPosition };
+            corte.style.lineColor = QColor(0xc6, 0x28, 0x28);
+            corte.style.pointRadiusPx = 7.0;
+            corte.selectable = false;
+            m_mapa->addFeature(corte);
+        }
+
+        statusBar()->showMessage(
+            v.clear
+                ? tr("Visión DIRECTA · %1 km · holgura mínima %2 m")
+                      .arg(v.totalDistanceM / 1000.0, 0, 'f', 2)
+                      .arg(v.clearanceM, 0, 'f', 0)
+                : tr("BLOQUEADA a %1 km · faltan %2 m de altura en el obstáculo")
+                      .arg(v.blockDistanceM / 1000.0, 0, 'f', 2)
+                      .arg(-v.clearanceM, 0, 'f', 0),
+            8000);
+    }
+
+    // Viewshed 360° desde el vértice de la entidad seleccionada (o el centro del
+    // mapa): dibuja el polígono de la zona visible para un objetivo a Alt2.
+    void analizarViewshed()
+    {
+        if (!exigirDem())
+            return;
+        const auto f = entidadSeleccionada();
+        const QGeoCoordinate origen =
+            (f && !f->geometry.isEmpty()) ? f->geometry.first() : m_mapa->center();
+
+        ViewshedParams vp;
+        vp.observerHeight = m_altA->value();
+        vp.targetHeight = m_altB->value();
+        vp.maxRangeM = m_alcanceKm->value() * 1000.0;
+
+        QElapsedTimer reloj;
+        reloj.start();
+        const Viewshed vs = m_mapa->viewshed(origen, vp);
+        const qint64 ms = reloj.elapsed();
+        if (!vs.isValid()) {
+            statusBar()->showMessage(
+                tr("No hay cota en el origen del viewshed (fuera de cobertura)."),
+                5000);
+            return;
+        }
+
+        // Polígono de la zona de visibilidad (ZVD): un vértice por rayo, a su
+        // alcance visible. Rayos sin alcance colapsan al centro (forma de estrella).
+        QVector<QGeoCoordinate> contorno;
+        contorno.reserve(vs.rays.size());
+        double sumaKm = 0.0, maxKm = 0.0;
+        for (const ViewshedRay &r : vs.rays) {
+            const double d = qMax(r.visibilityReachM, 1.0);
+            contorno.append(origen.atDistanceAndAzimuth(d, r.azimuthDeg));
+            sumaKm += r.visibilityReachM / 1000.0;
+            maxKm = qMax(maxKm, r.visibilityReachM / 1000.0);
+        }
+
+        prepararCapa(kCapaViewshed, tr("Análisis: viewshed"), 40);
+        MapFeature zona;
+        zona.layerId = kCapaViewshed;
+        zona.kind = GeometryKind::Polygon;
+        zona.type = QStringLiteral("zona_visibilidad");
+        zona.name = tr("Visibilidad a %1 m").arg(vp.targetHeight, 0, 'f', 0);
+        zona.geometry = contorno;
+        zona.style.lineColor = QColor(0x15, 0x65, 0xc0);
+        zona.style.fillColor = QColor(0x42, 0xa5, 0xf5, 70);
+        zona.style.lineWidth = 1.5;
+        zona.style.labelVisible = false;
+        zona.selectable = false;
+        m_mapa->addFeature(zona);
+
+        MapFeature centro;
+        centro.layerId = kCapaViewshed;
+        centro.kind = GeometryKind::Point;
+        centro.type = QStringLiteral("observador");
+        centro.name = tr("Observador");
+        centro.geometry = { origen };
+        centro.style.lineColor = QColor(0x0d, 0x47, 0xa1);
+        centro.selectable = false;
+        m_mapa->addFeature(centro);
+
+        statusBar()->showMessage(
+            tr("Viewshed: %1 rayos · obs %2 m, obj %3 m · alcance medio %4 km "
+               "(máx %5 km) · %6 ms")
+                .arg(vs.rays.size())
+                .arg(vp.observerHeight, 0, 'f', 0)
+                .arg(vp.targetHeight, 0, 'f', 0)
+                .arg(vs.rays.isEmpty() ? 0.0 : sumaKm / double(vs.rays.size()), 0, 'f', 1)
+                .arg(maxKm, 0, 'f', 1)
+                .arg(ms),
+            9000);
     }
 
     // ==================================================== arbol ===========
@@ -1281,6 +1633,13 @@ private:
     QSpinBox *m_zCobertura = nullptr;
     QPushButton *m_btnDem = nullptr;
     bool m_demActivo = false;
+
+    // Analisis de elevacion (barra "Elevacion").
+    QDoubleSpinBox *m_altA = nullptr;       //!< antena A / altura del observador
+    QDoubleSpinBox *m_altB = nullptr;       //!< antena B / altura del objetivo
+    QDoubleSpinBox *m_alcanceKm = nullptr;  //!< alcance del viewshed
+    const QString kCapaVision = QStringLiteral("elev_vision");
+    const QString kCapaViewshed = QStringLiteral("elev_viewshed");
 
     bool m_actualizandoPropiedades = false;
     QColor m_colorLinea = QColor(0xd3, 0x2f, 0x2f);

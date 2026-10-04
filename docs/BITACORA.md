@@ -3230,3 +3230,37 @@ slots del test existente.
 **Estado: las tres capacidades de análisis de elevación (perfil de ruta, visibilidad
 punto a punto, viewshed 360°) están en el núcleo y por la fachada, verdes (18 tests),
 solo visibilidad directa. Queda cerrado lo pedido tras revisar `DVD_potencial`.**
+
+## 63. El `demo` prueba el análisis de elevación
+
+Las tres capacidades (Fases A–C) estaban en la librería pero **invisibles**: el
+`demo` solo mostraba la cota bajo el cursor. Se le añade una barra **Elevación**
+para probarlas, **sin quitar nada** de lo que ya había (es cambio solo de la app de
+ejemplo; no toca la librería, su API ni los tests).
+
+Qué se añadió (en `demo/main.cpp`):
+
+- **Barra «Elevación»** (`construirBarraElevacion`), con dos alturas `Alt1`/`Alt2`
+  (antena A/B para la visión; observador/objetivo para el viewshed) y un `Alcance`
+  (radio del viewshed), más cuatro acciones:
+  - **Perfil:** sobre la línea/polígono seleccionado llama a
+    `MapWidget::elevationProfile` y abre un diálogo con el **corte del terreno**
+    dibujado (clase `PerfilWidget`, QPainter) y las estadísticas (distancia,
+    mín/máx, subida/bajada). Las muestras sin dato dejan hueco.
+  - **Visión A→B:** entre el 1º y el último vértice de la línea seleccionada llama a
+    `MapWidget::lineOfSight` con `Alt1`/`Alt2`, y dibuja el resultado como entidades
+    en la capa «Análisis: visión»: la recta en verde (hay visión) o roja (bloqueada)
+    y un punto en el obstáculo; la barra de estado da holgura/distancia.
+  - **Viewshed:** desde el vértice de la entidad seleccionada (o el centro del mapa)
+    llama a `MapWidget::viewshed` y dibuja el **polígono de la zona de visibilidad**
+    (ZVD) a la altura `Alt2` en la capa «Análisis: viewshed», más el punto del
+    observador; informa de alcance medio/máx y del tiempo de cálculo.
+  - **Limpiar análisis:** quita esas dos capas.
+- Las acciones avisan si no hay DEM activo o si falta selección/cobertura; los
+  resultados van a capas propias que se recrean vacías en cada cálculo (así no se
+  mezclan con las entidades del usuario).
+
+Verificación: compila `demo` sin warnings; los **18 tests** siguen en verde (la
+librería no cambió). La validación visual la hace el usuario en su PC (en el
+contenedor no hay paquete de datos). Docs: README (fila del `demo` y sección
+«Análisis de elevación»), `arquitectura.html` (8c) + PDF.
