@@ -2791,6 +2791,10 @@ mensaje con un fallo de instalación es fácil, así que se documenta.
 - Nota en el paso 2: para **reinstalar** tras un cambio basta
   `mingw32-make -j4 && mingw32-make install` dentro de `build-qt6`; el `qmake`
   solo se repite si se borra esa carpeta.
+- Aviso al principio del paso 1 para quien **clona el repo**: QCustomPlot y el
+  paquete de datos **no vienen en git** (licencia y tamaño), hay que
+  conseguirlos aparte; el resto sí llega con el `git clone`. Pensado para el
+  compañero que montará el juego Qt 5 en su PC.
 
 Cambio **solo de documentación** (`.md`): no toca código ni tests, y
 `DESPLIEGUE.md` no es `arquitectura.html`, así que no hay que regenerar el PDF.

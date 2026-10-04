@@ -66,6 +66,20 @@ Donde la guía ponga `qtX`, cambia la X por **5** o por **6** según tu juego.
 
 ## Paso 1. Comprueba que tienes todo
 
+> **Si acabas de clonar el repositorio (`git clone`), dos cosas NO vienen en él**
+> —a propósito, no es un olvido— y sin ellas no llegarás al final:
+>
+> - **QCustomPlot 2.1.1** (`qcustomplot.h` y `qcustomplot.cpp`): fuera del repo
+>   por su licencia (GPLv3). Sin él, el `widget` **no compila**. Lo descargas tú
+>   (punto 3 de abajo).
+> - **El paquete de datos** (`Recursos\` con `mapa.json` y las `.sqlitedb`): son
+>   los mapas, pesan mucho y no son código, así que tampoco van en git. **Te los
+>   tiene que pasar** quien ya los tenga (pendrive, red…) — o se generan con las
+>   herramientas (punto 4 de abajo).
+>
+> Todo lo demás (la librería, el proyecto qmake, el ejemplo `app_minima`, los
+> scripts `desplegar*.bat` y esta guía) sí te llega con el `git clone`.
+
 1. **Qt con MinGW de 64 bits**, el de tu juego (tabla de arriba), y **Qt Creator**.
    Comprueba que existe este fichero. Si no está, añade el módulo
    *Qt Positioning* con el *Qt Maintenance Tool*:
