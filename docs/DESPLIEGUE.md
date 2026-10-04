@@ -21,6 +21,9 @@ internet**.
 Los pasos 0, 1 y 2 se hacen **una sola vez** por PC. Del 3 al 6 son los de cada
 vez que entregas una versión nueva (y si no has tocado nada, el 3 ya está).
 
+> ¿Solo quieres la versión corta para **Qt 5**? Está en
+> [`RESUMEN_QT5.md`](RESUMEN_QT5.md) (misma carpeta). Esta guía es la detallada.
+
 ---
 
 ## Antes de empezar: cinco palabras

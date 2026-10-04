@@ -2795,6 +2795,10 @@ mensaje con un fallo de instalación es fácil, así que se documenta.
   paquete de datos **no vienen en git** (licencia y tamaño), hay que
   conseguirlos aparte; el resto sí llega con el `git clone`. Pensado para el
   compañero que montará el juego Qt 5 en su PC.
+- Nuevo `docs/RESUMEN_QT5.md`: la versión corta del juego Qt 5 (clonar →
+  compilar/instalar → probar el ejemplo → desplegar), para que el compañero la
+  tenga con el `git clone` sin depender de un reenvío por chat. `DESPLIEGUE.md`
+  enlaza a él desde el resumen de pasos.
 
 Cambio **solo de documentación** (`.md`): no toca código ni tests, y
 `DESPLIEGUE.md` no es `arquitectura.html`, así que no hay que regenerar el PDF.
