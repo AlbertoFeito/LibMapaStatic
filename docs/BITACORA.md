@@ -3027,3 +3027,52 @@ listados).
 **Estado: ciclo de seguimiento completo (ver, simbología, escala, y ahora
 selección/consulta por clic); 17 tests en verde. Pendiente opcional: Fase 4
 (corte limpio del dominio naval legado) y consolidar la rama en `main`.**
+
+## 59. Corte limpio del modelo vectorial legado (Fase 4)
+
+El esquema SQLite arrastraba, de la migración desde el CBDatos original, un
+**modelo vectorial legado** completo: `punto`, `vehiculo`, `buque_ais`,
+`trayectoria`, `poligono`/`poligono_vertice`, `ruta`/`ruta_punto`, y además unas
+tablas `feature`/`feature_vertice`/`feature_capa` **huérfanas** (se creaban pero
+nadie las usaba). Al explorarlo se confirmó que **nada de la librería viva lo
+usa**: `MapWidget` persiste las entidades en las tablas `entidad`/`capa` a través
+de `VectorRepository`; esos tipos y métodos legados solo los ejercían el tool
+`vector_db` y su test. El usuario pidió el corte limpio **total**.
+
+Cambios:
+
+- **`src/db/Schema.cpp`:** `migrations()` crea ahora solo `entidad`,
+  `entidad_vertice` y `capa` (lo que de verdad usa la persistencia de entidades).
+  Fuera todo el modelo naval/CBDatos y las tablas `feature*` huérfanas.
+  `kCurrentVersion` se mantiene en 2, así que las BD de entidades existentes
+  siguen válidas.
+- **`src/db/VectorRepository.{h,cpp}`:** se eliminan las APIs de Puntos,
+  Vehículos, Trayectorias, Polígonos y Rutas (`insertPoint`, `insertVehicle`,
+  `appendTrack`, `insertPolygon`, `insertRoute`, …). Queda solo el almacén de
+  entidades de dibujo y capas (`saveFeature(s)`, `loadFeatures`,
+  `removeFeatureRow`, `clearFeatures`, `saveLayer`, `loadLayers`) que usa
+  `MapWidget`. Doc de la clase actualizada.
+- **`include/libmapa/MapTypes.h`:** se retiran los structs `MapPoint`,
+  `VehicleKind`, `AisData`, `MapVehicle`, `TrackSample`, `MapPolygon`,
+  `MapRoutePoint`, `MapRoute` y sus `Q_DECLARE_METATYPE`. Quedan `BaseLayer`,
+  `MapTool`, `BaseLayerInfo` y `Measurement`.
+- **Tool `vector_db`:** eliminado (`tools/vector_db/` + su `add_executable` y su
+  entrada en la lista de instalación de CMake). Era la única app que tocaba el
+  modelo legado.
+- **`tests/tst_vectorrepository.cpp`:** reescrito para cubrir solo la API que
+  queda (esquema/versión, idempotencia, guardar/cargar/borrar/limpiar Features,
+  filtrar por capa, multi-parte, seguridad ante comillas/inyección, capas,
+  geometría inválida, cero DDL en runtime, propagación de errores y la
+  comparación transacción-vs-commits-sueltos). Siguen **17 tests** en verde, sin
+  warnings.
+- **Docs:** README (fuera `vector_db` de la tabla y de la referencia de
+  comandos) y `arquitectura.html` (fila de tipos, tabla y sección de
+  herramientas) + PDF.
+
+Qt y qmake sin cambios: no se retiró ningún `.cpp` del núcleo
+(`Schema.cpp`/`VectorRepository.cpp` siguen, más pequeños), y `vector_db` no
+tenía proyecto qmake.
+
+**Estado: VectorRepository es ya solo el almacén de entidades que usa MapWidget;
+esquema sin modelo legado; 17 tests en verde. Con esto, el alcance acordado de la
+librería (Fases 1–5 + hit-testing + corte limpio) queda cerrado.**

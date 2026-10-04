@@ -57,99 +57,6 @@ struct BaseLayerInfo {
     bool available = false;
 };
 
-/*!
- * \brief Un punto sobre el mapa.
- *
- * Es un tipo de VALOR, no un puntero a una jerarquia. El codigo original
- * manejaba QList<CPunto*> y QList<void*>, con castes a mano en cada uso
- * (fallas F-12 y F-7 del analisis). Aqui la identidad es un entero que
- * devuelve MapWidget al anadirlo.
- */
-struct MapPoint {
-    qint64 id = -1;              //!< Lo asigna MapWidget; -1 si aun no se anadio.
-    QString name;
-    QString description;
-    QGeoCoordinate position;
-    QPixmap icon;                //!< Vacio = simbolo por defecto.
-    QColor color = Qt::red;
-    bool labelVisible = true;
-    double altitude = 0.0;
-};
-
-//! Clase de vehiculo. Sustituye a la jerarquia CVehiculo/CAvion/CBarco.
-enum class VehicleKind {
-    Land,
-    Aerial,
-    Naval
-};
-
-//! Datos AIS. Van por COMPOSICION, no por herencia: en el codigo original
-//! CBarco anadia unos cincuenta getters que CAvion no tenia ni podia usar.
-struct AisData {
-    QString mmsi;
-    QString imo;
-    QString callSign;
-    QString shipName;
-    QString shipType;
-    QString flag;
-    QString destination;
-    QString navigationStatus;
-    double length = 0.0;
-    double beam = 0.0;
-    double draught = 0.0;
-    double heading = 0.0;
-    double course = 0.0;
-    qint64 lastUpdateUtcMs = 0;
-    bool isValid() const { return !mmsi.isEmpty(); }
-};
-
-struct MapVehicle {
-    qint64 id = -1;
-    QString name;
-    VehicleKind kind = VehicleKind::Land;
-    QGeoCoordinate position;
-    double heading = 0.0;        //!< Grados desde el norte.
-    double speed = 0.0;
-    double altitude = 0.0;
-    QPixmap icon;
-    QColor trackColor = Qt::yellow;
-    bool trackVisible = true;
-    int trackMaxPoints = 500;
-    AisData ais;                 //!< Solo relevante en los navales.
-};
-
-//! Una muestra de trayectoria.
-struct TrackSample {
-    QGeoCoordinate position;
-    qint64 timeUtcMs = 0;      //!< Epoch en ms, no texto: comparable en SQL.
-    double heading = 0.0;
-    double speed = 0.0;
-    double altitude = 0.0;
-};
-
-struct MapPolygon {
-    qint64 id = -1;
-    QString name;
-    QVector<QGeoCoordinate> vertices;
-    QColor lineColor = Qt::darkGreen;
-    QColor fillColor = QColor(0, 128, 0, 60);
-    bool filled = true;
-};
-
-struct MapRoutePoint {
-    QGeoCoordinate position;
-    QString description;
-    int priority = 0;
-    double approachRadiusMeters = 20.0;
-};
-
-struct MapRoute {
-    qint64 id = -1;
-    QString name;
-    QVector<MapRoutePoint> points;
-    QColor color = Qt::blue;
-};
-
 //! Resultado de una medicion sobre el mapa.
 struct Measurement {
     QGeoCoordinate from;
@@ -160,11 +67,6 @@ struct Measurement {
 
 } // namespace libmapa
 
-Q_DECLARE_METATYPE(libmapa::MapPoint)
-Q_DECLARE_METATYPE(libmapa::MapVehicle)
-Q_DECLARE_METATYPE(libmapa::MapPolygon)
-Q_DECLARE_METATYPE(libmapa::MapRoute)
 Q_DECLARE_METATYPE(libmapa::Measurement)
-Q_DECLARE_METATYPE(libmapa::TrackSample)
 
 #endif // LIBMAPA_MAPTYPES_H_

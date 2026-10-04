@@ -2,14 +2,21 @@
 #include "db/VectorRepository.h"
 #include "db/Schema.h"
 
+#include "libmapa/MapFeature.h"
+
+#include <QElapsedTimer>
+#include <QSignalSpy>
 #include <QSqlError>
 #include <QSqlQuery>
-#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
 
 using namespace libmapa;
 
+//! Tests del almacen de entidades de dibujo (la unica cara de VectorRepository
+//! tras el corte limpio del modelo vectorial legado): esquema, guardar/cargar
+//! Features y capas, multi-parte, seguridad ante comillas y propagacion de
+//! errores. Nada de puntos/vehiculos/AIS/poligonos/rutas: eso se retiro.
 class TstVectorRepository : public QObject
 {
     Q_OBJECT
@@ -19,47 +26,39 @@ private slots:
     void cleanup();
     void cleanupTestCase();
 
-    // --- Los fallos del esquema original, demostrados -------------------
-
-    /*! "NOT nullptr" no es SQL valido: la tabla no se crea siquiera. */
-    void originalDdlIsASyntaxError();
-    /*! "no_punto KEY INTEGER" no declara ninguna clave primaria. */
-    void originalPrimaryKeyIsNotAKey();
-    /*! Los indices de columna descuadrados al leer puntos. */
-    void originalColumnIndicesAreShifted();
-
-    // --- El esquema nuevo -----------------------------------------------
-
     void createsSchemaAndRecordsVersion();
     void migrationIsIdempotent();
 
-    void insertsAndLoadsPoints();
-    void rejectsPointsWithoutNameOrPosition();
-    void handlesQuotesInNames();
-    void enforcesUniqueName();
+    void savesAndLoadsFeatures();
+    void removesAndClearsFeatures();
+    void filtersFeaturesByLayer();
+    void savesMultiPartFeature();
+    void handlesQuotesAndInjectionInNames();
+    void savesAndLoadsLayers();
+    void rejectsInvalidGeometry();
 
-    void insertsVehicleWithAisByComposition();
-    void loadsVesselsByTimestamp();
-
-    void appendsTrackInOneTransaction();
+    /*! Ni una tabla creada en tiempo de ejecucion, guarde lo que guarde. */
+    void neverCreatesTablesAtRuntime();
+    void reportsErrorsInsteadOfSwallowingThem();
     /*! Una transaccion frente a N commits sueltos, medido. */
     void transactionBeatsLooseCommits();
-    void prunesTrack();
-
-    /*! ON DELETE CASCADE: borrar un punto se lleva su trayectoria. */
-    void deletingPointRemovesItsTrack();
-
-    void insertsPolygonAtomically();
-    void rollsBackIncompletePolygon();
-    void insertsAndLoadsRoutes();
-
-    /*! Ni una tabla creada en tiempo de ejecucion. */
-    void neverCreatesTablesAtRuntime();
-
-    void reportsErrorsInsteadOfSwallowingThem();
 
 private:
     QString dbPath(const QString &name) const { return m_dir.filePath(name); }
+
+    //! Entidad valida de ejemplo (polilinea de 'n' vertices) en la capa dada.
+    static MapFeature lineFeature(const QString &layer, const QString &name,
+                                  int n = 3)
+    {
+        MapFeature f;
+        f.layerId = layer;
+        f.kind = GeometryKind::Polyline;
+        f.name = name;
+        for (int i = 0; i < n; ++i)
+            f.geometry.append(QGeoCoordinate(23.0 + i * 0.01, -82.0 + i * 0.01));
+        return f;
+    }
+
     QTemporaryDir m_dir;
 };
 
@@ -78,125 +77,6 @@ void TstVectorRepository::cleanupTestCase()
     SqliteConnectionPool::closeAllForCurrentThread();
 }
 
-// ------------------------------------------------ el esquema original ------
-
-void TstVectorRepository::originalDdlIsASyntaxError()
-{
-    const QString conn = QStringLiteral("orig_ddl");
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
-        db.setDatabaseName(dbPath(QStringLiteral("orig.sig")));
-        QVERIFY(db.open());
-
-        // Literalmente el DDL de CBDatos::guardarNuevoPunto.
-        const QString ddl = QStringLiteral(
-            "CREATE TABLE IF NOT EXISTS puntos (no_punto KEY INTEGER NOT nullptr "
-            "UNIQUE, nombre TEXT NOT nullptr UNIQUE, descripcion TEXT, tipo TEXT, "
-            "simbolo BLOB, latitud DOUBLE, longitud DOUBLE, fecha_creacion TEXT)");
-
-        QSqlQuery q(db);
-
-        // El original hace: if (Consulta.prepare(Crea)) Consulta.exec();
-        // El prepare falla, asi que el exec ni se intenta.
-        const bool preparado = q.prepare(ddl);
-        QVERIFY2(!preparado,
-                 "Se esperaba que 'NOT nullptr' fuera un error de sintaxis");
-        QVERIFY(q.lastError().text().contains(QStringLiteral("nullptr")));
-
-        // Y por tanto la tabla NO existe. En una instalacion nueva, la
-        // aplicacion no crea sus tablas: solo funciona sobre ficheros .sig
-        // heredados de antes del Find&Replace de NULL por nullptr.
-        QSqlQuery comprueba(db);
-        QVERIFY(comprueba.exec(QStringLiteral(
-            "SELECT COUNT(*) FROM sqlite_master WHERE name='puntos'")));
-        QVERIFY(comprueba.next());
-        QCOMPARE(comprueba.value(0).toInt(), 0);
-
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(conn);
-}
-
-void TstVectorRepository::originalPrimaryKeyIsNotAKey()
-{
-    const QString conn = QStringLiteral("orig_pk");
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
-        db.setDatabaseName(dbPath(QStringLiteral("origpk.sig")));
-        QVERIFY(db.open());
-
-        QSqlQuery q(db);
-        // Con NOT NULL arreglado, como estaba antes del reemplazo.
-        QVERIFY(q.exec(QStringLiteral(
-            "CREATE TABLE puntos (no_punto KEY INTEGER NOT NULL UNIQUE, "
-            "nombre TEXT NOT NULL UNIQUE, descripcion TEXT, tipo TEXT, "
-            "simbolo BLOB, latitud DOUBLE, longitud DOUBLE, fecha_creacion TEXT)")));
-
-        QVERIFY(q.exec(QStringLiteral("PRAGMA table_info(puntos)")));
-        bool hayClavePrimaria = false;
-        QString tipoDeNoPunto;
-        while (q.next()) {
-            if (q.value(1).toString() == QStringLiteral("no_punto"))
-                tipoDeNoPunto = q.value(2).toString();
-            if (q.value(5).toInt() != 0)
-                hayClavePrimaria = true;
-        }
-
-        // "KEY INTEGER" es el TIPO de la columna, no una declaracion de clave.
-        QCOMPARE(tipoDeNoPunto, QStringLiteral("KEY INTEGER"));
-        QVERIFY2(!hayClavePrimaria,
-                 "Se esperaba que la tabla no tuviera clave primaria");
-
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(conn);
-}
-
-void TstVectorRepository::originalColumnIndicesAreShifted()
-{
-    // La tabla tiene 8 columnas; cargarPuntos las lee como si fueran 7,
-    // porque se comento la lectura de 'tipo' sin corregir los indices.
-    const QStringList columnas{
-        QStringLiteral("no_punto"), QStringLiteral("nombre"),
-        QStringLiteral("descripcion"), QStringLiteral("tipo"),
-        QStringLiteral("simbolo"), QStringLiteral("latitud"),
-        QStringLiteral("longitud"), QStringLiteral("fecha_creacion")};
-
-    // Lo que hace el original: value(3) como simbolo, value(4) y value(5)
-    // como latitud y longitud, value(6) como fecha.
-    QCOMPARE(columnas.at(3), QStringLiteral("tipo"));       // se lee como simbolo
-    QCOMPARE(columnas.at(4), QStringLiteral("simbolo"));    // se lee como latitud
-    QCOMPARE(columnas.at(5), QStringLiteral("latitud"));    // se lee como longitud
-    QCOMPARE(columnas.at(6), QStringLiteral("longitud"));   // se lee como fecha
-
-    // El repositorio nuevo lee por NOMBRE, asi que este descuadre no puede
-    // repetirse aunque cambie el orden de las columnas.
-    VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("porNombre.db"))));
-
-    MapPoint p;
-    p.name = QStringLiteral("Faro");
-    p.position = QGeoCoordinate(23.05, -82.35);
-    p.altitude = 42.0;
-    QPixmap icono(8, 8);
-    icono.fill(Qt::magenta);
-    p.icon = icono;
-
-    const auto id = repo.insertPoint(p);
-    QVERIFY(id.has_value());
-
-    const auto leido = repo.findPointByName(QStringLiteral("Faro"));
-    QVERIFY(leido.has_value());
-    QCOMPARE(leido->name, QStringLiteral("Faro"));
-    QVERIFY(qAbs(leido->position.latitude() - 23.05) < 1e-9);
-    QVERIFY(qAbs(leido->position.longitude() + 82.35) < 1e-9);
-    QCOMPARE(leido->altitude, 42.0);
-    QVERIFY2(!leido->icon.isNull(), "El simbolo se leyo de la columna correcta");
-    QCOMPARE(leido->icon.size(), QSize(8, 8));
-}
-
-// --------------------------------------------------- el esquema nuevo ------
-
 void TstVectorRepository::createsSchemaAndRecordsVersion()
 {
     VectorRepository repo;
@@ -212,10 +92,8 @@ void TstVectorRepository::migrationIsIdempotent()
     {
         VectorRepository repo;
         QVERIFY(repo.open(ruta));
-        MapPoint p;
-        p.name = QStringLiteral("Persistente");
-        p.position = QGeoCoordinate(23.0, -82.0);
-        QVERIFY(repo.insertPoint(p).has_value());
+        QVERIFY(repo.saveFeature(lineFeature(QStringLiteral("capa"),
+                                             QStringLiteral("Persistente"))).has_value());
     }
     SqliteConnectionPool::closeAllForCurrentThread();
 
@@ -223,357 +101,181 @@ void TstVectorRepository::migrationIsIdempotent()
     VectorRepository repo;
     QVERIFY(repo.open(ruta));
     QCOMPARE(repo.schemaVersion(), schema::kCurrentVersion);
-    QCOMPARE(repo.loadPoints().size(), 1);
+    QCOMPARE(repo.loadFeatures().size(), 1);
 }
 
-void TstVectorRepository::insertsAndLoadsPoints()
+void TstVectorRepository::savesAndLoadsFeatures()
 {
     VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("puntos.db"))));
+    QVERIFY(repo.open(dbPath(QStringLiteral("features.db"))));
 
-    MapPoint a;
-    a.name = QStringLiteral("Morro");
-    a.description = QStringLiteral("Castillo");
-    a.position = QGeoCoordinate(23.1500, -82.3560);
-    a.color = QColor(Qt::green);
-    a.labelVisible = false;
+    MapFeature pol;
+    pol.layerId = QStringLiteral("zonas");
+    pol.kind = GeometryKind::Polygon;
+    pol.type = QStringLiteral("zona_prohibida");
+    pol.name = QStringLiteral("Area 1");
+    pol.description = QStringLiteral("prueba");
+    pol.style.lineColor = QColor(Qt::red);
+    pol.style.fillColor = QColor(255, 0, 0, 60);
+    pol.style.lineWidth = 3.5;
+    pol.attributes.insert(QStringLiteral("techo_m"), 120);
+    pol.attributes.insert(QStringLiteral("vigencia"), QStringLiteral("2026-09-01"));
+    for (int i = 0; i < 4; ++i)
+        pol.geometry.append(QGeoCoordinate(23.0 + i * 0.01, -82.0));
 
-    const auto id = repo.insertPoint(a);
+    const auto id = repo.saveFeature(pol);
     QVERIFY(id.has_value());
-    QVERIFY(*id > 0);
 
-    const auto puntos = repo.loadPoints();
-    QCOMPARE(puntos.size(), 1);
-    QCOMPARE(puntos.first().name, QStringLiteral("Morro"));
-    QCOMPARE(puntos.first().description, QStringLiteral("Castillo"));
-    QCOMPARE(puntos.first().color, QColor(Qt::green));
-    QCOMPARE(puntos.first().labelVisible, false);
-
-    // Modificar y borrar.
-    MapPoint mod = puntos.first();
-    mod.description = QStringLiteral("Faro del Morro");
-    QVERIFY(repo.updatePoint(mod));
-    QCOMPARE(repo.loadPoints().first().description,
-             QStringLiteral("Faro del Morro"));
-
-    QVERIFY(repo.removePoint(*id));
-    QVERIFY(repo.loadPoints().isEmpty());
-    QVERIFY(!repo.removePoint(*id));      // ya no esta
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 1);
+    const MapFeature &f = cargadas.first();
+    QCOMPARE(f.layerId, QStringLiteral("zonas"));
+    QCOMPARE(f.kind, GeometryKind::Polygon);
+    QCOMPARE(f.type, QStringLiteral("zona_prohibida"));
+    QCOMPARE(f.name, QStringLiteral("Area 1"));
+    QCOMPARE(f.geometry.size(), 4);
+    QCOMPARE(f.style.lineColor, QColor(Qt::red));
+    QCOMPARE(f.style.fillColor.alpha(), 60);
+    QVERIFY(qAbs(f.style.lineWidth - 3.5) < 1e-9);
+    // Los atributos de dominio (JSON) sobreviven el viaje.
+    QCOMPARE(f.attributes.value(QStringLiteral("techo_m")).toInt(), 120);
+    QCOMPARE(f.attributes.value(QStringLiteral("vigencia")).toString(),
+             QStringLiteral("2026-09-01"));
 }
 
-void TstVectorRepository::rejectsPointsWithoutNameOrPosition()
+void TstVectorRepository::removesAndClearsFeatures()
 {
     VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("valida.db"))));
-    QSignalSpy errores(&repo, &VectorRepository::errorOccurred);
+    QVERIFY(repo.open(dbPath(QStringLiteral("remove.db"))));
 
-    MapPoint sinNombre;
-    sinNombre.position = QGeoCoordinate(23.0, -82.0);
-    QVERIFY(!repo.insertPoint(sinNombre).has_value());
+    const auto id = repo.saveFeature(lineFeature(QStringLiteral("c"),
+                                                 QStringLiteral("A")));
+    QVERIFY(id.has_value());
+    QVERIFY(repo.saveFeature(lineFeature(QStringLiteral("c"),
+                                         QStringLiteral("B"))).has_value());
+    QCOMPARE(repo.loadFeatures().size(), 2);
 
-    MapPoint sinPosicion;
-    sinPosicion.name = QStringLiteral("Fantasma");
-    QVERIFY(!repo.insertPoint(sinPosicion).has_value());
+    QVERIFY(repo.removeFeatureRow(*id));
+    QCOMPARE(repo.loadFeatures().size(), 1);
 
-    // Los errores se PROPAGAN. El original hacia
-    // "if (prepare(x)) exec();" y tiraba el resultado.
-    QCOMPARE(errores.count(), 2);
-    QVERIFY(repo.loadPoints().isEmpty());
+    QVERIFY(repo.clearFeatures());
+    QVERIFY(repo.loadFeatures().isEmpty());
 }
 
-void TstVectorRepository::handlesQuotesInNames()
+void TstVectorRepository::filtersFeaturesByLayer()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("capas.db"))));
+
+    QVERIFY(repo.saveFeature(lineFeature(QStringLiteral("rojo"),
+                                         QStringLiteral("r1"))).has_value());
+    QVERIFY(repo.saveFeature(lineFeature(QStringLiteral("rojo"),
+                                         QStringLiteral("r2"))).has_value());
+    QVERIFY(repo.saveFeature(lineFeature(QStringLiteral("azul"),
+                                         QStringLiteral("a1"))).has_value());
+
+    QCOMPARE(repo.loadFeaturesInLayer(QStringLiteral("rojo")).size(), 2);
+    QCOMPARE(repo.loadFeaturesInLayer(QStringLiteral("azul")).size(), 1);
+    QVERIFY(repo.loadFeaturesInLayer(QStringLiteral("verde")).isEmpty());
+}
+
+void TstVectorRepository::savesMultiPartFeature()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("multiparte.db"))));
+
+    // Un .geo entero (varias polilineas) como UNA sola entidad.
+    MapFeature f;
+    f.layerId = QStringLiteral("costa");
+    f.kind = GeometryKind::Polyline;
+    f.name = QStringLiteral("Lineas de costa");
+    QVector<QGeoCoordinate> p1{ QGeoCoordinate(23.0, -82.0),
+                                QGeoCoordinate(23.1, -82.0) };
+    QVector<QGeoCoordinate> p2{ QGeoCoordinate(24.0, -81.0),
+                                QGeoCoordinate(24.1, -81.1),
+                                QGeoCoordinate(24.2, -81.2) };
+    f.parts = { p1, p2 };
+    f.geometry = p1;                 // la primera parte coincide con geometry
+    QVERIFY(f.isMultiPart());
+    QVERIFY(repo.saveFeature(f).has_value());
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 1);
+    QVERIFY(cargadas.first().isMultiPart());
+    QCOMPARE(cargadas.first().parts.size(), 2);
+    QCOMPARE(cargadas.first().parts.at(0).size(), 2);
+    QCOMPARE(cargadas.first().parts.at(1).size(), 3);
+}
+
+void TstVectorRepository::handlesQuotesAndInjectionInNames()
 {
     VectorRepository repo;
     QVERIFY(repo.open(dbPath(QStringLiteral("comillas.db"))));
 
-    // Con el INSERT concatenado del original, esto rompia la sentencia.
-    MapPoint p;
-    p.name = QStringLiteral("O'Brien \"el rapido\"; DROP TABLE punto;--");
-    p.description = QStringLiteral("100% v'alido");
-    p.position = QGeoCoordinate(22.0, -80.0);
+    // Con un INSERT concatenado esto romperia la sentencia o seria inyeccion.
+    // Con bindValue es un valor mas.
+    MapFeature f = lineFeature(QStringLiteral("capa"),
+        QStringLiteral("O'Brien \"rapido\"; DROP TABLE entidad;--"));
+    f.attributes.insert(QStringLiteral("nota"), QStringLiteral("100% v'alido"));
+    QVERIFY(repo.saveFeature(f).has_value());
 
-    QVERIFY(repo.insertPoint(p).has_value());
-
-    const auto puntos = repo.loadPoints();
-    QCOMPARE(puntos.size(), 1);
-    QCOMPARE(puntos.first().name, p.name);
-    QCOMPARE(puntos.first().description, p.description);
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 1);
+    QCOMPARE(cargadas.first().name, f.name);
+    QCOMPARE(cargadas.first().attributes.value(QStringLiteral("nota")).toString(),
+             QStringLiteral("100% v'alido"));
 }
 
-void TstVectorRepository::enforcesUniqueName()
+void TstVectorRepository::savesAndLoadsLayers()
 {
     VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("unico.db"))));
+    QVERIFY(repo.open(dbPath(QStringLiteral("layers.db"))));
 
-    MapPoint p;
-    p.name = QStringLiteral("Repetido");
-    p.position = QGeoCoordinate(22.0, -80.0);
-    QVERIFY(repo.insertPoint(p).has_value());
+    LayerInfo a;
+    a.id = QStringLiteral("fondo");
+    a.displayName = QStringLiteral("Fondo");
+    a.zOrder = 0;
+    LayerInfo b;
+    b.id = QStringLiteral("encima");
+    b.displayName = QStringLiteral("Encima");
+    b.visible = false;
+    b.zOrder = 10;
+    QVERIFY(repo.saveLayer(a));
+    QVERIFY(repo.saveLayer(b));       // una capa vacia tambien se conserva
 
-    // Ahora la restriccion existe de verdad, no es un "NOT nullptr" inerte.
-    QVERIFY(!repo.insertPoint(p).has_value());
-    QCOMPARE(repo.loadPoints().size(), 1);
+    const auto capas = repo.loadLayers();
+    QCOMPARE(capas.size(), 2);
+    // Ordenadas por z_orden ascendente (orden de pintado).
+    QCOMPARE(capas.first().id, QStringLiteral("fondo"));
+    QCOMPARE(capas.last().id, QStringLiteral("encima"));
+    QCOMPARE(capas.last().visible, false);
+
+    // INSERT OR REPLACE por id: reguardar actualiza, no duplica.
+    b.displayName = QStringLiteral("Encima (mod)");
+    QVERIFY(repo.saveLayer(b));
+    QCOMPARE(repo.loadLayers().size(), 2);
 }
 
-void TstVectorRepository::insertsVehicleWithAisByComposition()
+void TstVectorRepository::rejectsInvalidGeometry()
 {
     VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("vehiculos.db"))));
+    QVERIFY(repo.open(dbPath(QStringLiteral("invalida.db"))));
+    QSignalSpy errores(&repo, &VectorRepository::errorOccurred);
 
-    MapVehicle avion;
-    avion.name = QStringLiteral("CU-T1234");
-    avion.kind = VehicleKind::Aerial;
-    avion.position = QGeoCoordinate(23.0, -82.0);
-    avion.altitude = 9500.0;
-    avion.heading = 270.0;
-    avion.speed = 850.0;
-    QVERIFY(repo.insertVehicle(avion).has_value());
+    MapFeature vacia;
+    vacia.layerId = QStringLiteral("c");
+    vacia.kind = GeometryKind::Polygon;       // sin vertices -> invalida
+    QVERIFY(!repo.saveFeature(vacia).has_value());
 
-    MapVehicle buque;
-    buque.name = QStringLiteral("Rio Almendares");
-    buque.kind = VehicleKind::Naval;
-    buque.position = QGeoCoordinate(23.2, -82.4);
-    buque.speed = 12.0;
-    buque.ais.mmsi = QStringLiteral("323456789");
-    buque.ais.shipName = QStringLiteral("RIO ALMENDARES");
-    buque.ais.flag = QStringLiteral("CU");
-    buque.ais.length = 120.0;
-    buque.ais.lastUpdateUtcMs = QDateTime::currentMSecsSinceEpoch();
-    QVERIFY(repo.insertVehicle(buque).has_value());
+    MapFeature corta;
+    corta.layerId = QStringLiteral("c");
+    corta.kind = GeometryKind::Polygon;
+    corta.geometry = { QGeoCoordinate(23.0, -82.0),
+                       QGeoCoordinate(23.1, -82.0) };   // 2 < 3
+    QVERIFY(!repo.saveFeature(corta).has_value());
 
-    const auto vehiculos = repo.loadVehicles();
-    QCOMPARE(vehiculos.size(), 2);
-
-    for (const MapVehicle &v : vehiculos) {
-        if (v.kind == VehicleKind::Aerial) {
-            // El avion NO arrastra campos AIS: van por composicion, no por
-            // herencia. En el original, CBarco anadia unos cincuenta getters
-            // que CAvion heredaba sin poder usarlos.
-            QVERIFY(!v.ais.isValid());
-            QCOMPARE(v.altitude, 9500.0);
-        } else if (v.kind == VehicleKind::Naval) {
-            QVERIFY(v.ais.isValid());
-            QCOMPARE(v.ais.mmsi, QStringLiteral("323456789"));
-            QCOMPARE(v.ais.length, 120.0);
-        }
-    }
-}
-
-void TstVectorRepository::loadsVesselsByTimestamp()
-{
-    VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("ais.db"))));
-
-    const qint64 ahora = QDateTime::currentMSecsSinceEpoch();
-    const qint64 unDia = 24LL * 3600 * 1000;
-
-    for (int i = 0; i < 3; ++i) {
-        MapVehicle b;
-        b.name = QStringLiteral("Buque%1").arg(i);
-        b.kind = VehicleKind::Naval;
-        b.position = QGeoCoordinate(23.0 + i * 0.1, -82.0);
-        b.ais.mmsi = QStringLiteral("30000000%1").arg(i);
-        b.ais.lastUpdateUtcMs = ahora - i * unDia;   // hoy, ayer, anteayer
-        QVERIFY(repo.insertVehicle(b).has_value());
-    }
-
-    // Con las fechas como enteros, "del ultimo dia" es una comparacion. En el
-    // original eran TEXT "dd/MM/yyyy hh:mm:ss" y habia que comparar dia y mes
-    // a mano en C++, con un caso especial para diciembre.
-    QCOMPARE(repo.loadVesselsUpdatedSince(ahora - unDia / 2).size(), 1);
-    QCOMPARE(repo.loadVesselsUpdatedSince(ahora - unDia - 1000).size(), 2);
-    QCOMPARE(repo.loadVesselsUpdatedSince(0).size(), 3);
-}
-
-void TstVectorRepository::appendsTrackInOneTransaction()
-{
-    VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("traza.db"))));
-
-    MapPoint p;
-    p.name = QStringLiteral("Movil");
-    p.position = QGeoCoordinate(23.0, -82.0);
-    const auto id = repo.insertPoint(p);
-    QVERIFY(id.has_value());
-
-    QVector<TrackSample> muestras;
-    const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
-    for (int i = 0; i < 200; ++i) {
-        TrackSample s;
-        s.position = QGeoCoordinate(23.0 + i * 0.001, -82.0 + i * 0.001);
-        s.timeUtcMs = t0 + i * 1000;
-        s.speed = 10.0 + i;
-        muestras.append(s);
-    }
-
-    QElapsedTimer t;
-    t.start();
-    QVERIFY(repo.appendTrackBatch(*id, muestras));
-    const qint64 ms = t.elapsed();
-
-    const auto leidas = repo.loadTrack(*id, 1000);
-    QCOMPARE(leidas.size(), 200);
-    // Devueltas en orden cronologico.
-    QVERIFY(leidas.first().timeUtcMs < leidas.last().timeUtcMs);
-    QCOMPARE(leidas.first().speed, 10.0);
-
-    qInfo() << "200 muestras en una transaccion:" << ms << "ms";
-}
-
-void TstVectorRepository::prunesTrack()
-{
-    VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("poda.db"))));
-
-    MapPoint p;
-    p.name = QStringLiteral("Podado");
-    p.position = QGeoCoordinate(23.0, -82.0);
-    const auto id = repo.insertPoint(p);
-    QVERIFY(id.has_value());
-
-    QVector<TrackSample> muestras;
-    const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
-    for (int i = 0; i < 100; ++i) {
-        TrackSample s;
-        s.position = QGeoCoordinate(23.0, -82.0);
-        s.timeUtcMs = t0 + i * 1000;
-        muestras.append(s);
-    }
-    QVERIFY(repo.appendTrackBatch(*id, muestras));
-
-    QVERIFY(repo.pruneTrack(*id, 10));
-    const auto quedan = repo.loadTrack(*id, 1000);
-    QCOMPARE(quedan.size(), 10);
-    // Se conservan las MAS RECIENTES.
-    QCOMPARE(quedan.last().timeUtcMs, t0 + 99 * 1000);
-}
-
-void TstVectorRepository::deletingPointRemovesItsTrack()
-{
-    const QString ruta = dbPath(QStringLiteral("cascada.db"));
-    VectorRepository repo;
-    QVERIFY(repo.open(ruta));
-
-    MapVehicle v;
-    v.name = QStringLiteral("Efimero");
-    v.kind = VehicleKind::Naval;
-    v.position = QGeoCoordinate(23.0, -82.0);
-    v.ais.mmsi = QStringLiteral("999888777");
-    const auto id = repo.insertVehicle(v);
-    QVERIFY(id.has_value());
-
-    TrackSample s;
-    s.position = QGeoCoordinate(23.0, -82.0);
-    QVERIFY(repo.appendTrack(*id, s));
-    QCOMPARE(repo.loadTrack(*id).size(), 1);
-
-    QVERIFY(repo.removePoint(*id));
-
-    // Trayectoria, vehiculo y AIS desaparecen con el punto. En el original,
-    // la tabla trayectorias_<nombre> quedaba huerfana para siempre.
-    QCOMPARE(repo.loadTrack(*id).size(), 0);
-    QVERIFY(repo.loadVehicles().isEmpty());
-
-    QSqlQuery q(SqliteConnectionPool::connectionFor(
-        QStringLiteral("vector_cascada.db"), ruta,
-        SqliteConnectionPool::Mode::ReadWrite));
-    QVERIFY(q.exec(QStringLiteral("SELECT COUNT(*) FROM buque_ais")));
-    QVERIFY(q.next());
-    QCOMPARE(q.value(0).toInt(), 0);
-}
-
-void TstVectorRepository::insertsPolygonAtomically()
-{
-    VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("poligonos.db"))));
-
-    MapPolygon poly;
-    poly.name = QStringLiteral("Zona de exclusion");
-    poly.lineColor = QColor(Qt::red);
-    poly.fillColor = QColor(255, 0, 0, 60);
-    for (int i = 0; i < 200; ++i)
-        poly.vertices.append(QGeoCoordinate(23.0 + i * 0.001, -82.0 + i * 0.001));
-
-    QElapsedTimer t;
-    t.start();
-    const auto id = repo.insertPolygon(poly);
-    const qint64 ms = t.elapsed();
-    QVERIFY(id.has_value());
-
-    const auto leidos = repo.loadPolygons();
-    QCOMPARE(leidos.size(), 1);
-    QCOMPARE(leidos.first().name, poly.name);
-    QCOMPARE(leidos.first().vertices.size(), 200);
-    QCOMPARE(leidos.first().lineColor, QColor(Qt::red));
-    QCOMPARE(leidos.first().fillColor.alpha(), 60);
-    // El orden de los vertices se conserva.
-    QVERIFY(qAbs(leidos.first().vertices.first().latitude() - 23.0) < 1e-9);
-
-    qInfo() << "Poligono de 200 vertices en una transaccion:" << ms << "ms";
-
-    QVERIFY(repo.removePolygon(*id));
-    QVERIFY(repo.loadPolygons().isEmpty());
-}
-
-void TstVectorRepository::rollsBackIncompletePolygon()
-{
-    VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("rollback.db"))));
-
-    MapPolygon valido;
-    valido.name = QStringLiteral("Bueno");
-    for (int i = 0; i < 4; ++i)
-        valido.vertices.append(QGeoCoordinate(23.0 + i * 0.01, -82.0));
-    QVERIFY(repo.insertPolygon(valido).has_value());
-
-    // Nombre repetido: el INSERT de la cabecera falla y no debe quedar nada
-    // a medias.
-    MapPolygon repetido = valido;
-    QVERIFY(!repo.insertPolygon(repetido).has_value());
-
-    QCOMPARE(repo.loadPolygons().size(), 1);
-    QCOMPARE(repo.loadPolygons().first().vertices.size(), 4);
-
-    // Menos de tres vertices no es un poligono.
-    MapPolygon corto;
-    corto.name = QStringLiteral("Corto");
-    corto.vertices.append(QGeoCoordinate(23.0, -82.0));
-    corto.vertices.append(QGeoCoordinate(23.1, -82.0));
-    QVERIFY(!repo.insertPolygon(corto).has_value());
-    QCOMPARE(repo.loadPolygons().size(), 1);
-}
-
-void TstVectorRepository::insertsAndLoadsRoutes()
-{
-    VectorRepository repo;
-    QVERIFY(repo.open(dbPath(QStringLiteral("rutas.db"))));
-
-    MapRoute r;
-    r.name = QStringLiteral("Patrulla norte");
-    r.color = QColor(Qt::blue);
-    for (int i = 0; i < 5; ++i) {
-        MapRoutePoint p;
-        p.position = QGeoCoordinate(23.0 + i * 0.05, -82.0 - i * 0.05);
-        p.description = QStringLiteral("Waypoint %1").arg(i);
-        p.priority = i;
-        p.approachRadiusMeters = 50.0 + i;
-        r.points.append(p);
-    }
-
-    const auto id = repo.insertRoute(r);
-    QVERIFY(id.has_value());
-
-    const auto rutas = repo.loadRoutes();
-    QCOMPARE(rutas.size(), 1);
-    QCOMPARE(rutas.first().points.size(), 5);
-    // 'pos' era TEXT en el original: la coordenada iba dentro de una cadena.
-    // Aqui son dos numeros y el orden se conserva.
-    QCOMPARE(rutas.first().points.at(2).description, QStringLiteral("Waypoint 2"));
-    QCOMPARE(rutas.first().points.at(3).priority, 3);
-    QVERIFY(qAbs(rutas.first().points.at(4).approachRadiusMeters - 54.0) < 1e-9);
-
-    QVERIFY(repo.removeRoute(*id));
-    QVERIFY(repo.loadRoutes().isEmpty());
+    QVERIFY(errores.count() >= 2);            // los errores se PROPAGAN
+    QVERIFY(repo.loadFeatures().isEmpty());
 }
 
 void TstVectorRepository::neverCreatesTablesAtRuntime()
@@ -598,32 +300,15 @@ void TstVectorRepository::neverCreatesTablesAtRuntime()
 
     const QStringList antes = tablas();
 
-    // Se guarda de todo, con nombres que en el original habrian generado
-    // tablas: trayectorias_<nombre>, poligono_<nombre>, Ruta_<fecha>.
-    MapVehicle v;
-    v.name = QStringLiteral("Buque de prueba");
-    v.kind = VehicleKind::Naval;
-    v.position = QGeoCoordinate(23.0, -82.0);
-    v.ais.mmsi = QStringLiteral("111222333");
-    const auto id = repo.insertVehicle(v);
-    QVERIFY(id.has_value());
-
-    TrackSample s;
-    s.position = QGeoCoordinate(23.0, -82.0);
-    QVERIFY(repo.appendTrack(*id, s));
-
-    MapPolygon poly;
-    poly.name = QStringLiteral("Area 51");
-    for (int i = 0; i < 4; ++i)
-        poly.vertices.append(QGeoCoordinate(23.0 + i * 0.01, -82.0));
-    QVERIFY(repo.insertPolygon(poly).has_value());
-
-    MapRoute r;
-    r.name = QStringLiteral("Ruta_01_01_2026");
-    MapRoutePoint rp;
-    rp.position = QGeoCoordinate(23.0, -82.0);
-    r.points.append(rp);
-    QVERIFY(repo.insertRoute(r).has_value());
+    // Se guarda de todo, con nombres y tipos que en el original habrian
+    // generado tablas nuevas a partir de texto del usuario.
+    MapFeature f = lineFeature(QStringLiteral("Ruta_01_2026"),
+                               QStringLiteral("Zona_<nombre>"));
+    f.type = QStringLiteral("trayectorias_buque");
+    QVERIFY(repo.saveFeature(f).has_value());
+    LayerInfo capa;
+    capa.id = QStringLiteral("poligono_X");
+    QVERIFY(repo.saveLayer(capa));
 
     QCOMPARE(tablas(), antes);
     qInfo() << "Tablas tras guardar de todo:" << antes.size()
@@ -641,12 +326,10 @@ void TstVectorRepository::reportsErrorsInsteadOfSwallowingThem()
     QVERIFY(errores.count() > 0);
 
     // Y usarlo cerrado no revienta: devuelve fallo y avisa.
-    MapPoint p;
-    p.name = QStringLiteral("X");
-    p.position = QGeoCoordinate(23.0, -82.0);
-    QVERIFY(!repo.insertPoint(p).has_value());
-    QVERIFY(repo.loadPoints().isEmpty());
-    QVERIFY(!repo.updatePoint(p));
+    QVERIFY(!repo.saveFeature(lineFeature(QStringLiteral("c"),
+                                          QStringLiteral("X"))).has_value());
+    QVERIFY(repo.loadFeatures().isEmpty());
+    QVERIFY(!repo.clearFeatures());
 }
 
 void TstVectorRepository::transactionBeatsLooseCommits()
@@ -678,27 +361,25 @@ void TstVectorRepository::transactionBeatsLooseCommits()
     }
     QSqlDatabase::removeDatabase(conn);
 
-    // --- Como se hace ahora: todo en una transaccion ---------------------
+    // --- Como se hace ahora: una entidad de 500 vertices en UNA transaccion.
     VectorRepository repo;
     QVERIFY(repo.open(dbPath(QStringLiteral("entx.db"))));
 
-    MapPolygon poly;
-    poly.name = QStringLiteral("Medido");
-    for (int i = 0; i < kFilas; ++i)
-        poly.vertices.append(QGeoCoordinate(23.0 + i * 0.001, -82.0));
+    MapFeature f = lineFeature(QStringLiteral("medido"),
+                               QStringLiteral("Medido"), kFilas);
 
     QElapsedTimer t;
     t.start();
-    QVERIFY(repo.insertPolygon(poly).has_value());
+    QVERIFY(repo.saveFeature(f).has_value());
     const qint64 msTx = t.elapsed();
 
-    QCOMPARE(repo.loadPolygons().first().vertices.size(), kFilas);
+    QCOMPARE(repo.loadFeatures().first().geometry.size(), kFilas);
 
-    qInfo() << kFilas << "filas ->" << msSueltos << "ms sueltas,"
+    qInfo() << kFilas << "vertices ->" << msSueltos << "ms sueltos,"
             << msTx << "ms en una transaccion";
 
-    // No se afirma un factor concreto: depende del disco y de si hay fsync
-    // real. Lo que si debe cumplirse es que la transaccion no sea peor.
+    // No se afirma un factor concreto (depende del disco); solo que la
+    // transaccion no sea peor.
     QVERIFY2(msTx <= msSueltos + 50,
              qPrintable(QStringLiteral("transaccion %1 ms frente a %2 ms")
                             .arg(msTx).arg(msSueltos)));

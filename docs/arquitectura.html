@@ -169,7 +169,7 @@ por un entero cuando hace falta.</p>
 <tr><td>MapTarget</td><td>Objetivo móvil: posición, rumbo, velocidad, color, etiqueta, visibilidad de traza, más <code>kind</code> y un <code>QVariantMap attributes</code> libre para datos de dominio (AIS/ADS-B/telemetría) que la librería no interpreta. Pensado para tiempo real y agnóstico del dominio.</td></tr>
 <tr><td>LayerInfo / BaseLayerInfo</td><td>Descriptor de una capa (de entidades / base) para poblar menús.</td></tr>
 <tr><td>GeoPath</td><td>Un trazado leído de un fichero <code>.geo</code> (lista de coordenadas + si cierra).</td></tr>
-<tr><td>Measurement / MapPoint / MapVehicle…</td><td>Tipos auxiliares de la API pública (medición, puntos, vehículos, rutas).</td></tr>
+<tr><td>Measurement</td><td>Resultado de una medición sobre el mapa (distancia y azimut).</td></tr>
 </table>
 <p class="muted">Regla de diseño: la identidad es un entero que devuelve la librería al añadir el objeto, no un puntero a una jerarquía. Esto elimina los <code>QList&lt;void*&gt;</code> y castes del código original.</p>
 
@@ -499,7 +499,6 @@ exactamente donde el mapa la espera.</div>
 <tr><th>Herramienta</th><th>Tipo</th><th>Para qué</th></tr>
 <tr><td class="mono">probe_db</td><td>consola</td><td>Sonda una <code>.sqlitedb</code> y deduce su configuración; imprime el bloque para <code>datasets.json</code>.</td></tr>
 <tr><td class="mono">geo_to_tiles</td><td>consola (Gui)</td><td>Rasteriza un vector <code>.geo/.xyz</code> a una pirámide de teselas SQLite (capa base rápida).</td></tr>
-<tr><td class="mono">vector_db</td><td>consola</td><td>Utilidad sobre la BD de entidades vectoriales.</td></tr>
 <tr><td class="mono">render_map</td><td>utilidad (widget)</td><td>Renderiza el mapa a imagen sin interacción (pruebas/verificación).</td></tr>
 <tr><td class="mono">bench_tiles</td><td>consola</td><td>Mide el rendimiento de lectura/caché de teselas.</td></tr>
 <tr><td class="mono">fill_tiles</td><td>consola</td><td>Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave.</td></tr>
@@ -552,14 +551,6 @@ distribuir, 1 = errores, 2 = argumentos mal; pensado para scripts.</p>
 <tr><td>--minzoom / --maxzoom</td><td>Rango de zoom de la pirámide (def. 4..11).</td></tr>
 <tr><td>--color / --width</td><td>Color y grosor de línea del trazado.</td></tr>
 <tr><td>--fill / --bg</td><td>Rellenar polígonos / color de fondo.</td></tr>
-</table>
-
-<h3>vector_db — BD de entidades vectoriales</h3>
-<p class="mono" style="font-size:12px">vector_db --out &lt;mapdata.db&gt; [--dump]  ·  vector_db --file &lt;mapdata.db&gt; --dump</p>
-<table class="kv">
-<tr><td>--out</td><td>Crea una BD nueva con datos de ejemplo (la borra si existe).</td></tr>
-<tr><td>--file</td><td>Abre una BD existente sin tocarla (para inspección).</td></tr>
-<tr><td>--dump</td><td>Vuelca esquema y contenido (implícito al crear con <code>--out</code>).</td></tr>
 </table>
 
 <h3>render_map — mapa a imagen (sin ventana)</h3>
