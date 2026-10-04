@@ -352,6 +352,15 @@ public:
         double antennaA = 0.0, double antennaB = 0.0,
         const LineOfSightParams &params = LineOfSightParams()) const;
 
+    //! Viewshed 360 grados desde \a origin: por azimut, el angulo de cierre del
+    //! terreno (horizonte y picos) y hasta donde se ve un objetivo a
+    //! \c ViewshedParams::targetHeight (zona de visibilidad). Corrige la
+    //! curvatura 4/3 (configurable). Resultado invalido (isValid()==false) si no
+    //! hay origen de elevacion o falta la cota del origen.
+    Viewshed viewshed(
+        const QGeoCoordinate &origin,
+        const ViewshedParams &params = ViewshedParams()) const;
+
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;
     void setActiveTool(MapTool tool);

@@ -951,6 +951,16 @@ LineOfSightResult MapWidget::lineOfSight(
     return libmapa::lineOfSight(*d->elevation, a, b, antennaA, antennaB, params);
 }
 
+// Viewshed 360 grados. Reenvio al calculo del nucleo con el origen de elevacion
+// configurado; resultado invalido si no hay origen.
+Viewshed MapWidget::viewshed(const QGeoCoordinate &origin,
+                             const ViewshedParams &params) const
+{
+    if (!d->elevation)
+        return Viewshed();
+    return libmapa::computeViewshed(*d->elevation, origin, params);
+}
+
 // Cambia en caliente el origen a una CARPETA de `.hgt` (vacia = quita elevacion).
 void MapWidget::setElevationDir(const QString &dir)
 {

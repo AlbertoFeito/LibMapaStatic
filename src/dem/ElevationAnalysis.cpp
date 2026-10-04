@@ -2,6 +2,8 @@
 
 #include "geo/GeoMath.h"
 
+#include <QtMath>
+
 #include <cmath>
 
 namespace libmapa {
@@ -44,6 +46,15 @@ void anadirMuestra(ElevationProfile &perfil, double distancia,
 double abombamiento(double d1, double d2, double k, double R)
 {
     return (d1 * d2) / (2.0 * k * R);
+}
+
+// Caida de la superficie terrestre bajo el plano horizontal del observador a
+// distancia d: d^2/(2·k·R). Es abombamiento(d, d, k, R), pero con nombre propio
+// para el viewshed (la referencia aqui es la tangente en el observador, no la
+// cuerda entre dos puntos).
+double caida(double d, double k, double R)
+{
+    return abombamiento(d, d, k, R);
 }
 
 } // namespace
@@ -171,6 +182,108 @@ LineOfSightResult lineOfSight(const IElevationSource &src,
         r.blockDistanceM = minDist;
     }
     return r;
+}
+
+// Un rayo del viewshed: camina el azimut \a az desde \a origin muestreando el
+// terreno y acumulando el horizonte. El OBJETIVO a altura H de un punto a
+// distancia d se tapa con el terreno MAS cercano que d, asi que se comprueba su
+// angulo contra el horizonte acumulado ANTES de incorporar el terreno de d (el
+// terreno de d no se tapa a si mismo). Con H=0 esto es el viewshed del propio
+// terreno. Las muestras sin dato (hueco o fuera de cobertura) se saltan.
+ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &origin,
+                         double az, double zObs, double paso, double maxR,
+                         double H, bool curva, double k, double R,
+                         bool guardarPerfil)
+{
+    ViewshedRay ray;
+    ray.azimuthDeg = az;
+
+    // Tangente del horizonte acumulado (max del angulo del terreno visto hasta
+    // aqui). Empieza en -inf: al principio no hay nada que tape.
+    double horizonteTan = -std::numeric_limits<double>::infinity();
+    double mejorTan = -std::numeric_limits<double>::infinity();   // para horizonDeg
+    bool visibleContinuo = true;                                  // zona ZVD sin cortar
+
+    double ultimaCota = std::numeric_limits<double>::quiet_NaN();
+    if (guardarPerfil)
+        anadirMuestra(ray.profile, 0.0, origin, src.elevationAt(origin), ultimaCota);
+
+    double ultimoD = 0.0;
+    for (double d = paso; d <= maxR; d += paso) {
+        const QGeoCoordinate p = origin.atDistanceAndAzimuth(d, az);
+        const double t = src.elevationAt(p);
+        if (guardarPerfil)
+            anadirMuestra(ray.profile, d, p, t, ultimaCota);
+        if (std::isnan(t))
+            continue;                                   // hueco / fuera de cobertura
+        ultimoD = d;
+
+        const double c = curva ? caida(d, k, R) : 0.0;
+
+        // Objetivo a altura H: visible si su angulo supera el horizonte de lo
+        // MAS cercano (sin incluir el terreno de este mismo d).
+        const double yTgt = (t + H - zObs) - c;
+        const double tanTgt = yTgt / d;
+        const bool visibleAqui = tanTgt >= horizonteTan;
+        if (visibleContinuo) {
+            if (visibleAqui) ray.visibilityReachM = d;
+            else             visibleContinuo = false;
+        }
+
+        // Ahora incorpora el terreno de d al horizonte; si fija un nuevo maximo,
+        // es un pico de la silueta.
+        const double yTerr = (t - zObs) - c;
+        const double tanTerr = yTerr / d;
+        if (tanTerr > horizonteTan) {
+            ClosingAnglePeak pk;
+            pk.distanceM = d;
+            pk.position = p;
+            pk.elevation = t;
+            pk.angleDeg = qRadiansToDegrees(std::atan2(yTerr, d));
+            pk.tangent = tanTerr;
+            ray.peaks.append(pk);
+            horizonteTan = tanTerr;
+        }
+        if (tanTerr > mejorTan)
+            mejorTan = tanTerr;
+    }
+
+    if (guardarPerfil)
+        ray.profile.totalDistanceM = ultimoD;
+    ray.horizonDeg = ray.peaks.isEmpty()
+                         ? 0.0
+                         : qRadiansToDegrees(std::atan(mejorTan));
+    return ray;
+}
+
+// Viewshed 360 grados: un rayo por azimut. Invalido si no hay cota en el origen
+// (no se puede anclar el plano del observador).
+Viewshed computeViewshed(const IElevationSource &src, const QGeoCoordinate &origin,
+                         const ViewshedParams &params)
+{
+    Viewshed vs;
+    if (!origin.isValid())
+        return vs;
+    const double t0 = src.elevationAt(origin);
+    if (std::isnan(t0))
+        return vs;
+
+    const double paso = params.stepMeters > 0.0 ? params.stepMeters : 30.0;
+    const double azPaso = params.azimuthStepDeg > 0.0 ? params.azimuthStepDeg : 1.0;
+    const double maxR = params.maxRangeM > 0.0 ? params.maxRangeM : 50000.0;
+    const double k = params.k > 0.0 ? params.k : 4.0 / 3.0;
+    const double R = params.earthRadiusM > 0.0 ? params.earthRadiusM : 6371000.0;
+    const double zObs = t0 + params.observerHeight;
+
+    vs.origin = origin;
+    vs.observerHeight = params.observerHeight;
+    vs.targetHeight = params.targetHeight;
+
+    for (double az = 0.0; az < 360.0; az += azPaso)
+        vs.rays.append(rayoViewshed(src, origin, az, zObs, paso, maxR,
+                                    params.targetHeight, params.curvature, k, R,
+                                    params.keepProfiles));
+    return vs;
 }
 
 } // namespace libmapa

@@ -39,6 +39,22 @@ LineOfSightResult lineOfSight(const IElevationSource &src,
                               double antennaA, double antennaB,
                               const LineOfSightParams &params = {});
 
+/*!
+ * \brief Viewshed 360 grados desde \a origin: un rayo por azimut.
+ *
+ * Por cada azimut (0..360 a paso \c params.azimuthStepDeg) camina el rayo
+ * geodesico hasta \c params.maxRangeM muestreando el terreno (via \a src) cada
+ * \c params.stepMeters. Para cada rayo calcula el angulo de cierre del terreno
+ * (con curvatura 4/3 por defecto), el horizonte acumulado y sus picos, y hasta
+ * donde se ve de forma continua un objetivo a \c params.targetHeight (el borde
+ * del poligono de visibilidad). Resultado invalido (rays vacio) si falta la cota
+ * en el origen. Es visibilidad DIRECTA, no radar (el horizonte geometrico emerge
+ * de la geometria, no se codifica la formula 4.12*raiz(h)).
+ */
+Viewshed computeViewshed(const IElevationSource &src,
+                         const QGeoCoordinate &origin,
+                         const ViewshedParams &params = {});
+
 } // namespace libmapa
 
 #endif // LIBMAPA_DEM_ELEVATIONANALYSIS_H_

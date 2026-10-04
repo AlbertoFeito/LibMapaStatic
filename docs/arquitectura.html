@@ -428,16 +428,21 @@ el <b>perfil de una ruta</b>.</p>
 <tr><td class="mono">ElevationProfile</td><td><code>samples[]</code> (<code>{distanceM, position, elevation}</code>, NaN = hueco), <code>totalDistanceM</code>, <code>min/maxElevation</code>, <code>gain</code>, <code>loss</code>. Las estadísticas ignoran los NaN.</td></tr>
 <tr><td class="mono">lineOfSight(src, a, b, antA, antB, params)</td><td>Visibilidad directa entre dos puntos con altura de antena en cada extremo. Muestrea el terreno intermedio y lo compara con la recta entre las cimas de antena, <b>más el abombamiento de la Tierra</b> (radio efectivo <b>k·R</b>, k=4/3; <code>curvature=false</code> → geométrico).</td></tr>
 <tr><td class="mono">LineOfSightResult</td><td><code>clear</code> (¿hay visión?), <code>clearanceM</code> (holgura mínima; negativa = cuánto falta), <code>blockPosition</code>/<code>blockDistanceM</code> (punto crítico), <code>isValid()</code> (falso sin dato en un extremo).</td></tr>
+<tr><td class="mono">computeViewshed(src, origin, params)</td><td>Viewshed 360°: un rayo por azimut (<code>azimuthStepDeg</code>) hasta <code>maxRangeM</code>. Por rayo: ángulo de cierre del terreno, horizonte acumulado y <b>picos</b> de la silueta, y <code>visibilityReachM</code> (hasta dónde se ve un objetivo a <code>targetHeight</code> = polígono ZVD). Curvatura k·R como en <code>lineOfSight</code>.</td></tr>
+<tr><td class="mono">Viewshed / ViewshedRay / ClosingAnglePeak</td><td><code>Viewshed{origin, rays[]}</code>; cada <code>ViewshedRay{azimuthDeg, horizonDeg, peaks[], visibilityReachM, profile}</code>; cada <code>ClosingAnglePeak{distanceM, position, elevation, angleDeg, tangent}</code>. <code>keepProfiles</code> llena <code>profile</code> por rayo (memoria acotada si no).</td></tr>
 </table>
 <p>El <b>perfil de ruta</b> es altura <b>real</b> del terreno EN EL LUGAR —no aplica
 curvatura terrestre—, para dibujar el corte del recorrido o medir desniveles. La
-<b>visibilidad punto a punto</b> sí corrige la curvatura+refracción (la constante
-<code>d1·d2/(2·k·R)</code> es la misma física que <code>DVD_potencial</code>, k=4/3);
-es visibilidad <b>directa</b>, no radar (sin horizonte radioeléctrico ni haz). La
-librería devuelve los datos; la gráfica la pinta la app. Se exponen por la fachada:
-<code>MapWidget::elevationProfile(path, params)</code> y
-<code>MapWidget::lineOfSight(a, b, antA, antB, params)</code> (vacío / inválido si no
-hay origen DEM configurado).</p>
+<b>visibilidad punto a punto</b> y el <b>viewshed 360°</b> sí corrigen la
+curvatura+refracción (la constante <code>d1·d2/(2·k·R)</code> es la misma física que
+<code>DVD_potencial</code>, k=4/3; la caída desde el observador es <code>d²/(2·k·R)</code>);
+son visibilidad <b>directa</b>, no radar: el horizonte geométrico (<code>≈4.12·√h</code>)
+<b>emerge</b> de la geometría (atan2 + caída), no se codifica. Un viewshed de 360° a
+30 m y 50 km tarda ~0,1 s. La librería devuelve los datos; la gráfica la pinta la app.
+Se exponen por la fachada: <code>MapWidget::elevationProfile(path, params)</code>,
+<code>MapWidget::lineOfSight(a, b, antA, antB, params)</code> y
+<code>MapWidget::viewshed(origin, params)</code> (vacío / inválido si no hay origen
+DEM configurado).</p>
 
 <!-- ===================== 9. FLUJOS ===================== -->
 <h2 class="sec">9 · Flujos de interacción entre objetos</h2>

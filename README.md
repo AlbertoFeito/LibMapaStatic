@@ -321,6 +321,27 @@ libmapa::LineOfSightResult v = mapa->lineOfSight(A, B, /*antenaA*/ 10, /*antenaB
 // v.blockPosition / v.blockDistanceM -> punto crítico (dónde bloquea)
 ```
 
+El tercero es el **viewshed 360°** desde un punto: por cada azimut, el **ángulo de
+cierre** del terreno (grados y tangente) con el horizonte acumulado y sus picos, y
+hasta qué distancia se ve un objetivo a una altura dada (la **zona de visibilidad
+directa**, el polígono ZVD). También con curvatura 4/3. El horizonte geométrico
+(`≈4.12·√h`) **emerge** de la geometría; no se codifica como fórmula —es
+visibilidad directa, no radar—.
+
+```cpp
+libmapa::ViewshedParams p;
+p.observerHeight = 15;   // antena del observador (m)
+p.targetHeight   = 300;  // altura del objetivo para la zona de visibilidad (m)
+libmapa::Viewshed vs = mapa->viewshed(centro, p);  // 360 rayos (1° por defecto)
+// vs.rays[az].horizonDeg / .peaks  -> silueta y ángulo de cierre por azimut
+// vs.rays[az].visibilityReachM     -> alcance visible del objetivo (polígono ZVD)
+```
+
+Por memoria, cada rayo guarda solo los picos y escalares; `ViewshedParams::keepProfiles`
+añade el perfil completo de cada rayo cuando se necesita dibujar un corte. Un viewshed
+de 360° a 30 m y 50 km tarda ~0,1 s. La librería devuelve los datos; la gráfica la
+pinta la app.
+
 ## Referencia de comandos (argumentos por herramienta)
 
 Opciones entre `[…]` opcionales; el resto, obligatorias. Los bbox son siempre
@@ -414,6 +435,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 15 | Juego Qt 5: librería con qmake (`qmake/libmapa`, `libmapa.pri`), `desplegar_qt5.bat` y guía [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md) |
 | 16 | Análisis de elevación: perfil del terreno a lo largo de una ruta (`MapWidget::elevationProfile`) sobre el origen DEM existente |
 | 17 | Visibilidad punto a punto (`MapWidget::lineOfSight`): línea de visión con altura de antenas y curvatura 4/3 |
+| 18 | Viewshed 360° (`MapWidget::viewshed`): ángulo de cierre, horizonte y picos, y zona de visibilidad a una altura por azimut |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

@@ -3174,3 +3174,59 @@ existente, así que **siguen 18 tests** en verde, sin warnings.
 **Estado: visibilidad punto a punto disponible en el núcleo y por la fachada.
 Siguiente: Fase C (viewshed 360° — perfil + ángulo de cierre + zona de
 visibilidad a una altura).**
+
+## 62. Análisis de elevación: viewshed 360° (Fase C)
+
+Tercera y última capacidad: el **viewshed** desde un punto. Por cada azimut (0..360
+a paso configurable, 1° = 360 rayos) se camina el rayo geodésico y se calcula el
+**ángulo de cierre** del terreno, el **horizonte acumulado** con sus **picos** (la
+silueta), y hasta dónde se ve un **objetivo a una altura H** (la zona de visibilidad
+directa, el polígono ZVD que pedía el usuario). Cierra el alcance de análisis de
+elevación acordado tras revisar `DVD_potencial`.
+
+Física (reutiliza la de la Fase B). Observador en el origen con plano horizontal
+tangente; para un punto a distancia `d`: caída de la Tierra bajo la tangente
+`d²/(2·k·R)` (= `abombamiento(d, d, k, R)`, envuelto en el helper `caida`), altura
+respecto al observador `y = (terreno + [H] − zObs) − caída`, y **ángulo de cierre**
+`atan2(y, d)` en grados con su tangente (no la aproximación de ángulo pequeño
+`3440·Δh/d` de DVD; usamos `atan2`). El horizonte es el máximo acumulado del ángulo
+del terreno; un objetivo a altura H es visible mientras su ángulo supere ese
+horizonte acumulado hasta esa distancia. Es visibilidad **directa**, no radar: el
+horizonte geométrico (`≈4.12·√h`) **emerge** de la geometría; no se codifica la
+fórmula. El test lo confirma: sobre terreno plano el alcance con curvatura sale
+26040 m frente a los 26069 m de `sqrt(2·k·R)·(√hObs+√H)`.
+
+Cambios:
+
+- **`include/libmapa/Elevation.h`:** tipos nuevos `ViewshedParams` (`stepMeters=30`,
+  `azimuthStepDeg=1`, `maxRangeM=50000`, `observerHeight`, `targetHeight`,
+  `curvature`, `k=4/3`, `earthRadiusM`, `keepProfiles=false`), `ClosingAnglePeak`
+  (`distanceM`, `position`, `elevation`, `angleDeg`, `tangent`), `ViewshedRay`
+  (`azimuthDeg`, `visibilityReachM`, `horizonDeg`, `peaks`, `profile`) y `Viewshed`
+  (`origin`, alturas, `rays`, `isValid()`).
+- **`src/dem/ElevationAnalysis.{h,cpp}`:** función libre
+  `computeViewshed(src, origin, params)` (+ helper interno `rayoViewshed` por azimut
+  y `caida(d,k,R)`). El objetivo de un punto se comprueba contra el horizonte de lo
+  MÁS cercano (antes de incorporar el terreno de ese mismo `d`, que no se tapa a sí
+  mismo); con H=0 es el viewshed del propio terreno. Huecos/fuera de cobertura se
+  saltan. **Memoria acotada:** con `keepProfiles=false` (defecto) cada rayo guarda
+  solo picos y escalares (360 rayos → trivial); `keepProfiles=true` llena el perfil
+  por rayo.
+- **Fachada `MapWidget`:** `viewshed(origin, params)` sobre el origen DEM
+  configurado (inválido si no hay origen).
+- **`tests/tst_elevationanalysis.cpp`:** cuatro casos nuevos (slots del test
+  existente): colina al este → pico de la silueta a distancia conocida y horizonte
+  mucho mayor que hacia el oeste (plano); el alcance de visibilidad crece con la
+  altura del objetivo; terreno plano → alcance finito que coincide con el horizonte
+  geométrico (y, sin curvatura, hasta el alcance máximo); casos inválidos. Un
+  `qDebug` registra el tiempo de un viewshed 360° (≈136 ms a 30 m, 50 km). Siguen
+  **18 tests** en verde, sin warnings.
+- **Docs:** README (viewshed en «Análisis de elevación», hito 18),
+  `arquitectura.html` (8c) + PDF.
+
+Sin cambios en CMake ni qmake: todo va en `ElevationAnalysis.cpp` y los casos son
+slots del test existente.
+
+**Estado: las tres capacidades de análisis de elevación (perfil de ruta, visibilidad
+punto a punto, viewshed 360°) están en el núcleo y por la fachada, verdes (18 tests),
+solo visibilidad directa. Queda cerrado lo pedido tras revisar `DVD_potencial`.**

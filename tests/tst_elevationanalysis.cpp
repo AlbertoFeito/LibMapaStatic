@@ -3,9 +3,11 @@
 #include "geo/GeoMath.h"
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtEndian>
+#include <QtMath>
 #include <QtTest>
 
 #include <cmath>
@@ -27,6 +29,10 @@ private slots:
     void lineOfSightBlockedByHill();
     void lineOfSightCurvatureOnFlatEarth();
     void lineOfSightInvalid();
+    void viewshedPeakAtKnownAzimuth();
+    void viewshedTargetHeightVisibility();
+    void viewshedCurvatureHorizon();
+    void viewshedInvalid();
 
 private:
     static bool writeHgt(const QString &path, int side, const QVector<int> &s);
@@ -249,6 +255,165 @@ void TstElevationAnalysis::lineOfSightInvalid()
     const QGeoCoordinate hueco(19.0 + 5.0 / 6.0, -77.0 + 1.0 / 6.0);
     QVERIFY(std::isnan(m_dem.elevationAt(hueco)));
     QVERIFY(!lineOfSight(m_dem, hueco, b, 0.0, 0.0).isValid());
+}
+
+// --- Viewshed (Fase C) ------------------------------------------------------
+
+// Crea un tile con terreno 0 salvo una colina (un nodo alto) para los tests del
+// viewshed. Devuelve true si se escribio.
+static bool writeHillTile(const QString &path, int side, int hillRow, int hillCol,
+                          int hillValue)
+{
+    QVector<int> s(side * side, 0);
+    s[hillRow * side + hillCol] = hillValue;
+    // Reutiliza el writeHgt de la clase a traves de una instancia temporal.
+    QByteArray bytes;
+    bytes.resize(side * side * 2);
+    char *p = bytes.data();
+    for (int i = 0; i < side * side; ++i)
+        qToBigEndian<qint16>(qint16(s[i]), p + i * 2);
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
+        return false;
+    return f.write(bytes) == bytes.size();
+}
+
+// Una colina al ESTE (azimut 90) produce en ese rayo un pico de la silueta a
+// distancia conocida y un horizonte (angulo de cierre) muy superior al del rayo
+// hacia el oeste (terreno plano). Mide ademas el tiempo de un viewshed de 360.
+void TstElevationAnalysis::viewshedPeakAtKnownAzimuth()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 7;
+    // Colina en el nodo (3,5): lat 19.5, lon -76.1667, al este del origen (3,3).
+    QVERIFY(writeHillTile(dir.filePath(QStringLiteral("N19W077.hgt")),
+                          side, 3, 5, 1500));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    const QGeoCoordinate origen(19.5, -76.5);     // nodo (3,3), cota 0
+
+    ViewshedParams vp;                            // observador a ras (0 m)
+    vp.maxRangeM = 50000.0;
+
+    QElapsedTimer t;
+    t.start();
+    const Viewshed vs = computeViewshed(dem, origen, vp);
+    qDebug() << "viewshed 360deg paso" << vp.stepMeters << "m alcance"
+             << vp.maxRangeM << "m:" << t.elapsed() << "ms,"
+             << vs.rays.size() << "rayos";
+
+    QVERIFY(vs.isValid());
+    QCOMPARE(vs.rays.size(), 360);                // 1 grado -> 360 rayos
+
+    const ViewshedRay &este = vs.rays[90];        // indice = azimut con paso 1
+    QCOMPARE(int(este.azimuthDeg), 90);
+    QVERIFY(!este.peaks.isEmpty());
+    // El pico mas alto de la silueta es la colina: lejos del origen y ~1500 m.
+    const ClosingAnglePeak &cima = este.peaks.last();
+    QVERIFY2(cima.elevation > 1000.0,
+             qPrintable(QStringLiteral("cota del pico=%1").arg(cima.elevation)));
+    QVERIFY(cima.distanceM > 20000.0 && cima.distanceM < 45000.0);
+    QVERIFY(cima.angleDeg > 0.0);                 // por encima del horizonte
+    QVERIFY(std::abs(cima.tangent - std::tan(qDegreesToRadians(cima.angleDeg))) < 1e-9);
+
+    // Hacia el este la silueta se "cierra" mucho mas que hacia el oeste (plano).
+    const ViewshedRay &oeste = vs.rays[270];
+    QVERIFY(este.horizonDeg > oeste.horizonDeg + 1.0);
+}
+
+// Un objetivo mas alto se ve mas lejos: en el rayo hacia la colina, la zona de
+// visibilidad (visibilityReachM) crece con la altura del objetivo.
+void TstElevationAnalysis::viewshedTargetHeightVisibility()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 7;
+    QVERIFY(writeHillTile(dir.filePath(QStringLiteral("N19W077.hgt")),
+                          side, 3, 5, 1500));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    const QGeoCoordinate origen(19.5, -76.5);
+
+    ViewshedParams bajo;
+    bajo.observerHeight = 30.0;
+    bajo.targetHeight = 0.0;
+    bajo.maxRangeM = 50000.0;
+    const Viewshed vsBajo = computeViewshed(dem, origen, bajo);
+
+    ViewshedParams alto = bajo;
+    alto.targetHeight = 3000.0;                   // bien por encima de la colina
+    const Viewshed vsAlto = computeViewshed(dem, origen, alto);
+
+    QVERIFY(vsBajo.isValid() && vsAlto.isValid());
+    const double reachBajo = vsBajo.rays[90].visibilityReachM;
+    const double reachAlto = vsAlto.rays[90].visibilityReachM;
+    QVERIFY2(reachAlto > reachBajo,
+             qPrintable(QStringLiteral("reachAlto=%1 reachBajo=%2")
+                            .arg(reachAlto).arg(reachBajo)));
+}
+
+// Sobre terreno plano, el unico limite de la vision es la curvatura: con ella, un
+// objetivo a altura H tiene alcance FINITO que coincide con el horizonte
+// geometrico sqrt(2kR)*(sqrt(hObs)+sqrt(H)) -el 4.12*raiz(h) de DVD EMERGE, no se
+// codifica-; sin curvatura y H>=hObs, se ve hasta el alcance maximo.
+void TstElevationAnalysis::viewshedCurvatureHorizon()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 7;
+    const QVector<int> s(side * side, 0);          // todo plano a cota 0
+    QVERIFY(writeHgt(dir.filePath(QStringLiteral("N19W077.hgt")), side, s));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    const QGeoCoordinate origen(19.5, -76.5);
+    const double hObs = 10.0, H = 10.0, k = 4.0 / 3.0, R = 6371000.0;
+
+    ViewshedParams conCurva;
+    conCurva.observerHeight = hObs;
+    conCurva.targetHeight = H;
+    // 50 km se mantiene dentro del tile (1x1 grado) en todas las direcciones desde
+    // el centro; el horizonte geometrico (~26 km) queda holgadamente por debajo.
+    conCurva.maxRangeM = 50000.0;
+    const Viewshed vsCurva = computeViewshed(dem, origen, conCurva);
+    QVERIFY(vsCurva.isValid());
+    const double reachCurva = vsCurva.rays[0].visibilityReachM;
+
+    const double horizonteGeo =
+        std::sqrt(2.0 * k * R) * (std::sqrt(hObs) + std::sqrt(H));   // ~26 km
+    qDebug() << "reach con curvatura" << reachCurva << "m; horizonte geometrico"
+             << horizonteGeo << "m";
+    QVERIFY(reachCurva < conCurva.maxRangeM);                 // finito
+    QVERIFY2(std::abs(reachCurva - horizonteGeo) < 1000.0,
+             qPrintable(QStringLiteral("reach=%1 geo=%2")
+                            .arg(reachCurva).arg(horizonteGeo)));
+
+    // Sin curvatura: el terreno plano no tapa y el objetivo (H=hObs) se ve hasta
+    // el final del alcance.
+    ViewshedParams sinCurva = conCurva;
+    sinCurva.curvature = false;
+    const Viewshed vsPlano = computeViewshed(dem, origen, sinCurva);
+    const double reachPlano = vsPlano.rays[0].visibilityReachM;
+    QVERIFY(reachPlano > reachCurva);
+    QVERIFY(reachPlano > sinCurva.maxRangeM - 2.0 * sinCurva.stepMeters);
+}
+
+// Sin origen de elevacion, o con el origen sobre un hueco SRTM, el viewshed es
+// invalido (no se puede anclar el plano del observador): isValid()==false.
+void TstElevationAnalysis::viewshedInvalid()
+{
+    const QGeoCoordinate origen(19.5, -76.5);
+
+    HgtElevation vacio;
+    QVERIFY(!computeViewshed(vacio, origen).isValid());
+
+    // Origen sobre el hueco del tile compartido (nodo (1,1)).
+    const QGeoCoordinate hueco(19.0 + 5.0 / 6.0, -77.0 + 1.0 / 6.0);
+    QVERIFY(std::isnan(m_dem.elevationAt(hueco)));
+    QVERIFY(!computeViewshed(m_dem, hueco).isValid());
 }
 
 QTEST_MAIN(TstElevationAnalysis)
