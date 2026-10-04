@@ -1,6 +1,7 @@
 #include "libmapa/MapWidget.h"
 
 #include "core/Logging.h"
+#include "dem/ElevationAnalysis.h"
 #include "dem/HgtElevation.h"
 #include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
@@ -925,6 +926,17 @@ double MapWidget::elevationAt(const QGeoCoordinate &position) const
 {
     return d->elevation ? d->elevation->elevationAt(position)
                         : std::numeric_limits<double>::quiet_NaN();
+}
+
+// Perfil de elevacion a lo largo de una ruta. Reenvio al calculo del nucleo
+// usando el origen de elevacion configurado; perfil vacio si no hay origen.
+ElevationProfile MapWidget::elevationProfile(
+    const QVector<QGeoCoordinate> &path,
+    const ElevationProfileParams &params) const
+{
+    if (!d->elevation)
+        return ElevationProfile();
+    return libmapa::elevationProfile(*d->elevation, path, params);
 }
 
 // Cambia en caliente el origen a una CARPETA de `.hgt` (vacia = quita elevacion).

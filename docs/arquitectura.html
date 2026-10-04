@@ -416,6 +416,24 @@ se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m,
 <p>El <code>.hgt</code> es crudo y <b>sin cabecera</b>: rejilla <b>cuadrada</b> de <code>int16</code> <b>big-endian</b> de 1°×1°, nombre = esquina SO (<code>N19W077.hgt</code>), fila 0 = norte, col 0 = oeste. La resolución se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m, 3601 = 30 m). La <b>BD</b> guarda esas mismas muestras <code>qCompress</code>-adas: <code>dem_tiles(lat,lon,side,data)</code> + <code>dem_meta</code>; se abre read-only por el <code>SqliteConnectionPool</code>.</p>
 <p><b>Propiedades:</b> <span class="tag">caché LRU</span> de tiles abiertos; <span class="tag">huecos→NaN</span> no inventa terreno; <span class="tag">dos orígenes</span> carpeta <code>.hgt</code> o BD empaquetable, misma cota. Se expone por la fachada: <code>MapConfig.elevationDir</code>/<code>elevationDbFile</code>, <code>MapWidget::elevationAt()</code> y <code>setElevationDir/Db()</code>; <code>fill_map</code> muestra la cota bajo el cursor (<code>--dem</code> carpeta, <code>--dem-db</code> base de datos, o el botón <b>DEM…</b>).</p>
 
+<h2 class="sec">8c · Análisis de elevación — perfiles sobre el DEM</h2>
+<p>Sobre ese mismo <code>IElevationSource</code>, el núcleo calcula <b>perfiles del
+terreno</b> con funciones libres en <span class="tag">src/dem/ElevationAnalysis.{h,cpp}</span>
+y tipos de resultado públicos en <span class="tag">include/libmapa/Elevation.h</span>.
+Son cálculos de <b>visibilidad directa</b> (nada de radar). La primera capacidad es
+el <b>perfil de una ruta</b>.</p>
+<table>
+<tr><th>Elemento</th><th>Qué hace</th></tr>
+<tr><td class="mono">elevationProfile(src, path, params)</td><td>Cota del terreno a lo largo de una polilínea, muestreada a paso constante (por defecto <b>30 m</b>) de forma uniforme por toda la ruta (incluye siempre el último punto exacto). Camina rayos geodésicos con <code>atDistanceAndAzimuth</code> + <code>GeoMath</code>.</td></tr>
+<tr><td class="mono">ElevationProfile</td><td><code>samples[]</code> (<code>{distanceM, position, elevation}</code>, NaN = hueco), <code>totalDistanceM</code>, <code>min/maxElevation</code>, <code>gain</code>, <code>loss</code>. Las estadísticas ignoran los NaN.</td></tr>
+</table>
+<p>Es altura <b>real</b> del terreno EN EL LUGAR —no aplica curvatura terrestre—,
+pensada para dibujar el corte del recorrido o medir desniveles; la curvatura 4/3
+entra solo en los cálculos de visibilidad (línea de visión y viewshed, pendientes).
+La librería devuelve los datos; la gráfica la pinta la app. Se expone por la
+fachada: <code>MapWidget::elevationProfile(path, params)</code> (perfil vacío si no
+hay origen DEM configurado).</p>
+
 <!-- ===================== 9. FLUJOS ===================== -->
 <h2 class="sec">9 · Flujos de interacción entre objetos</h2>
 

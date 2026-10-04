@@ -3076,3 +3076,55 @@ tenía proyecto qmake.
 **Estado: VectorRepository es ya solo el almacén de entidades que usa MapWidget;
 esquema sin modelo legado; 17 tests en verde. Con esto, el alcance acordado de la
 librería (Fases 1–5 + hit-testing + corte limpio) queda cerrado.**
+
+## 60. Análisis de elevación: perfil de una ruta (Fase A)
+
+Con el seguimiento cerrado, el usuario pidió **cálculos de elevación** sobre el
+DEM que la librería ya tiene (`IElevationSource`, bilineal, hueco→NaN). Son tres
+capacidades, de visibilidad **directa** (nada de radar: sin horizonte radioeléctrico
+`4.12√h`, sin haz, sin factores empíricos): **A)** perfil del terreno a lo largo de
+una ruta, **B)** visibilidad punto a punto con altura de antenas y curvatura 4/3, y
+**C)** viewshed 360° (perfil + ángulo de cierre + zona de visibilidad a una altura).
+Se revisó `DVD_potencial` como referencia física y se confirmó que su constante de
+curvatura `d²/17e6` es `d²/(2·k·R)` con radio efectivo **k=4/3** y R=6371 km — la
+misma física que usarán B y C. Esta sección cubre la **Fase A**.
+
+Decisión de alcance de A: el **perfil de ruta** es la cota del terreno EN EL LUGAR,
+no desde un punto; por eso **no** aplica curvatura (es altura real, para dibujar el
+corte o medir desniveles). La curvatura entra solo en los cálculos de visibilidad
+(B y C). Muestreo configurable, **por defecto 30 m**: como `elevationAt` es bilineal,
+muestrear a 30 m sobre un DEM de 90 m interpola sin coste extra de datos.
+
+Cambios:
+
+- **`include/libmapa/Elevation.h` (cabecera pública nueva):** tipos de resultado
+  `ElevationSample{distanceM, position, elevation}` (NaN = sin dato),
+  `ElevationProfile{samples, totalDistanceM, min/maxElevation, gain, loss}` y los
+  parámetros `ElevationProfileParams{stepMeters=30}`. Se instala por el glob de
+  `include/libmapa/*.h`.
+- **`src/dem/ElevationAnalysis.{h,cpp}` (núcleo nuevo):** función libre
+  `elevationProfile(const IElevationSource&, path, params)`. Camina la polilínea
+  vértice a vértice con `QGeoCoordinate::atDistanceAndAzimuth` y `GeoMath`,
+  muestreando a paso uniforme a lo largo de TODA la ruta (lleva un "resto" entre
+  tramos para no reiniciar el paso en cada vértice) e incluye siempre el último
+  punto exacto. Estadísticas (min/máx/ganancia/pérdida) que ignoran las muestras
+  sin dato. Con menos de dos vértices válidos → perfil vacío.
+- **Fachada `MapWidget`:** reenvío fino `elevationProfile(path, params)` que usa el
+  origen DEM configurado (`d->elevation`); sin origen, perfil vacío.
+- **`tests/tst_elevationanalysis.cpp` (nuevo, test 18):** `.hgt` sintético N19W077
+  de lado 7 en rampa (`col·100+row`) con un hueco en el nodo (1,1). Comprueba el
+  perfil a lo largo de una línea (muestras cada 30 m, distancia creciente, cuesta
+  arriba = solo ganancia, extremos exactos que coinciden con `elevationAt`), que la
+  distancia total de una ruta multi-tramo suma los tramos, y el tratamiento de
+  huecos→NaN (una línea que arranca en la banda bilineal del hueco y sale a terreno
+  con dato: hay muestras NaN y, aun así, estadísticas de las válidas) y de rutas
+  degeneradas / sin origen DEM (geometría válida pero cotas NaN).
+- **Build:** `src/dem/ElevationAnalysis.cpp` añadido a `libmapa_core` en
+  `CMakeLists.txt` y, en espejo, en `qmake/libmapa/core/core.pro`;
+  `libmapa_add_test(tst_elevationanalysis)`.
+- **Docs:** README (sección «Análisis de elevación», recuento 17→18, hito 16) y
+  `arquitectura.html` + PDF.
+
+**Estado: perfil de ruta disponible en el núcleo y por la fachada; 18 tests en
+verde, sin warnings. Siguientes: Fase B (visibilidad punto a punto) y Fase C
+(viewshed 360°).**

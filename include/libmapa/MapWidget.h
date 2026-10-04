@@ -3,6 +3,7 @@
 
 #include "libmapa/DataPackage.h"
 #include "libmapa/GeoFile.h"
+#include "libmapa/Elevation.h"
 #include "libmapa/MapFeature.h"
 #include "libmapa/MapTarget.h"
 #include "libmapa/TargetSymbol.h"
@@ -331,6 +332,14 @@ public:
     void setElevationDir(const QString &dir);
     //! Usa en caliente una BASE DE DATOS `.sqlitedb` como origen (vacia = quita).
     void setElevationDb(const QString &dbFile);
+
+    //! Perfil de elevacion del terreno a lo largo de una ruta (polilinea): la
+    //! cota en cada lugar, muestreada cada \c params.stepMeters (30 m por
+    //! defecto), con distancia total y desniveles. Perfil vacio si no hay origen
+    //! de elevacion o la ruta tiene menos de dos puntos validos.
+    ElevationProfile elevationProfile(
+        const QVector<QGeoCoordinate> &path,
+        const ElevationProfileParams &params = ElevationProfileParams()) const;
 
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;

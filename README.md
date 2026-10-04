@@ -12,7 +12,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 17 tests (14 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 18 tests (15 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir
@@ -289,6 +289,26 @@ Para empaquetar la elevación en un solo fichero, el pipeline es
 `fill_map --dem-db dem.sqlitedb`. El generador acepta también tus propios `.hgt`
 de 90 m. La BD es ideal para distribuir dentro de una app.
 
+### Análisis de elevación
+
+Sobre ese mismo origen de elevación la librería calcula **perfiles del terreno**.
+El primero es el **perfil de una ruta**: la cota del terreno a lo largo de una
+polilínea (`QVector<QGeoCoordinate>`), muestreada a paso constante (por defecto
+30 m, aprovechando el SRTM de 1"). Es altura real del terreno —no aplica
+curvatura terrestre—, pensada para dibujar el corte del recorrido o medir
+desniveles:
+
+```cpp
+#include <libmapa/Elevation.h>
+libmapa::ElevationProfile perfil = mapa->elevationProfile({A, B, C});
+// perfil.samples[i] = { distanceM, position, elevation (NaN si hueco) }
+// perfil.totalDistanceM, minElevation, maxElevation, gain, loss
+```
+
+La librería devuelve los datos; la gráfica la pinta la app. Las muestras sin dato
+(hueco SRTM, tile ausente, sin origen DEM) salen como `NaN` sin romper las
+estadísticas, que ignoran esos puntos.
+
 ## Referencia de comandos (argumentos por herramienta)
 
 Opciones entre `[…]` opcionales; el resto, obligatorias. Los bbox son siempre
@@ -348,7 +368,7 @@ src/
   io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               17 tests (14 sin QCustomPlot)
+tests/               18 tests (15 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
@@ -380,6 +400,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 13 | Comprobación del paquete: `check_data` (informe con cobertura por zoom) y `MapWidget::dataWarnings()` al abrir |
 | 14 | Despliegue: `install()` + `find_package(libmapa)`, `examples/app_minima`, `desplegar.bat`, `check_data --export`, guarda contra Qt Network |
 | 15 | Juego Qt 5: librería con qmake (`qmake/libmapa`, `libmapa.pri`), `desplegar_qt5.bat` y guía [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md) |
+| 16 | Análisis de elevación: perfil del terreno a lo largo de una ruta (`MapWidget::elevationProfile`) sobre el origen DEM existente |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

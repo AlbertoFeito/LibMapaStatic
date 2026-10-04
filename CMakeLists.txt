@@ -132,6 +132,8 @@ add_library(libmapa_core STATIC
     src/dem/HgtElevation.h
     src/dem/SqliteElevation.cpp
     src/dem/SqliteElevation.h
+    src/dem/ElevationAnalysis.cpp
+    src/dem/ElevationAnalysis.h
 )
 
 target_include_directories(libmapa_core
@@ -336,6 +338,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_vectorrepository)
     libmapa_add_test(tst_hgtelevation)
     libmapa_add_test(tst_sqliteelevation)
+    libmapa_add_test(tst_elevationanalysis)
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 
