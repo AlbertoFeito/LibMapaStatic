@@ -5,6 +5,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QVariant>
 #include <QVector>
 #include <limits>
 #include <optional>
@@ -54,6 +55,15 @@ public:
 
     bool setLabel(qint64 id, const QString &text);
     bool setColor(qint64 id, const QColor &color);
+
+    //! Fija (o reemplaza) un atributo libre del objetivo. Via para colgar datos
+    //! de dominio en caliente (AIS, ADS-B, telemetria) sin que el modelo los
+    //! interprete. false si el id no existe.
+    bool setAttribute(qint64 id, const QString &key, const QVariant &value);
+    //! Valor de un atributo del objetivo, o QVariant() invalido si no existe el
+    //! id o la clave.
+    QVariant attribute(qint64 id, const QString &key) const;
+
     bool remove(qint64 id);
     void clear();
     void clearTrail(qint64 id);

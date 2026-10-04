@@ -12,6 +12,7 @@
 #include <QPointF>
 #include <QString>
 #include <QStringList>
+#include <QVariant>
 #include <QWidget>
 #include <limits>
 #include <memory>
@@ -269,6 +270,14 @@ public:
                       double headingDeg = std::numeric_limits<double>::quiet_NaN());
 
     bool setTargetLabel(qint64 id, const QString &text);
+
+    //! Cuelga (o reemplaza) un dato de dominio en un objetivo: AIS (mmsi, imo),
+    //! ADS-B (callsign, squawk), telemetria de un UAV... La libreria los guarda
+    //! y los devuelve tal cual, sin interpretarlos. false si el id no existe.
+    bool setTargetAttribute(qint64 id, const QString &key, const QVariant &value);
+    //! Valor de un atributo de un objetivo, o QVariant() invalido si no existe.
+    QVariant targetAttribute(qint64 id, const QString &key) const;
+
     bool removeTarget(qint64 id);
     void clearTargets();
 

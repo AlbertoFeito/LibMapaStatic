@@ -5,6 +5,7 @@
 #include <QGeoCoordinate>
 #include <QMetaType>
 #include <QString>
+#include <QVariant>
 
 namespace libmapa {
 
@@ -29,6 +30,16 @@ struct MapTarget
     double speed = 0.0;        //!< Informativo; la libreria no lo interpreta.
 
     QString label;             //!< Texto que se dibuja junto al objetivo.
+
+    //! Clase que la aplicacion asigna al objetivo ("buque", "aeronave", "uav"...).
+    //! La libreria no la interpreta; sirve para que la app elija simbolo o filtre.
+    QString kind;
+
+    //! Datos libres del objetivo (p.ej. mmsi/imo para AIS, callsign/squawk para
+    //! ADS-B, bateria/enlace para un UAV). La libreria los guarda y los devuelve
+    //! tal cual, SIN interpretarlos: asi un mismo MapTarget vale para cualquier
+    //! dominio sin que la libreria conozca su semantica.
+    QVariantMap attributes;
 
     QColor color = QColor(0xff, 0x8f, 0x00);   //!< Simbolo y traza.
     bool labelVisible = true;

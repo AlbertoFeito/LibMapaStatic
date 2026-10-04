@@ -2837,3 +2837,45 @@ tests) y no toca `arquitectura.html` (sin PDF que regenerar).
 **Estado: CI en marcha (Qt 6 y Qt 5, 17 tests offscreen); sin cambios en el
 código de la librería; queda, para `main`, validar `desplegar_qt5.bat` en un
 Windows con Qt 5.14 real y abrir el PR de la rama con su resumen.**
+
+## 54. Objetivo móvil extensible: `kind` + `attributes` (Fase 1 del alcance)
+
+Tras acordar el **alcance** de la librería (motor de representación de objetos
+móviles sobre mapa offline, agnóstico del dominio, para apps de seguimiento
+naval/aéreo/UAV), esta es la primera fase. El objetivo: que un mismo `MapTarget`
+sirva a cualquier dominio sin que la librería conozca su semántica.
+
+Hallazgo que facilitó todo: la fachada **ya era agnóstica** (`MapTarget` y
+`addTarget/updateTarget/...` no sabían de barcos). El dominio naval (`vehiculo`,
+`buque_ais`) vive solo en el esquema SQLite legado, aparte del motor de tracks.
+Así que la Fase 1 fue aditiva, sin tocar el dominio.
+
+Cambios:
+
+- `include/libmapa/MapTarget.h`: dos campos nuevos. `QString kind` (clase que la
+  app asigna: "buque", "aeronave", "uav"…, para elegir símbolo o filtrar) y
+  `QVariantMap attributes` (datos libres del objetivo: mmsi/imo para AIS,
+  callsign/squawk para ADS-B, batería/enlace para un UAV). La librería los lleva
+  y los devuelve **tal cual, sin interpretarlos**. Se incluye `<QVariant>` (no
+  `<QVariantMap>`, que como cabecera suelta no existe en Qt 5.14; el typedef
+  viene de `<QVariant>`).
+- `src/widget/TargetModel.{h,cpp}`: `upsert` ya guardaba el `MapTarget` completo,
+  así que `kind`/`attributes` viajan sin cambios y la vía rápida `update` (solo
+  posición/rumbo) **no los pierde**. Añadidos `setAttribute(id, clave, valor)` y
+  `attribute(id, clave)` para colgar/leer datos de dominio en caliente.
+- `include/libmapa/MapWidget.h` + `src/widget/MapWidget.cpp`: reenvíos finos
+  `setTargetAttribute` / `targetAttribute`, en línea con `setTargetLabel`.
+- `tests/tst_targetmodel.cpp`: caso nuevo `carriesKindAndAttributes` (upsert con
+  kind+atributos, que `update` los conserva, set/get en caliente, e id/clave
+  inexistentes → QVariant inválido / false). Siguen los **17 tests** en verde,
+  sin warnings (`-Wall -Wextra -Wconversion -Wold-style-cast`).
+- Docs: `arquitectura.html` (descripción de `MapTarget` y fila de API) + **PDF
+  regenerado**; README con una línea de "seguimiento agnóstico del dominio".
+
+Es cambio de **API público** (solo aditivo: no rompe nada existente). Fases que
+siguen: simbología por hooks (2), escala a miles (3), corte limpio del dominio
+legado (4) y ejemplo de seguimiento + contrato público (5).
+
+**Estado: 17 tests en verde (Qt 6 local; el CI los repite en Qt 6 y Qt 5);
+`MapTarget` ya es extensible por la app. Siguiente: Fase 2 (simbología por
+hooks).**

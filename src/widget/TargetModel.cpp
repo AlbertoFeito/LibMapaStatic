@@ -100,6 +100,29 @@ bool TargetModel::setColor(qint64 id, const QColor &color)
     return true;
 }
 
+// Fija (o reemplaza) un atributo libre de un objetivo. Es la via para colgar
+// datos de dominio (AIS, ADS-B, telemetria...) sin que el modelo los interprete;
+// quedan guardados dentro del MapTarget. false si el id no existe.
+bool TargetModel::setAttribute(qint64 id, const QString &key, const QVariant &value)
+{
+    auto it = m_targets.find(id);
+    if (it == m_targets.end())
+        return false;
+    it->target.attributes.insert(key, value);
+    emit changed();
+    return true;
+}
+
+// Devuelve el valor de un atributo del objetivo, o un QVariant invalido si no
+// existe el id o la clave.
+QVariant TargetModel::attribute(qint64 id, const QString &key) const
+{
+    auto it = m_targets.constFind(id);
+    if (it == m_targets.constEnd())
+        return {};
+    return it->target.attributes.value(key);
+}
+
 // Elimina un objetivo (con su traza). false si no habia ninguno con ese id.
 bool TargetModel::remove(qint64 id)
 {

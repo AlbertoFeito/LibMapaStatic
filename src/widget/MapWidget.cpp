@@ -796,6 +796,19 @@ bool MapWidget::setTargetLabel(qint64 id, const QString &text)
     return d->view && d->view->targetModel()->setLabel(id, text);
 }
 
+// Cuelga un dato de dominio (AIS, ADS-B, telemetria...) en un objetivo. La
+// libreria no lo interpreta; solo lo guarda y lo devuelve tal cual.
+bool MapWidget::setTargetAttribute(qint64 id, const QString &key, const QVariant &value)
+{
+    return d->view && d->view->targetModel()->setAttribute(id, key, value);
+}
+
+// Devuelve el valor de un atributo de un objetivo (invalido si no existe).
+QVariant MapWidget::targetAttribute(qint64 id, const QString &key) const
+{
+    return d->view ? d->view->targetModel()->attribute(id, key) : QVariant();
+}
+
 // Elimina un objetivo.
 bool MapWidget::removeTarget(qint64 id)
 {
