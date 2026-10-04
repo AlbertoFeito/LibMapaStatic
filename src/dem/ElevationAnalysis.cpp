@@ -202,7 +202,17 @@ ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &orig
     // aqui). Empieza en -inf: al principio no hay nada que tape.
     double horizonteTan = -std::numeric_limits<double>::infinity();
     double mejorTan = -std::numeric_limits<double>::infinity();   // para horizonDeg
-    bool visibleContinuo = true;                                  // zona ZVD sin cortar
+    bool visibleContinuo = true;                                  // primer tramo sin cortar
+
+    // Seguimiento del tramo visible en curso (para la zona REAL, con huecos).
+    bool tramoAbierto = false;
+    double tramoIni = 0.0, ultimaVisD = 0.0;
+    auto cerrarTramo = [&] {
+        if (tramoAbierto) {
+            ray.visibleRanges.append(VisibleRange{tramoIni, ultimaVisD});
+            tramoAbierto = false;
+        }
+    };
 
     double ultimaCota = std::numeric_limits<double>::quiet_NaN();
     if (guardarPerfil)
@@ -214,20 +224,37 @@ ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &orig
         const double t = src.elevationAt(p);
         if (guardarPerfil)
             anadirMuestra(ray.profile, d, p, t, ultimaCota);
-        if (std::isnan(t))
+        if (std::isnan(t)) {
+            cerrarTramo();                              // sin dato: no se afirma visible
             continue;                                   // hueco / fuera de cobertura
+        }
         ultimoD = d;
 
         const double c = curva ? caida(d, k, R) : 0.0;
 
         // Objetivo a altura H: visible si su angulo supera el horizonte de lo
-        // MAS cercano (sin incluir el terreno de este mismo d).
+        // MAS cercano (sin incluir el terreno de este mismo d). Este test es,
+        // punto a punto, el mismo que decide lineOfSight.
         const double yTgt = (t + H - zObs) - c;
         const double tanTgt = yTgt / d;
         const bool visibleAqui = tanTgt >= horizonteTan;
+
+        // Primer tramo contiguo desde el origen (ZVD en estrella simple).
         if (visibleContinuo) {
             if (visibleAqui) ray.visibilityReachM = d;
             else             visibleContinuo = false;
+        }
+        // Zona REAL: abre/cierra tramos visibles (deja los huecos a la vista).
+        if (visibleAqui) {
+            if (!tramoAbierto) {
+                tramoAbierto = true;
+                // El primer tramo que arranca en la 1a muestra incluye el origen;
+                // los demas empiezan exactamente en esta muestra.
+                tramoIni = (d <= paso) ? 0.0 : d;
+            }
+            ultimaVisD = d;
+        } else {
+            cerrarTramo();
         }
 
         // Ahora incorpora el terreno de d al horizonte; si fija un nuevo maximo,
@@ -247,6 +274,7 @@ ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &orig
         if (tanTerr > mejorTan)
             mejorTan = tanTerr;
     }
+    cerrarTramo();                                      // cierra el ultimo tramo abierto
 
     if (guardarPerfil)
         ray.profile.totalDistanceM = ultimoD;

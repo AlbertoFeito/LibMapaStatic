@@ -334,8 +334,16 @@ p.observerHeight = 15;   // antena del observador (m)
 p.targetHeight   = 300;  // altura del objetivo para la zona de visibilidad (m)
 libmapa::Viewshed vs = mapa->viewshed(centro, p);  // 360 rayos (1° por defecto)
 // vs.rays[az].horizonDeg / .peaks  -> silueta y ángulo de cierre por azimut
-// vs.rays[az].visibilityReachM     -> alcance visible del objetivo (polígono ZVD)
+// vs.rays[az].visibleRanges        -> TODOS los tramos visibles (zona real, con
+//                                     huecos: tras una loma puede volver a verse)
+// vs.rays[az].visibilityReachM     -> solo el primer tramo contiguo desde el centro
 ```
+
+Las dos lecturas de visibilidad son **consistentes punto a punto con `lineOfSight`**:
+un punto que la línea de visión declara visible cae dentro de algún `visibleRanges`.
+`visibilityReachM` es solo el primer tramo contiguo (cómodo para un polígono simple),
+pero **se corta en el primer obstáculo**; para la zona real —con sus huecos— usa
+`visibleRanges`, así una loma que tapa una vaguada deja ver el terreno de más allá.
 
 Por memoria, cada rayo guarda solo los picos y escalares; `ViewshedParams::keepProfiles`
 añade el perfil completo de cada rayo cuando se necesita dibujar un corte. Un viewshed
@@ -345,7 +353,7 @@ pinta la app.
 La app de ejemplo `demo` lo demuestra en su barra **Elevación** (con un DEM activo):
 **Perfil** dibuja el corte del terreno de la línea seleccionada; **Visión A→B** traza
 la línea de visión entre sus extremos (verde si hay, roja con el obstáculo si no), con
-Alt1/Alt2 de antena; **Viewshed** pinta el polígono de visibilidad a la altura Alt2
+Alt1/Alt2 de antena; **Viewshed** pinta la zona de visibilidad real (con sus huecos) a la altura Alt2
 desde el vértice seleccionado (o el centro del mapa).
 
 ## Referencia de comandos (argumentos por herramienta)

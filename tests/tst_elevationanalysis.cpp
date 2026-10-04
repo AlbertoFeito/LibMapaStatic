@@ -32,6 +32,7 @@ private slots:
     void viewshedPeakAtKnownAzimuth();
     void viewshedTargetHeightVisibility();
     void viewshedCurvatureHorizon();
+    void viewshedMatchesLineOfSight();
     void viewshedInvalid();
 
 private:
@@ -399,6 +400,67 @@ void TstElevationAnalysis::viewshedCurvatureHorizon()
     const double reachPlano = vsPlano.rays[0].visibilityReachM;
     QVERIFY(reachPlano > reachCurva);
     QVERIFY(reachPlano > sinCurva.maxRangeM - 2.0 * sinCurva.stepMeters);
+}
+
+// CONSISTENCIA ZVD <-> linea de vision: para CADA distancia del rayo, que el
+// objetivo este dentro de un tramo visible del viewshed debe coincidir con que
+// lineOfSight(origen, punto) lo declare visible. Terreno con una loma que tapa una
+// vaguada y, mas alla, un pico que vuelve a verse: la zona tiene un HUECO y una
+// bolsa visible detras, y ambas funciones concuerdan punto a punto.
+void TstElevationAnalysis::viewshedMatchesLineOfSight()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 13;                           // 12 celdas/grado (~8.7 km)
+    QVector<int> s(side * side, 0);
+    // Origen en el nodo (6,6) = (19.5, -76.5). Hacia el este (fila 6):
+    s[6 * side + 8] = 400;                         // loma a ~17.5 km
+    s[6 * side + 10] = 800;                        // pico a ~35 km (tras la loma)
+    QVERIFY(writeHgt(dir.filePath(QStringLiteral("N19W077.hgt")), side, s));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    const QGeoCoordinate origen(19.5, -76.5);
+    const double obsH = 50.0, H = 50.0;
+
+    ViewshedParams vp;
+    vp.observerHeight = obsH;
+    vp.targetHeight = H;
+    vp.maxRangeM = 40000.0;                        // dentro del tile
+    const Viewshed vs = computeViewshed(dem, origen, vp);
+    QVERIFY(vs.isValid());
+    const ViewshedRay &este = vs.rays[90];         // azimut 90 (este)
+
+    auto enTramoVisible = [&](double d) {
+        for (const VisibleRange &r : este.visibleRanges)
+            if (d >= r.startM && d <= r.endM)
+                return true;
+        return false;
+    };
+
+    int oculto = 0, visibleLejos = 0;
+    double ultimoOculto = 0.0;
+    for (double d = 3000.0; d <= 38000.0; d += 300.0) {   // multiplos del paso (30)
+        const QGeoCoordinate p = origen.atDistanceAndAzimuth(d, 90.0);
+        const LineOfSightResult v = lineOfSight(dem, origen, p, obsH, H);
+        QVERIFY(v.isValid());
+        // Cerca del punto de roce (holgura ~0) el veredicto es ambiguo por el
+        // muestreo; se compara solo donde esta claramente visible u oculto.
+        if (std::abs(v.clearanceM) < 1.0)
+            continue;
+        QVERIFY2(enTramoVisible(d) == v.clear,
+                 qPrintable(QStringLiteral("d=%1 zvd=%2 los=%3 holgura=%4")
+                                .arg(d).arg(enTramoVisible(d)).arg(v.clear)
+                                .arg(v.clearanceM)));
+        if (!v.clear) { ++oculto; ultimoOculto = d; }
+        else if (d > ultimoOculto && ultimoOculto > 0.0) ++visibleLejos;
+    }
+
+    // Que el escenario se ejercita: hay zona oculta y una bolsa visible mas alla
+    // (el hueco), y por tanto mas de un tramo visible.
+    QVERIFY2(oculto > 0, "Se esperaba terreno oculto tras la loma");
+    QVERIFY2(visibleLejos > 0, "Se esperaba una bolsa visible tras el hueco");
+    QVERIFY(este.visibleRanges.size() >= 2);
 }
 
 // Sin origen de elevacion, o con el origen sobre un hueco SRTM, el viewshed es

@@ -130,15 +130,31 @@ struct ClosingAnglePeak
     double tangent = 0.0;
 };
 
+//! Tramo [startM, endM] (metros desde el origen) de un rayo donde un objetivo a
+//! \c ViewshedParams::targetHeight SE VE. Un rayo puede tener varios: tras una
+//! loma que tapa una vaguada, el terreno vuelve a verse mas lejos (un hueco).
+struct VisibleRange
+{
+    double startM = 0.0;
+    double endM = 0.0;
+};
+
 /*!
  * \brief Resultado de un rayo (un azimut) del viewshed.
  *
  * \c horizonDeg es el angulo de cierre maximo del rayo (la silueta mas alta en
  * esa direccion). \c peaks son los puntos que van definiendo esa silueta.
- * \c visibilityReachM es la frontera de la zona en la que un objetivo a
- * \c ViewshedParams::targetHeight se ve de forma CONTINUA desde el origen (el
- * borde del poligono ZVD). \c profile es el perfil del terreno del rayo, vacio
- * salvo que se pida con \c keepProfiles.
+ *
+ * Para la zona de visibilidad de un objetivo a \c ViewshedParams::targetHeight
+ * hay dos lecturas, ambas consistentes punto a punto con \c lineOfSight:
+ * - \c visibleRanges: TODOS los tramos visibles del rayo (la zona REAL, con sus
+ *   huecos). Un punto que \c lineOfSight declara visible cae dentro de uno.
+ * - \c visibilityReachM: solo el primer tramo contiguo desde el origen (frontera
+ *   de la zona ininterrumpida); es \c visibleRanges.first().endM, o 0 si el
+ *   primer punto ya esta tapado. Comodo para un poligono en estrella simple.
+ *
+ * \c profile es el perfil del terreno del rayo, vacio salvo que se pida con
+ * \c keepProfiles.
  */
 struct ViewshedRay
 {
@@ -146,6 +162,7 @@ struct ViewshedRay
     double visibilityReachM = 0.0;
     double horizonDeg = 0.0;
     QVector<ClosingAnglePeak> peaks;
+    QVector<VisibleRange> visibleRanges;
     ElevationProfile profile;
 };
 

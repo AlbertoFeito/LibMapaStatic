@@ -3264,3 +3264,46 @@ Verificación: compila `demo` sin warnings; los **18 tests** siguen en verde (la
 librería no cambió). La validación visual la hace el usuario en su PC (en el
 contenedor no hay paquete de datos). Docs: README (fila del `demo` y sección
 «Análisis de elevación»), `arquitectura.html` (8c) + PDF.
+
+## 64. Viewshed: zona de visibilidad REAL (con huecos), consistente con la Visión
+
+Al probar el `demo`, el usuario vio que la **línea verde «Visión directa»** (Visión
+A→B) llegaba a un punto que quedaba **fuera** del polígono azul de la ZVD, y señaló
+—con razón— que no pueden contradecirse en un azimut.
+
+Diagnóstico: **no era física distinta**. El test de visibilidad del viewshed por
+muestra es, desarrollado con `caida(d)=d²/(2kR)`, **exactamente** la condición de
+`lineOfSight` (con `abombamiento(d1,d2)=d1·d2/(2kR)`); coinciden punto a punto. La
+discrepancia venía de una decisión de representación: `visibilityReachM` era el
+alcance **contiguo** (se cortaba en el PRIMER obstáculo), así que un punto que se ve
+de verdad pero está tras una vaguada oculta quedaba fuera de la estrella, aunque
+`lineOfSight` lo diera visible.
+
+Corrección (el usuario eligió «zona real con huecos»):
+
+- **`include/libmapa/Elevation.h`:** tipo nuevo `VisibleRange{startM,endM}` y campo
+  `QVector<VisibleRange> visibleRanges` en `ViewshedRay`: TODOS los tramos visibles
+  del rayo (la zona real; tras una loma, el terreno de más allá vuelve a verse como
+  una bolsa). `visibilityReachM` se conserva como el primer tramo contiguo (útil
+  para un polígono simple), documentado como tal.
+- **`src/dem/ElevationAnalysis.cpp` (`rayoViewshed`):** además del alcance contiguo,
+  abre/cierra tramos visibles según el MISMO test por muestra (los huecos y los
+  NaN cierran el tramo). El primer tramo que arranca en la 1ª muestra incluye el
+  origen; los demás empiezan en su muestra exacta.
+- **`tests/tst_elevationanalysis.cpp` (test 19 en slots):** `viewshedMatchesLineOfSight`
+  sobre un tile con loma + vaguada + pico: para CADA distancia del rayo comprueba
+  que estar en un tramo visible del viewshed == `lineOfSight(origen, punto).clear`
+  (saltando el roce, holgura ≈ 0, por el muestreo), y confirma que hay zona oculta
+  y una **bolsa visible** detrás (≥ 2 tramos). Garantiza la consistencia y evita
+  regresiones. Siguen 18 ejecutables de test (más slots), todos en verde.
+- **`demo/main.cpp` (`analizarViewshed`):** la ZVD se dibuja ahora como la zona
+  **real**: una cuña por cada tramo visible de cada rayo, todas como partes de UNA
+  entidad (polígono multiparte), de modo que los huecos se ven como entrantes y la
+  zona concuerda con la Visión A→B. La barra de estado informa de nº de tramos y
+  distancia máxima visible.
+- **Docs:** README y `arquitectura.html` (8c) + PDF: `visibleRanges` vs
+  `visibilityReachM` y la nota de consistencia viewshed↔`lineOfSight`.
+
+**Estado: la ZVD del viewshed es la zona de visibilidad real (con huecos) y
+concuerda, azimut a azimut, con la línea de visión; 18 tests en verde, sin
+warnings.**

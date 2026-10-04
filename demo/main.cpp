@@ -941,31 +941,46 @@ private:
             return;
         }
 
-        // Polígono de la zona de visibilidad (ZVD): un vértice por rayo, a su
-        // alcance visible. Rayos sin alcance colapsan al centro (forma de estrella).
-        QVector<QGeoCoordinate> contorno;
-        contorno.reserve(vs.rays.size());
-        double sumaKm = 0.0, maxKm = 0.0;
+        // Zona de visibilidad REAL: una cuña por cada TRAMO visible de cada rayo,
+        // todas como partes de UNA sola entidad (polígono multiparte). Así los
+        // huecos (vaguadas ocultas tras una loma) se ven como entrantes y la zona
+        // concuerda, azimut a azimut, con la Visión A→B. No es la estrella de
+        // "alcance contiguo" de antes, que se cortaba en el primer obstáculo.
+        const double half = (vp.azimuthStepDeg > 0.0 ? vp.azimuthStepDeg : 1.0) / 2.0;
+        QVector<QVector<QGeoCoordinate>> cunas;
+        int tramos = 0;
+        double maxKm = 0.0;
         for (const ViewshedRay &r : vs.rays) {
-            const double d = qMax(r.visibilityReachM, 1.0);
-            contorno.append(origen.atDistanceAndAzimuth(d, r.azimuthDeg));
-            sumaKm += r.visibilityReachM / 1000.0;
-            maxKm = qMax(maxKm, r.visibilityReachM / 1000.0);
+            for (const VisibleRange &vr : r.visibleRanges) {
+                if (vr.endM - vr.startM < 1.0)
+                    continue;
+                const double d0 = qMax(vr.startM, 1.0);
+                cunas.append({
+                    origen.atDistanceAndAzimuth(d0,      r.azimuthDeg - half),
+                    origen.atDistanceAndAzimuth(vr.endM, r.azimuthDeg - half),
+                    origen.atDistanceAndAzimuth(vr.endM, r.azimuthDeg + half),
+                    origen.atDistanceAndAzimuth(d0,      r.azimuthDeg + half)
+                });
+                ++tramos;
+                maxKm = qMax(maxKm, vr.endM / 1000.0);
+            }
         }
 
         prepararCapa(kCapaViewshed, tr("Análisis: viewshed"), 40);
-        MapFeature zona;
-        zona.layerId = kCapaViewshed;
-        zona.kind = GeometryKind::Polygon;
-        zona.type = QStringLiteral("zona_visibilidad");
-        zona.name = tr("Visibilidad a %1 m").arg(vp.targetHeight, 0, 'f', 0);
-        zona.geometry = contorno;
-        zona.style.lineColor = QColor(0x15, 0x65, 0xc0);
-        zona.style.fillColor = QColor(0x42, 0xa5, 0xf5, 70);
-        zona.style.lineWidth = 1.5;
-        zona.style.labelVisible = false;
-        zona.selectable = false;
-        m_mapa->addFeature(zona);
+        if (!cunas.isEmpty()) {
+            MapFeature zona;
+            zona.layerId = kCapaViewshed;
+            zona.kind = GeometryKind::Polygon;
+            zona.type = QStringLiteral("zona_visibilidad");
+            zona.name = tr("Visibilidad a %1 m").arg(vp.targetHeight, 0, 'f', 0);
+            zona.parts = cunas;              // multiparte: las cuñas, con sus huecos
+            zona.geometry = cunas.first();
+            zona.style.lineColor = QColor(0x15, 0x65, 0xc0, 0);   // sin borde por cuña
+            zona.style.fillColor = QColor(0x42, 0xa5, 0xf5, 70);
+            zona.style.labelVisible = false;
+            zona.selectable = false;
+            m_mapa->addFeature(zona);
+        }
 
         MapFeature centro;
         centro.layerId = kCapaViewshed;
@@ -978,12 +993,12 @@ private:
         m_mapa->addFeature(centro);
 
         statusBar()->showMessage(
-            tr("Viewshed: %1 rayos · obs %2 m, obj %3 m · alcance medio %4 km "
-               "(máx %5 km) · %6 ms")
+            tr("Viewshed: %1 rayos · obs %2 m, obj %3 m · %4 tramos visibles · "
+               "máx %5 km · %6 ms")
                 .arg(vs.rays.size())
                 .arg(vp.observerHeight, 0, 'f', 0)
                 .arg(vp.targetHeight, 0, 'f', 0)
-                .arg(vs.rays.isEmpty() ? 0.0 : sumaKm / double(vs.rays.size()), 0, 'f', 1)
+                .arg(tramos)
                 .arg(maxKm, 0, 'f', 1)
                 .arg(ms),
             9000);
