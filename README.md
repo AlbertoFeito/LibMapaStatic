@@ -1,5 +1,7 @@
 # libmapa
 
+[![CI](https://github.com/AlbertoFeito/LibMapaStatic/actions/workflows/ci.yml/badge.svg)](https://github.com/AlbertoFeito/LibMapaStatic/actions/workflows/ci.yml)
+
 Librería Qt que dibuja mapas de teselas guardadas en SQLite, embebible como un
 `QWidget` corriente. Refactorización de **LibMapaStatic**, la librería de mapas
 de EstacionTerrena3.

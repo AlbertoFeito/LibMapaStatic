@@ -2808,3 +2808,32 @@ punta a punta también en Windows real (Qt 6.11.2 MinGW): instalar, usar desde
 `app_minima` y desplegar con `desplegar.bat`; juego Qt 5 como en §51 (pendiente
 solo de `desplegar_qt5.bat` en un Windows con Qt 5.14); guía con el paso 3
 afinado.**
+
+## 53. Integración continua: compilar y pasar los 17 tests en cada push/PR (Qt 6 y Qt 5)
+
+De cara a pasar a `main`, el repo no tenía **CI**: nada verificaba de forma
+automática que compila y pasa los tests, y menos aún el objetivo **multi-Qt**
+(5.14/5.15/6.x), que hasta ahora solo se comprobaba a mano. Se añade
+`.github/workflows/ci.yml` (GitHub Actions):
+
+- **Matriz de dos jobs en paralelo**, uno con **Qt 6** y otro con **Qt 5**, en
+  `ubuntu-latest`. Cada job instala **solo su Qt** por `apt`
+  (`qt6-base-dev …` / `qtbase5-dev …` + `*-positioning-dev` y el driver
+  `*sql*-sqlite`), de modo que `find_package(QT NAMES Qt6 Qt5 …)` del
+  `CMakeLists.txt` detecta la versión sin ambigüedad.
+- **QCustomPlot 2.1.1** no está en git (GPLv3): el workflow lo **descarga** de
+  `qcustomplot.com` y copia `qcustomplot.{h,cpp}` a `third_party/qcustomplot/`,
+  como indica `CLAUDE.md`. Así compilan también el widget y sus 3 tests (17 en
+  total; sin QCustomPlot serían 14).
+- Compila en Release y corre `ctest` con `QT_QPA_PLATFORM=offscreen` (el runner
+  no tiene pantalla, igual que el contenedor).
+- Dispara en push a `main` y a ramas `claude/**`, en PR hacia `main` y a mano
+  (`workflow_dispatch`). `concurrency` cancela runs superados de la misma rama.
+
+También se añade el **badge de CI** al principio del `README.md`. Es el primer
+fichero bajo `.github/`; no cambia el código de la librería (siguen los 17
+tests) y no toca `arquitectura.html` (sin PDF que regenerar).
+
+**Estado: CI en marcha (Qt 6 y Qt 5, 17 tests offscreen); sin cambios en el
+código de la librería; queda, para `main`, validar `desplegar_qt5.bat` en un
+Windows con Qt 5.14 real y abrir el PR de la rama con su resumen.**

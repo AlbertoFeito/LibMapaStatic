@@ -1,0 +1,74 @@
+# Integracion continua: compila libmapa y pasa los 17 tests en cada push/PR,
+# con Qt 6 y con Qt 5, para proteger `main` y verificar el objetivo multi-Qt.
+#
+# - Dos jobs en paralelo (matriz), uno por version de Qt. Cada uno instala solo
+#   su Qt, asi `find_package(QT NAMES Qt6 Qt5 ...)` del CMakeLists la detecta sin
+#   ambiguedad.
+# - QCustomPlot 2.1.1 NO esta en git (GPLv3): se descarga aqui, igual que indica
+#   CLAUDE.md, para que compilen tambien el widget y sus 3 tests (17 en total;
+#   sin el serian 14).
+# - Los tests graficos corren con QT_QPA_PLATFORM=offscreen (runner sin pantalla).
+name: CI
+
+on:
+  push:
+    branches: [ main, 'claude/**' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+# Un push nuevo sobre la misma rama cancela el run anterior que siga en curso.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Qt6
+            qt_packages: >-
+              qt6-base-dev qt6-base-dev-tools qt6-positioning-dev
+              libqt6sql6-sqlite
+          - name: Qt5
+            qt_packages: >-
+              qtbase5-dev qtbase5-dev-tools qtpositioning5-dev
+              libqt5sql5-sqlite
+
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Qt y herramientas de build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ make curl ca-certificates libgl1-mesa-dev \
+            ${{ matrix.qt_packages }}
+
+      - name: Obtener QCustomPlot 2.1.1 (no va en git, es GPLv3)
+        run: |
+          set -e
+          curl -fsSL https://www.qcustomplot.com/release/2.1.1/QCustomPlot-source.tar.gz -o /tmp/qcp.tar.gz
+          mkdir -p /tmp/qcp
+          tar xf /tmp/qcp.tar.gz -C /tmp/qcp
+          src="$(dirname "$(find /tmp/qcp -name qcustomplot.h | head -n1)")"
+          test -n "$src"
+          cp "$src/qcustomplot.h" "$src/qcustomplot.cpp" third_party/qcustomplot/
+          echo "QCustomPlot copiado desde $src"
+
+      - name: Configurar (CMake, Release)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Tests (ctest, sin pantalla)
+        working-directory: build
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --output-on-failure
