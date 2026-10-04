@@ -309,6 +309,18 @@ La librería devuelve los datos; la gráfica la pinta la app. Las muestras sin d
 (hueco SRTM, tile ausente, sin origen DEM) salen como `NaN` sin romper las
 estadísticas, que ignoran esos puntos.
 
+El segundo es la **visibilidad punto a punto**: si hay línea de visión directa
+entre dos puntos, con **altura de antena en cada extremo** y corrección de la
+curvatura+refracción de la Tierra (radio efectivo 4/3 por defecto; configurable,
+o geométrico puro). Pensada para enlaces, no para radar: solo visibilidad directa.
+
+```cpp
+libmapa::LineOfSightResult v = mapa->lineOfSight(A, B, /*antenaA*/ 10, /*antenaB*/ 2);
+// v.clear        -> ¿hay visión directa?
+// v.clearanceM   -> holgura mínima (negativa = cuánto falta en el peor punto)
+// v.blockPosition / v.blockDistanceM -> punto crítico (dónde bloquea)
+```
+
 ## Referencia de comandos (argumentos por herramienta)
 
 Opciones entre `[…]` opcionales; el resto, obligatorias. Los bbox son siempre
@@ -401,6 +413,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 14 | Despliegue: `install()` + `find_package(libmapa)`, `examples/app_minima`, `desplegar.bat`, `check_data --export`, guarda contra Qt Network |
 | 15 | Juego Qt 5: librería con qmake (`qmake/libmapa`, `libmapa.pri`), `desplegar_qt5.bat` y guía [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md) |
 | 16 | Análisis de elevación: perfil del terreno a lo largo de una ruta (`MapWidget::elevationProfile`) sobre el origen DEM existente |
+| 17 | Visibilidad punto a punto (`MapWidget::lineOfSight`): línea de visión con altura de antenas y curvatura 4/3 |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

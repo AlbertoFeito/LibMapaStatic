@@ -36,6 +36,16 @@ void anadirMuestra(ElevationProfile &perfil, double distancia,
     ultimaCota = cota;
 }
 
+// Abombamiento de la Tierra (metros) en un punto intermedio que dista \a d1 de un
+// extremo y \a d2 del otro, respecto a la cuerda recta entre ambos: d1·d2/(2·k·R).
+// Con radio efectivo k·R (k=4/3 refraccion estandar, k=1 geometrico puro). Es la
+// altura que "sube" la superficie sobre la linea recta A-B en ese punto, asi que
+// se suma al terreno al comprobar si corta la vision.
+double abombamiento(double d1, double d2, double k, double R)
+{
+    return (d1 * d2) / (2.0 * k * R);
+}
+
 } // namespace
 
 // Perfil de elevacion a lo largo de una polilinea. El muestreo es uniforme a lo
@@ -96,6 +106,71 @@ ElevationProfile elevationProfile(const IElevationSource &src,
 
     perfil.totalDistanceM = distGlobal;
     return perfil;
+}
+
+// Linea de vision entre dos puntos con altura de antena. Camina el rayo geodesico
+// A->B muestreando el terreno cada `paso`; en cada muestra compara la altura de la
+// recta entre las cimas de antena con la del terreno MAS el abombamiento de la
+// Tierra en ese punto (el terreno "sube" sobre la cuerda). La holgura es recta -
+// (terreno+abombamiento); su minimo a lo largo del trayecto decide si hay vision.
+// Las muestras sin dato (NaN) se saltan (no se puede afirmar nada ahi).
+LineOfSightResult lineOfSight(const IElevationSource &src,
+                              const QGeoCoordinate &a, const QGeoCoordinate &b,
+                              double antennaA, double antennaB,
+                              const LineOfSightParams &params)
+{
+    LineOfSightResult r;
+    if (!a.isValid() || !b.isValid())
+        return r;                                   // sin geometria
+    const double D = GeoMath::distanceMeters(a, b);
+    if (D <= 0.0)
+        return r;
+
+    // Anclaje en los extremos: sin cota en A o B no se puede trazar la recta.
+    const double terrA = src.elevationAt(a);
+    const double terrB = src.elevationAt(b);
+    if (std::isnan(terrA) || std::isnan(terrB))
+        return r;
+    const double zA = terrA + antennaA;             // cima de antena A (absoluta)
+    const double zB = terrB + antennaB;             // cima de antena B
+
+    const double paso = params.stepMeters > 0.0 ? params.stepMeters : 30.0;
+    const double k = params.k > 0.0 ? params.k : 4.0 / 3.0;
+    const double R = params.earthRadiusM > 0.0 ? params.earthRadiusM : 6371000.0;
+    const double azimut = GeoMath::azimuthDegrees(a, b);
+
+    double minHolgura = std::numeric_limits<double>::infinity();
+    QGeoCoordinate minPos;
+    double minDist = 0.0;
+    for (double d = paso; d < D; d += paso) {
+        const QGeoCoordinate p = a.atDistanceAndAzimuth(d, azimut);
+        const double t = src.elevationAt(p);
+        if (std::isnan(t))
+            continue;                               // hueco: no decide
+        const double recta = zA + (zB - zA) * (d / D);
+        const double bulge = params.curvature ? abombamiento(d, D - d, k, R) : 0.0;
+        const double holgura = recta - (t + bulge);
+        if (holgura < minHolgura) {
+            minHolgura = holgura;
+            minPos = p;
+            minDist = d;
+        }
+    }
+
+    r.valid = true;
+    r.totalDistanceM = D;
+    if (std::isinf(minHolgura)) {
+        // Trayecto mas corto que un paso (o solo huecos en medio): no hay terreno
+        // intermedio que evaluar; la vision depende solo de los extremos.
+        r.clear = true;
+        r.clearanceM = std::min(antennaA, antennaB);
+    } else {
+        r.clearanceM = minHolgura;
+        r.clear = minHolgura >= 0.0;
+        r.blockPosition = minPos;
+        r.blockDistanceM = minDist;
+    }
+    return r;
 }
 
 } // namespace libmapa

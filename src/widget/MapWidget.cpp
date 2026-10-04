@@ -939,6 +939,18 @@ ElevationProfile MapWidget::elevationProfile(
     return libmapa::elevationProfile(*d->elevation, path, params);
 }
 
+// Visibilidad punto a punto. Reenvio al calculo del nucleo con el origen de
+// elevacion configurado; resultado invalido si no hay origen.
+LineOfSightResult MapWidget::lineOfSight(
+    const QGeoCoordinate &a, const QGeoCoordinate &b,
+    double antennaA, double antennaB,
+    const LineOfSightParams &params) const
+{
+    if (!d->elevation)
+        return LineOfSightResult();
+    return libmapa::lineOfSight(*d->elevation, a, b, antennaA, antennaB, params);
+}
+
 // Cambia en caliente el origen a una CARPETA de `.hgt` (vacia = quita elevacion).
 void MapWidget::setElevationDir(const QString &dir)
 {

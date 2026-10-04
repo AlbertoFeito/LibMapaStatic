@@ -23,6 +23,22 @@ ElevationProfile elevationProfile(const IElevationSource &src,
                                   const QVector<QGeoCoordinate> &path,
                                   const ElevationProfileParams &params = {});
 
+/*!
+ * \brief Visibilidad directa entre dos puntos, con altura de antena en cada uno.
+ *
+ * Comprueba si el terreno corta la recta entre la cima de la antena en \a a
+ * (altura \a antennaA sobre el terreno) y la de \a b (\a antennaB), muestreando
+ * el terreno intermedio (via \a src) cada \c params.stepMeters. Corrige el
+ * abombamiento de la Tierra con radio efectivo k·R (refraccion estandar k=4/3;
+ * \c params.curvature=false lo desactiva). Devuelve si hay vision, la holgura
+ * minima y el punto critico. Resultado invalido si falta la cota de algun
+ * extremo o la geometria es degenerada.
+ */
+LineOfSightResult lineOfSight(const IElevationSource &src,
+                              const QGeoCoordinate &a, const QGeoCoordinate &b,
+                              double antennaA, double antennaB,
+                              const LineOfSightParams &params = {});
+
 } // namespace libmapa
 
 #endif // LIBMAPA_DEM_ELEVATIONANALYSIS_H_

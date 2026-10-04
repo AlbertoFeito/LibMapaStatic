@@ -341,6 +341,17 @@ public:
         const QVector<QGeoCoordinate> &path,
         const ElevationProfileParams &params = ElevationProfileParams()) const;
 
+    //! Visibilidad directa entre \a a y \a b con altura de antena en cada extremo
+    //! (metros sobre el terreno). Corrige la curvatura+refraccion de la Tierra
+    //! (radio efectivo 4/3 por defecto; ver \c LineOfSightParams). Indica si hay
+    //! vision, la holgura minima y el punto critico. Resultado invalido
+    //! (isValid()==false) si no hay origen de elevacion o falta la cota de un
+    //! extremo.
+    LineOfSightResult lineOfSight(
+        const QGeoCoordinate &a, const QGeoCoordinate &b,
+        double antennaA = 0.0, double antennaB = 0.0,
+        const LineOfSightParams &params = LineOfSightParams()) const;
+
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;
     void setActiveTool(MapTool tool);

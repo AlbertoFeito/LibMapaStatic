@@ -3128,3 +3128,49 @@ Cambios:
 **Estado: perfil de ruta disponible en el núcleo y por la fachada; 18 tests en
 verde, sin warnings. Siguientes: Fase B (visibilidad punto a punto) y Fase C
 (viewshed 360°).**
+
+## 61. Análisis de elevación: visibilidad punto a punto (Fase B)
+
+Segunda capacidad: la **línea de visión** entre dos puntos con **altura de antena
+en cada extremo**. A diferencia del perfil de ruta (altura real del terreno), aquí
+**sí** se corrige el abombamiento de la Tierra, porque lo que se decide es si una
+recta en el espacio queda despejada.
+
+Física (la misma de `DVD_potencial`, revisada en la fase de diseño): el
+abombamiento de la superficie sobre la cuerda recta A–B en un punto intermedio que
+dista `d1` de un extremo y `d2` del otro es `d1·d2/(2·k·R)`, con R=6371 km y radio
+efectivo **k=4/3** (refracción estándar; k=1 = geométrico puro). Equivale a la
+constante `d²/17e6` de DVD. Se **suma al terreno** y se compara con la recta entre
+las cimas de antena: `holgura = recta − (terreno + abombamiento)`. El mínimo de esa
+holgura a lo largo del trayecto decide la visión y marca el punto crítico.
+
+Cambios:
+
+- **`include/libmapa/Elevation.h`:** tipos nuevos `LineOfSightParams`
+  (`stepMeters=30`, `curvature=true`, `k=4/3`, `earthRadiusM`) y
+  `LineOfSightResult` (`clear`, `clearanceM` —holgura mínima, negativa = cuánto
+  falta—, `blockPosition`/`blockDistanceM` —punto crítico—, `isValid()`).
+- **`src/dem/ElevationAnalysis.{h,cpp}`:** función libre
+  `lineOfSight(src, a, b, antennaA, antennaB, params)` y el helper interno
+  `abombamiento(d1, d2, k, R)` (que reutilizará el viewshed). Camina el rayo
+  geodésico A→B con `atDistanceAndAzimuth`, salta las muestras sin dato (un hueco
+  no afirma nada), y devuelve resultado inválido si falta la cota de un extremo
+  (no se puede anclar la recta).
+- **Fachada `MapWidget`:** `lineOfSight(a, b, antennaA=0, antennaB=0, params)`
+  sobre el origen DEM configurado (inválido si no hay origen).
+- **`tests/tst_elevationanalysis.cpp`:** tres casos nuevos (el ejecutable sigue
+  siendo uno, con más slots): una colina central que bloquea a ras de suelo y se
+  despeja al subir las antenas; terreno plano a cota 0 donde la única obstrucción
+  es la curvatura, comprobando que la holgura mínima = −D²/(8·k·R) con k=4/3 (y que
+  desactivar la curvatura deja la vista justo a ras); y casos inválidos (sin origen
+  DEM, o un extremo sobre un hueco SRTM).
+- **Docs:** README (visibilidad en la sección «Análisis de elevación», hito 17),
+  `arquitectura.html` (8c) + PDF.
+
+No cambian ni CMake ni qmake: no se añadió ningún `.cpp` (todo va en el
+`ElevationAnalysis.cpp` ya listado), y los casos nuevos son slots del test
+existente, así que **siguen 18 tests** en verde, sin warnings.
+
+**Estado: visibilidad punto a punto disponible en el núcleo y por la fachada.
+Siguiente: Fase C (viewshed 360° — perfil + ángulo de cierre + zona de
+visibilidad a una altura).**

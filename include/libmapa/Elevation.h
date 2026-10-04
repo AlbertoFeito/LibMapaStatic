@@ -52,6 +52,44 @@ struct ElevationProfile
     bool isValid() const { return !samples.isEmpty(); }
 };
 
+//! Parametros de la visibilidad punto a punto.
+struct LineOfSightParams
+{
+    //! Separacion entre muestras del terreno intermedio, en metros.
+    double stepMeters = 30.0;
+    //! Si se corrige por curvatura+refraccion (abombamiento de la Tierra). Con
+    //! \c false el calculo es puramente geometrico (k=1).
+    bool curvature = true;
+    //! Factor de radio terrestre efectivo. 4/3 es la refraccion estandar; 1 =
+    //! geometrico puro. Solo se usa si \c curvature es \c true.
+    double k = 4.0 / 3.0;
+    //! Radio medio de la Tierra, en metros.
+    double earthRadiusM = 6371000.0;
+};
+
+/*!
+ * \brief Resultado de la linea de vision entre dos puntos (con altura de antena).
+ *
+ * \c clear indica si hay vision directa (el terreno no corta la recta entre las
+ * cimas de las antenas, teniendo en cuenta el abombamiento de la Tierra).
+ * \c clearanceM es la holgura MINIMA a lo largo del trayecto: positiva = margen
+ * libre; negativa = cuanto se queda corto en el peor punto. \c blockPosition /
+ * \c blockDistanceM marcan ese punto critico (donde bloquea si \c clear es
+ * \c false; si no, el de menor holgura). \c isValid es \c false si falta dato en
+ * algun extremo o la geometria es degenerada.
+ */
+struct LineOfSightResult
+{
+    bool clear = false;
+    double clearanceM = std::numeric_limits<double>::quiet_NaN();
+    QGeoCoordinate blockPosition;
+    double blockDistanceM = 0.0;
+    double totalDistanceM = 0.0;
+    bool valid = false;
+
+    bool isValid() const { return valid; }
+};
+
 } // namespace libmapa
 
 #endif // LIBMAPA_ELEVATION_H_

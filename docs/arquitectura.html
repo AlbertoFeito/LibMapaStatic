@@ -426,12 +426,17 @@ el <b>perfil de una ruta</b>.</p>
 <tr><th>Elemento</th><th>Qué hace</th></tr>
 <tr><td class="mono">elevationProfile(src, path, params)</td><td>Cota del terreno a lo largo de una polilínea, muestreada a paso constante (por defecto <b>30 m</b>) de forma uniforme por toda la ruta (incluye siempre el último punto exacto). Camina rayos geodésicos con <code>atDistanceAndAzimuth</code> + <code>GeoMath</code>.</td></tr>
 <tr><td class="mono">ElevationProfile</td><td><code>samples[]</code> (<code>{distanceM, position, elevation}</code>, NaN = hueco), <code>totalDistanceM</code>, <code>min/maxElevation</code>, <code>gain</code>, <code>loss</code>. Las estadísticas ignoran los NaN.</td></tr>
+<tr><td class="mono">lineOfSight(src, a, b, antA, antB, params)</td><td>Visibilidad directa entre dos puntos con altura de antena en cada extremo. Muestrea el terreno intermedio y lo compara con la recta entre las cimas de antena, <b>más el abombamiento de la Tierra</b> (radio efectivo <b>k·R</b>, k=4/3; <code>curvature=false</code> → geométrico).</td></tr>
+<tr><td class="mono">LineOfSightResult</td><td><code>clear</code> (¿hay visión?), <code>clearanceM</code> (holgura mínima; negativa = cuánto falta), <code>blockPosition</code>/<code>blockDistanceM</code> (punto crítico), <code>isValid()</code> (falso sin dato en un extremo).</td></tr>
 </table>
-<p>Es altura <b>real</b> del terreno EN EL LUGAR —no aplica curvatura terrestre—,
-pensada para dibujar el corte del recorrido o medir desniveles; la curvatura 4/3
-entra solo en los cálculos de visibilidad (línea de visión y viewshed, pendientes).
-La librería devuelve los datos; la gráfica la pinta la app. Se expone por la
-fachada: <code>MapWidget::elevationProfile(path, params)</code> (perfil vacío si no
+<p>El <b>perfil de ruta</b> es altura <b>real</b> del terreno EN EL LUGAR —no aplica
+curvatura terrestre—, para dibujar el corte del recorrido o medir desniveles. La
+<b>visibilidad punto a punto</b> sí corrige la curvatura+refracción (la constante
+<code>d1·d2/(2·k·R)</code> es la misma física que <code>DVD_potencial</code>, k=4/3);
+es visibilidad <b>directa</b>, no radar (sin horizonte radioeléctrico ni haz). La
+librería devuelve los datos; la gráfica la pinta la app. Se exponen por la fachada:
+<code>MapWidget::elevationProfile(path, params)</code> y
+<code>MapWidget::lineOfSight(a, b, antA, antB, params)</code> (vacío / inválido si no
 hay origen DEM configurado).</p>
 
 <!-- ===================== 9. FLUJOS ===================== -->

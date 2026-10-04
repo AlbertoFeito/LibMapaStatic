@@ -24,6 +24,9 @@ private slots:
     void profileAlongLine();
     void multiVertexDistanceAddsUp();
     void handlesVoidsEmptyAndNoData();
+    void lineOfSightBlockedByHill();
+    void lineOfSightCurvatureOnFlatEarth();
+    void lineOfSightInvalid();
 
 private:
     static bool writeHgt(const QString &path, int side, const QVector<int> &s);
@@ -151,6 +154,101 @@ void TstElevationAnalysis::handlesVoidsEmptyAndNoData()
     const ElevationProfile sinDato = elevationProfile(vacio, {a, b});
     QVERIFY(sinDato.isValid());                 // la geometria existe
     QVERIFY(std::isnan(sinDato.maxElevation));  // pero no hay cotas
+}
+
+// Una colina central bloquea la vision a ras de suelo; subir las antenas por
+// encima de ella restablece la vision directa. Tile con una cresta en la columna
+// central (col 3 = 1500 m, el resto 0), linea este-oeste a latitud 19.5 que la
+// cruza por la cima.
+void TstElevationAnalysis::lineOfSightBlockedByHill()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 7;
+    QVector<int> s(side * side, 0);
+    for (int row = 0; row < side; ++row)
+        s[row * side + 3] = 1500;                 // cresta en la columna central
+    QVERIFY(writeHgt(dir.filePath(QStringLiteral("N19W077.hgt")), side, s));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    // La cima (col 3) cae en lon -76.5; A y B a ambos lados, sobre cota 0.
+    const QGeoCoordinate a(19.5, -76.9);
+    const QGeoCoordinate b(19.5, -76.1);
+
+    // A ras de suelo (antenas 0): la colina corta la vision.
+    const LineOfSightResult bloqueada = lineOfSight(dem, a, b, 0.0, 0.0);
+    QVERIFY(bloqueada.isValid());
+    QVERIFY(!bloqueada.clear);
+    QVERIFY(bloqueada.clearanceM < -1000.0);      // se queda muy corto
+    QVERIFY(bloqueada.blockPosition.isValid());
+    // El punto critico esta cerca de la cima (lon -76.5), no en los extremos.
+    QVERIFY(std::abs(bloqueada.blockPosition.longitude() + 76.5) < 0.1);
+    QVERIFY(bloqueada.blockDistanceM > 0.0
+            && bloqueada.blockDistanceM < bloqueada.totalDistanceM);
+
+    // Antenas de 3000 m en ambos extremos: por encima de la colina -> hay vision.
+    const LineOfSightResult despejada = lineOfSight(dem, a, b, 3000.0, 3000.0);
+    QVERIFY(despejada.isValid());
+    QVERIFY(despejada.clear);
+    QVERIFY(despejada.clearanceM > 0.0);
+}
+
+// Sobre terreno plano a cota 0 y antenas a 0, la unica obstruccion es el
+// abombamiento de la Tierra: la holgura minima debe coincidir con -D^2/(8kR) (en
+// el punto medio) con k=4/3; desactivar la curvatura deja la vision justo a ras
+// (holgura 0). Comprueba la constante de curvatura.
+void TstElevationAnalysis::lineOfSightCurvatureOnFlatEarth()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 7;
+    const QVector<int> s(side * side, 0);          // todo a cota 0
+    QVERIFY(writeHgt(dir.filePath(QStringLiteral("N19W077.hgt")), side, s));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    const QGeoCoordinate a(19.5, -76.9);
+    const QGeoCoordinate b(19.5, -76.5);
+    const double D = GeoMath::distanceMeters(a, b);
+
+    // Con curvatura (4/3 por defecto): bloquea, y la holgura minima ~ -D^2/(8kR).
+    const LineOfSightResult conCurva = lineOfSight(dem, a, b, 0.0, 0.0);
+    QVERIFY(conCurva.isValid());
+    QVERIFY(!conCurva.clear);
+    const double k = 4.0 / 3.0, R = 6371000.0;
+    const double esperado = -(D * D) / (8.0 * k * R);
+    QVERIFY2(std::abs(conCurva.clearanceM - esperado) < 0.5,
+             qPrintable(QStringLiteral("holgura=%1 esperado=%2")
+                            .arg(conCurva.clearanceM).arg(esperado)));
+    // El punto critico, en el medio del trayecto.
+    QVERIFY(std::abs(conCurva.blockDistanceM - D / 2.0) < 60.0);
+
+    // Sin curvatura (geometrico puro): recta a ras del terreno plano -> vision.
+    LineOfSightParams geom;
+    geom.curvature = false;
+    const LineOfSightResult sinCurva = lineOfSight(dem, a, b, 0.0, 0.0, geom);
+    QVERIFY(sinCurva.isValid());
+    QVERIFY(sinCurva.clear);
+    QVERIFY(std::abs(sinCurva.clearanceM) < 1e-6);
+}
+
+// Sin origen de elevacion, o con un extremo sobre un hueco SRTM, el resultado es
+// invalido (no se puede anclar la recta): isValid()==false.
+void TstElevationAnalysis::lineOfSightInvalid()
+{
+    const QGeoCoordinate a(19.5, -76.8);
+    const QGeoCoordinate b(19.5, -76.5);
+
+    // Sin carpeta: elevationAt siempre NaN.
+    HgtElevation vacio;
+    QVERIFY(!lineOfSight(vacio, a, b, 0.0, 0.0).isValid());
+
+    // Extremo justo sobre el hueco (nodo (1,1) del tile compartido): lat ~19.833,
+    // lon ~-76.833. Sin cota en A -> invalido.
+    const QGeoCoordinate hueco(19.0 + 5.0 / 6.0, -77.0 + 1.0 / 6.0);
+    QVERIFY(std::isnan(m_dem.elevationAt(hueco)));
+    QVERIFY(!lineOfSight(m_dem, hueco, b, 0.0, 0.0).isValid());
 }
 
 QTEST_MAIN(TstElevationAnalysis)
