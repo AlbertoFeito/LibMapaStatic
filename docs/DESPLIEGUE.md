@@ -104,6 +104,11 @@ Solo hay que hacerlo la primera vez, o cuando cambie la librería.
    ```
    `mingw32-make -j4` tarda unos minutos y escribe mucho texto. Es normal.
    Termina bien si **no** aparece la palabra `Error` al final.
+
+   > Para **reinstalar** la librería más adelante (si cambia su código) no hace
+   > falta repetir el `mkdir` ni el `qmake`: basta entrar en `build-qt6` y lanzar
+   > `mingw32-make -j4 && mingw32-make install`. El `qmake` solo se repite si
+   > borras la carpeta `build-qt6`.
 3. Comprueba que la instalación ha creado esto (con `qt5` o `qt6`):
    ```
    C:\libmapa\qt5\
@@ -157,13 +162,37 @@ dejará el script de despliegue.
 Mientras programas en tu PC, el `.exe` está en la carpeta de compilación y
 ahí no hay `datos`. Para esas pruebas puedes poner la carpeta real
 (`cfg.dataDir = "D:/QtPro/Recursos";`), pero **antes de desplegar** deja
-la línea de `applicationDirPath()`.
+la línea de `applicationDirPath()`. (Esto es para **tu** aplicación; el
+ejemplo `app_minima` no se edita: recibe la carpeta como argumento, ver 3.3.)
 
-Si quieres partir de un ejemplo que ya funciona, abre
-`LibMapaStatic\examples\app_minima\app_minima.pro`. Es una aplicación completa
-con mapa y avisos.
+### 3.3 Probar con el ejemplo `app_minima` (sin escribir código)
 
-### 3.3 Comprobar que compila
+Si no quieres escribir nada todavía, abre el ejemplo que ya viene hecho:
+`LibMapaStatic\examples\app_minima\app_minima.pro` (una aplicación completa con
+mapa y avisos). Al abrirlo, Qt Creator te pide **configurar el proyecto**: elige
+el **mismo kit** con el que instalaste la librería en el paso 2 y pulsa
+*Configurar proyecto*.
+
+Este ejemplo no tiene fija la carpeta de datos en el código: la toma como
+**argumento**. Para verlo con tus mapas mientras desarrollas, díselo así:
+
+1. Panel izquierdo **«Proyectos»** → bajo tu kit, **«Ejecución»**.
+2. En **«Argumentos de la línea de órdenes»**, escribe la carpeta de tu paquete,
+   por ejemplo `D:\QtPro\Recursos` (entre comillas si tiene espacios).
+3. Vuelve al editor y pulsa **Ejecutar** (el triángulo verde).
+
+Debe abrirse la ventana con el mapa. Así pruebas sin tener que desplegar.
+
+> **Si ves `No se encuentra el manifiesto …\datos\mapa.json`**, no es un fallo de
+> la instalación: significa que la librería **ya funciona** (está enlazada y
+> corriendo) y lo único que le falta es saber **dónde están los datos**. Pasa que
+> lo ejecutaste sin argumento, y entonces busca una carpeta `datos` junto al
+> `.exe` (dentro del build), que no existe mientras desarrollas. Solución:
+> ponle la carpeta del paquete como argumento (los 3 pasos de arriba). Al
+> desplegar (paso 5) ese problema desaparece, porque el script deja `datos\`
+> junto al `.exe`.
+
+### 3.4 Comprobar que compila
 
 Pulsa **Ejecutar** (el triángulo verde). Funciona en Debug y en Release.
 
@@ -272,7 +301,7 @@ No hace falta instalar nada en ese PC: ni Qt, ni internet.
 | qmake: `Falta QCustomPlot 2.1.1` | Paso 1, punto 3. |
 | En el otro PC: *«falta Qt5Core.dll»* o *«Qt6Core.dll»* | Se ha copiado solo el `.exe`. Copia la carpeta de entrega entera. |
 | El mapa sale, pero la capa satelital en blanco | Falta `imageformats\qjpeg.dll` en la entrega. El programa avisa al abrir. Vuelve a desplegar. |
-| *«No se encuentra el manifiesto ...\datos/mapa.json»* | El programa no encuentra `datos` junto al `.exe`. Revisa `cfg.dataDir` (paso 3.2) y que `D:\Entrega\datos\mapa.json` exista. |
+| *«No se encuentra el manifiesto ...\datos/mapa.json»* | La librería funciona, pero no encuentra los datos. **Probando el ejemplo** en Qt Creator: pásale la carpeta del paquete como argumento (paso 3.3). **En tu app**: revisa `cfg.dataDir` (paso 3.2). **En la entrega**: que exista `D:\Entrega\datos\mapa.json`. |
 | `AVISO: estos ficheros siguen pidiendo Qt5Network.dll` | El programa funciona, pero la entrega lleva algo de red. Avisa al responsable de la librería con el nombre de los ficheros. |
 | `el paquete tiene errores` | Lee las líneas `ERROR` de arriba: dicen qué fichero falta o está mal. Revísalo con `C:\libmapa\qtX\bin\check_data.exe D:\QtPro\Recursos`. |
 

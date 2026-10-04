@@ -2743,3 +2743,60 @@ el PDF.
 punta a punta (Qt 6.11.2); juego Qt 5 verificado hasta compilar, instalar,
 enlazar el ejemplo y `check_data` con un Qt 5.15 real, pendiente solo de
 `desplegar_qt5.bat` en un Windows con Qt 5.14; guía de despliegue repasada.**
+
+## 52. El juego Qt 6, verificado en el PC real del usuario (no solo en el contenedor)
+
+Hasta §51 el juego **Qt 6** estaba verificado «en este PC» entendiendo por eso
+el **contenedor Linux** (build con CMake y qmake, 17 tests). Faltaba el único
+escenario que importa de verdad para entregar: **Windows real con Qt 6.11.2
+MinGW**. El usuario lo ha recorrido ahora, paso a paso siguiendo
+`docs/DESPLIEGUE.md`, y ha funcionado de punta a punta:
+
+- **Instalar la librería (paso 2).** En la consola «Qt 6.11.2 (MinGW 13.1.0
+  64-bit)»: `qmake ..\qmake\libmapa\libmapa.pro`, `mingw32-make -j4` y
+  `mingw32-make install`. Quedó en `C:\libmapa\qt6` con la forma esperada: las
+  cuatro `.a` (Release y Debug), `include\libmapa\*.h`, `bin\check_data.exe`,
+  `libmapa.pri`, `libmapa_qt.pri` y `share\libmapa\desplegar.bat`.
+- **Usar la librería desde una app (paso 3).** Abrió `examples/app_minima` con
+  el mismo kit Qt 6; enlazó contra la instalación por la única línea
+  `include(C:/libmapa/qt$${QT_MAJOR_VERSION}/libmapa.pri)`, sin tocar nada más.
+  Apuntado a su paquete `D:\QtPro\Recursos` (pasado como **argumento de
+  ejecución**), dibujó el mapa.
+- **Release + desplegar (pasos 4–5).** Recompiló en Release y lanzó
+  `desplegar.bat <app_minima.exe> D:\Entrega D:\QtPro\Recursos` desde `cmd`:
+  terminó con `Listo: D:\Entrega` (el `.exe`, las DLL de Qt sin las de red, los
+  plugins y el paquete de datos filtrado por `check_data`).
+
+Con esto, del lado **Qt 6** ya no queda nada «no verificado en Windows real».
+
+**Un detalle que la guía no recogía.** Al ejecutar el ejemplo **sin argumento**
+salió `libmapa.render: "No se encuentra el manifiesto …\datos\mapa.json"`.
+Parece un error, pero es justo lo contrario: demuestra que la librería **está
+enlazada y corriendo** (es ella quien emite el mensaje); lo único que falta es
+decirle **dónde están los datos**. Sin argumento busca una carpeta `datos`
+junto al `.exe` —que en el build no existe— mientras que `app_minima` toma esa
+carpeta como argumento (`app_minima <carpeta>`), que en Qt Creator se pone en
+*Proyectos → Ejecución → Argumentos de la línea de órdenes*. Confundir ese
+mensaje con un fallo de instalación es fácil, así que se documenta.
+
+**Afinado de `docs/DESPLIEGUE.md`** (solo documentación):
+
+- Nuevo apartado **3.3 «Probar con el ejemplo `app_minima`»**: cómo verlo con
+  datos sin escribir código, pasando la carpeta del paquete como argumento de
+  ejecución; el antiguo «Comprobar que compila» pasa a 3.4. En 3.2 se aclara que
+  editar `cfg.dataDir` es para **tu** app, no para el ejemplo.
+- La aclaración del mensaje de `mapa.json` queda en 3.3 y la fila de *Problemas
+  frecuentes* se amplía con los tres casos (ejemplo en Qt Creator / tu app / la
+  entrega).
+- Nota en el paso 2: para **reinstalar** tras un cambio basta
+  `mingw32-make -j4 && mingw32-make install` dentro de `build-qt6`; el `qmake`
+  solo se repite si se borra esa carpeta.
+
+Cambio **solo de documentación** (`.md`): no toca código ni tests, y
+`DESPLIEGUE.md` no es `arquitectura.html`, así que no hay que regenerar el PDF.
+
+**Estado: sin cambios en el código ni en los 17 tests; juego Qt 6 verificado de
+punta a punta también en Windows real (Qt 6.11.2 MinGW): instalar, usar desde
+`app_minima` y desplegar con `desplegar.bat`; juego Qt 5 como en §51 (pendiente
+solo de `desplegar_qt5.bat` en un Windows con Qt 5.14); guía con el paso 3
+afinado.**
