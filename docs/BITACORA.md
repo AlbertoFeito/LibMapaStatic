@@ -3409,3 +3409,25 @@ Afinados del `demo` tras probar (solo `demo/main.cpp`, sin tocar la librería):
 
 Compila sin warnings; la librería no cambia, **18 tests** en verde. README al día;
 sin cambios de API, no se regenera el PDF.
+
+## 69. Perfil con curvatura de la Tierra y checks que re-aplican
+
+Más afinados del `demo` tras probar (solo `demo/main.cpp`; la librería no cambia):
+
+- **Checks que re-aplican al instante:** al marcar/desmarcar «Mar = 0» o
+  «Curvatura 4/3» se vuelve a ejecutar el último análisis (perfil/visión/viewshed)
+  sin pulsar otra vez el botón (`enum Analisis m_ultimo` + `reejecutar()`).
+- **Perfil que refleja la curvatura:** `PerfilWidget` reescrito a coordenadas
+  proyectadas `cota − caida(d)` (con `caida=d²/(2kR)` si hay curvatura): el terreno
+  se **hunde con la distancia**, se dibuja una **curva azul fina** del nivel del mar
+  y la **línea de visión queda recta** entre las cimas de antena (equivalente, punto
+  a punto, a la representación anterior). Nueva API del widget:
+  `setVision(zA, zB, D, critD, bloqueado)` (cimas absolutas), `setCurvatura(on,k,R)`,
+  `setTechoSobreObjetivo(m)` y `setProfile(p, maxInicial)`.
+- **Mayor área:** el perfil de la Visión A→B llega hasta **alcance + 5 km** (datos),
+  con vista inicial `[0, alcance]` para **arrastrar desde el inicio**; en vertical
+  muestra hasta **5000 m por encima del objetivo**. Mástiles de antena, línea de
+  sombra y cursor (lectura en cotas absolutas) se mantienen.
+
+Compila sin warnings; **18 tests** en verde. README y BITÁCORA al día; sin cambios de
+API, no se regenera el PDF.
