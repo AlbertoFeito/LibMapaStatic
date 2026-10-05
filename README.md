@@ -357,12 +357,16 @@ de 360° a 30 m y 50 km tarda ~0,1 s. La librería devuelve los datos; la gráfi
 pinta la app.
 
 La app de ejemplo `demo` lo demuestra en su **pestaña «Elevación»** del panel lateral
-(con un DEM activo): **Perfil** abre una **ventana flotante** con el corte del terreno
-(ejes, rejilla, rueda = zoom, arrastrar = desplazar, cursor con lectura); **Visión A→B**
-traza la línea de visión entre los extremos con Alt1/Alt2 de antena (**azul** el tramo
-visible, **rojo** el oculto, obstáculo con su distancia) y la dibuja también sobre el
-perfil; **Viewshed** pinta la zona a la altura Alt2 desde el vértice seleccionado (o el
-centro del mapa) con **azul = visible y amarillo = oculto**. El perfil se abre en una
+(con un DEM activo). Los puntos se introducen en la propia pestaña: **Punto A** y **Punto
+B** con campos lat/lon editables y un botón **«📍 Mapa»** que los fija con el siguiente
+clic en el mapa. Cada análisis usa lo suyo: **Perfil** = A + **rumbo** + **alcance**
+(perfil radial desde A); **Visión A→B** = A (Alt1) y B (Alt2); **Viewshed** = A
+(observador Alt1, objetivo Alt2, alcance). **Perfil** abre una **ventana flotante** con el
+corte del terreno (ejes, rejilla, rueda = zoom, arrastrar = desplazar); **Visión A→B**
+traza la línea de visión de A a B con Alt1/Alt2 de antena (**azul** el tramo visible,
+**rojo** el oculto, obstáculo con su distancia) y la dibuja también sobre el perfil;
+**Viewshed** pinta la zona a la altura Alt2 desde A con **azul = visible y amarillo =
+oculto**. El perfil se abre en una
 ventana con **QCustomPlot** (arrastre y zoom con la rueda, al estilo de la herramienta
 de referencia DVD): **terreno** verde relleno hasta la **curva de curvatura de la
 Tierra** (`−d²/2kR`), y en la Visión A→B la **recta de visibilidad** A→B, la curva del

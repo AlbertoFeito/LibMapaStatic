@@ -3575,3 +3575,25 @@ dominante). Se replica en `pintarPerfil` (solo `demo`):
 
 Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
 día; sin cambios de API, no se regenera el PDF.
+
+## 75. Entrada de puntos en la pestaña Elevación (pick en el mapa / lat-lon)
+
+Antes el análisis tomaba la geometría de la entidad SELECCIONADA en el mapa (una línea
+para perfil/visión, un vértice para el viewshed). Ahora los puntos se introducen en la
+propia pestaña, por análisis. Cambio **solo del `demo`**.
+
+- **Punto A** y **Punto B**: cada uno con campos **lat/lon** editables y un botón
+  **«📍 Mapa»** que captura el siguiente clic. Se aprovecha el API público del widget:
+  `setActiveTool(MapTool::PickPoint)` + señal `pointPicked(coord)`. Como `PickPoint` no se
+  auto-resetea, tras capturar se vuelve a `MapTool::None` y se re-ejecuta el último
+  análisis para verlo al vuelo. A y B arrancan en el centro del mapa y 20 km al este.
+- **Perfil** (radial): A + **rumbo** (azimut, 0=N) + **alcance**; perfil del terreno desde
+  A por ese rumbo hasta el alcance (`a.atDistanceAndAzimuth`).
+- **Visión A→B**: A (Alt1) y B (Alt2) de los campos; se exige A≠B.
+- **Viewshed**: origen = A; observador Alt1, objetivo Alt2, alcance.
+- Nuevos campos: `m_latA/m_lonA`, `m_latB/m_lonB`, `m_rumbo`; enum `Pick{Ninguno,A,B}` y
+  `m_picking`. Se elimina `entidadSeleccionada()` (ya no se usa). Los botones y la ayuda
+  del tab describen el nuevo flujo.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.

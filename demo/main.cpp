@@ -152,6 +152,9 @@ class Ventana : public QMainWindow
 {
     Q_OBJECT
 
+    //! Punto que se está capturando del mapa (pestaña Elevación).
+    enum class Pick { Ninguno, A, B };
+
 public:
     //! \a origen es un datasets.json o, si \a esPaquete, la carpeta de un
     //! paquete de datos (mapa.json), que ya trae elevacion, capas fijas y
@@ -665,6 +668,28 @@ private:
         caja->setContentsMargins(8, 8, 8, 8);
 
         auto *form = new QFormLayout;
+
+        // Punto A (perfil/visión/zvd) y Punto B (visión): lat/lon editables + un
+        // botón «📍 Mapa» que captura el siguiente clic sobre el mapa.
+        auto filaPunto = [&](QDoubleSpinBox *&lat, QDoubleSpinBox *&lon, Pick cual) {
+            lat = new QDoubleSpinBox(tab);
+            lat->setRange(-90.0, 90.0); lat->setDecimals(5); lat->setSingleStep(0.001);
+            lat->setToolTip(tr("Latitud"));
+            lon = new QDoubleSpinBox(tab);
+            lon->setRange(-180.0, 180.0); lon->setDecimals(5); lon->setSingleStep(0.001);
+            lon->setToolTip(tr("Longitud"));
+            auto *pick = new QPushButton(tr("📍 Mapa"), tab);
+            pick->setToolTip(tr("Fija este punto con el siguiente clic en el mapa."));
+            connect(pick, &QPushButton::clicked, this, [this, cual] { iniciarPick(cual); });
+            auto *fila = new QHBoxLayout;
+            fila->setContentsMargins(0, 0, 0, 0);
+            fila->addWidget(lat, 1); fila->addWidget(lon, 1); fila->addWidget(pick, 0);
+            auto *w = new QWidget(tab); w->setLayout(fila);
+            return w;
+        };
+        form->addRow(tr("Punto A (lat/lon):"), filaPunto(m_latA, m_lonA, Pick::A));
+        form->addRow(tr("Punto B (lat/lon):"), filaPunto(m_latB, m_lonB, Pick::B));
+
         m_altA = new QDoubleSpinBox(tab);
         m_altA->setRange(0.0, 20000.0); m_altA->setValue(10.0); m_altA->setSuffix(tr(" m"));
         m_altA->setToolTip(tr("Visión: antena en A.  Viewshed: altura del observador."));
@@ -673,11 +698,27 @@ private:
         m_altB->setRange(0.0, 20000.0); m_altB->setValue(10.0); m_altB->setSuffix(tr(" m"));
         m_altB->setToolTip(tr("Visión: antena en B.  Viewshed: altura del objetivo."));
         form->addRow(tr("Alt2 (objetivo / B):"), m_altB);
+        m_rumbo = new QDoubleSpinBox(tab);
+        m_rumbo->setRange(0.0, 359.9); m_rumbo->setDecimals(1); m_rumbo->setSuffix(tr(" °"));
+        m_rumbo->setValue(180.0); m_rumbo->setWrapping(true);
+        m_rumbo->setToolTip(tr("Rumbo (azimut) del perfil radial desde A (0=N, 90=E)."));
+        form->addRow(tr("Rumbo (perfil):"), m_rumbo);
         m_alcanceKm = new QDoubleSpinBox(tab);
         m_alcanceKm->setRange(1.0, 300.0); m_alcanceKm->setValue(40.0); m_alcanceKm->setSuffix(tr(" km"));
-        m_alcanceKm->setToolTip(tr("Alcance (radio) de los rayos del viewshed."));
-        form->addRow(tr("Alcance viewshed:"), m_alcanceKm);
+        m_alcanceKm->setToolTip(tr("Alcance del viewshed (radio) y del perfil radial desde A."));
+        form->addRow(tr("Alcance (viewshed/perfil):"), m_alcanceKm);
         caja->addLayout(form);
+
+        // Puntos A y B por defecto: centro del mapa y 20 km al este (así la Visión
+        // A→B arranca con una línea válida sin tener que pinchar primero).
+        const QGeoCoordinate c = m_mapa->center();
+        if (c.isValid()) {
+            m_latA->setValue(c.latitude()); m_lonA->setValue(c.longitude());
+            const QGeoCoordinate b = c.atDistanceAndAzimuth(20000.0, 90.0);
+            m_latB->setValue(b.latitude()); m_lonB->setValue(b.longitude());
+        }
+        connect(m_mapa, &MapWidget::pointPicked, this,
+                [this](const QGeoCoordinate &p) { onPointPicked(p); });
 
         m_marComo0 = new QCheckBox(tr("Mar / sin dato = 0 m"), tab);
         m_marComo0->setChecked(true);
@@ -704,10 +745,10 @@ private:
         fila2->addWidget(bViewshed); fila2->addWidget(bLimpiar);
         caja->addLayout(fila2);
 
-        bPerfil->setToolTip(tr("Perfil del terreno de la LÍNEA/polígono seleccionado."));
-        bVision->setToolTip(tr("Línea de visión entre el 1º y último vértice, con Alt1/Alt2."));
-        bViewshed->setToolTip(tr("Zona de visibilidad 360° desde el vértice seleccionado "
-                                 "(o el centro del mapa): azul visible, amarillo oculto."));
+        bPerfil->setToolTip(tr("Perfil del terreno desde A por el rumbo indicado, hasta el alcance."));
+        bVision->setToolTip(tr("Línea de visión de A (Alt1) a B (Alt2)."));
+        bViewshed->setToolTip(tr("Zona de visibilidad 360° desde A (observador Alt1, objetivo Alt2): "
+                                 "azul visible, amarillo oculto."));
         connect(bPerfil, &QPushButton::clicked, this, &Ventana::analizarPerfil);
         connect(bVision, &QPushButton::clicked, this, &Ventana::analizarVision);
         connect(bViewshed, &QPushButton::clicked, this, &Ventana::analizarViewshed);
@@ -730,9 +771,11 @@ private:
         caja->addWidget(m_resultado);
 
         auto *ayuda = new QLabel(
-            tr("<span style='color:#777'>Azul = visible, amarillo = oculto, rojo = "
-               "obstáculo. El perfil se abre en una ventana aparte (QCustomPlot: "
-               "arrastrar = desplazar, rueda = zoom).</span>"), tab);
+            tr("<span style='color:#777'>Fija los puntos con «📍 Mapa» o escríbelos. "
+               "<b>Perfil</b>: A + rumbo + alcance. <b>Visión A→B</b>: A (Alt1) y B (Alt2). "
+               "<b>Viewshed</b>: A (observador Alt1, objetivo Alt2, alcance). "
+               "Azul = visible, amarillo = oculto, rojo = obstáculo. El perfil se abre en "
+               "una ventana aparte (arrastrar = desplazar, rueda = zoom).</span>"), tab);
         ayuda->setWordWrap(true);
         caja->addWidget(ayuda);
         caja->addStretch(1);
@@ -965,10 +1008,37 @@ private:
     }
 
     // Entidad seleccionada (o vacía si no hay ninguna).
-    std::optional<MapFeature> entidadSeleccionada() const
+    // Punto A / B leídos de los campos lat/lon de la pestaña.
+    QGeoCoordinate puntoA() const { return QGeoCoordinate(m_latA->value(), m_lonA->value()); }
+    QGeoCoordinate puntoB() const { return QGeoCoordinate(m_latB->value(), m_lonB->value()); }
+
+    // Arranca la captura de un punto (A o B) con el siguiente clic en el mapa.
+    void iniciarPick(Pick cual)
     {
-        const qint64 id = m_mapa->selectedFeature();
-        return id >= 0 ? m_mapa->feature(id) : std::nullopt;
+        m_picking = cual;
+        m_mapa->setActiveTool(MapTool::PickPoint);
+        statusBar()->showMessage(
+            tr("Pincha en el mapa para fijar el punto %1…")
+                .arg(cual == Pick::A ? tr("A") : tr("B")), 8000);
+    }
+
+    // Recibe el clic capturado: vuelca la coordenada en los campos del punto en
+    // curso, vuelve a navegar y re-ejecuta el último análisis para verlo al vuelo.
+    void onPointPicked(const QGeoCoordinate &p)
+    {
+        if (m_picking == Pick::Ninguno) return;
+        QDoubleSpinBox *lat = (m_picking == Pick::A) ? m_latA : m_latB;
+        QDoubleSpinBox *lon = (m_picking == Pick::A) ? m_lonA : m_lonB;
+        lat->setValue(p.latitude());
+        lon->setValue(p.longitude());
+        const Pick cual = m_picking;
+        m_picking = Pick::Ninguno;
+        m_mapa->setActiveTool(MapTool::None);
+        statusBar()->showMessage(
+            tr("Punto %1 fijado en %2, %3")
+                .arg(cual == Pick::A ? tr("A") : tr("B"))
+                .arg(p.latitude(), 0, 'f', 5).arg(p.longitude(), 0, 'f', 5), 4000);
+        reejecutar();     // refresca el análisis con el nuevo punto
     }
 
     // (Re)crea vacía una capa donde volcar un resultado de análisis.
@@ -997,46 +1067,46 @@ private:
     {
         if (!exigirDem())
             return;
-        const auto f = entidadSeleccionada();
-        if (!f || f->geometry.size() < 2) {
-            statusBar()->showMessage(
-                tr("Selecciona una LÍNEA o polígono (≥2 vértices) para su perfil."),
-                5000);
+        // Perfil RADIAL desde A por el rumbo indicado, hasta el alcance.
+        const QGeoCoordinate a = puntoA();
+        if (!a.isValid()) {
+            statusBar()->showMessage(tr("Punto A no válido (fíjalo en el mapa o escríbelo)."), 5000);
             return;
         }
+        const double alcanceM = m_alcanceKm->value() * 1000.0;
+        const QGeoCoordinate fin = a.atDistanceAndAzimuth(alcanceM, m_rumbo->value());
         // El perfil se DIBUJA con la cota cruda (muestra la batimetría en azul); el
         // check «Mar = 0» solo afecta al ANÁLISIS de visibilidad, no a la gráfica.
-        const ElevationProfile p = m_mapa->elevationProfile(f->geometry, ElevationProfileParams());
+        const ElevationProfile p = m_mapa->elevationProfile({ a, fin }, ElevationProfileParams());
         if (!p.isValid() || std::isnan(p.maxElevation)) {
             statusBar()->showMessage(
-                tr("La ruta no tiene cota en el DEM activo (fuera de cobertura)."),
+                tr("El perfil no tiene cota en el DEM activo (fuera de cobertura)."),
                 5000);
             return;
         }
         const QString resumen =
-            tr("<b>Perfil</b> · %1 km · mín %2 m · máx %3 m · subida +%4 m · bajada −%5 m")
+            tr("<b>Perfil</b> · rumbo %1° · %2 km · mín %3 m · máx %4 m · subida +%5 m · bajada −%6 m")
+                .arg(m_rumbo->value(), 0, 'f', 0)
                 .arg(p.totalDistanceM / 1000.0, 0, 'f', 2)
                 .arg(p.minElevation, 0, 'f', 0).arg(p.maxElevation, 0, 'f', 0)
                 .arg(p.gain, 0, 'f', 0).arg(p.loss, 0, 'f', 0);
         if (m_resultado) m_resultado->setText(resumen);
         m_ultimo = Analisis::Perfil;
-        mostrarPerfil(p, resumen);           // ruta: sin visión ni techo 5000
+        mostrarPerfil(p, resumen);           // perfil radial: sin visión ni techo 5000
     }
 
-    // Línea de visión entre el 1º y el último vértice de la línea seleccionada.
+    // Línea de visión de A (Alt1) a B (Alt2), ambos de los campos de la pestaña.
     void analizarVision()
     {
         if (!exigirDem())
             return;
-        const auto f = entidadSeleccionada();
-        if (!f || f->geometry.size() < 2) {
+        const QGeoCoordinate a = puntoA();
+        const QGeoCoordinate b = puntoB();
+        if (!a.isValid() || !b.isValid() || a == b) {
             statusBar()->showMessage(
-                tr("Selecciona una LÍNEA (se usan su 1º y último vértice como A y B)."),
-                5000);
+                tr("Fija los puntos A y B (distintos) en el mapa o escríbelos."), 5000);
             return;
         }
-        const QGeoCoordinate a = f->geometry.first();
-        const QGeoCoordinate b = f->geometry.last();
         LineOfSightParams lp;
         lp.voidElevation = voidElev();
         lp.curvature = curvaturaOn();
@@ -1177,9 +1247,11 @@ private:
     {
         if (!exigirDem())
             return;
-        const auto f = entidadSeleccionada();
-        const QGeoCoordinate origen =
-            (f && !f->geometry.isEmpty()) ? f->geometry.first() : m_mapa->center();
+        const QGeoCoordinate origen = puntoA();
+        if (!origen.isValid()) {
+            statusBar()->showMessage(tr("Punto (A) no válido (fíjalo en el mapa o escríbelo)."), 5000);
+            return;
+        }
 
         ViewshedParams vp;
         vp.observerHeight = m_altA->value();
@@ -1922,9 +1994,15 @@ private:
 
     // Analisis de elevacion (pestaña "Elevacion" del panel lateral).
     QTabWidget *m_tabs = nullptr;
+    QDoubleSpinBox *m_latA = nullptr;       //!< punto A: latitud (perfil/visión/zvd)
+    QDoubleSpinBox *m_lonA = nullptr;       //!< punto A: longitud
+    QDoubleSpinBox *m_latB = nullptr;       //!< punto B: latitud (visión)
+    QDoubleSpinBox *m_lonB = nullptr;       //!< punto B: longitud
+    QDoubleSpinBox *m_rumbo = nullptr;      //!< rumbo (azimut) del perfil radial
     QDoubleSpinBox *m_altA = nullptr;       //!< antena A / altura del observador
     QDoubleSpinBox *m_altB = nullptr;       //!< antena B / altura del objetivo
-    QDoubleSpinBox *m_alcanceKm = nullptr;  //!< alcance del viewshed
+    QDoubleSpinBox *m_alcanceKm = nullptr;  //!< alcance del viewshed / perfil
+    Pick m_picking = Pick::Ninguno;
     QCheckBox *m_marComo0 = nullptr;        //!< tratar mar/sin dato como 0 m
     QCheckBox *m_curvatura = nullptr;       //!< aplicar curvatura 4/3
     QLabel *m_resultado = nullptr;          //!< lectura del ultimo analisis
