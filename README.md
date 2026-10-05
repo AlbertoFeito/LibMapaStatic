@@ -372,6 +372,16 @@ El check «Mar / sin dato = 0 m» trata el mar como cota 0 (objetivos sobre el m
 (sobre mar sin obstáculos se ve hasta el alcance máximo). **Cambiar un check re-aplica
 al instante** el último análisis.
 
+**Cotas negativas y batimetría.** El lector del DEM deja pasar **cualquier cota
+negativa** tal cual (solo `−32768` es hueco → NaN): sirve para tierra bajo el nivel del
+mar (depresiones) y, si el dataset trae **batimetría**, para la profundidad del fondo
+marino (p. ej. el talud al norte de Cuba a ~−1800 m). SRTM puro no trae batimetría
+(sobre el mar es 0 o hueco), pero el mismo lector aceptaría un DEM batimétrico
+(GEBCO/ETOPO). En el perfil, lo que queda **bajo el nivel del mar (cota < 0) se rellena
+de azul** (columna de agua) con una línea de referencia del nivel del mar en y=0. La
+**recta de visibilidad** coloca los objetivos sobre el mar en la **superficie (0)**, no
+en el fondo: los mástiles de antena de un buque arrancan en 0, no a −profundidad.
+
 ## Referencia de comandos (argumentos por herramienta)
 
 Opciones entre `[…]` opcionales; el resto, obligatorias. Los bbox son siempre

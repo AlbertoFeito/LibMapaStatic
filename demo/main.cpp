@@ -828,7 +828,27 @@ private:
         gTerr->setChannelFillGraph(gCurva);
         gTerr->setData(dx, terr);
 
-        double yTop = terrMax, yBot = qMin(terrMin, -caida(dFin));
+        // Nivel del mar (y=0) + columna de agua azul donde la cota es < 0.
+        // El dataset puede traer batimetría (profundidades negativas): el agua se
+        // rellena entre el terreno (cota < 0) y la superficie 0. Con `min(terr,0)`
+        // frente a una línea constante 0, donde la tierra está sobre el mar los dos
+        // valores coinciden (sin relleno) y solo se pinta la columna sumergida.
+        QVector<double> agua, cero;
+        agua.reserve(dx.size()); cero.reserve(dx.size());
+        for (double e : terr) { agua << qMin(e, 0.0); cero << 0.0; }
+        QCPGraph *gNivel = m_plot->addGraph();            // referencia del nivel del mar
+        gNivel->setName(tr("Nivel del mar"));
+        gNivel->setPen(QPen(QColor(0x0d, 0x47, 0xa1), 1, Qt::DashLine));
+        gNivel->setData(dx, cero);
+        QCPGraph *gAgua = m_plot->addGraph();             // columna de agua (azul)
+        gAgua->setName(tr("Agua (bajo el nivel del mar)"));
+        gAgua->setPen(QPen(QColor(0x15, 0x65, 0xc0, 0)));  // sin borde propio
+        gAgua->setBrush(QBrush(QColor(0x21, 0x96, 0xf3, 90)));
+        gAgua->setChannelFillGraph(gNivel);
+        gAgua->setData(dx, agua);
+        gAgua->removeFromLegend();                        // la leyenda ya tiene «Nivel del mar»
+
+        double yTop = qMax(terrMax, 0.0), yBot = qMin(terrMin, -caida(dFin));
         if (conVision && D > 0.0) {
             // Recta de visibilidad A→B (naranja) entre las cimas de antena.
             QCPGraph *gVis = m_plot->addGraph();
@@ -843,9 +863,13 @@ private:
             gObj->setPen(QPen(QColor(0x15, 0x65, 0xc0), 1, Qt::DotLine));
             gObj->setData(dx, objetivo);
 
-            // Mástiles de antena en A y B.
-            mastil(0.0, terrEn(p, 0.0), zA);
-            mastil(D, terrEn(p, D), zB);
+            // Mástiles de antena en A y B. Sobre el mar (cota < 0 o sin dato) la
+            // base arranca en la superficie (0), coherente con la recta.
+            auto baseMastil = [](double t) {
+                return std::isnan(t) ? 0.0 : qMax(t, 0.0);
+            };
+            mastil(0.0, baseMastil(terrEn(p, 0.0)), zA);
+            mastil(D, baseMastil(terrEn(p, D)), zB);
 
             // Obstáculo + línea de sombra (si bloquea).
             if (bloqueado && critD >= 0.0) {
@@ -1102,9 +1126,16 @@ private:
             }
         }
         m_ultimo = Analisis::Vision;
-        if (!std::isnan(tA) && !std::isnan(tB) && D > 0.0) {
-            const double zA = tA + m_altA->value();   // cima de antena en A (abs)
-            const double zB = tB + m_altB->value();   // cima de antena en B (abs)
+        // La recta de visibilidad busca el objetivo SOBRE EL MAR: si un extremo no
+        // tiene dato (NaN) o cae bajo el nivel del mar (mar o batimetría negativa),
+        // la base de la antena se asienta en la SUPERFICIE (0), no en el fondo
+        // marino. Los objetivos están por encima del nivel del mar (p. ej. buques),
+        // así que su mástil arranca en 0, no a −profundidad.
+        const double baseA = std::isnan(tA) ? 0.0 : qMax(tA, 0.0);
+        const double baseB = std::isnan(tB) ? 0.0 : qMax(tB, 0.0);
+        if (D > 0.0) {
+            const double zA = baseA + m_altA->value();   // cima de antena en A (abs)
+            const double zB = baseB + m_altB->value();   // cima de antena en B (abs)
             mostrarPerfil(perfil, resumen, alcanceM, true, zA, zB, D,
                           v.blockDistanceM, !v.clear);
         } else {

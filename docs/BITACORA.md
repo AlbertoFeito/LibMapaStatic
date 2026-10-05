@@ -3458,3 +3458,32 @@ por un QCustomPlot con esa misma representación.
 Reconfigurar CMake (`cmake -S . -B build`). Compila sin warnings; la librería no
 cambia, **18 tests** en verde. README y BITÁCORA al día; sin cambios de API, no se
 regenera el PDF.
+
+## 71. Perfil: agua azul bajo el nivel del mar y recta de visibilidad sobre el mar
+
+Probando sobre el dataset «Cuba 2026.10», el usuario vio que la barra de estado marcaba
+**−1891 m** con el cursor en mar abierto al norte de Mariel. Esa lectura es la cota cruda
+bajo el cursor (`m_mapa->elevationAt`, sin aplicar el check «Mar=0»): que salga negativa
+sobre el mar confirma que **este dataset trae batimetría** (profundidad del fondo; el
+talud al norte de Cuba cae a ~−1800 m hacia el Estrecho de Florida). El lector del DEM ya
+dejaba pasar los negativos (solo `−32768` es hueco), así que no hubo que tocar la
+librería; basta aprovecharlo en el `demo`. Dos cambios, **solo en `demo/main.cpp`**:
+
+- **Agua azul en el perfil (`pintarPerfil`).** Se añade una línea de **nivel del mar** en
+  `y=0` (azul discontinua) y una **columna de agua** azul translúcida: un graph con
+  `min(terreno, 0)` relleno por canal hasta una línea constante 0. Donde la tierra está
+  sobre el mar ambos coinciden (sin relleno); donde la cota es < 0 (mar con batimetría o
+  depresión) se rellena entre el terreno y 0 → se ve la diferencia tierra/agua. El cuerpo
+  verde del terreno sigue yendo hasta la curva de curvatura (tierra bajo el agua).
+- **Recta de visibilidad sobre el mar (`analizarVision` + mástiles).** Los objetivos son
+  por ahora **sobre el nivel del mar** (buques): si un extremo no tiene dato (NaN) o cae
+  bajo 0 (mar/batimetría), la base de la antena se asienta en la **superficie (0)**, no en
+  el fondo marino (`base = isnan ? 0 : max(cota,0)`). Así la recta «busca» el objetivo en
+  la superficie y el mástil arranca en 0, en vez de a −profundidad. (Una depresión de
+  tierra firme bajo 0 se trata igual en el `demo` por simplicidad; distinguir mar de
+  tierra firme negativa necesitaría una máscara de costa, fuera de alcance.)
+
+Nota: sin batimetría (SRTM puro) el mar abierto está en 0 o es hueco, así que el azul solo
+aparece donde hay cota real < 0; con un DEM batimétrico (GEBCO/ETOPO) el mismo lector
+mostraría la profundidad. Compila sin warnings; la librería no cambia, **18 tests** en
+verde. README y BITÁCORA al día; sin cambios de API, no se regenera el PDF.
