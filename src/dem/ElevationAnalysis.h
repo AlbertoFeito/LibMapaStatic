@@ -50,10 +50,15 @@ LineOfSightResult lineOfSight(const IElevationSource &src,
  * del poligono de visibilidad). Resultado invalido (rays vacio) si falta la cota
  * en el origen. Es visibilidad DIRECTA, no radar (el horizonte geometrico emerge
  * de la geometria, no se codifica la formula 4.12*raiz(h)).
+ *
+ * \a progress (opcional) se invoca tras cada azimut con (rayos hechos, total);
+ * si devuelve \c false, se cancela y el resultado es vacio (util para barras de
+ * progreso cancelables en alcances largos).
  */
 Viewshed computeViewshed(const IElevationSource &src,
                          const QGeoCoordinate &origin,
-                         const ViewshedParams &params = {});
+                         const ViewshedParams &params = {},
+                         const ViewshedProgress &progress = {});
 
 } // namespace libmapa
 

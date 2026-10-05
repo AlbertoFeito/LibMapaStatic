@@ -322,7 +322,7 @@ ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &orig
 // Viewshed 360 grados: un rayo por azimut. Invalido si no hay cota en el origen
 // (no se puede anclar el plano del observador).
 Viewshed computeViewshed(const IElevationSource &src, const QGeoCoordinate &origin,
-                         const ViewshedParams &params)
+                         const ViewshedParams &params, const ViewshedProgress &progress)
 {
     Viewshed vs;
     if (!origin.isValid())
@@ -342,10 +342,18 @@ Viewshed computeViewshed(const IElevationSource &src, const QGeoCoordinate &orig
     vs.observerHeight = params.observerHeight;
     vs.targetHeight = params.targetHeight;
 
-    for (double az = 0.0; az < 360.0; az += azPaso)
+    const int total = static_cast<int>(std::ceil(360.0 / azPaso));
+    int hecho = 0;
+    for (double az = 0.0; az < 360.0; az += azPaso) {
         vs.rays.append(rayoViewshed(src, origin, az, zObs, paso, maxR,
                                     params.targetHeight, params.curvature, k, R,
                                     params.voidElevation, params.keepProfiles));
+        ++hecho;
+        if (progress && !progress(hecho, total)) {   // cancelado: resultado vacio
+            vs.rays.clear();
+            return vs;
+        }
+    }
     return vs;
 }
 

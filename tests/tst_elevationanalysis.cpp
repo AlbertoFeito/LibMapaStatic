@@ -37,6 +37,7 @@ private slots:
     void viewshedSeaAsVoidElevation();
     void viewshedVisibleHiddenPartition();
     void viewshedInvalid();
+    void viewshedProgressAndCancel();
 
 private:
     static bool writeHgt(const QString &path, int side, const QVector<int> &s);
@@ -601,6 +602,35 @@ void TstElevationAnalysis::viewshedInvalid()
     const QGeoCoordinate hueco(19.0 + 5.0 / 6.0, -77.0 + 1.0 / 6.0);
     QVERIFY(std::isnan(m_dem.elevationAt(hueco)));
     QVERIFY(!computeViewshed(m_dem, hueco).isValid());
+}
+
+// El callback de progreso se invoca una vez por rayo, en orden, hasta (total,
+// total); devolver false CANCELA (resultado vacio). Para barras de progreso.
+void TstElevationAnalysis::viewshedProgressAndCancel()
+{
+    const QGeoCoordinate origen(19.5, -76.5);
+    ViewshedParams vp;
+    vp.azimuthStepDeg = 10.0;        // 36 rayos
+    vp.maxRangeM = 5000.0;
+    vp.voidElevation = 0.0;
+
+    int llamadas = 0, ultimoHecho = 0, ultimoTotal = 0;
+    auto prog = [&](int done, int total) {
+        ++llamadas; ultimoHecho = done; ultimoTotal = total; return true;
+    };
+    const Viewshed vs = computeViewshed(m_dem, origen, vp, prog);
+    QVERIFY(vs.isValid());
+    QCOMPARE(vs.rays.size(), 36);
+    QCOMPARE(llamadas, 36);
+    QCOMPARE(ultimoHecho, 36);
+    QCOMPARE(ultimoTotal, 36);
+
+    // Cancelar en el 5º rayo -> resultado vacio/invalido.
+    int n = 0;
+    auto cancelar = [&](int, int) { return ++n < 5; };
+    const Viewshed vc = computeViewshed(m_dem, origen, vp, cancelar);
+    QVERIFY(!vc.isValid());
+    QCOMPARE(n, 5);
 }
 
 QTEST_MAIN(TstElevationAnalysis)

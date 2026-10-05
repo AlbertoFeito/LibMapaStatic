@@ -261,7 +261,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
-| `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura |
+| `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura. Permite **sobre-zoom** del mapa de vista previa (hasta z19) para navegar y enmarcar niveles altos (z15/16…) aunque la base recomiende un máximo menor; el rango de descarga llega a z22 |
 | `demo` | Aplicación de ejemplo: capas, dibujo/edición, cobertura por zoom, cota del terreno, **análisis de elevación** (perfil, visión A→B, viewshed) y persistencia automática |
 
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
@@ -355,6 +355,13 @@ Por memoria, cada rayo guarda solo los picos y escalares; `ViewshedParams::keepP
 añade el perfil completo de cada rayo cuando se necesita dibujar un corte. Un viewshed
 de 360° a 30 m y 50 km tarda ~0,1 s. La librería devuelve los datos; la gráfica la
 pinta la app.
+
+Se admiten **alcances largos (hasta 400 km)** y **alturas de objetivo hasta 20 km**. Como
+un viewshed de 360° a esos alcances puede tardar, `computeViewshed` (y
+`MapWidget::viewshed`) aceptan un **callback de progreso** opcional
+(`ViewshedProgress = function<bool(hecho, total)>`): se invoca tras cada azimut y, si
+devuelve `false`, **cancela** (resultado vacío). El `demo` lo usa para una **barra de
+progreso cancelable** que solo aparece si el cálculo pasa de ~0,4 s.
 
 La app de ejemplo `demo` lo demuestra en su **pestaña «Elevación»** del panel lateral
 (con un DEM activo). Los puntos se introducen en la propia pestaña: **Punto A** y **Punto

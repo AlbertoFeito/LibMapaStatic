@@ -3597,3 +3597,38 @@ propia pestaña, por análisis. Cambio **solo del `demo`**.
 
 Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
 día; sin cambios de API, no se regenera el PDF.
+
+## 76. Alcances de 400 km, progreso cancelable del viewshed y sobre-zoom en fill_map
+
+Tres mejoras para ir preparando escenarios grandes.
+
+**1. Rangos largos (demo).** El alcance (viewshed/perfil) sube a **400 km**; las alturas
+de antena/objetivo ya llegaban a **20 km** (0–20000 m). El viewshed, el perfil radial y la
+visión A→B operan sin cambios a esos alcances (caminan varias teselas del DEM).
+
+**2. Progreso cancelable del viewshed (librería + demo).** Un viewshed de 360° a 400 km
+son millones de muestras y puede tardar. Se añade un **callback de progreso** opcional al
+API:
+- `include/libmapa/Elevation.h`: `using ViewshedProgress = std::function<bool(int done,
+  int total)>;`.
+- `computeViewshed(src, origin, params, progress = {})`: invoca `progress(hecho, total)`
+  tras cada azimut; si devuelve `false`, **cancela** y devuelve un viewshed vacío.
+- `MapWidget::viewshed(origin, params, progress = {})`: reenvío.
+- `demo`: `analizarViewshed` muestra un `QProgressDialog` **cancelable** (modal, aparece
+  solo si pasa de ~0,4 s); el callback procesa eventos y propaga «Cancelar».
+- Test `viewshedProgressAndCancel`: el callback se llama una vez por rayo hasta
+  `(total,total)`; devolver `false` al 5º rayo deja el resultado inválido.
+
+**3. Sobre-zoom en fill_map (librería + fill_map).** El mapa recortaba el zoom a
+`recommendedMaxZoom` del dataset (p. ej. 14), así que no se podían **navegar ni enmarcar**
+niveles altos (z15/16) para descargarlos. Se añade:
+- `MapView::setMaxZoomOverride(int)` / `MapWidget::setMaxZoomOverride(int)`: tope de
+  sobre-zoom por encima del recomendado (−1 lo restaura). Se aplica en `setZoom` y
+  `fitBounds`.
+- `fill_map`: `m_mapa->setMaxZoomOverride(19)` al arrancar; así la vista previa llega a
+  z19 para enmarcar. Los spinboxes de descarga ya llegaban a z22 (sin recorte), de modo
+  que **z15/z16 se descargan cuando se desee**.
+
+Compila sin warnings; **18 tests** en verde (slot nuevo). README, BITÁCORA y
+`arquitectura.html` al día; **cambia el API público (callback de progreso, sobre-zoom) →
+se regenera el PDF**.

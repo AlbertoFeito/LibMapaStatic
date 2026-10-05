@@ -417,6 +417,13 @@ void MapWidget::setZoom(int zoom)
         d->view->setZoom(zoom);
 }
 
+// Permite sobre-zoom por encima del maximo recomendado (-1 lo restaura).
+void MapWidget::setMaxZoomOverride(int zoom)
+{
+    if (d->view)
+        d->view->setMaxZoomOverride(zoom);
+}
+
 // Zoom minimo del dataset activo.
 int MapWidget::minZoom() const
 {
@@ -954,11 +961,12 @@ LineOfSightResult MapWidget::lineOfSight(
 // Viewshed 360 grados. Reenvio al calculo del nucleo con el origen de elevacion
 // configurado; resultado invalido si no hay origen.
 Viewshed MapWidget::viewshed(const QGeoCoordinate &origin,
-                             const ViewshedParams &params) const
+                             const ViewshedParams &params,
+                             const ViewshedProgress &progress) const
 {
     if (!d->elevation)
         return Viewshed();
-    return libmapa::computeViewshed(*d->elevation, origin, params);
+    return libmapa::computeViewshed(*d->elevation, origin, params, progress);
 }
 
 // Cambia en caliente el origen a una CARPETA de `.hgt` (vacia = quita elevacion).

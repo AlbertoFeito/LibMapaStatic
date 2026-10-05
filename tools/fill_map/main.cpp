@@ -90,6 +90,11 @@ public:
                 tr("No se pudo abrir el mapa:\n%1").arg(m_mapa->lastError()));
         }
 
+        // fill_map es la herramienta de DESCARGA: permite sobre-zoom hasta z19
+        // para poder navegar y enmarcar niveles altos (z15/16…) que se van a bajar,
+        // aunque la base recomiende un maximo menor (p. ej. 14).
+        m_mapa->setMaxZoomOverride(19);
+
         // Antirebote del modo "al navegar": espera a que el mapa se pare antes
         // de descargar, para no lanzar en cada pixel del arrastre.
         m_debounce = new QTimer(this);

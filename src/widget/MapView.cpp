@@ -225,7 +225,9 @@ void MapView::setZoom(int zoom, const QPointF *anchorPx)
 {
     const TileDataset *ds = m_service ? m_service->activeDataset() : nullptr;
     const int lo = ds ? ds->minZoom : 0;
-    const int hi = ds ? ds->recommendedMaxZoom : 18;
+    int hi = ds ? ds->recommendedMaxZoom : 18;
+    if (m_maxZoomOverride >= 0)      // sobre-zoom permitido por la herramienta
+        hi = qMax(hi, m_maxZoomOverride);
 
     const int nuevo = qBound(lo, zoom, hi);
     if (nuevo == m_zoom)
@@ -273,7 +275,9 @@ void MapView::fitBounds(const QGeoCoordinate &northWest,
 
     const TileDataset *ds = m_service ? m_service->activeDataset() : nullptr;
     const int lo = ds ? ds->minZoom : 0;
-    const int hi = ds ? ds->recommendedMaxZoom : 18;
+    int hi = ds ? ds->recommendedMaxZoom : 18;
+    if (m_maxZoomOverride >= 0)
+        hi = qMax(hi, m_maxZoomOverride);
 
     ensureLayout();
     const int widthPx = qMax(1, plotArea().width());

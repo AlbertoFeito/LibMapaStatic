@@ -144,6 +144,12 @@ public:
     int minZoom() const;
     int maxZoom() const;
 
+    //! Permite SOBRE-ZOOM por encima del maximo recomendado del dataset (hasta
+    //! \a zoom). -1 restaura el limite normal. Pensado para herramientas de
+    //! descarga (fill_map): navegar/enmarcar niveles altos (z15/16) que se van a
+    //! bajar, aunque la base recomiende un maximo menor.
+    void setMaxZoomOverride(int zoom);
+
     /*!
      * \brief Olvida las teselas en cache y vuelve a pedir las del viewport.
      *
@@ -357,9 +363,13 @@ public:
     //! \c ViewshedParams::targetHeight (zona de visibilidad). Corrige la
     //! curvatura 4/3 (configurable). Resultado invalido (isValid()==false) si no
     //! hay origen de elevacion o falta la cota del origen.
+    //! \a progress (opcional) se invoca tras cada azimut con (rayos hechos,
+    //! total); si devuelve false se cancela (resultado invalido). Para barras de
+    //! progreso cancelables en alcances largos.
     Viewshed viewshed(
         const QGeoCoordinate &origin,
-        const ViewshedParams &params = ViewshedParams()) const;
+        const ViewshedParams &params = ViewshedParams(),
+        const ViewshedProgress &progress = ViewshedProgress()) const;
 
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;

@@ -54,6 +54,12 @@ public:
     int zoom() const { return m_zoom; }
     void setZoom(int zoom, const QPointF *anchorPx = nullptr);
 
+    //! Tope de zoom por encima del recomendado del dataset (sobre-zoom). -1 (por
+    //! defecto) = usar recommendedMaxZoom. Lo usan herramientas como fill_map para
+    //! poder navegar/enmarcar niveles altos (z15/16) que se van a descargar.
+    void setMaxZoomOverride(int zoom) { m_maxZoomOverride = zoom; }
+    int maxZoomOverride() const { return m_maxZoomOverride; }
+
     void fitBounds(const QGeoCoordinate &northWest,
                    const QGeoCoordinate &southEast);
 
@@ -191,6 +197,7 @@ private:
     CoverageLayer *m_coverageLayer = nullptr;
 
     int m_zoom = 10;
+    int m_maxZoomOverride = -1;     //!< tope de sobre-zoom (-1 = recommendedMaxZoom)
     QGeoCoordinate m_center{23.1136, -82.3666};
     qint64 m_selectedTarget = -1;    //!< Objetivo resaltado (-1 = ninguno).
 

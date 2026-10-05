@@ -4,6 +4,7 @@
 #include <QGeoCoordinate>
 #include <QVector>
 
+#include <functional>
 #include <limits>
 
 namespace libmapa {
@@ -202,6 +203,14 @@ struct Viewshed
 
     bool isValid() const { return !rays.isEmpty(); }
 };
+
+/*!
+ * \brief Callback de progreso del viewshed: recibe (rayos hechos, total) tras
+ * cada azimut. Devuelve \c true para seguir, \c false para CANCELAR (el viewshed
+ * devuelve entonces un resultado vacio/invalido). Vacio = sin progreso. Util para
+ * una barra de progreso cancelable en alcances largos (p. ej. 400 km).
+ */
+using ViewshedProgress = std::function<bool(int done, int total)>;
 
 } // namespace libmapa
 

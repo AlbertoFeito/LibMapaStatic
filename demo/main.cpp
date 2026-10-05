@@ -43,6 +43,7 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
+#include <QProgressDialog>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
@@ -704,8 +705,9 @@ private:
         m_rumbo->setToolTip(tr("Rumbo (azimut) del perfil radial desde A (0=N, 90=E)."));
         form->addRow(tr("Rumbo (perfil):"), m_rumbo);
         m_alcanceKm = new QDoubleSpinBox(tab);
-        m_alcanceKm->setRange(1.0, 300.0); m_alcanceKm->setValue(40.0); m_alcanceKm->setSuffix(tr(" km"));
-        m_alcanceKm->setToolTip(tr("Alcance del viewshed (radio) y del perfil radial desde A."));
+        m_alcanceKm->setRange(1.0, 400.0); m_alcanceKm->setValue(40.0); m_alcanceKm->setSuffix(tr(" km"));
+        m_alcanceKm->setToolTip(tr("Alcance del viewshed (radio) y del perfil radial desde A "
+                                   "(hasta 400 km; en alcances largos el viewshed muestra progreso)."));
         form->addRow(tr("Alcance (viewshed/perfil):"), m_alcanceKm);
         caja->addLayout(form);
 
@@ -1260,13 +1262,32 @@ private:
         vp.voidElevation = voidElev();      // mar / sin dato = 0 (objetivos en el mar)
         vp.curvature = curvaturaOn();       // sin curvatura: mar sin obstáculos = alcance
 
+        // Barra de progreso cancelable: el viewshed de 360° a largo alcance (hasta
+        // 400 km) puede tardar. Solo aparece si pasa de ~0,4 s (alcances cortos no
+        // la ven). El callback corre en este mismo hilo, así que procesa eventos
+        // para repintar y atender «Cancelar».
+        QProgressDialog prog(tr("Calculando viewshed (%1 km)…")
+                                 .arg(m_alcanceKm->value(), 0, 'f', 0),
+                             tr("Cancelar"), 0, 360, this);
+        prog.setWindowModality(Qt::WindowModal);
+        prog.setMinimumDuration(400);
+        auto progreso = [&prog](int done, int total) -> bool {
+            prog.setMaximum(total);
+            prog.setValue(done);
+            QApplication::processEvents();
+            return !prog.wasCanceled();
+        };
+
         QElapsedTimer reloj;
         reloj.start();
-        const Viewshed vs = m_mapa->viewshed(origen, vp);
+        const Viewshed vs = m_mapa->viewshed(origen, vp, progreso);
         const qint64 ms = reloj.elapsed();
+        const bool cancelado = prog.wasCanceled();
+        prog.reset();
         if (!vs.isValid()) {
             statusBar()->showMessage(
-                tr("No hay cota en el origen del viewshed (fuera de cobertura)."),
+                cancelado ? tr("Viewshed cancelado.")
+                          : tr("No hay cota en el origen del viewshed (fuera de cobertura)."),
                 5000);
             return;
         }
