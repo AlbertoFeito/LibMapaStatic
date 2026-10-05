@@ -862,17 +862,46 @@ private:
             mastil(0.0, terrPlot(0.0), zA);
             mastil(D, terrPlot(D), zBp);
 
-            // Obstáculo + línea de sombra (si bloquea), sobre la superficie hundida.
-            if (bloqueado && critD >= 0.0) {
-                const double ct = terrPlot(critD);
-                marcaObstaculo(critD, ct);
-                if (!std::isnan(ct) && critD > 1.0) {
-                    auto *linea = new QCPItemLine(m_plot);
-                    linea->setPen(QPen(QColor(0xc6, 0x28, 0x28), 1.6));
-                    const double m = (ct - zA) / critD;
-                    linea->start->setCoords(0.0, zA);
-                    linea->end->setCoords(dFin, zA + m * dFin);
+            // ÁNGULO DE CIERRE y picos de la silueta. Desde el observador en (0, zA),
+            // la tangente del ángulo de cierre a una muestra es (y − zA)/d; cada
+            // muestra que supera el máximo acumulado es un PICO que eleva el horizonte.
+            // El de mayor ángulo hasta B es el que DE VERDAD tapa el objetivo.
+            QVector<double> picoD, picoY;
+            double domD = -1.0, domY = 0.0;
+            double maxTan = -std::numeric_limits<double>::infinity();
+            for (int i = 0; i < dx.size(); ++i) {
+                if (dx[i] <= 1.0) continue;
+                const double tang = (terr[i] - zA) / dx[i];
+                if (tang > maxTan) {                       // nuevo máximo → pico
+                    maxTan = tang;
+                    picoD << dx[i]; picoY << terr[i];
+                    if (dx[i] <= D) { domD = dx[i]; domY = terr[i]; }   // dominante hasta B
                 }
+            }
+            if (domD < 0.0 && critD >= 0.0) {              // sin pico hasta B: corte más justo
+                domD = critD; domY = terrPlot(critD);
+            }
+
+            // Tracers (círculos) en los picos de la silueta.
+            QCPGraph *gPicos = m_plot->addGraph();
+            gPicos->setName(tr("Picos (ángulo de cierre)"));
+            gPicos->setLineStyle(QCPGraph::lsNone);
+            gPicos->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle,
+                                                    QColor(0x37, 0x47, 0x4f), 6));
+            gPicos->setData(picoD, picoY);
+
+            // Recta directa del observador al PICO DOMINANTE (el que tapa): la línea
+            // de cierre que limita la visibilidad. Rojo si bloquea, morado si no.
+            if (domD > 0.0) {
+                const QColor c = bloqueado ? QColor(0xc6, 0x28, 0x28)
+                                           : QColor(0x6a, 0x1b, 0x9a);
+                QCPGraph *gCierre = m_plot->addGraph();
+                gCierre->setName(bloqueado ? tr("Recta al pico que tapa")
+                                           : tr("Recta al pico dominante"));
+                gCierre->setPen(QPen(c, 1.8));
+                gCierre->setData({0.0, domD}, {zA, domY});
+                marcaObstaculo(domD, domY, c);            // tracer en el pico dominante
+                yTop = qMax(yTop, domY);
             }
         }
 
@@ -909,14 +938,14 @@ private:
         l->end->setCoords(d, cima);
     }
 
-    // Marca del obstáculo: punto rojo sobre el terreno.
-    void marcaObstaculo(double d, double cota)
+    // Marca del pico/obstáculo: punto sobre el terreno (rojo por defecto).
+    void marcaObstaculo(double d, double cota, const QColor &c = QColor(0xc6, 0x28, 0x28))
     {
         if (std::isnan(cota)) return;
         auto *t = new QCPItemTracer(m_plot);
         t->setStyle(QCPItemTracer::tsCircle);
-        t->setPen(QPen(QColor(0xc6, 0x28, 0x28)));
-        t->setBrush(QColor(0xc6, 0x28, 0x28));
+        t->setPen(QPen(c));
+        t->setBrush(c);
         t->setSize(8);
         t->position->setCoords(d, cota);
     }

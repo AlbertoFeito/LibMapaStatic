@@ -3523,6 +3523,9 @@ de tierra firme incluidos).
   (`clear`). Comprueba además que el perfil crudo muestra la batimetría (mín < −500) y que
   con mar=0 el perfil se clampea (mín = 0, máx = 100).
 
+Compila sin warnings; **18 tests** en verde (un slot nuevo del mismo ejecutable). README,
+BITÁCORA y `arquitectura.html` al día; **cambia la semántica del API → se regenera el PDF**.
+
 ## 73. Perfil al estilo DVD: curvatura en el eje Y, el mar es solo una línea
 
 Con el relleno azul (§71) el perfil quedaba feo: la batimetría (−1891 m) dominaba la
@@ -3549,5 +3552,24 @@ hasta `graph(1)` curvatura; `curva = −d²/17e6`; y donde no hay terreno, **`al
 Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
 día; sin cambios de API, no se regenera el PDF.
 
-Compila sin warnings; **18 tests** en verde (un slot nuevo del mismo ejecutable). README,
-BITÁCORA y `arquitectura.html` al día; **cambia la semántica del API → se regenera el PDF**.
+## 74. Perfil: ángulo de cierre, picos de la silueta y recta al pico dominante
+
+El usuario pidió reflejar en el perfil el **ángulo de cierre** al estilo DVD: una recta
+directa entre los puntos, tracers en los **picos máximos** y una recta hasta el **pico
+dominante**, el que de verdad provoca la no visibilidad. En DVD, los tracers se ponen en
+cada punto de ángulo de cierre sobre el terreno y la recta de visibilidad se dibuja como
+`tangente·d + posición` (recta desde el observador con la pendiente del ángulo de cierre
+dominante). Se replica en `pintarPerfil` (solo `demo`):
+
+- **Recta directa A→B** (naranja): se mantiene, es la línea de visión entre A y B.
+- **Ángulo de cierre:** desde el observador en `(0, zA)`, la tangente a cada muestra es
+  `(y − zA)/d` (en el plano ya hundido por la curvatura). Cada muestra que supera el
+  **máximo acumulado** es un **pico** que eleva el horizonte.
+- **Tracers (círculos) en los picos** de la silueta (`gPicos`, scatter sin línea).
+- **Recta al pico dominante** (`gCierre`): del observador `(0, zA)` al pico de mayor
+  ángulo hasta B `(domD, domY)`; es la línea de cierre que limita la visibilidad. **Roja
+  si bloquea, morada si no.** El pico dominante se marca con un tracer del mismo color.
+  Si no hay pico hasta B, cae al corte más justo (`critD`) de `lineOfSight`.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.

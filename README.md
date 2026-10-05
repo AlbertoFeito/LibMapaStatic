@@ -386,7 +386,13 @@ la **curvatura de la Tierra** (todo se hunde con la distancia restando `caída =
 El **nivel del mar es una sola línea** que baja con la distancia (`y = −caída(d)`) —el mar
 **no se rellena**—; el terreno sobre el mar riela sobre ella y la tierra firme va a su
 altura, también hundida. El objetivo sobre el mar queda a `Alt2` por encima de esa línea
-y la recta de visibilidad lo alcanza en el plano hundido.
+y la **recta de visibilidad directa A→B** lo alcanza en el plano hundido.
+
+Sobre el perfil se dibuja también el **ángulo de cierre**: desde el observador, la
+tangente a cada muestra es `(y − zObs)/d`; cada muestra que supera el máximo acumulado es
+un **pico de la silueta** (círculos). El pico de mayor ángulo hasta B es el que **de
+verdad tapa** el objetivo: se traza la **recta del observador a ese pico dominante** (roja
+si bloquea, morada si no), que marca el límite de visibilidad.
 
 ## Referencia de comandos (argumentos por herramienta)
 
