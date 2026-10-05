@@ -31,8 +31,10 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontMetrics>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QMouseEvent>
 #include <QHeaderView>
 #include <QIcon>
 #include <QInputDialog>
@@ -46,14 +48,17 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTableWidget>
+#include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <QWidget>
 #include <QtMath>
 #include <algorithm>
@@ -138,23 +143,36 @@ QPixmap iconoUav(const QColor &c)
     return pm;
 }
 
-// --- Perfil de elevacion: dibujo del corte del terreno --------------------
-// Pinta un ElevationProfile (distancia en X, cota en Y) como un corte relleno.
-// Las muestras sin dato (NaN) dejan hueco. Opcionalmente superpone la LINEA DE
-// VISION (la recta entre antenas, bajada por la curvatura de la Tierra) y marca
-// el OBSTACULO, para ver sobre el perfil por que se corta la vista. Es SOLO de la
-// app: la libreria da los numeros, el dibujo lo pone quien la usa.
+// --- Perfil de elevacion: grafica INTERACTIVA del corte del terreno -------
+// Pinta un ElevationProfile (distancia en X, cota en Y) como un corte relleno,
+// con ejes/rejilla, y permite ZOOM (rueda sobre X), ARRASTRE (desplazar en X),
+// doble clic para restablecer y un CURSOR con la lectura bajo el raton.
+// Opcionalmente superpone la LINEA DE VISION (recta entre antenas bajada por la
+// curvatura) y marca el OBSTACULO. Es SOLO de la app: la libreria da los numeros.
 class PerfilWidget : public QWidget
 {
 public:
     explicit PerfilWidget(const ElevationProfile &p, QWidget *parent = nullptr)
-        : QWidget(parent), m_p(p)
+        : QWidget(parent)
     {
-        setMinimumSize(560, 240);
+        setMinimumSize(560, 260);
+        setMouseTracking(true);
         setAutoFillBackground(true);
         QPalette pal = palette();
         pal.setColor(QPalette::Window, QColor(0xf7, 0xf7, 0xf7));
         setPalette(pal);
+        setProfile(p);
+    }
+
+    // Cambia el perfil y restablece la vista (zoom/desplazamiento) a toda la ruta.
+    void setProfile(const ElevationProfile &p)
+    {
+        m_p = p;
+        m_vista.clear();
+        m_critD = -1.0;
+        m_xMin = 0.0;
+        m_xMax = (p.totalDistanceM > 0.0) ? p.totalDistanceM : 1.0;
+        update();
     }
 
     // Superpone la linea de vision \a vista (x = distancia m, y = altura m) y
@@ -169,56 +187,119 @@ public:
     }
 
 protected:
+    QRectF plotArea() const { return QRectF(rect()).adjusted(60, 16, -16, -34); }
+
+    // Paso "bonito" (1/2/5 x 10^k) para los ticks de un rango dado.
+    static double pasoBonito(double rango, int objetivo)
+    {
+        if (rango <= 0.0 || objetivo < 1) return 1.0;
+        const double bruto = rango / objetivo;
+        const double mag = std::pow(10.0, std::floor(std::log10(bruto)));
+        const double n = bruto / mag;
+        const double paso = (n <= 1.0 ? 1.0 : n <= 2.0 ? 2.0 : n <= 5.0 ? 5.0 : 10.0);
+        return paso * mag;
+    }
+
+    // Cota del terreno (interpolada) a la distancia d, o NaN si no hay dato ahi.
+    double cotaEn(double d) const
+    {
+        const auto &s = m_p.samples;
+        if (s.size() < 2) return std::numeric_limits<double>::quiet_NaN();
+        for (int i = 1; i < s.size(); ++i) {
+            if (s[i].distanceM >= d) {
+                const double d0 = s[i - 1].distanceM, d1 = s[i].distanceM;
+                const double e0 = s[i - 1].elevation, e1 = s[i].elevation;
+                if (std::isnan(e0) || std::isnan(e1)) return std::numeric_limits<double>::quiet_NaN();
+                const double t = (d1 > d0) ? (d - d0) / (d1 - d0) : 0.0;
+                return e0 + (e1 - e0) * t;
+            }
+        }
+        return s.last().elevation;
+    }
+
+    // Altura de la linea de vision (interpolada) a la distancia d, o NaN.
+    double vistaEn(double d) const
+    {
+        if (m_vista.size() < 2) return std::numeric_limits<double>::quiet_NaN();
+        for (int i = 1; i < m_vista.size(); ++i) {
+            if (m_vista[i].x() >= d) {
+                const double d0 = m_vista[i - 1].x(), d1 = m_vista[i].x();
+                const double y0 = m_vista[i - 1].y(), y1 = m_vista[i].y();
+                const double t = (d1 > d0) ? (d - d0) / (d1 - d0) : 0.0;
+                return y0 + (y1 - y0) * t;
+            }
+        }
+        return m_vista.last().y();
+    }
+
     void paintEvent(QPaintEvent *) override
     {
         QPainter g(this);
         g.setRenderHint(QPainter::Antialiasing, true);
         g.fillRect(rect(), palette().window());
-        const QRectF area = QRectF(rect()).adjusted(56, 14, -16, -28);
+        const QRectF area = plotArea();
 
         if (m_p.samples.size() < 2 || std::isnan(m_p.maxElevation)) {
             g.setPen(Qt::darkGray);
             g.drawText(rect(), Qt::AlignCenter,
-                       QStringLiteral("Sin datos de elevacion en la ruta"));
+                       QStringLiteral("Pulsa «Perfil» o «Visión A→B» con una línea seleccionada"));
             return;
         }
 
-        const double dMax = m_p.totalDistanceM > 0.0 ? m_p.totalDistanceM : 1.0;
-        // El rango vertical abarca el terreno Y la linea de vision (las antenas
-        // pueden quedar por encima del terreno).
-        double yBot = m_p.minElevation, yTop = m_p.maxElevation;
-        for (const QPointF &v : m_vista) {
-            yTop = qMax(yTop, v.y());
-            yBot = qMin(yBot, v.y());
+        // Rango vertical: terreno + linea de vision DENTRO de la ventana de X.
+        double yBot = 1e18, yTop = -1e18;
+        for (const ElevationSample &s : m_p.samples) {
+            if (std::isnan(s.elevation)) continue;
+            if (s.distanceM < m_xMin || s.distanceM > m_xMax) continue;
+            yBot = qMin(yBot, s.elevation); yTop = qMax(yTop, s.elevation);
         }
-        double yMin = yBot, yMax = yTop;
-        if (yMax - yMin < 1.0) { yMax += 0.5; yMin -= 0.5; }   // rango minimo
-        const double margen = (yMax - yMin) * 0.1;
-        yMin -= margen; yMax += margen;
+        for (const QPointF &v : m_vista) {
+            if (v.x() < m_xMin || v.x() > m_xMax) continue;
+            yBot = qMin(yBot, v.y()); yTop = qMax(yTop, v.y());
+        }
+        if (yTop < yBot) { yBot = m_p.minElevation; yTop = m_p.maxElevation; }
+        if (yTop - yBot < 1.0) { yTop += 0.5; yBot -= 0.5; }
+        const double margen = (yTop - yBot) * 0.08;
+        const double yMin = yBot - margen, yMax = yTop + margen;
 
-        auto px = [&](double d) { return area.left() + area.width() * (d / dMax); };
+        auto px = [&](double d) {
+            return area.left() + area.width() * ((d - m_xMin) / (m_xMax - m_xMin));
+        };
         auto py = [&](double e) {
             return area.bottom() - area.height() * ((e - yMin) / (yMax - yMin));
         };
 
-        // Ejes y rotulos (cota arriba/abajo, distancia a la derecha).
-        g.setPen(QColor(0xaa, 0xaa, 0xaa));
+        // --- Rejilla + ticks ---------------------------------------------
+        g.setPen(QPen(QColor(0xe2, 0xe2, 0xe2)));
+        const double pasoY = pasoBonito(yMax - yMin, 5);
+        for (double e = std::ceil(yMin / pasoY) * pasoY; e <= yMax; e += pasoY) {
+            const double y = py(e);
+            g.setPen(QPen(QColor(0xe4, 0xe4, 0xe4)));
+            g.drawLine(QPointF(area.left(), y), QPointF(area.right(), y));
+            g.setPen(QColor(0x55, 0x55, 0x55));
+            g.drawText(QRectF(0, y - 7, 54, 14), Qt::AlignRight | Qt::AlignVCenter,
+                       QStringLiteral("%1").arg(e, 0, 'f', 0));
+        }
+        const double pasoX = pasoBonito(m_xMax - m_xMin, 6);
+        for (double d = std::ceil(m_xMin / pasoX) * pasoX; d <= m_xMax; d += pasoX) {
+            const double x = px(d);
+            g.setPen(QPen(QColor(0xe4, 0xe4, 0xe4)));
+            g.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()));
+            g.setPen(QColor(0x55, 0x55, 0x55));
+            g.drawText(QRectF(x - 40, area.bottom() + 4, 80, 14), Qt::AlignHCenter,
+                       QStringLiteral("%1").arg(d / 1000.0, 0, 'f', 2));
+        }
+        g.setPen(QColor(0x99, 0x99, 0x99));
         g.drawLine(area.topLeft(), area.bottomLeft());
         g.drawLine(area.bottomLeft(), area.bottomRight());
         g.setPen(QColor(0x55, 0x55, 0x55));
-        g.drawText(QRectF(0, area.top() - 7, 50, 14),
-                   Qt::AlignRight | Qt::AlignVCenter,
-                   QStringLiteral("%1 m").arg(yTop, 0, 'f', 0));
-        g.drawText(QRectF(0, area.bottom() - 7, 50, 14),
-                   Qt::AlignRight | Qt::AlignVCenter,
-                   QStringLiteral("%1 m").arg(yBot, 0, 'f', 0));
-        g.drawText(QRectF(area.right() - 90, area.bottom() + 8, 90, 16),
-                   Qt::AlignRight,
-                   QStringLiteral("%1 km").arg(dMax / 1000.0, 0, 'f', 1));
-        g.drawText(QRectF(area.left(), area.bottom() + 8, 60, 16),
-                   Qt::AlignLeft, QStringLiteral("0"));
+        g.drawText(QRectF(area.left(), area.bottom() + 18, area.width(), 14),
+                   Qt::AlignHCenter, QStringLiteral("Distancia (km)"));
+        g.drawText(QRectF(2, 1, 120, 14), Qt::AlignLeft, QStringLiteral("Altura (m)"));
 
-        // Corte: un poligono relleno por cada tramo continuo (cortado en los NaN).
+        g.setClipRect(area);
+
+        // --- Corte del terreno (relleno por tramos continuos) ------------
         const QColor relleno(0x2e, 0x7d, 0x32, 110);
         const QColor linea(0x1b, 0x5e, 0x20);
         QPolygonF tramo;
@@ -227,12 +308,8 @@ protected:
                 QPolygonF poly = tramo;
                 poly << QPointF(poly.last().x(), area.bottom())
                      << QPointF(poly.first().x(), area.bottom());
-                g.setPen(Qt::NoPen);
-                g.setBrush(relleno);
-                g.drawPolygon(poly);
-                g.setBrush(Qt::NoBrush);
-                g.setPen(QPen(linea, 1.6));
-                g.drawPolyline(tramo);
+                g.setPen(Qt::NoPen); g.setBrush(relleno); g.drawPolygon(poly);
+                g.setBrush(Qt::NoBrush); g.setPen(QPen(linea, 1.6)); g.drawPolyline(tramo);
             }
             tramo.clear();
         };
@@ -242,7 +319,7 @@ protected:
         }
         cerrar();
 
-        // Linea de vision (recta entre antenas, curvada por la Tierra): naranja.
+        // --- Linea de vision (naranja) -----------------------------------
         if (m_vista.size() >= 2) {
             QPolygonF rayo;
             for (const QPointF &v : m_vista)
@@ -251,36 +328,128 @@ protected:
             g.drawPolyline(rayo);
         }
 
-        // Marca del obstaculo (o del paso mas justo): linea vertical + punto sobre
-        // el terreno, con rotulo de la distancia.
-        if (m_critD >= 0.0 && m_critD <= dMax) {
+        // --- Marca del obstaculo / paso mas justo ------------------------
+        if (m_critD >= 0.0) {
             const QColor marca = m_bloqueado ? QColor(0xc6, 0x28, 0x28)
                                              : QColor(0x15, 0x65, 0xc0);
             const double x = px(m_critD);
-            g.setPen(QPen(marca, 1.0, Qt::DotLine));
+            g.setPen(QPen(marca, 1.2, Qt::DotLine));
             g.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()));
-            // Cota del terreno en esa distancia (muestra mas cercana).
-            double cota = m_p.minElevation;
-            double mejor = 1e18;
-            for (const ElevationSample &s : m_p.samples) {
-                if (std::isnan(s.elevation)) continue;
-                const double dd = std::abs(s.distanceM - m_critD);
-                if (dd < mejor) { mejor = dd; cota = s.elevation; }
+            const double cota = cotaEn(m_critD);
+            if (!std::isnan(cota)) {
+                g.setBrush(marca); g.setPen(QPen(Qt::white, 1.0));
+                g.drawEllipse(QPointF(x, py(cota)), 4.0, 4.0);
             }
-            g.setBrush(marca);
-            g.setPen(QPen(Qt::white, 1.0));
-            g.drawEllipse(QPointF(x, py(cota)), 4.0, 4.0);
-            g.setPen(marca);
-            g.drawText(QRectF(x - 60, area.top() - 2, 120, 14), Qt::AlignHCenter,
-                       QStringLiteral("%1 km").arg(m_critD / 1000.0, 0, 'f', 2));
         }
+
+        // --- Cursor con lectura ------------------------------------------
+        if (m_hoverX >= area.left() && m_hoverX <= area.right()) {
+            const double d = m_xMin + (m_hoverX - area.left()) / area.width() * (m_xMax - m_xMin);
+            const double ct = cotaEn(d);
+            const double vt = vistaEn(d);
+            g.setPen(QPen(QColor(0x37, 0x47, 0x4f), 0.8, Qt::DashLine));
+            g.drawLine(QPointF(m_hoverX, area.top()), QPointF(m_hoverX, area.bottom()));
+            if (!std::isnan(ct)) {
+                g.setBrush(QColor(0x1b, 0x5e, 0x20)); g.setPen(Qt::NoPen);
+                g.drawEllipse(QPointF(m_hoverX, py(ct)), 3.0, 3.0);
+            }
+            g.setClipping(false);
+            QStringList txt;
+            txt << QStringLiteral("%1 km").arg(d / 1000.0, 0, 'f', 2);
+            if (!std::isnan(ct)) txt << QStringLiteral("terreno %1 m").arg(ct, 0, 'f', 0);
+            if (!std::isnan(vt)) {
+                txt << QStringLiteral("visión %1 m").arg(vt, 0, 'f', 0);
+                if (!std::isnan(ct))
+                    txt << QStringLiteral("holgura %1 m").arg(vt - ct, 0, 'f', 0);
+            }
+            const QString s = txt.join(QStringLiteral("  ·  "));
+            QFontMetrics fm(g.font());
+            const QRectF caja(area.left() + 6, area.top() + 6,
+                              fm.horizontalAdvance(s) + 12, fm.height() + 6);
+            g.setBrush(QColor(255, 255, 255, 220));
+            g.setPen(QColor(0xbb, 0xbb, 0xbb));
+            g.drawRoundedRect(caja, 3, 3);
+            g.setPen(QColor(0x22, 0x22, 0x22));
+            g.drawText(caja, Qt::AlignCenter, s);
+            g.setClipRect(area);
+        }
+
+        g.setClipping(false);
+        // --- Leyenda -----------------------------------------------------
+        const int lx = int(area.right()) - 150, ly = int(area.top()) + 6;
+        auto chip = [&](int row, const QColor &c, const QString &t, bool dash) {
+            const double y = ly + row * 15;
+            g.setPen(QPen(c, 2.2, dash ? Qt::DashLine : Qt::SolidLine));
+            g.drawLine(QPointF(lx, y + 6), QPointF(lx + 20, y + 6));
+            g.setPen(QColor(0x44, 0x44, 0x44));
+            g.drawText(QRectF(lx + 26, y, 130, 14), Qt::AlignLeft | Qt::AlignVCenter, t);
+        };
+        chip(0, QColor(0x2e, 0x7d, 0x32), QStringLiteral("Terreno"), false);
+        if (m_vista.size() >= 2)
+            chip(1, QColor(0xef, 0x6c, 0x00), QStringLiteral("Línea de visión"), true);
     }
 
+    void wheelEvent(QWheelEvent *e) override
+    {
+        const QRectF area = plotArea();
+        const double mx = e->position().x();
+        if (mx < area.left() || mx > area.right()) return;
+        const double d = m_xMin + (mx - area.left()) / area.width() * (m_xMax - m_xMin);
+        const double factor = e->angleDelta().y() > 0 ? 0.82 : 1.0 / 0.82;
+        double span = (m_xMax - m_xMin) * factor;
+        const double total = (m_p.totalDistanceM > 0.0) ? m_p.totalDistanceM : 1.0;
+        span = qBound(qMin(50.0, total), span, total);
+        double frac = (d - m_xMin) / (m_xMax - m_xMin);
+        m_xMin = d - frac * span;
+        m_xMax = m_xMin + span;
+        clampVista();
+        update();
+    }
+
+    void mousePressEvent(QMouseEvent *e) override
+    {
+        if (e->button() == Qt::LeftButton) { m_arrastrando = true; m_lastX = e->pos().x(); }
+    }
+    void mouseReleaseEvent(QMouseEvent *) override { m_arrastrando = false; }
+    void mouseDoubleClickEvent(QMouseEvent *) override
+    {
+        m_xMin = 0.0;
+        m_xMax = (m_p.totalDistanceM > 0.0) ? m_p.totalDistanceM : 1.0;
+        update();
+    }
+    void mouseMoveEvent(QMouseEvent *e) override
+    {
+        m_hoverX = e->pos().x();
+        if (m_arrastrando) {
+            const QRectF area = plotArea();
+            const double dmPorPx = (m_xMax - m_xMin) / area.width();
+            const double delta = (e->pos().x() - m_lastX) * dmPorPx;
+            m_xMin -= delta; m_xMax -= delta;
+            m_lastX = e->pos().x();
+            clampVista();
+        }
+        update();
+    }
+    void leaveEvent(QEvent *) override { m_hoverX = -1.0; update(); }
+
 private:
+    void clampVista()
+    {
+        const double total = (m_p.totalDistanceM > 0.0) ? m_p.totalDistanceM : 1.0;
+        const double span = m_xMax - m_xMin;
+        if (m_xMin < 0.0) { m_xMin = 0.0; m_xMax = span; }
+        if (m_xMax > total) { m_xMax = total; m_xMin = total - span; }
+        if (m_xMin < 0.0) m_xMin = 0.0;
+    }
+
     ElevationProfile m_p;
     QVector<QPointF> m_vista;      // linea de vision: x=distancia m, y=altura m
     double m_critD = -1.0;         // distancia del obstaculo / paso mas justo (m)
     bool m_bloqueado = false;
+    double m_xMin = 0.0, m_xMax = 1.0;   // ventana de distancia (zoom/arrastre)
+    double m_hoverX = -1.0;              // x del cursor en pixeles (-1 = fuera)
+    bool m_arrastrando = false;
+    int m_lastX = 0;
 };
 
 } // namespace
@@ -337,7 +506,6 @@ public:
         construirBarraMapa();
         construirBarraEntidades();
         construirBarraDatos();
-        construirBarraElevacion();
         construirPanel();
         conectarSenales();
         aplicarEstiloAlTrazo();
@@ -645,7 +813,11 @@ private:
         caja->addWidget(m_aplicarAlTrazo);
         caja->addStretch(1);
 
-        dock->setWidget(cont);
+        // Dos pestañas en el panel lateral: «Capas» (lo de arriba) y «Elevación».
+        m_tabs = new QTabWidget(dock);
+        m_tabs->addTab(cont, tr("Capas"));
+        m_tabs->addTab(construirTabElevacion(), tr("Elevación"));
+        dock->setWidget(m_tabs);
         addDockWidget(Qt::RightDockWidgetArea, dock);
 
         // Propiedades -> modelo.
@@ -788,63 +960,104 @@ private:
     }
 
     // ============================================= analisis de elevacion ==
-    // Barra para PROBAR los tres calculos nuevos sobre el DEM activo: perfil de
+    // Pestaña lateral para PROBAR los tres calculos sobre el DEM activo: perfil de
     // una ruta, linea de vision entre dos puntos y viewshed 360. La libreria
-    // devuelve los datos; aqui se dibujan (dialogo del perfil; linea de vision y
-    // poligono de visibilidad como entidades sobre el mapa).
-    void construirBarraElevacion()
+    // devuelve los datos; aqui se dibujan (ventana flotante del perfil; linea de
+    // vision y zona de visibilidad como entidades sobre el mapa).
+    QWidget *construirTabElevacion()
     {
-        auto *barra = addToolBar(tr("Elevacion"));
-        barra->setObjectName(QStringLiteral("barraElevacion"));
-        barra->setMovable(false);
+        auto *tab = new QWidget;
+        auto *caja = new QVBoxLayout(tab);
+        caja->setContentsMargins(8, 8, 8, 8);
 
-        barra->addWidget(new QLabel(tr("  Alt1:")));
-        m_altA = new QDoubleSpinBox(this);
-        m_altA->setRange(0.0, 20000.0);
-        m_altA->setValue(10.0);
-        m_altA->setSuffix(tr(" m"));
+        auto *form = new QFormLayout;
+        m_altA = new QDoubleSpinBox(tab);
+        m_altA->setRange(0.0, 20000.0); m_altA->setValue(10.0); m_altA->setSuffix(tr(" m"));
         m_altA->setToolTip(tr("Visión: antena en A.  Viewshed: altura del observador."));
-        barra->addWidget(m_altA);
-
-        barra->addWidget(new QLabel(tr(" Alt2:")));
-        m_altB = new QDoubleSpinBox(this);
-        m_altB->setRange(0.0, 20000.0);
-        m_altB->setValue(10.0);
-        m_altB->setSuffix(tr(" m"));
+        form->addRow(tr("Alt1 (observador / A):"), m_altA);
+        m_altB = new QDoubleSpinBox(tab);
+        m_altB->setRange(0.0, 20000.0); m_altB->setValue(10.0); m_altB->setSuffix(tr(" m"));
         m_altB->setToolTip(tr("Visión: antena en B.  Viewshed: altura del objetivo."));
-        barra->addWidget(m_altB);
-
-        barra->addWidget(new QLabel(tr(" Alcance:")));
-        m_alcanceKm = new QDoubleSpinBox(this);
-        m_alcanceKm->setRange(1.0, 300.0);
-        m_alcanceKm->setValue(40.0);
-        m_alcanceKm->setSuffix(tr(" km"));
+        form->addRow(tr("Alt2 (objetivo / B):"), m_altB);
+        m_alcanceKm = new QDoubleSpinBox(tab);
+        m_alcanceKm->setRange(1.0, 300.0); m_alcanceKm->setValue(40.0); m_alcanceKm->setSuffix(tr(" km"));
         m_alcanceKm->setToolTip(tr("Alcance (radio) de los rayos del viewshed."));
-        barra->addWidget(m_alcanceKm);
+        form->addRow(tr("Alcance viewshed:"), m_alcanceKm);
+        caja->addLayout(form);
 
-        barra->addSeparator();
-        auto *perfil = barra->addAction(tr("Perfil"));
-        perfil->setToolTip(tr("Perfil del terreno a lo largo de la LÍNEA o polígono "
-                              "seleccionado (dibuja una línea y selecciónala)."));
-        connect(perfil, &QAction::triggered, this, &Ventana::analizarPerfil);
+        m_marComo0 = new QCheckBox(tr("Mar / sin dato = 0 m"), tab);
+        m_marComo0->setChecked(true);
+        m_marComo0->setToolTip(tr("Trata los huecos del DEM (mar, fuera de cobertura) "
+                                  "como cota 0, para analizar objetivos sobre el mar."));
+        caja->addWidget(m_marComo0);
 
-        auto *vision = barra->addAction(tr("Visión A→B"));
-        vision->setToolTip(tr("Línea de visión entre el primer y el último vértice "
-                              "de la línea seleccionada, con Alt1/Alt2 de antena."));
-        connect(vision, &QAction::triggered, this, &Ventana::analizarVision);
+        auto *fila1 = new QHBoxLayout;
+        auto *bPerfil = new QPushButton(tr("Perfil"), tab);
+        auto *bVision = new QPushButton(tr("Visión A→B"), tab);
+        fila1->addWidget(bPerfil); fila1->addWidget(bVision);
+        caja->addLayout(fila1);
+        auto *fila2 = new QHBoxLayout;
+        auto *bViewshed = new QPushButton(tr("Viewshed"), tab);
+        auto *bLimpiar = new QPushButton(tr("Limpiar"), tab);
+        fila2->addWidget(bViewshed); fila2->addWidget(bLimpiar);
+        caja->addLayout(fila2);
 
-        auto *viewshed = barra->addAction(tr("Viewshed"));
-        viewshed->setToolTip(tr("Zona de visibilidad 360° desde el vértice de la "
-                                "entidad seleccionada (o el centro del mapa)."));
-        connect(viewshed, &QAction::triggered, this, &Ventana::analizarViewshed);
-
-        auto *limpiar = barra->addAction(tr("Limpiar análisis"));
-        limpiar->setToolTip(tr("Quita las capas de visión y viewshed."));
-        connect(limpiar, &QAction::triggered, this, [this] {
+        bPerfil->setToolTip(tr("Perfil del terreno de la LÍNEA/polígono seleccionado."));
+        bVision->setToolTip(tr("Línea de visión entre el 1º y último vértice, con Alt1/Alt2."));
+        bViewshed->setToolTip(tr("Zona de visibilidad 360° desde el vértice seleccionado "
+                                 "(o el centro del mapa): azul visible, amarillo oculto."));
+        connect(bPerfil, &QPushButton::clicked, this, &Ventana::analizarPerfil);
+        connect(bVision, &QPushButton::clicked, this, &Ventana::analizarVision);
+        connect(bViewshed, &QPushButton::clicked, this, &Ventana::analizarViewshed);
+        connect(bLimpiar, &QPushButton::clicked, this, [this] {
             m_mapa->removeFeatureLayer(kCapaVision);
             m_mapa->removeFeatureLayer(kCapaViewshed);
+            if (m_resultado) m_resultado->clear();
             statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
         });
+
+        m_resultado = new QLabel(tab);
+        m_resultado->setWordWrap(true);
+        m_resultado->setTextFormat(Qt::RichText);
+        m_resultado->setMinimumHeight(60);
+        m_resultado->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+        caja->addWidget(m_resultado);
+
+        auto *ayuda = new QLabel(
+            tr("<span style='color:#777'>Azul = visible, amarillo = oculto, rojo = "
+               "obstáculo. El perfil se abre en una ventana aparte (rueda = zoom, "
+               "arrastrar = desplazar, doble clic = restablecer).</span>"), tab);
+        ayuda->setWordWrap(true);
+        caja->addWidget(ayuda);
+        caja->addStretch(1);
+        return tab;
+    }
+
+    // Abre (o reutiliza) la ventana flotante del perfil y la actualiza.
+    void mostrarPerfil(const ElevationProfile &p, const QString &resumen,
+                       const QVector<QPointF> &vista = {}, double critD = -1.0,
+                       bool bloqueado = false)
+    {
+        if (!m_perfilWin) {
+            m_perfilWin = new QDialog(this);
+            m_perfilWin->setWindowTitle(tr("Perfil del terreno"));
+            m_perfilWin->resize(860, 440);
+            auto *lay = new QVBoxLayout(m_perfilWin);
+            m_perfilInfo = new QLabel(m_perfilWin);
+            m_perfilInfo->setWordWrap(true);
+            lay->addWidget(m_perfilInfo);
+            m_perfilVista = new PerfilWidget(ElevationProfile(), m_perfilWin);
+            lay->addWidget(m_perfilVista, 1);
+            auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, m_perfilWin);
+            connect(bb, &QDialogButtonBox::rejected, m_perfilWin, &QDialog::hide);
+            lay->addWidget(bb);
+        }
+        m_perfilInfo->setText(resumen);
+        m_perfilVista->setProfile(p);
+        m_perfilVista->setVision(vista, critD, bloqueado);
+        m_perfilWin->show();
+        m_perfilWin->raise();
+        m_perfilWin->activateWindow();
     }
 
     // Comprueba que hay DEM; si no, avisa y devuelve false.
@@ -871,7 +1084,20 @@ private:
             m_mapa->clearFeatureLayer(id);
     }
 
-    // Perfil del terreno a lo largo de la ruta seleccionada -> diálogo con el corte.
+    // Parámetros de elevación con la opción «mar/sin dato = 0 m» de la pestaña.
+    ElevationProfileParams paramsPerfil() const
+    {
+        ElevationProfileParams pp;
+        if (m_marComo0 && m_marComo0->isChecked()) pp.voidElevation = 0.0;
+        return pp;
+    }
+    double voidElev() const
+    {
+        return (m_marComo0 && m_marComo0->isChecked())
+                   ? 0.0 : std::numeric_limits<double>::quiet_NaN();
+    }
+
+    // Perfil del terreno a lo largo de la ruta seleccionada -> ventana flotante.
     void analizarPerfil()
     {
         if (!exigirDem())
@@ -883,32 +1109,20 @@ private:
                 5000);
             return;
         }
-        const ElevationProfile p = m_mapa->elevationProfile(f->geometry);
+        const ElevationProfile p = m_mapa->elevationProfile(f->geometry, paramsPerfil());
         if (!p.isValid() || std::isnan(p.maxElevation)) {
             statusBar()->showMessage(
                 tr("La ruta no tiene cota en el DEM activo (fuera de cobertura)."),
                 5000);
             return;
         }
-
-        QDialog dlg(this);
-        dlg.setWindowTitle(tr("Perfil del terreno — %1")
-                               .arg(f->name.isEmpty() ? tr("ruta") : f->name));
-        auto *lay = new QVBoxLayout(&dlg);
-        lay->addWidget(new QLabel(
-            tr("Distancia %1 km   ·   mín %2 m   máx %3 m   ·   "
-               "subida +%4 m   bajada −%5 m")
+        const QString resumen =
+            tr("<b>Perfil</b> · %1 km · mín %2 m · máx %3 m · subida +%4 m · bajada −%5 m")
                 .arg(p.totalDistanceM / 1000.0, 0, 'f', 2)
-                .arg(p.minElevation, 0, 'f', 0)
-                .arg(p.maxElevation, 0, 'f', 0)
-                .arg(p.gain, 0, 'f', 0)
-                .arg(p.loss, 0, 'f', 0), &dlg));
-        lay->addWidget(new PerfilWidget(p, &dlg), 1);
-        auto *botones = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
-        connect(botones, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-        lay->addWidget(botones);
-        dlg.resize(660, 340);
-        dlg.exec();
+                .arg(p.minElevation, 0, 'f', 0).arg(p.maxElevation, 0, 'f', 0)
+                .arg(p.gain, 0, 'f', 0).arg(p.loss, 0, 'f', 0);
+        if (m_resultado) m_resultado->setText(resumen);
+        mostrarPerfil(p, resumen);
     }
 
     // Línea de visión entre el 1º y el último vértice de la línea seleccionada.
@@ -925,8 +1139,10 @@ private:
         }
         const QGeoCoordinate a = f->geometry.first();
         const QGeoCoordinate b = f->geometry.last();
+        LineOfSightParams lp;
+        lp.voidElevation = voidElev();
         const LineOfSightResult v =
-            m_mapa->lineOfSight(a, b, m_altA->value(), m_altB->value());
+            m_mapa->lineOfSight(a, b, m_altA->value(), m_altB->value(), lp);
         if (!v.isValid()) {
             statusBar()->showMessage(
                 tr("No se pudo calcular la visión (falta cota en A o B)."), 5000);
@@ -991,24 +1207,28 @@ private:
             m_mapa->addFeature(corte);
         }
 
-        statusBar()->showMessage(
+        const QString resumen =
             v.clear
-                ? tr("Visión DIRECTA (azul) · distancia %1 km · holgura mínima %2 m "
-                     "· paso más justo a %3 km")
+                ? tr("<b>Visión DIRECTA</b> · %1 km · holgura mínima %2 m · paso más "
+                     "justo a %3 km. <span style='color:#777'>Naranja = línea de visión "
+                     "(Alt1 %4 m en A, Alt2 %5 m en B).</span>")
                       .arg(v.totalDistanceM / 1000.0, 0, 'f', 2)
                       .arg(v.clearanceM, 0, 'f', 0)
                       .arg(v.blockDistanceM / 1000.0, 0, 'f', 2)
-                : tr("BLOQUEADA · obstáculo a %1 km de %2 km · faltan %3 m de altura "
-                     "· azul = visible, rojo = oculto")
+                      .arg(m_altA->value(), 0, 'f', 0).arg(m_altB->value(), 0, 'f', 0)
+                : tr("<b>BLOQUEADA</b> · obstáculo a %1 km de %2 km · faltan %3 m de "
+                     "altura. <span style='color:#777'>Azul = visible, rojo = oculto; "
+                     "naranja = línea de visión.</span>")
                       .arg(v.blockDistanceM / 1000.0, 0, 'f', 2)
                       .arg(v.totalDistanceM / 1000.0, 0, 'f', 2)
-                      .arg(-v.clearanceM, 0, 'f', 0),
-            9000);
+                      .arg(-v.clearanceM, 0, 'f', 0);
+        if (m_resultado) m_resultado->setText(resumen);
+        statusBar()->showMessage(QString(resumen).remove(QRegularExpression(
+                                     QStringLiteral("<[^>]*>"))), 9000);
 
         // Perfil de la misma línea A→B con la LÍNEA DE VISIÓN (recta entre antenas,
-        // bajada por la curvatura) y el obstáculo marcados: la mejor referencia
-        // para ver POR QUÉ se corta la vista.
-        const ElevationProfile perfil = m_mapa->elevationProfile({ a, b });
+        // bajada por la curvatura) y el obstáculo marcados, en la ventana flotante.
+        const ElevationProfile perfil = m_mapa->elevationProfile({ a, b }, paramsPerfil());
         if (!perfil.isValid() || std::isnan(perfil.maxElevation))
             return;
 
@@ -1028,32 +1248,7 @@ private:
                 vista.append(QPointF(d, recta - bulge));
             }
         }
-
-        QDialog dlg(this);
-        dlg.setWindowTitle(v.clear ? tr("Visión directa — perfil")
-                                   : tr("Visión bloqueada — perfil"));
-        auto *lay = new QVBoxLayout(&dlg);
-        auto *info = new QLabel(
-            v.clear
-                ? tr("Visión DIRECTA · %1 km · holgura mínima %2 m.  "
-                     "Naranja = línea de visión (antenas Alt1 %3 m en A, Alt2 %4 m en B).")
-                      .arg(D / 1000.0, 0, 'f', 2).arg(v.clearanceM, 0, 'f', 0)
-                      .arg(m_altA->value(), 0, 'f', 0).arg(m_altB->value(), 0, 'f', 0)
-                : tr("BLOQUEADA · obstáculo a %1 km (faltan %2 m).  "
-                     "Naranja = línea de visión (antenas Alt1 %3 m en A, Alt2 %4 m en B).")
-                      .arg(v.blockDistanceM / 1000.0, 0, 'f', 2).arg(-v.clearanceM, 0, 'f', 0)
-                      .arg(m_altA->value(), 0, 'f', 0).arg(m_altB->value(), 0, 'f', 0),
-            &dlg);
-        info->setWordWrap(true);
-        lay->addWidget(info);
-        auto *pw = new PerfilWidget(perfil, &dlg);
-        pw->setVision(vista, v.blockDistanceM, !v.clear);
-        lay->addWidget(pw, 1);
-        auto *botones = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
-        connect(botones, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-        lay->addWidget(botones);
-        dlg.resize(700, 380);
-        dlg.exec();
+        mostrarPerfil(perfil, resumen, vista, v.blockDistanceM, !v.clear);
     }
 
     // Viewshed 360° desde el vértice de la entidad seleccionada (o el centro del
@@ -1070,6 +1265,7 @@ private:
         vp.observerHeight = m_altA->value();
         vp.targetHeight = m_altB->value();
         vp.maxRangeM = m_alcanceKm->value() * 1000.0;
+        vp.voidElevation = voidElev();      // mar / sin dato = 0 (objetivos en el mar)
 
         QElapsedTimer reloj;
         reloj.start();
@@ -1082,46 +1278,58 @@ private:
             return;
         }
 
-        // Zona de visibilidad REAL: una cuña por cada TRAMO visible de cada rayo,
-        // todas como partes de UNA sola entidad (polígono multiparte). Así los
-        // huecos (vaguadas ocultas tras una loma) se ven como entrantes y la zona
-        // concuerda, azimut a azimut, con la Visión A→B. No es la estrella de
-        // "alcance contiguo" de antes, que se cortaba en el primer obstáculo.
+        // Zona de visibilidad REAL: una cuña por cada TRAMO de cada rayo, como
+        // partes de UNA entidad por color. AZUL = visible, AMARILLO = oculto; lo
+        // que no tiene dato (y el check de mar está apagado) se deja sin pintar.
+        // Coincide, azimut a azimut, con la Visión A→B.
         const double half = (vp.azimuthStepDeg > 0.0 ? vp.azimuthStepDeg : 1.0) / 2.0;
-        QVector<QVector<QGeoCoordinate>> cunas;
-        int tramos = 0;
+        auto cunasDe = [&](const QVector<VisibleRange> &rs, double az) {
+            QVector<QVector<QGeoCoordinate>> out;
+            for (const VisibleRange &vr : rs) {
+                if (vr.endM - vr.startM < 1.0) continue;
+                const double d0 = qMax(vr.startM, 1.0);
+                out.append({
+                    origen.atDistanceAndAzimuth(d0,      az - half),
+                    origen.atDistanceAndAzimuth(vr.endM, az - half),
+                    origen.atDistanceAndAzimuth(vr.endM, az + half),
+                    origen.atDistanceAndAzimuth(d0,      az + half)
+                });
+            }
+            return out;
+        };
+        QVector<QVector<QGeoCoordinate>> cunasVis, cunasOcu;
         double maxKm = 0.0;
         for (const ViewshedRay &r : vs.rays) {
-            for (const VisibleRange &vr : r.visibleRanges) {
-                if (vr.endM - vr.startM < 1.0)
-                    continue;
-                const double d0 = qMax(vr.startM, 1.0);
-                cunas.append({
-                    origen.atDistanceAndAzimuth(d0,      r.azimuthDeg - half),
-                    origen.atDistanceAndAzimuth(vr.endM, r.azimuthDeg - half),
-                    origen.atDistanceAndAzimuth(vr.endM, r.azimuthDeg + half),
-                    origen.atDistanceAndAzimuth(d0,      r.azimuthDeg + half)
-                });
-                ++tramos;
+            cunasVis += cunasDe(r.visibleRanges, r.azimuthDeg);
+            cunasOcu += cunasDe(r.hiddenRanges, r.azimuthDeg);
+            for (const VisibleRange &vr : r.visibleRanges)
                 maxKm = qMax(maxKm, vr.endM / 1000.0);
-            }
         }
 
         prepararCapa(kCapaViewshed, tr("Análisis: viewshed"), 40);
-        if (!cunas.isEmpty()) {
+        auto pintarZona = [&](const QVector<QVector<QGeoCoordinate>> &cunas,
+                              const QString &tipo, const QString &nombre,
+                              const QColor &fill) {
+            if (cunas.isEmpty()) return;
             MapFeature zona;
             zona.layerId = kCapaViewshed;
             zona.kind = GeometryKind::Polygon;
-            zona.type = QStringLiteral("zona_visibilidad");
-            zona.name = tr("Visibilidad a %1 m").arg(vp.targetHeight, 0, 'f', 0);
-            zona.parts = cunas;              // multiparte: las cuñas, con sus huecos
+            zona.type = tipo;
+            zona.name = nombre;
+            zona.parts = cunas;
             zona.geometry = cunas.first();
-            zona.style.lineColor = QColor(0x15, 0x65, 0xc0, 0);   // sin borde por cuña
-            zona.style.fillColor = QColor(0x42, 0xa5, 0xf5, 70);
+            zona.style.lineColor = QColor(0, 0, 0, 0);   // sin borde por cuña
+            zona.style.fillColor = fill;
             zona.style.labelVisible = false;
             zona.selectable = false;
             m_mapa->addFeature(zona);
-        }
+        };
+        // Oculto primero (debajo), visible encima.
+        pintarZona(cunasOcu, QStringLiteral("zona_oculta"), tr("Oculto"),
+                   QColor(0xff, 0xc1, 0x07, 90));                 // amarillo
+        pintarZona(cunasVis, QStringLiteral("zona_visibilidad"),
+                   tr("Visible a %1 m").arg(vp.targetHeight, 0, 'f', 0),
+                   QColor(0x42, 0xa5, 0xf5, 80));                 // azul
 
         MapFeature centro;
         centro.layerId = kCapaViewshed;
@@ -1133,16 +1341,16 @@ private:
         centro.selectable = false;
         m_mapa->addFeature(centro);
 
-        statusBar()->showMessage(
-            tr("Viewshed: %1 rayos · obs %2 m, obj %3 m · %4 tramos visibles · "
-               "máx %5 km · %6 ms")
+        const QString resumen =
+            tr("<b>Viewshed</b> · %1 rayos · obs %2 m, obj %3 m · alcance máx visible "
+               "%4 km · %5 ms. <span style='color:#777'>Azul = visible, amarillo = "
+               "oculto.</span>")
                 .arg(vs.rays.size())
-                .arg(vp.observerHeight, 0, 'f', 0)
-                .arg(vp.targetHeight, 0, 'f', 0)
-                .arg(tramos)
-                .arg(maxKm, 0, 'f', 1)
-                .arg(ms),
-            9000);
+                .arg(vp.observerHeight, 0, 'f', 0).arg(vp.targetHeight, 0, 'f', 0)
+                .arg(maxKm, 0, 'f', 1).arg(ms);
+        if (m_resultado) m_resultado->setText(resumen);
+        statusBar()->showMessage(QString(resumen).remove(QRegularExpression(
+                                     QStringLiteral("<[^>]*>"))), 9000);
     }
 
     // ==================================================== arbol ===========
@@ -1790,10 +1998,16 @@ private:
     QPushButton *m_btnDem = nullptr;
     bool m_demActivo = false;
 
-    // Analisis de elevacion (barra "Elevacion").
+    // Analisis de elevacion (pestaña "Elevacion" del panel lateral).
+    QTabWidget *m_tabs = nullptr;
     QDoubleSpinBox *m_altA = nullptr;       //!< antena A / altura del observador
     QDoubleSpinBox *m_altB = nullptr;       //!< antena B / altura del objetivo
     QDoubleSpinBox *m_alcanceKm = nullptr;  //!< alcance del viewshed
+    QCheckBox *m_marComo0 = nullptr;        //!< tratar mar/sin dato como 0 m
+    QLabel *m_resultado = nullptr;          //!< lectura del ultimo analisis
+    QDialog *m_perfilWin = nullptr;         //!< ventana flotante del perfil
+    QLabel *m_perfilInfo = nullptr;
+    PerfilWidget *m_perfilVista = nullptr;
     const QString kCapaVision = QStringLiteral("elev_vision");
     const QString kCapaViewshed = QStringLiteral("elev_viewshed");
 

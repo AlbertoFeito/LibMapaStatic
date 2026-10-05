@@ -30,6 +30,9 @@ struct ElevationProfileParams
     //! Separacion entre muestras, en metros. 30 m aprovecha el SRTM de 1" y es
     //! barato; se puede subir para recorridos muy largos.
     double stepMeters = 30.0;
+    //! Cota a usar donde el DEM NO tiene dato (hueco, mar, fuera de cobertura).
+    //! NaN (por defecto) = dejar la muestra sin dato; 0 = tratarlo como mar.
+    double voidElevation = std::numeric_limits<double>::quiet_NaN();
 };
 
 /*!
@@ -65,6 +68,9 @@ struct LineOfSightParams
     double k = 4.0 / 3.0;
     //! Radio medio de la Tierra, en metros.
     double earthRadiusM = 6371000.0;
+    //! Cota a usar donde el DEM no tiene dato (hueco, mar, fuera de cobertura).
+    //! NaN (por defecto) = saltar esa muestra; 0 = tratarla como mar.
+    double voidElevation = std::numeric_limits<double>::quiet_NaN();
 };
 
 /*!
@@ -107,6 +113,10 @@ struct ViewshedParams
     bool curvature = true;
     double k = 4.0 / 3.0;              //!< Radio terrestre efectivo (4/3 estandar).
     double earthRadiusM = 6371000.0;   //!< Radio medio de la Tierra, en metros.
+    //! Cota donde el DEM no tiene dato (hueco, mar, fuera de cobertura). NaN (por
+    //! defecto) = saltar; 0 = tratar como mar (util: objetivos sobre el mar se
+    //! analizan hasta el alcance en vez de cortarse en la costa).
+    double voidElevation = std::numeric_limits<double>::quiet_NaN();
     //! Si cada rayo guarda ademas su perfil completo (\c ViewshedRay::profile).
     //! Por defecto NO, para acotar la memoria con 360 rayos; actívalo para
     //! obtener el corte del terreno de un azimut concreto.
@@ -149,6 +159,10 @@ struct VisibleRange
  * hay dos lecturas, ambas consistentes punto a punto con \c lineOfSight:
  * - \c visibleRanges: TODOS los tramos visibles del rayo (la zona REAL, con sus
  *   huecos). Un punto que \c lineOfSight declara visible cae dentro de uno.
+ * - \c hiddenRanges: los tramos NO visibles (con dato). Junto con
+ *   \c visibleRanges parten el rayo cubierto, sin solape; lo que no esta en
+ *   ninguno es "sin dato" (y solo aparece si \c ViewshedParams::voidElevation es
+ *   NaN). Util para sombrear lo oculto.
  * - \c visibilityReachM: solo el primer tramo contiguo desde el origen (frontera
  *   de la zona ininterrumpida); es \c visibleRanges.first().endM, o 0 si el
  *   primer punto ya esta tapado. Comodo para un poligono en estrella simple.
@@ -163,6 +177,7 @@ struct ViewshedRay
     double horizonDeg = 0.0;
     QVector<ClosingAnglePeak> peaks;
     QVector<VisibleRange> visibleRanges;
+    QVector<VisibleRange> hiddenRanges;
     ElevationProfile profile;
 };
 

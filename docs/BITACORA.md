@@ -3353,3 +3353,39 @@ Para verlo, mejora SOLO del `demo` (`PerfilWidget` y `analizarVision`):
 
 Compila sin warnings; la librería no cambia, **siguen 18 tests** en verde. Sin
 cambios de API; no se regenera el PDF.
+
+## 67. Pestaña de elevación, perfil interactivo y viewshed azul/amarillo (mar=0)
+
+El usuario pidió: mover el análisis de elevación a una **pestaña lateral**, un
+**perfil interactivo**, y que el viewshed **sombree de amarillo lo no visible**,
+tratando el **mar/sin dato como 0 m** (objetivos en el mar). Casi todo es del
+`demo`; dos añadidos a la librería (API aditiva, compatible).
+
+Librería (`include/libmapa/Elevation.h`, `src/dem/ElevationAnalysis.cpp`):
+- **`voidElevation`** en `ElevationProfileParams`, `LineOfSightParams` y
+  `ViewshedParams`: cota con la que sustituir los huecos del DEM (NaN = saltar,
+  por defecto; 0 = mar). El helper interno `cota()` la aplica en el perfil, la
+  línea de visión y el viewshed, así un objetivo sobre el mar se analiza hasta el
+  alcance en vez de cortarse en la costa.
+- **`hiddenRanges`** en `ViewshedRay`: los tramos NO visibles (con dato); junto a
+  `visibleRanges` parten el rayo cubierto, sin solape. Para sombrear lo oculto.
+- Tests nuevos: `viewshedSeaAsVoidElevation` (un tile todo hueco, inválido sin la
+  opción, válido como mar con `voidElevation=0`) y `viewshedVisibleHiddenPartition`
+  (en cada muestra con dato el objetivo está en EXACTAMENTE uno de los dos). **18
+  tests** en verde, sin warnings.
+
+Demo (`demo/main.cpp`):
+- **Pestaña «Elevación»** (`construirTabElevacion`): `QTabWidget` en el dock con
+  «Capas» y «Elevación»; esta última lleva Alt1/Alt2/Alcance, los botones
+  (Perfil/Visión A→B/Viewshed/Limpiar), el check «Mar / sin dato = 0 m», una
+  lectura (`m_resultado`) y una leyenda. Se quitó la barra superior de elevación.
+- **`PerfilWidget` interactivo:** ejes y rejilla con ticks «bonitos», **zoom** con
+  la rueda sobre la distancia, **arrastre** para desplazar, **doble clic** para
+  restablecer y un **cursor** con la lectura (distancia, cota, altura de la visión,
+  holgura), leyenda, y `setProfile`/`setVision`. Se abre en una **ventana flotante
+  reutilizable** (`mostrarPerfil`), no modal, que Perfil y Visión A→B actualizan.
+- **Viewshed azul/amarillo:** cuñas **azules** de `visibleRanges` y **amarillas**
+  de `hiddenRanges` (dos entidades multiparte); con `voidElevation=0` el mar entra
+  como objetivo. La Visión A→B usa el mismo `voidElevation` para seguir coherente.
+
+Docs: `Elevation.h` (comentarios), README, `arquitectura.html` (8c) + **PDF**.

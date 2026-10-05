@@ -429,7 +429,8 @@ el <b>perfil de una ruta</b>.</p>
 <tr><td class="mono">lineOfSight(src, a, b, antA, antB, params)</td><td>Visibilidad directa entre dos puntos con altura de antena en cada extremo. Muestrea el terreno intermedio y lo compara con la recta entre las cimas de antena, <b>más el abombamiento de la Tierra</b> (radio efectivo <b>k·R</b>, k=4/3; <code>curvature=false</code> → geométrico).</td></tr>
 <tr><td class="mono">LineOfSightResult</td><td><code>clear</code> (¿hay visión?), <code>clearanceM</code> (holgura mínima; negativa = cuánto falta), <code>blockPosition</code>/<code>blockDistanceM</code> (punto crítico), <code>isValid()</code> (falso sin dato en un extremo).</td></tr>
 <tr><td class="mono">computeViewshed(src, origin, params)</td><td>Viewshed 360°: un rayo por azimut (<code>azimuthStepDeg</code>) hasta <code>maxRangeM</code>. Por rayo: ángulo de cierre del terreno, horizonte acumulado y <b>picos</b> de la silueta, y la visibilidad de un objetivo a <code>targetHeight</code>. Curvatura k·R como en <code>lineOfSight</code> (y <b>consistente punto a punto</b> con él).</td></tr>
-<tr><td class="mono">Viewshed / ViewshedRay / VisibleRange</td><td><code>Viewshed{origin, rays[]}</code>; cada <code>ViewshedRay{azimuthDeg, horizonDeg, peaks[], visibleRanges[], visibilityReachM, profile}</code>. <code>visibleRanges</code> = TODOS los tramos visibles del rayo (la <b>zona real, con huecos</b>: tras una loma el terreno de más allá puede volver a verse); <code>visibilityReachM</code> = solo el primer tramo contiguo (se corta en el primer obstáculo). <code>keepProfiles</code> llena <code>profile</code> por rayo.</td></tr>
+<tr><td class="mono">Viewshed / ViewshedRay / VisibleRange</td><td><code>Viewshed{origin, rays[]}</code>; cada <code>ViewshedRay{azimuthDeg, horizonDeg, peaks[], visibleRanges[], hiddenRanges[], visibilityReachM, profile}</code>. <code>visibleRanges</code> = TODOS los tramos visibles del rayo (la <b>zona real, con huecos</b>); <code>hiddenRanges</code> = los ocultos (ambos parten el rayo cubierto, para sombrear); <code>visibilityReachM</code> = solo el primer tramo contiguo. <code>keepProfiles</code> llena <code>profile</code> por rayo.</td></tr>
+<tr><td class="mono">voidElevation (en los 3 params)</td><td>Cota a usar donde el DEM no tiene dato (hueco, mar, fuera de cobertura): NaN (por defecto) = saltar; <code>0</code> = tratar como mar, para analizar objetivos sobre el mar hasta el alcance en vez de cortar en la costa.</td></tr>
 </table>
 <p>El <b>perfil de ruta</b> es altura <b>real</b> del terreno EN EL LUGAR —no aplica
 curvatura terrestre—, para dibujar el corte del recorrido o medir desniveles. La
@@ -444,9 +445,12 @@ viewshed por muestra es, término a término, la misma condición que <code>line
 Se exponen por la fachada: <code>MapWidget::elevationProfile(path, params)</code>,
 <code>MapWidget::lineOfSight(a, b, antA, antB, params)</code> y
 <code>MapWidget::viewshed(origin, params)</code> (vacío / inválido si no hay origen
-DEM configurado). La app <span class="mono">demo</span> lo prueba en su barra
-<b>Elevación</b>: perfil del terreno de la línea seleccionada, línea de visión A→B
-(con altura de antenas) y la zona de visibilidad real del viewshed (con huecos) sobre el mapa.</p>
+DEM configurado). La app <span class="mono">demo</span> lo prueba en su <b>pestaña
+«Elevación»</b> del panel lateral: el perfil se abre en una ventana flotante
+interactiva (ejes/rejilla, zoom con la rueda, arrastre, cursor con lectura); la
+Visión A→B se dibuja sobre el mapa y sobre el perfil (azul visible, rojo oculto,
+obstáculo con su distancia); y el viewshed sombrea <b>azul lo visible y amarillo lo
+oculto</b>, con opción de tratar el mar/sin dato como cota 0.</p>
 
 <!-- ===================== 9. FLUJOS ===================== -->
 <h2 class="sec">9 · Flujos de interacción entre objetos</h2>

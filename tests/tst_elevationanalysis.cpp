@@ -33,6 +33,8 @@ private slots:
     void viewshedTargetHeightVisibility();
     void viewshedCurvatureHorizon();
     void viewshedMatchesLineOfSight();
+    void viewshedSeaAsVoidElevation();
+    void viewshedVisibleHiddenPartition();
     void viewshedInvalid();
 
 private:
@@ -461,6 +463,85 @@ void TstElevationAnalysis::viewshedMatchesLineOfSight()
     QVERIFY2(oculto > 0, "Se esperaba terreno oculto tras la loma");
     QVERIFY2(visibleLejos > 0, "Se esperaba una bolsa visible tras el hueco");
     QVERIFY(este.visibleRanges.size() >= 2);
+}
+
+// voidElevation trata los huecos del DEM (mar / fuera de cobertura) como una cota
+// fija (0 = mar): un tile TODO hueco, que sin la opcion da viewshed/lineOfSight
+// invalidos, con mar=0 se analiza como mar llano hasta el horizonte.
+void TstElevationAnalysis::viewshedSeaAsVoidElevation()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 7;
+    const QVector<int> s(side * side, -32768);     // todo hueco SRTM = mar
+    QVERIFY(writeHgt(dir.filePath(QStringLiteral("N19W077.hgt")), side, s));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    const QGeoCoordinate origen(19.5, -76.5);
+
+    // Sin la opcion: origen sin dato -> viewshed invalido.
+    QVERIFY(!computeViewshed(dem, origen).isValid());
+
+    // Con mar=0: valido; sobre mar llano, el objetivo a H se ve cerca y se oculta
+    // tras el horizonte geometrico (~26 km < 50 km de alcance).
+    ViewshedParams vp;
+    vp.voidElevation = 0.0;
+    vp.observerHeight = 10.0;
+    vp.targetHeight = 10.0;
+    vp.maxRangeM = 50000.0;
+    const Viewshed vs = computeViewshed(dem, origen, vp);
+    QVERIFY(vs.isValid());
+    const ViewshedRay &r = vs.rays[0];
+    QVERIFY(!r.visibleRanges.isEmpty());
+    QVERIFY2(!r.hiddenRanges.isEmpty(), "tras el horizonte el mar queda oculto");
+
+    // lineOfSight entre dos puntos de mar: invalido sin la opcion, valido con mar=0.
+    const QGeoCoordinate b = origen.atDistanceAndAzimuth(5000.0, 90.0);
+    QVERIFY(!lineOfSight(dem, origen, b, 10.0, 10.0).isValid());
+    LineOfSightParams lp;
+    lp.voidElevation = 0.0;
+    QVERIFY(lineOfSight(dem, origen, b, 10.0, 10.0, lp).isValid());
+}
+
+// visibleRanges y hiddenRanges parten el rayo cubierto: en cada muestra con dato,
+// el objetivo esta en EXACTAMENTE uno de los dos (ni en ambos ni en ninguno).
+void TstElevationAnalysis::viewshedVisibleHiddenPartition()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 13;
+    QVector<int> s(side * side, 0);                // todo con dato (0), loma y pico
+    s[6 * side + 8] = 400;
+    s[6 * side + 10] = 800;
+    QVERIFY(writeHgt(dir.filePath(QStringLiteral("N19W077.hgt")), side, s));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    const QGeoCoordinate origen(19.5, -76.5);
+    ViewshedParams vp;
+    vp.observerHeight = 30.0;
+    vp.targetHeight = 10.0;
+    vp.maxRangeM = 30000.0;                        // dentro del tile
+    const Viewshed vs = computeViewshed(dem, origen, vp);
+    QVERIFY(vs.isValid());
+    const ViewshedRay &r = vs.rays[90];
+
+    auto en = [](const QVector<VisibleRange> &rs, double d) {
+        for (const VisibleRange &x : rs)
+            if (d >= x.startM && d <= x.endM) return true;
+        return false;
+    };
+
+    int vis = 0, ocu = 0;
+    for (double d = 300.0; d <= 29000.0; d += 300.0) {   // multiplos del paso (30)
+        const bool v = en(r.visibleRanges, d);
+        const bool h = en(r.hiddenRanges, d);
+        QVERIFY2(v != h, qPrintable(QStringLiteral("d=%1 vis=%2 ocu=%3")
+                                        .arg(d).arg(v).arg(h)));
+        if (v) ++vis; else ++ocu;
+    }
+    QVERIFY(vis > 0 && ocu > 0);                   // hay de los dos
 }
 
 // Sin origen de elevacion, o con el origen sobre un hueco SRTM, el viewshed es

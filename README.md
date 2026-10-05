@@ -336,8 +336,14 @@ libmapa::Viewshed vs = mapa->viewshed(centro, p);  // 360 rayos (1° por defecto
 // vs.rays[az].horizonDeg / .peaks  -> silueta y ángulo de cierre por azimut
 // vs.rays[az].visibleRanges        -> TODOS los tramos visibles (zona real, con
 //                                     huecos: tras una loma puede volver a verse)
+// vs.rays[az].hiddenRanges         -> los tramos ocultos (para sombrearlos)
 // vs.rays[az].visibilityReachM     -> solo el primer tramo contiguo desde el centro
 ```
+
+Los huecos del DEM (mar, fuera de cobertura) se pueden tratar como una cota fija con
+`params.voidElevation` (NaN = saltar, por defecto; `0` = mar) en el perfil, la línea
+de visión y el viewshed; así un objetivo sobre el mar se analiza hasta el alcance en
+vez de cortarse en la costa.
 
 Las dos lecturas de visibilidad son **consistentes punto a punto con `lineOfSight`**:
 un punto que la línea de visión declara visible cae dentro de algún `visibleRanges`.
@@ -350,12 +356,14 @@ añade el perfil completo de cada rayo cuando se necesita dibujar un corte. Un v
 de 360° a 30 m y 50 km tarda ~0,1 s. La librería devuelve los datos; la gráfica la
 pinta la app.
 
-La app de ejemplo `demo` lo demuestra en su barra **Elevación** (con un DEM activo):
-**Perfil** dibuja el corte del terreno de la línea seleccionada; **Visión A→B** traza
-la línea de visión entre sus extremos con Alt1/Alt2 de antena, en **azul el tramo
-visible y en rojo el oculto** tras el obstáculo, que se marca con su distancia;
-**Viewshed** pinta la zona de visibilidad real (con sus huecos) a la altura Alt2
-desde el vértice seleccionado (o el centro del mapa).
+La app de ejemplo `demo` lo demuestra en su **pestaña «Elevación»** del panel lateral
+(con un DEM activo): **Perfil** abre una **ventana flotante** con el corte del terreno
+(ejes, rejilla, rueda = zoom, arrastrar = desplazar, cursor con lectura); **Visión A→B**
+traza la línea de visión entre los extremos con Alt1/Alt2 de antena (**azul** el tramo
+visible, **rojo** el oculto, obstáculo con su distancia) y la dibuja también sobre el
+perfil; **Viewshed** pinta la zona a la altura Alt2 desde el vértice seleccionado (o el
+centro del mapa) con **azul = visible y amarillo = oculto**. El check «Mar / sin dato =
+0 m» trata el mar como cota 0 (objetivos sobre el mar).
 
 ## Referencia de comandos (argumentos por herramienta)
 

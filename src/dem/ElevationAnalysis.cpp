@@ -57,6 +57,17 @@ double caida(double d, double k, double R)
     return abombamiento(d, d, k, R);
 }
 
+// Cota del terreno en \a p, sustituyendo los huecos del DEM por \a voidElev si
+// este es finito (p. ej. 0 = mar). Con \a voidElev NaN, devuelve el dato tal cual
+// (NaN donde no hay).
+double cota(const IElevationSource &src, const QGeoCoordinate &p, double voidElev)
+{
+    const double t = src.elevationAt(p);
+    if (std::isnan(t) && !std::isnan(voidElev))
+        return voidElev;
+    return t;
+}
+
 } // namespace
 
 // Perfil de elevacion a lo largo de una polilinea. El muestreo es uniforme a lo
@@ -82,9 +93,11 @@ ElevationProfile elevationProfile(const IElevationSource &src,
     double ultimaCota = std::numeric_limits<double>::quiet_NaN();
     double distGlobal = 0.0;
 
+    const double vacio = params.voidElevation;
+
     // Primer punto.
     anadirMuestra(perfil, 0.0, pts.first(),
-                  src.elevationAt(pts.first()), ultimaCota);
+                  cota(src, pts.first(), vacio), ultimaCota);
 
     double distanciaAlProximo = paso;   // cuanto falta para la siguiente muestra
     for (int i = 0; i + 1 < pts.size(); ++i) {
@@ -100,7 +113,7 @@ ElevationProfile elevationProfile(const IElevationSource &src,
         while (offset < largoTramo) {
             const QGeoCoordinate p = a.atDistanceAndAzimuth(offset, azimut);
             anadirMuestra(perfil, distGlobal + offset, p,
-                          src.elevationAt(p), ultimaCota);
+                          cota(src, p, vacio), ultimaCota);
             offset += paso;
         }
         // Lo que sobra del paso se arrastra al siguiente tramo.
@@ -112,7 +125,7 @@ ElevationProfile elevationProfile(const IElevationSource &src,
     if (perfil.samples.isEmpty()
         || perfil.samples.last().position != pts.last()) {
         anadirMuestra(perfil, distGlobal, pts.last(),
-                      src.elevationAt(pts.last()), ultimaCota);
+                      cota(src, pts.last(), vacio), ultimaCota);
     }
 
     perfil.totalDistanceM = distGlobal;
@@ -137,9 +150,10 @@ LineOfSightResult lineOfSight(const IElevationSource &src,
     if (D <= 0.0)
         return r;
 
-    // Anclaje en los extremos: sin cota en A o B no se puede trazar la recta.
-    const double terrA = src.elevationAt(a);
-    const double terrB = src.elevationAt(b);
+    // Anclaje en los extremos: sin cota en A o B no se puede trazar la recta
+    // (salvo que voidElevation sustituya el hueco, p. ej. mar = 0).
+    const double terrA = cota(src, a, params.voidElevation);
+    const double terrB = cota(src, b, params.voidElevation);
     if (std::isnan(terrA) || std::isnan(terrB))
         return r;
     const double zA = terrA + antennaA;             // cima de antena A (absoluta)
@@ -155,7 +169,7 @@ LineOfSightResult lineOfSight(const IElevationSource &src,
     double minDist = 0.0;
     for (double d = paso; d < D; d += paso) {
         const QGeoCoordinate p = a.atDistanceAndAzimuth(d, azimut);
-        const double t = src.elevationAt(p);
+        const double t = cota(src, p, params.voidElevation);
         if (std::isnan(t))
             continue;                               // hueco: no decide
         const double recta = zA + (zB - zA) * (d / D);
@@ -193,7 +207,7 @@ LineOfSightResult lineOfSight(const IElevationSource &src,
 ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &origin,
                          double az, double zObs, double paso, double maxR,
                          double H, bool curva, double k, double R,
-                         bool guardarPerfil)
+                         double voidElev, bool guardarPerfil)
 {
     ViewshedRay ray;
     ray.azimuthDeg = az;
@@ -204,28 +218,36 @@ ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &orig
     double mejorTan = -std::numeric_limits<double>::infinity();   // para horizonDeg
     bool visibleContinuo = true;                                  // primer tramo sin cortar
 
-    // Seguimiento del tramo visible en curso (para la zona REAL, con huecos).
-    bool tramoAbierto = false;
-    double tramoIni = 0.0, ultimaVisD = 0.0;
-    auto cerrarTramo = [&] {
-        if (tramoAbierto) {
-            ray.visibleRanges.append(VisibleRange{tramoIni, ultimaVisD});
-            tramoAbierto = false;
+    // Seguimiento de los tramos visibles (zona REAL con huecos) y ocultos (con
+    // dato), que parten el rayo cubierto sin solape.
+    bool tramoVisAbierto = false, tramoOcuAbierto = false;
+    double visIni = 0.0, ultimaVisD = 0.0, ocuIni = 0.0, ultimaOcuD = 0.0;
+    auto cerrarVisible = [&] {
+        if (tramoVisAbierto) {
+            ray.visibleRanges.append(VisibleRange{visIni, ultimaVisD});
+            tramoVisAbierto = false;
+        }
+    };
+    auto cerrarOculto = [&] {
+        if (tramoOcuAbierto) {
+            ray.hiddenRanges.append(VisibleRange{ocuIni, ultimaOcuD});
+            tramoOcuAbierto = false;
         }
     };
 
     double ultimaCota = std::numeric_limits<double>::quiet_NaN();
     if (guardarPerfil)
-        anadirMuestra(ray.profile, 0.0, origin, src.elevationAt(origin), ultimaCota);
+        anadirMuestra(ray.profile, 0.0, origin, cota(src, origin, voidElev), ultimaCota);
 
     double ultimoD = 0.0;
     for (double d = paso; d <= maxR; d += paso) {
         const QGeoCoordinate p = origin.atDistanceAndAzimuth(d, az);
-        const double t = src.elevationAt(p);
+        const double t = cota(src, p, voidElev);
         if (guardarPerfil)
             anadirMuestra(ray.profile, d, p, t, ultimaCota);
         if (std::isnan(t)) {
-            cerrarTramo();                              // sin dato: no se afirma visible
+            cerrarVisible();            // sin dato: ni visible ni oculto (desconocido)
+            cerrarOculto();
             continue;                                   // hueco / fuera de cobertura
         }
         ultimoD = d;
@@ -244,17 +266,23 @@ ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &orig
             if (visibleAqui) ray.visibilityReachM = d;
             else             visibleContinuo = false;
         }
-        // Zona REAL: abre/cierra tramos visibles (deja los huecos a la vista).
+        // Zona REAL: abre/cierra tramos visibles y ocultos (con huecos a la vista).
         if (visibleAqui) {
-            if (!tramoAbierto) {
-                tramoAbierto = true;
+            cerrarOculto();
+            if (!tramoVisAbierto) {
+                tramoVisAbierto = true;
                 // El primer tramo que arranca en la 1a muestra incluye el origen;
                 // los demas empiezan exactamente en esta muestra.
-                tramoIni = (d <= paso) ? 0.0 : d;
+                visIni = (d <= paso) ? 0.0 : d;
             }
             ultimaVisD = d;
         } else {
-            cerrarTramo();
+            cerrarVisible();
+            if (!tramoOcuAbierto) {
+                tramoOcuAbierto = true;
+                ocuIni = (d <= paso) ? 0.0 : d;
+            }
+            ultimaOcuD = d;
         }
 
         // Ahora incorpora el terreno de d al horizonte; si fija un nuevo maximo,
@@ -274,7 +302,8 @@ ViewshedRay rayoViewshed(const IElevationSource &src, const QGeoCoordinate &orig
         if (tanTerr > mejorTan)
             mejorTan = tanTerr;
     }
-    cerrarTramo();                                      // cierra el ultimo tramo abierto
+    cerrarVisible();                                    // cierra los ultimos tramos
+    cerrarOculto();
 
     if (guardarPerfil)
         ray.profile.totalDistanceM = ultimoD;
@@ -292,7 +321,7 @@ Viewshed computeViewshed(const IElevationSource &src, const QGeoCoordinate &orig
     Viewshed vs;
     if (!origin.isValid())
         return vs;
-    const double t0 = src.elevationAt(origin);
+    const double t0 = cota(src, origin, params.voidElevation);
     if (std::isnan(t0))
         return vs;
 
@@ -310,7 +339,7 @@ Viewshed computeViewshed(const IElevationSource &src, const QGeoCoordinate &orig
     for (double az = 0.0; az < 360.0; az += azPaso)
         vs.rays.append(rayoViewshed(src, origin, az, zObs, paso, maxR,
                                     params.targetHeight, params.curvature, k, R,
-                                    params.keepProfiles));
+                                    params.voidElevation, params.keepProfiles));
     return vs;
 }
 
