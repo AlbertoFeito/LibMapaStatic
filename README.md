@@ -391,8 +391,9 @@ y la **recta de visibilidad directa A→B** lo alcanza en el plano hundido.
 Sobre el perfil se dibuja también el **ángulo de cierre**: desde el observador, la
 tangente a cada muestra es `(y − zObs)/d`; cada muestra que supera el máximo acumulado es
 un **pico de la silueta** (círculos). El pico de mayor ángulo hasta B es el que **de
-verdad tapa** el objetivo: se traza la **recta del observador a ese pico dominante** (roja
-si bloquea, morada si no), que marca el límite de visibilidad.
+verdad tapa** el objetivo: se traza la **recta tangente del observador por ese pico
+dominante, extendida hasta la distancia máxima** (roja si bloquea, morada si no), que
+marca el límite de visibilidad (lo que queda por debajo detrás del pico está oculto).
 
 ## Referencia de comandos (argumentos por herramienta)
 

@@ -3566,10 +3566,12 @@ dominante). Se replica en `pintarPerfil` (solo `demo`):
   `(y − zA)/d` (en el plano ya hundido por la curvatura). Cada muestra que supera el
   **máximo acumulado** es un **pico** que eleva el horizonte.
 - **Tracers (círculos) en los picos** de la silueta (`gPicos`, scatter sin línea).
-- **Recta al pico dominante** (`gCierre`): del observador `(0, zA)` al pico de mayor
-  ángulo hasta B `(domD, domY)`; es la línea de cierre que limita la visibilidad. **Roja
-  si bloquea, morada si no.** El pico dominante se marca con un tracer del mismo color.
-  Si no hay pico hasta B, cae al corte más justo (`critD`) de `lineOfSight`.
+- **Recta al pico dominante** (`gCierre`): recta tangente del observador `(0, zA)` por el
+  pico de mayor ángulo hasta B `(domD, domY)`, **extendida con esa pendiente hasta la
+  distancia máxima** `dFin` (lo que queda por debajo detrás del pico está oculto). Es la
+  línea de cierre que limita la visibilidad. **Roja si bloquea, morada si no**; el pico se
+  marca con un tracer del mismo color. Si no hay pico hasta B, cae al corte más justo
+  (`critD`) de `lineOfSight`.
 
 Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
 día; sin cambios de API, no se regenera el PDF.

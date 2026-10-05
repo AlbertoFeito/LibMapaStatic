@@ -890,18 +890,22 @@ private:
                                                     QColor(0x37, 0x47, 0x4f), 6));
             gPicos->setData(picoD, picoY);
 
-            // Recta directa del observador al PICO DOMINANTE (el que tapa): la línea
-            // de cierre que limita la visibilidad. Rojo si bloquea, morado si no.
+            // Recta tangente del observador por el PICO DOMINANTE (el que tapa),
+            // EXTENDIDA hasta la distancia máxima: es la línea de cierre que limita
+            // la visibilidad (lo que queda por debajo detrás del pico está oculto).
+            // Rojo si bloquea, morado si no.
             if (domD > 0.0) {
                 const QColor c = bloqueado ? QColor(0xc6, 0x28, 0x28)
                                            : QColor(0x6a, 0x1b, 0x9a);
+                const double pend = (domY - zA) / domD;   // pendiente del ángulo de cierre
+                const double yFin = zA + pend * dFin;     // extendida hasta el final
                 QCPGraph *gCierre = m_plot->addGraph();
                 gCierre->setName(bloqueado ? tr("Recta al pico que tapa")
                                            : tr("Recta al pico dominante"));
                 gCierre->setPen(QPen(c, 1.8));
-                gCierre->setData({0.0, domD}, {zA, domY});
+                gCierre->setData({0.0, dFin}, {zA, yFin});
                 marcaObstaculo(domD, domY, c);            // tracer en el pico dominante
-                yTop = qMax(yTop, domY);
+                yTop = qMax(yTop, qMax(domY, yFin));
             }
         }
 
