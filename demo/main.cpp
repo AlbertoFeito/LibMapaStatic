@@ -217,10 +217,13 @@ protected:
         return s.last().elevation;
     }
 
-    // Altura de la linea de vision (interpolada) a la distancia d, o NaN.
+    // Altura de la linea de vision (interpolada) a la distancia d, o NaN fuera de
+    // su rango (la recta solo existe entre A y B; mas alla no hay objetivo).
     double vistaEn(double d) const
     {
         if (m_vista.size() < 2) return std::numeric_limits<double>::quiet_NaN();
+        if (d < m_vista.first().x() || d > m_vista.last().x())
+            return std::numeric_limits<double>::quiet_NaN();
         for (int i = 1; i < m_vista.size(); ++i) {
             if (m_vista[i].x() >= d) {
                 const double d0 = m_vista[i - 1].x(), d1 = m_vista[i].x();
@@ -319,13 +322,45 @@ protected:
         }
         cerrar();
 
-        // --- Linea de vision (naranja) -----------------------------------
+        // --- Linea de vision (naranja) + mastiles de antena en A y B -----
         if (m_vista.size() >= 2) {
             QPolygonF rayo;
             for (const QPointF &v : m_vista)
                 rayo << QPointF(px(v.x()), py(v.y()));
             g.setPen(QPen(QColor(0xef, 0x6c, 0x00), 1.8, Qt::DashLine));
             g.drawPolyline(rayo);
+
+            // Mastil: linea vertical del terreno a la cima de la antena, en cada
+            // extremo (A y B), con un punto arriba y su etiqueta.
+            auto mastil = [&](const QPointF &v, const QString &etq, bool derecha) {
+                const double ct = cotaEn(v.x());
+                const double base = std::isnan(ct) ? v.y() : ct;
+                const double x = px(v.x());
+                g.setPen(QPen(QColor(0x33, 0x33, 0x33), 2.0));
+                g.drawLine(QPointF(x, py(base)), QPointF(x, py(v.y())));
+                g.setBrush(QColor(0x33, 0x33, 0x33)); g.setPen(Qt::NoPen);
+                g.drawEllipse(QPointF(x, py(v.y())), 3.0, 3.0);
+                g.setPen(QColor(0x22, 0x22, 0x22));
+                g.drawText(QPointF(x + (derecha ? -14 : 4), py(v.y()) - 4), etq);
+            };
+            mastil(m_vista.first(), QStringLiteral("A"), false);
+            mastil(m_vista.last(),  QStringLiteral("B"), true);
+        }
+
+        // --- Linea de sombra (dead ground): rayo rojo desde la antena A que roza
+        // el obstaculo y sigue hasta la distancia maxima del perfil. Por debajo de
+        // ella, tras el obstaculo, el terreno queda oculto.
+        if (m_bloqueado && m_critD >= 0.0 && m_vista.size() >= 2) {
+            const double ct = cotaEn(m_critD);
+            const QPointF ojo = m_vista.first();        // (0, zA): cima de antena A
+            if (!std::isnan(ct) && m_critD - ojo.x() > 1.0) {
+                const double m = (ct - ojo.y()) / (m_critD - ojo.x());
+                const double dFin = m_p.totalDistanceM;
+                const double yFin = ojo.y() + m * (dFin - ojo.x());
+                g.setPen(QPen(QColor(0xc6, 0x28, 0x28), 1.6));
+                g.drawLine(QPointF(px(ojo.x()), py(ojo.y())),
+                           QPointF(px(dFin), py(yFin)));
+            }
         }
 
         // --- Marca del obstaculo / paso mas justo ------------------------
@@ -387,6 +422,8 @@ protected:
         chip(0, QColor(0x2e, 0x7d, 0x32), QStringLiteral("Terreno"), false);
         if (m_vista.size() >= 2)
             chip(1, QColor(0xef, 0x6c, 0x00), QStringLiteral("Línea de visión"), true);
+        if (m_bloqueado && m_critD >= 0.0)
+            chip(2, QColor(0xc6, 0x28, 0x28), QStringLiteral("Sombra / oculto"), false);
     }
 
     void wheelEvent(QWheelEvent *e) override
@@ -991,6 +1028,14 @@ private:
                                   "como cota 0, para analizar objetivos sobre el mar."));
         caja->addWidget(m_marComo0);
 
+        m_curvatura = new QCheckBox(tr("Curvatura 4/3"), tab);
+        m_curvatura->setChecked(true);
+        m_curvatura->setToolTip(tr("Con curvatura, el mar llano se oculta tras el "
+                                   "horizonte geométrico. Desactívala para analizar "
+                                   "solo el enmascaramiento por terreno (sobre mar sin "
+                                   "obstáculos se ve hasta el alcance máximo)."));
+        caja->addWidget(m_curvatura);
+
         auto *fila1 = new QHBoxLayout;
         auto *bPerfil = new QPushButton(tr("Perfil"), tab);
         auto *bVision = new QPushButton(tr("Visión A→B"), tab);
@@ -1096,6 +1141,7 @@ private:
         return (m_marComo0 && m_marComo0->isChecked())
                    ? 0.0 : std::numeric_limits<double>::quiet_NaN();
     }
+    bool curvaturaOn() const { return !m_curvatura || m_curvatura->isChecked(); }
 
     // Perfil del terreno a lo largo de la ruta seleccionada -> ventana flotante.
     void analizarPerfil()
@@ -1141,6 +1187,7 @@ private:
         const QGeoCoordinate b = f->geometry.last();
         LineOfSightParams lp;
         lp.voidElevation = voidElev();
+        lp.curvature = curvaturaOn();
         const LineOfSightResult v =
             m_mapa->lineOfSight(a, b, m_altA->value(), m_altB->value(), lp);
         if (!v.isValid()) {
@@ -1226,25 +1273,40 @@ private:
         statusBar()->showMessage(QString(resumen).remove(QRegularExpression(
                                      QStringLiteral("<[^>]*>"))), 9000);
 
-        // Perfil de la misma línea A→B con la LÍNEA DE VISIÓN (recta entre antenas,
-        // bajada por la curvatura) y el obstáculo marcados, en la ventana flotante.
-        const ElevationProfile perfil = m_mapa->elevationProfile({ a, b }, paramsPerfil());
+        // Perfil con la LÍNEA DE VISIÓN y el obstáculo marcados, en la ventana
+        // flotante. El perfil se extiende 5 km MÁS ALLÁ de B (a lo largo del mismo
+        // rumbo) para ver el terreno detrás; la recta de visión solo va de A a B.
+        const double D = v.totalDistanceM;                  // distancia A→B
+        const QGeoCoordinate b2 = b.atDistanceAndAzimuth(5000.0, a.azimuthTo(b));
+        const ElevationProfile perfil = m_mapa->elevationProfile({ a, b2 }, paramsPerfil());
         if (!perfil.isValid() || std::isnan(perfil.maxElevation))
             return;
 
-        const double D = perfil.totalDistanceM;
+        // Terreno en A y en B tomados del perfil (ya con «mar = 0» si procede).
         const double tA = perfil.samples.first().elevation;
-        const double tB = perfil.samples.last().elevation;
+        double tB = std::numeric_limits<double>::quiet_NaN();
+        for (int i = 1; i < perfil.samples.size(); ++i) {
+            if (perfil.samples[i].distanceM >= D) {
+                const ElevationSample &s0 = perfil.samples[i - 1];
+                const ElevationSample &s1 = perfil.samples[i];
+                if (!std::isnan(s0.elevation) && !std::isnan(s1.elevation)) {
+                    const double t = (s1.distanceM > s0.distanceM)
+                        ? (D - s0.distanceM) / (s1.distanceM - s0.distanceM) : 0.0;
+                    tB = s0.elevation + (s1.elevation - s0.elevation) * t;
+                }
+                break;
+            }
+        }
         QVector<QPointF> vista;
-        if (!std::isnan(tA) && !std::isnan(tB)) {
+        if (!std::isnan(tA) && !std::isnan(tB) && D > 0.0) {
             const double zA = tA + m_altA->value();   // cima de antena en A
             const double zB = tB + m_altB->value();   // cima de antena en B
-            const double k = 4.0 / 3.0, R = 6371000.0; // por defecto de LineOfSightParams
-            vista.reserve(perfil.samples.size());
+            const double k = 4.0 / 3.0, R = 6371000.0;
             for (const ElevationSample &s : perfil.samples) {
                 const double d = s.distanceM;
-                const double recta = (D > 0.0) ? zA + (zB - zA) * (d / D) : zA;
-                const double bulge = (d * (D - d)) / (2.0 * k * R);
+                if (d > D + 0.5) break;                // la recta solo llega hasta B
+                const double recta = zA + (zB - zA) * (d / D);
+                const double bulge = curvaturaOn() ? (d * (D - d)) / (2.0 * k * R) : 0.0;
                 vista.append(QPointF(d, recta - bulge));
             }
         }
@@ -1266,6 +1328,7 @@ private:
         vp.targetHeight = m_altB->value();
         vp.maxRangeM = m_alcanceKm->value() * 1000.0;
         vp.voidElevation = voidElev();      // mar / sin dato = 0 (objetivos en el mar)
+        vp.curvature = curvaturaOn();       // sin curvatura: mar sin obstáculos = alcance
 
         QElapsedTimer reloj;
         reloj.start();
@@ -2004,6 +2067,7 @@ private:
     QDoubleSpinBox *m_altB = nullptr;       //!< antena B / altura del objetivo
     QDoubleSpinBox *m_alcanceKm = nullptr;  //!< alcance del viewshed
     QCheckBox *m_marComo0 = nullptr;        //!< tratar mar/sin dato como 0 m
+    QCheckBox *m_curvatura = nullptr;       //!< aplicar curvatura 4/3
     QLabel *m_resultado = nullptr;          //!< lectura del ultimo analisis
     QDialog *m_perfilWin = nullptr;         //!< ventana flotante del perfil
     QLabel *m_perfilInfo = nullptr;

@@ -362,8 +362,12 @@ La app de ejemplo `demo` lo demuestra en su **pestaña «Elevación»** del pane
 traza la línea de visión entre los extremos con Alt1/Alt2 de antena (**azul** el tramo
 visible, **rojo** el oculto, obstáculo con su distancia) y la dibuja también sobre el
 perfil; **Viewshed** pinta la zona a la altura Alt2 desde el vértice seleccionado (o el
-centro del mapa) con **azul = visible y amarillo = oculto**. El check «Mar / sin dato =
-0 m» trata el mar como cota 0 (objetivos sobre el mar).
+centro del mapa) con **azul = visible y amarillo = oculto**. En el perfil de la Visión
+A→B se dibujan los **mástiles de antena** en A y B, se extiende **5 km más allá de B**
+y, si bloquea, una **línea de sombra roja** desde A por el obstáculo hasta el final
+(terreno oculto por debajo). El check «Mar / sin dato = 0 m» trata el mar como cota 0
+(objetivos sobre el mar) y «Curvatura 4/3» se puede desactivar para analizar solo el
+enmascaramiento por terreno (sobre mar sin obstáculos se ve hasta el alcance máximo).
 
 ## Referencia de comandos (argumentos por herramienta)
 

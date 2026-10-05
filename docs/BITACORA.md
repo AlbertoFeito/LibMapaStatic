@@ -3389,3 +3389,23 @@ Demo (`demo/main.cpp`):
   como objetivo. La Visión A→B usa el mismo `voidElevation` para seguir coherente.
 
 Docs: `Elevation.h` (comentarios), README, `arquitectura.html` (8c) + **PDF**.
+
+## 68. Perfil: mástiles, +5 km tras B, línea de sombra y check de curvatura
+
+Afinados del `demo` tras probar (solo `demo/main.cpp`, sin tocar la librería):
+
+- **Perfil +5 km tras B:** la Visión A→B calcula el perfil de `{A, B+5 km}` (mismo
+  rumbo) para ver el terreno detrás del objetivo; la recta de visión sigue yendo
+  solo de A a B (no se extrapola).
+- **Mástiles de antena:** en el perfil se dibuja, en A y B, la línea vertical del
+  terreno a la cima de la antena (Alt1/Alt2) con su punto y etiqueta.
+- **Línea de sombra (dead ground):** si bloquea, un rayo rojo desde la antena de A
+  que roza el obstáculo y sigue hasta el final del perfil; por debajo, tras el
+  obstáculo, el terreno queda oculto.
+- **Check «Curvatura 4/3»:** con curvatura (por defecto) el mar llano se oculta tras
+  el horizonte geométrico; al desactivarla, el análisis es solo de enmascaramiento
+  por terreno y sobre mar sin obstáculos se ve hasta el alcance máximo. Se aplica a
+  la línea de visión, al viewshed y a la recta dibujada en el perfil.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README al día;
+sin cambios de API, no se regenera el PDF.
