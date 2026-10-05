@@ -267,6 +267,14 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
 tesela propia, rojo si viene de un nivel superior escalado.
 
+**Configuración unificada (`mapa.json`).** Todas las herramientas de teselas
+(`fill_map`, `fill_tiles`, `bench_tiles`, `render_map`, `check_data`, el `demo`) leen
+el **paquete `mapa.json`**: si no se indica una ruta, usan el `mapa.json` del directorio
+actual (y, si no existe, `datasets.json`). Un `mapa.json` y un `datasets.json` comparten
+el array `datasets`, así que ambos valen; el paquete resuelve además elevación, overlays
+y rutas relativas. Ejecuta las herramientas desde tu carpeta de recursos (la que tiene el
+`mapa.json`) y todas verán la misma configuración y zooms (`maxZoom`/`recommendedMaxZoom`).
+
 En `fill_map`, el botón **Rejilla** hace lo mismo sobre el mapa, y el botón
 **Cobertura** (con selector de zoom) pinta una mancha fija con las zonas que ya
 están en la BD a ese zoom, coloreada por completitud (ámbar→verde) y visible

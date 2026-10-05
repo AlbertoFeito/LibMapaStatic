@@ -3632,3 +3632,28 @@ niveles altos (z15/16) para descargarlos. Se añade:
 Compila sin warnings; **18 tests** en verde (slot nuevo). README, BITÁCORA y
 `arquitectura.html` al día; **cambia el API público (callback de progreso, sobre-zoom) →
 se regenera el PDF**.
+
+## 77. Todas las herramientas de teselas leen el paquete mapa.json
+
+El usuario tenía su configuración en `D:\QtPro\recursos\mapa.json` (paquete v2, con
+`clarity` a maxZoom 16), pero `fill_map` mostraba `clarity z[3..14]`: estaba leyendo un
+`datasets.json` suelto de su directorio de trabajo, no el paquete. `fill_map`,
+`fill_tiles` y `bench_tiles` solo entendían `datasets.json`; el `demo`, `render_map` y
+`check_data` ya aceptaban el paquete. Se unifica: **todas usan `mapa.json`**.
+
+- **`fill_map`** (GUI): el constructor pasa a `(origen, esPaquete, demDir, demDb)`. Con un
+  paquete, `cfg.dataDir = origen` (la vista previa lee capas, elevación y overlays del
+  paquete); los datasets para la descarga se leen con `DataPackage::load(origen)`, que
+  acepta tanto un `mapa.json` (rutas resueltas a absolutas) como un `datasets.json` plano.
+  `main` detecta paquete (carpeta o fichero `mapa.json`) y, sin argumento, prefiere
+  `mapa.json` del directorio actual y si no `datasets.json`.
+- **`fill_tiles`** / **`bench_tiles`** (consola): su lector ya tomaba el array `datasets`
+  (común a `mapa.json` y `datasets.json`) resolviendo rutas junto al JSON; se añade que, sin
+  `--datasets`, usen `mapa.json` del directorio actual (si no, `datasets.json`).
+
+Así, ejecutando las herramientas desde la carpeta de recursos, todas ven el mismo
+`mapa.json` y los mismos zooms. (El «z14» era la config vieja; con el paquete, `clarity`
+llega a z16 en vista y cobertura, y la descarga a z15/16 funciona como ya hacía.)
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
