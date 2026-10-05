@@ -372,22 +372,21 @@ El check «Mar / sin dato = 0 m» trata el mar como cota 0 (objetivos sobre el m
 (sobre mar sin obstáculos se ve hasta el alcance máximo). **Cambiar un check re-aplica
 al instante** el último análisis.
 
-**Cotas negativas y batimetría.** El lector del DEM deja pasar **cualquier cota
-negativa** tal cual (solo `−32768` es hueco → NaN): sirve para tierra bajo el nivel del
-mar (depresiones) y, si el dataset trae **batimetría**, para la profundidad del fondo
-marino (p. ej. el talud al norte de Cuba a ~−1800 m). SRTM puro no trae batimetría
-(sobre el mar es 0 o hueco), pero el mismo lector aceptaría un DEM batimétrico
-(GEBCO/ETOPO). En el perfil, lo que queda **bajo el nivel del mar (cota < 0) se rellena
-de azul** (columna de agua) con una línea de referencia del nivel del mar en y=0.
+**Mar, curvatura y batimetría.** El lector del DEM deja pasar **cualquier cota negativa**
+tal cual (solo `−32768` es hueco → NaN); un dataset con **batimetría** (p. ej. el talud al
+norte de Cuba a ~−1800 m) se lee sin más, aunque SRTM puro no la trae. Para el **análisis
+de visibilidad**, `voidElevation = 0` (check «Mar = 0») actúa como **suelo**: rellena los
+huecos y **sube a 0 la batimetría negativa**. Sobre el mar la superficie que cuenta es el
+nivel del agua, no el fondo marino: ni los objetivos flotan en el lecho ni el fondo tapa
+una visual. Así la **recta de visibilidad** alcanza el objetivo sobre el mar y el
+**obstáculo** nunca cae en el fondo del mar.
 
-Para el **análisis de visibilidad**, `voidElevation = 0` (check «Mar = 0») actúa como
-**suelo**: además de rellenar los huecos, **sube a 0 la batimetría negativa**. Sobre el
-mar la superficie que cuenta es el nivel del agua, no el fondo marino: ni los objetivos
-flotan en el lecho ni el fondo tapa una visual entre objetivos de superficie. Así la
-**recta de visibilidad** alcanza el objetivo sobre el mar (mástil del buque desde 0, no
-desde −profundidad) y el **obstáculo** nunca cae en el fondo del mar. El **perfil se
-dibuja siempre con la cota cruda** (se ve la batimetría en azul); el check solo cambia el
-análisis.
+El **perfil se dibuja al estilo de la herramienta de referencia (DVD)**: el eje Y refleja
+la **curvatura de la Tierra** (todo se hunde con la distancia restando `caída = d²/2kR`).
+El **nivel del mar es una sola línea** que baja con la distancia (`y = −caída(d)`) —el mar
+**no se rellena**—; el terreno sobre el mar riela sobre ella y la tierra firme va a su
+altura, también hundida. El objetivo sobre el mar queda a `Alt2` por encima de esa línea
+y la recta de visibilidad lo alcanza en el plano hundido.
 
 ## Referencia de comandos (argumentos por herramienta)
 

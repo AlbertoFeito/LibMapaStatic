@@ -3523,5 +3523,31 @@ de tierra firme incluidos).
   (`clear`). Comprueba además que el perfil crudo muestra la batimetría (mín < −500) y que
   con mar=0 el perfil se clampea (mín = 0, máx = 100).
 
+## 73. Perfil al estilo DVD: curvatura en el eje Y, el mar es solo una línea
+
+Con el relleno azul (§71) el perfil quedaba feo: la batimetría (−1891 m) dominaba la
+gráfica con una gran mancha azul, y el objetivo sobre el mar no reflejaba la curvatura.
+Revisando a fondo `DVD_potencial/graficaperfil.cpp` (`graph(0)` terreno relleno por canal
+hasta `graph(1)` curvatura; `curva = −d²/17e6`; y donde no hay terreno, **`altu = curva`**
+→ el terreno SIGUE la línea del mar), se reescribe `pintarPerfil` con ese modelo. Cambio
+**solo del `demo`**.
+
+- **El eje Y refleja la curvatura de la Tierra:** todo se hunde con la distancia restando
+  `caída(d) = d²/2kR` (k=4/3). El **nivel del mar es una sola línea** `y = −caída(d)` que
+  baja con la distancia; **el mar no se rellena**, es esa línea (antes se rellenaba de
+  azul: eliminado).
+- **Terreno:** `max(cota, 0) − caída(d)`. La tierra firme (cota > 0) va a su altura,
+  hundida; el mar y la batimetría (cota ≤ 0) se tratan como superficie 0 y **rielan sobre
+  la línea del mar** (relleno verde por canal hasta ella → nulo sobre el mar). Ya no se
+  dibuja la batimetría: el usuario pidió el mar como una línea, no como relleno.
+- **Objetivo sobre el mar:** a `Alt2` por encima de la línea del mar (hundida); «el punto
+  va sobre la línea del mar con curvatura».
+- **Recta de visibilidad:** recta en el plano hundido, de la cima de antena en A
+  `(0, zA)` a la del objetivo en B `(D, zB − caída(D))`, que es justo el punto del objetivo
+  rielando sobre el mar. Mástiles y obstáculo se sitúan sobre la superficie hundida.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
+
 Compila sin warnings; **18 tests** en verde (un slot nuevo del mismo ejecutable). README,
 BITÁCORA y `arquitectura.html` al día; **cambia la semántica del API → se regenera el PDF**.

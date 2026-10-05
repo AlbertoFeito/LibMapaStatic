@@ -801,84 +801,70 @@ private:
         const double k = 4.0 / 3.0, R = 6371000.0;
         auto caida = [&](double d) { return curv ? (d * d) / (2.0 * k * R) : 0.0; };
 
-        QVector<double> dx, terr, curva, objetivo;
-        double dFin = 0.0, terrMin = 1e18, terrMax = -1e18;
+        // Modelo al estilo DVD: el eje Y refleja la CURVATURA de la Tierra. Todo se
+        // hunde con la distancia restando caida(d)=d²/2kR. Así el NIVEL DEL MAR es
+        // una sola línea que baja con la distancia (y = −caida(d)); el mar NO se
+        // rellena, es esa línea. El terreno sobre el mar (cota ≤ 0: mar o batimetría)
+        // se trata como superficie 0 y RIELA sobre esa línea; la tierra firme (cota
+        // > 0) va a su altura, también hundida. terreno dibujado = max(cota,0) −
+        // caida(d); nivel del mar = −caida(d).
+        auto superf = [](double e) { return std::isnan(e) ? 0.0 : qMax(e, 0.0); };
+        QVector<double> dx, mar, terr, objetivo;
+        double dFin = 0.0, yTop = -1e18, yBot = 1e18;
         for (const ElevationSample &s : p.samples) {
-            if (std::isnan(s.elevation)) continue;
-            dx << s.distanceM;
-            terr << s.elevation;
-            curva << -caida(s.distanceM);
-            if (conVision) objetivo << s.elevation + m_altB->value();
-            dFin = s.distanceM;
-            terrMin = qMin(terrMin, s.elevation); terrMax = qMax(terrMax, s.elevation);
+            const double d = s.distanceM;
+            const double nivelMar = -caida(d);                 // mar hundido por curvatura
+            const double yt = superf(s.elevation) - caida(d);  // terreno (mar = nivel del mar)
+            dx << d; mar << nivelMar; terr << yt;
+            if (conVision) objetivo << yt + m_altB->value();
+            dFin = d;
+            yTop = qMax(yTop, yt); yBot = qMin(yBot, nivelMar);
         }
         if (dx.size() < 2) { m_plot->replot(); return; }
 
-        // Curva de curvatura (referencia del nivel del mar hundiéndose).
-        QCPGraph *gCurva = m_plot->addGraph();
-        gCurva->setName(tr("Curvatura de la Tierra"));
-        gCurva->setPen(QPen(QColor(0x1e, 0x88, 0xe5), 1));
-        gCurva->setData(dx, curva);
+        // Nivel del mar (una línea azul fina que baja con la curvatura). El mar es
+        // SOLO esta línea: no se rellena.
+        QCPGraph *gMar = m_plot->addGraph();
+        gMar->setName(tr("Nivel del mar"));
+        gMar->setPen(QPen(QColor(0x1e, 0x88, 0xe5), 1));
+        gMar->setData(dx, mar);
 
-        // Terreno crudo (verde), relleno por canal hasta la curva de curvatura.
+        // Terreno (verde), relleno por canal hasta el nivel del mar = el cuerpo de
+        // tierra sobre el agua. Donde hay mar, terreno = nivel del mar → relleno nulo.
         QCPGraph *gTerr = m_plot->addGraph();
         gTerr->setName(tr("Perfil del terreno"));
         gTerr->setPen(QPen(QColor(0x1b, 0x5e, 0x20), 1.4));
         gTerr->setBrush(QBrush(QColor(0x2e, 0x7d, 0x32, 90)));
-        gTerr->setChannelFillGraph(gCurva);
+        gTerr->setChannelFillGraph(gMar);
         gTerr->setData(dx, terr);
 
-        // Nivel del mar (y=0) + columna de agua azul donde la cota es < 0.
-        // El dataset puede traer batimetría (profundidades negativas): el agua se
-        // rellena entre el terreno (cota < 0) y la superficie 0. Con `min(terr,0)`
-        // frente a una línea constante 0, donde la tierra está sobre el mar los dos
-        // valores coinciden (sin relleno) y solo se pinta la columna sumergida.
-        QVector<double> agua, cero;
-        agua.reserve(dx.size()); cero.reserve(dx.size());
-        for (double e : terr) { agua << qMin(e, 0.0); cero << 0.0; }
-        QCPGraph *gNivel = m_plot->addGraph();            // referencia del nivel del mar
-        gNivel->setName(tr("Nivel del mar"));
-        gNivel->setPen(QPen(QColor(0x0d, 0x47, 0xa1), 1, Qt::DashLine));
-        gNivel->setData(dx, cero);
-        QCPGraph *gAgua = m_plot->addGraph();             // columna de agua (azul)
-        gAgua->setName(tr("Agua (bajo el nivel del mar)"));
-        gAgua->setPen(QPen(QColor(0x15, 0x65, 0xc0, 0)));  // sin borde propio
-        gAgua->setBrush(QBrush(QColor(0x21, 0x96, 0xf3, 90)));
-        gAgua->setChannelFillGraph(gNivel);
-        gAgua->setData(dx, agua);
-        gAgua->removeFromLegend();                        // la leyenda ya tiene «Nivel del mar»
-
-        double yTop = qMax(terrMax, 0.0), yBot = qMin(terrMin, -caida(dFin));
+        // Terreno-superficie hundido a una distancia d (para mástiles y obstáculo).
+        auto terrPlot = [&](double d) {
+            return superf(terrEn(p, d)) - caida(d);
+        };
         if (conVision && D > 0.0) {
-            // Recta de visibilidad A→B (naranja) entre las cimas de antena.
+            const double zBp = zB - caida(D);        // cima del objetivo, ya hundida
+            // Recta de visibilidad A→B (naranja): recta en el plano hundido, de la
+            // cima de antena en A a la del objetivo en B (que riela sobre el mar).
             QCPGraph *gVis = m_plot->addGraph();
             gVis->setName(tr("Recta de visibilidad"));
             gVis->setPen(QPen(QColor(0xef, 0x6c, 0x00), 2, Qt::DashLine));
-            gVis->setData({0.0, D}, {zA, zB});
-            yTop = qMax(yTop, qMax(zA, zB));
+            gVis->setData({0.0, D}, {zA, zBp});
+            yTop = qMax(yTop, qMax(zA, zBp));
 
-            // Objetivo a Alt2 sobre el terreno (curva).
+            // Objetivo a Alt2 sobre el terreno (ya hundido).
             QCPGraph *gObj = m_plot->addGraph();
             gObj->setName(tr("Objetivo a %1 m sobre el terreno").arg(m_altB->value(), 0, 'f', 0));
             gObj->setPen(QPen(QColor(0x15, 0x65, 0xc0), 1, Qt::DotLine));
             gObj->setData(dx, objetivo);
 
-            // Mástiles de antena en A y B. Sobre el mar (cota < 0 o sin dato) la
-            // base arranca en la superficie (0), coherente con la recta.
-            auto baseMastil = [](double t) {
-                return std::isnan(t) ? 0.0 : qMax(t, 0.0);
-            };
-            mastil(0.0, baseMastil(terrEn(p, 0.0)), zA);
-            mastil(D, baseMastil(terrEn(p, D)), zB);
+            // Mástiles de antena en A y B (del terreno hundido a la cima).
+            mastil(0.0, terrPlot(0.0), zA);
+            mastil(D, terrPlot(D), zBp);
 
-            // Obstáculo + línea de sombra (si bloquea). El obstáculo se sitúa en la
-            // misma superficie que usó el análisis: con «Mar = 0» el fondo marino se
-            // sube al nivel del agua, así que un corte sobre el mar queda en 0, no en
-            // la batimetría (el fondo del mar no tapa una visual de superficie).
+            // Obstáculo + línea de sombra (si bloquea), sobre la superficie hundida.
             if (bloqueado && critD >= 0.0) {
-                double ct = terrEn(p, critD);
-                if (m_marComo0 && m_marComo0->isChecked() && !std::isnan(ct))
-                    ct = qMax(ct, 0.0);
+                const double ct = terrPlot(critD);
                 marcaObstaculo(critD, ct);
                 if (!std::isnan(ct) && critD > 1.0) {
                     auto *linea = new QCPItemLine(m_plot);
