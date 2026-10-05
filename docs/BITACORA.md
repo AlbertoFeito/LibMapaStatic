@@ -3431,3 +3431,30 @@ Más afinados del `demo` tras probar (solo `demo/main.cpp`; la librería no camb
 
 Compila sin warnings; **18 tests** en verde. README y BITÁCORA al día; sin cambios de
 API, no se regenera el PDF.
+
+## 70. Perfil del `demo` con QCustomPlot, al estilo de DVD_potencial
+
+El perfil hecho a mano «seguía sin funcionar» (arrastre/zoom/curvatura). Revisado
+`DVD_potencial/graficaperfil.cpp`: usa **QCustomPlot** (arrastre y zoom reales con
+`setInteractions(iRangeDrag|iRangeZoom)`, leyenda) y dibuja el **terreno crudo**
+(verde, relleno por canal hasta) una **curva de curvatura** aparte `−d²/17e6`, más la
+recta de visibilidad y curvas de altura. LibMapaStatic **ya trae QCustomPlot** (se
+compila dentro de `libmapa_widget`), así que se sustituye el widget a mano del `demo`
+por un QCustomPlot con esa misma representación.
+
+- **CMake (target `demo`):** se enlaza `Qt::PrintSupport` y se añade el include de
+  QCustomPlot como `SYSTEM` (los símbolos ya están en `libmapa_widget`). El `demo`
+  sigue construyéndose solo cuando hay QCustomPlot, como antes.
+- **`demo/main.cpp`:** se elimina la clase `PerfilWidget` (QWidget a mano) y la ventana
+  flotante embebe un `QCustomPlot`. `pintarPerfil(...)` dibuja: curva de **curvatura**
+  (`curvOn ? −d²/2kR : 0`), **terreno** crudo verde con `setChannelFillGraph` hasta la
+  curvatura, y en la Visión A→B la **recta de visibilidad** A→B, la **curva del objetivo
+  a Alt2**, los **mástiles** (`QCPItemLine`), el **obstáculo** (`QCPItemTracer`) y la
+  **línea de sombra** hasta el final. Arrastre y zoom (rueda) en ambos ejes; rango X
+  inicial `[0, alcance]` con datos hasta `alcance+5 km`; Y auto-ajustado al dato con
+  margen (se quita el techo fijo de 5000 m que aplastaba el relieve). Se mantienen los
+  checks «Mar=0»/«Curvatura 4/3» que re-aplican al instante.
+
+Reconfigurar CMake (`cmake -S . -B build`). Compila sin warnings; la librería no
+cambia, **18 tests** en verde. README y BITÁCORA al día; sin cambios de API, no se
+regenera el PDF.

@@ -16,6 +16,8 @@
 
 #include "libmapa/MapWidget.h"
 
+#include "qcustomplot.h"      // ya compilado dentro de libmapa_widget; aquí solo se usa
+
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -143,371 +145,6 @@ QPixmap iconoUav(const QColor &c)
     return pm;
 }
 
-// --- Perfil de elevacion: grafica INTERACTIVA con curvatura de la Tierra ---
-// Pinta el terreno REFLEJANDO la curvatura (se hunde con la distancia: cota -
-// caida(d)) con una curva azul fina del nivel del mar; la LINEA DE VISION (si la
-// hay) queda RECTA entre las cimas de antena. Permite ZOOM (rueda), ARRASTRE y
-// doble clic para restablecer, con un CURSOR de lectura. Es SOLO de la app.
-class PerfilWidget : public QWidget
-{
-public:
-    explicit PerfilWidget(const ElevationProfile &p, QWidget *parent = nullptr)
-        : QWidget(parent)
-    {
-        setMinimumSize(560, 260);
-        setMouseTracking(true);
-        setAutoFillBackground(true);
-        QPalette pal = palette();
-        pal.setColor(QPalette::Window, QColor(0xf7, 0xf7, 0xf7));
-        setPalette(pal);
-        setProfile(p);
-    }
-
-    // Cambia el perfil. \a maxInicialM fija la ventana inicial [0, maxInicialM]
-    // (deja margen para arrastrar si los datos llegan mas lejos); <=0 = toda la ruta.
-    void setProfile(const ElevationProfile &p, double maxInicialM = -1.0)
-    {
-        m_p = p;
-        m_hasVision = false;
-        m_critD = -1.0;
-        const double total = (p.totalDistanceM > 0.0) ? p.totalDistanceM : 1.0;
-        m_resetMax = (maxInicialM > 0.0) ? qMin(maxInicialM, total) : total;
-        m_xMin = 0.0;
-        m_xMax = m_resetMax;
-        update();
-    }
-
-    // Linea de vision RECTA entre la cima de antena en A (d=0, \a zA absoluta) y en
-    // B (d=\a D, \a zB absoluta); \a critD = obstaculo/paso mas justo; \a bloqueado
-    // decide el color. D<=0 = sin linea de vision.
-    void setVision(double zA, double zB, double D, double critD, bool bloqueado)
-    {
-        m_hasVision = D > 0.0;
-        m_zA = zA; m_zB = zB; m_D = D;
-        m_critD = critD; m_bloqueado = bloqueado;
-        update();
-    }
-
-    void setCurvatura(bool on, double k, double R) { m_curvOn = on; m_k = k; m_R = R; update(); }
-    void setTechoSobreObjetivo(double m) { m_techo = m; update(); }
-
-protected:
-    QRectF plotArea() const { return QRectF(rect()).adjusted(60, 16, -16, -34); }
-
-    // Caida de la Tierra bajo la tangente del origen a distancia d (0 si no hay
-    // curvatura): d^2/(2kR). Se resta a las cotas para dibujar la Tierra curva.
-    double caida(double d) const
-    {
-        return m_curvOn ? (d * d) / (2.0 * m_k * m_R) : 0.0;
-    }
-
-    static double pasoBonito(double rango, int objetivo)
-    {
-        if (rango <= 0.0 || objetivo < 1) return 1.0;
-        const double bruto = rango / objetivo;
-        const double mag = std::pow(10.0, std::floor(std::log10(bruto)));
-        const double n = bruto / mag;
-        const double paso = (n <= 1.0 ? 1.0 : n <= 2.0 ? 2.0 : n <= 5.0 ? 5.0 : 10.0);
-        return paso * mag;
-    }
-
-    // Cota del terreno (absoluta, interpolada) a la distancia d, o NaN sin dato.
-    double cotaEn(double d) const
-    {
-        const auto &s = m_p.samples;
-        if (s.size() < 2) return std::numeric_limits<double>::quiet_NaN();
-        for (int i = 1; i < s.size(); ++i) {
-            if (s[i].distanceM >= d) {
-                const double d0 = s[i - 1].distanceM, d1 = s[i].distanceM;
-                const double e0 = s[i - 1].elevation, e1 = s[i].elevation;
-                if (std::isnan(e0) || std::isnan(e1)) return std::numeric_limits<double>::quiet_NaN();
-                const double t = (d1 > d0) ? (d - d0) / (d1 - d0) : 0.0;
-                return e0 + (e1 - e0) * t;
-            }
-        }
-        return s.last().elevation;
-    }
-
-    // Altura ABSOLUTA de la linea de vision (recta A→B) a la distancia d, o NaN
-    // fuera de [0, D] (la recta solo existe entre A y B).
-    double vistaEn(double d) const
-    {
-        if (!m_hasVision || d < 0.0 || d > m_D) return std::numeric_limits<double>::quiet_NaN();
-        return m_zA + (m_zB - m_zA) * (d / m_D);
-    }
-
-    void paintEvent(QPaintEvent *) override
-    {
-        QPainter g(this);
-        g.setRenderHint(QPainter::Antialiasing, true);
-        g.fillRect(rect(), palette().window());
-        const QRectF area = plotArea();
-
-        if (m_p.samples.size() < 2 || std::isnan(m_p.maxElevation)) {
-            g.setPen(Qt::darkGray);
-            g.drawText(rect(), Qt::AlignCenter,
-                       QStringLiteral("Pulsa «Perfil» o «Visión A→B» con una línea seleccionada"));
-            return;
-        }
-
-        // Rango vertical en coordenadas YA PROYECTADAS (cota − caida), dentro de la
-        // ventana de X; incluye terreno, nivel del mar curvo, antenas y, si se pide,
-        // 5000 m por encima del objetivo.
-        double yBot = 1e18, yTop = -1e18;
-        auto acc = [&](double v) { yBot = qMin(yBot, v); yTop = qMax(yTop, v); };
-        for (const ElevationSample &s : m_p.samples) {
-            if (std::isnan(s.elevation)) continue;
-            if (s.distanceM < m_xMin || s.distanceM > m_xMax) continue;
-            acc(s.elevation - caida(s.distanceM));
-        }
-        acc(-caida(m_xMin)); acc(-caida(m_xMax));       // curva del mar
-        if (m_hasVision) {
-            if (0.0 >= m_xMin && 0.0 <= m_xMax) acc(m_zA);
-            if (m_D >= m_xMin && m_D <= m_xMax) acc(m_zB - caida(m_D));
-            if (m_techo > 0.0) acc((m_zB - caida(m_D)) + m_techo);
-        }
-        if (yTop < yBot) { yBot = -1.0; yTop = m_p.maxElevation + 1.0; }
-        if (yTop - yBot < 1.0) { yTop += 0.5; yBot -= 0.5; }
-        const double margen = (yTop - yBot) * 0.06;
-        const double yMin = yBot - margen, yMax = yTop + margen;
-
-        auto px = [&](double d) {
-            return area.left() + area.width() * ((d - m_xMin) / (m_xMax - m_xMin));
-        };
-        auto py = [&](double e) {
-            return area.bottom() - area.height() * ((e - yMin) / (yMax - yMin));
-        };
-        // Punto proyectado del terreno (cota curvada) a distancia d.
-        auto pTerr = [&](double d, double cotaAbs) { return QPointF(px(d), py(cotaAbs - caida(d))); };
-
-        // --- Rejilla + ticks ---------------------------------------------
-        const double pasoY = pasoBonito(yMax - yMin, 5);
-        for (double e = std::ceil(yMin / pasoY) * pasoY; e <= yMax; e += pasoY) {
-            const double y = py(e);
-            g.setPen(QPen(QColor(0xe4, 0xe4, 0xe4)));
-            g.drawLine(QPointF(area.left(), y), QPointF(area.right(), y));
-            g.setPen(QColor(0x55, 0x55, 0x55));
-            g.drawText(QRectF(0, y - 7, 54, 14), Qt::AlignRight | Qt::AlignVCenter,
-                       QStringLiteral("%1").arg(e, 0, 'f', 0));
-        }
-        const double pasoX = pasoBonito(m_xMax - m_xMin, 6);
-        for (double d = std::ceil(m_xMin / pasoX) * pasoX; d <= m_xMax; d += pasoX) {
-            const double x = px(d);
-            g.setPen(QPen(QColor(0xe4, 0xe4, 0xe4)));
-            g.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()));
-            g.setPen(QColor(0x55, 0x55, 0x55));
-            g.drawText(QRectF(x - 40, area.bottom() + 4, 80, 14), Qt::AlignHCenter,
-                       QStringLiteral("%1").arg(d / 1000.0, 0, 'f', 2));
-        }
-        g.setPen(QColor(0x99, 0x99, 0x99));
-        g.drawLine(area.topLeft(), area.bottomLeft());
-        g.drawLine(area.bottomLeft(), area.bottomRight());
-        g.setPen(QColor(0x55, 0x55, 0x55));
-        g.drawText(QRectF(area.left(), area.bottom() + 18, area.width(), 14),
-                   Qt::AlignHCenter, QStringLiteral("Distancia (km)"));
-        g.drawText(QRectF(2, 1, 120, 14), Qt::AlignLeft, QStringLiteral("Altura (m)"));
-
-        g.setClipRect(area);
-
-        // --- Curva del nivel del mar (curvatura de la Tierra): azul fina -----
-        if (m_curvOn) {
-            QPolygonF mar;
-            const int N = 80;
-            for (int i = 0; i <= N; ++i) {
-                const double d = m_xMin + (m_xMax - m_xMin) * i / N;
-                mar << QPointF(px(d), py(-caida(d)));
-            }
-            g.setPen(QPen(QColor(0x1e, 0x88, 0xe5), 0.8));
-            g.drawPolyline(mar);
-        }
-
-        // --- Corte del terreno curvado (relleno por tramos continuos) ----
-        const QColor relleno(0x2e, 0x7d, 0x32, 110);
-        const QColor linea(0x1b, 0x5e, 0x20);
-        QPolygonF tramo;
-        auto cerrar = [&] {
-            if (tramo.size() >= 2) {
-                QPolygonF poly = tramo;
-                poly << QPointF(poly.last().x(), area.bottom())
-                     << QPointF(poly.first().x(), area.bottom());
-                g.setPen(Qt::NoPen); g.setBrush(relleno); g.drawPolygon(poly);
-                g.setBrush(Qt::NoBrush); g.setPen(QPen(linea, 1.6)); g.drawPolyline(tramo);
-            }
-            tramo.clear();
-        };
-        for (const ElevationSample &s : m_p.samples) {
-            if (std::isnan(s.elevation)) { cerrar(); continue; }
-            tramo << pTerr(s.distanceM, s.elevation);
-        }
-        cerrar();
-
-        // --- Linea de vision RECTA + mastiles de antena en A y B ---------
-        if (m_hasVision) {
-            const QPointF pA(px(0.0), py(m_zA));
-            const QPointF pB(px(m_D), py(m_zB - caida(m_D)));
-            g.setPen(QPen(QColor(0xef, 0x6c, 0x00), 1.8, Qt::DashLine));
-            g.drawLine(pA, pB);
-
-            auto mastil = [&](double d, double zTop, const QString &etq, bool derecha) {
-                const double ct = cotaEn(d);
-                const QPointF cima(px(d), py(zTop - caida(d)));
-                const double baseY = std::isnan(ct) ? py(zTop - caida(d)) : py(ct - caida(d));
-                g.setPen(QPen(QColor(0x33, 0x33, 0x33), 2.0));
-                g.drawLine(QPointF(px(d), baseY), cima);
-                g.setBrush(QColor(0x33, 0x33, 0x33)); g.setPen(Qt::NoPen);
-                g.drawEllipse(cima, 3.0, 3.0);
-                g.setPen(QColor(0x22, 0x22, 0x22));
-                g.drawText(cima + QPointF(derecha ? -14 : 4, -4), etq);
-            };
-            mastil(0.0, m_zA, QStringLiteral("A"), false);
-            mastil(m_D, m_zB, QStringLiteral("B"), true);
-        }
-
-        // --- Linea de sombra (dead ground): rayo rojo desde la antena A que roza
-        // el obstaculo y sigue hasta el final del perfil (terreno oculto por debajo).
-        if (m_bloqueado && m_hasVision && m_critD > 1.0) {
-            const double ct = cotaEn(m_critD);
-            if (!std::isnan(ct)) {
-                const QPointF pOjo(px(0.0), py(m_zA));
-                const QPointF pObs(px(m_critD), py(ct - caida(m_critD)));
-                const double dFin = m_p.totalDistanceM;
-                const double mPix = (pObs.y() - pOjo.y()) / (pObs.x() - pOjo.x());
-                const double yFin = pOjo.y() + mPix * (px(dFin) - pOjo.x());
-                g.setPen(QPen(QColor(0xc6, 0x28, 0x28), 1.6));
-                g.drawLine(pOjo, QPointF(px(dFin), yFin));
-            }
-        }
-
-        // --- Marca del obstaculo / paso mas justo ------------------------
-        if (m_hasVision && m_critD >= 0.0) {
-            const QColor marca = m_bloqueado ? QColor(0xc6, 0x28, 0x28)
-                                             : QColor(0x15, 0x65, 0xc0);
-            const double x = px(m_critD);
-            g.setPen(QPen(marca, 1.2, Qt::DotLine));
-            g.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()));
-            const double ct = cotaEn(m_critD);
-            if (!std::isnan(ct)) {
-                g.setBrush(marca); g.setPen(QPen(Qt::white, 1.0));
-                g.drawEllipse(pTerr(m_critD, ct), 4.0, 4.0);
-            }
-        }
-
-        // --- Cursor con lectura (cotas absolutas) ------------------------
-        if (m_hoverX >= area.left() && m_hoverX <= area.right()) {
-            const double d = m_xMin + (m_hoverX - area.left()) / area.width() * (m_xMax - m_xMin);
-            const double ct = cotaEn(d);
-            const double vt = vistaEn(d);
-            g.setPen(QPen(QColor(0x37, 0x47, 0x4f), 0.8, Qt::DashLine));
-            g.drawLine(QPointF(m_hoverX, area.top()), QPointF(m_hoverX, area.bottom()));
-            if (!std::isnan(ct)) {
-                g.setBrush(QColor(0x1b, 0x5e, 0x20)); g.setPen(Qt::NoPen);
-                g.drawEllipse(pTerr(d, ct), 3.0, 3.0);
-            }
-            g.setClipping(false);
-            QStringList txt;
-            txt << QStringLiteral("%1 km").arg(d / 1000.0, 0, 'f', 2);
-            if (!std::isnan(ct)) txt << QStringLiteral("terreno %1 m").arg(ct, 0, 'f', 0);
-            if (!std::isnan(vt)) {
-                txt << QStringLiteral("visión %1 m").arg(vt, 0, 'f', 0);
-                if (!std::isnan(ct))
-                    txt << QStringLiteral("holgura %1 m").arg(vt - ct, 0, 'f', 0);
-            }
-            const QString s = txt.join(QStringLiteral("  ·  "));
-            QFontMetrics fm(g.font());
-            const QRectF caja(area.left() + 6, area.top() + 6,
-                              fm.horizontalAdvance(s) + 12, fm.height() + 6);
-            g.setBrush(QColor(255, 255, 255, 220));
-            g.setPen(QColor(0xbb, 0xbb, 0xbb));
-            g.drawRoundedRect(caja, 3, 3);
-            g.setPen(QColor(0x22, 0x22, 0x22));
-            g.drawText(caja, Qt::AlignCenter, s);
-            g.setClipRect(area);
-        }
-
-        g.setClipping(false);
-        // --- Leyenda -----------------------------------------------------
-        const int lx = int(area.right()) - 160, ly = int(area.top()) + 6;
-        int fila = 0;
-        auto chip = [&](const QColor &c, const QString &t, bool dash) {
-            const double y = ly + fila++ * 15;
-            g.setPen(QPen(c, 2.2, dash ? Qt::DashLine : Qt::SolidLine));
-            g.drawLine(QPointF(lx, y + 6), QPointF(lx + 20, y + 6));
-            g.setPen(QColor(0x44, 0x44, 0x44));
-            g.drawText(QRectF(lx + 26, y, 140, 14), Qt::AlignLeft | Qt::AlignVCenter, t);
-        };
-        chip(QColor(0x2e, 0x7d, 0x32), QStringLiteral("Terreno"), false);
-        if (m_curvOn) chip(QColor(0x1e, 0x88, 0xe5), QStringLiteral("Curvatura (mar)"), false);
-        if (m_hasVision) chip(QColor(0xef, 0x6c, 0x00), QStringLiteral("Línea de visión"), true);
-        if (m_bloqueado && m_hasVision && m_critD >= 0.0)
-            chip(QColor(0xc6, 0x28, 0x28), QStringLiteral("Sombra / oculto"), false);
-    }
-
-    void wheelEvent(QWheelEvent *e) override
-    {
-        const QRectF area = plotArea();
-        const double mx = e->position().x();
-        if (mx < area.left() || mx > area.right()) return;
-        const double d = m_xMin + (mx - area.left()) / area.width() * (m_xMax - m_xMin);
-        const double factor = e->angleDelta().y() > 0 ? 0.82 : 1.0 / 0.82;
-        double span = (m_xMax - m_xMin) * factor;
-        const double total = (m_p.totalDistanceM > 0.0) ? m_p.totalDistanceM : 1.0;
-        span = qBound(qMin(50.0, total), span, total);
-        double frac = (d - m_xMin) / (m_xMax - m_xMin);
-        m_xMin = d - frac * span;
-        m_xMax = m_xMin + span;
-        clampVista();
-        update();
-    }
-
-    void mousePressEvent(QMouseEvent *e) override
-    {
-        if (e->button() == Qt::LeftButton) { m_arrastrando = true; m_lastX = e->pos().x(); }
-    }
-    void mouseReleaseEvent(QMouseEvent *) override { m_arrastrando = false; }
-    void mouseDoubleClickEvent(QMouseEvent *) override
-    {
-        m_xMin = 0.0; m_xMax = m_resetMax;
-        update();
-    }
-    void mouseMoveEvent(QMouseEvent *e) override
-    {
-        m_hoverX = e->pos().x();
-        if (m_arrastrando) {
-            const QRectF area = plotArea();
-            const double dmPorPx = (m_xMax - m_xMin) / area.width();
-            const double delta = (e->pos().x() - m_lastX) * dmPorPx;
-            m_xMin -= delta; m_xMax -= delta;
-            m_lastX = e->pos().x();
-            clampVista();
-        }
-        update();
-    }
-    void leaveEvent(QEvent *) override { m_hoverX = -1.0; update(); }
-
-private:
-    void clampVista()
-    {
-        const double total = (m_p.totalDistanceM > 0.0) ? m_p.totalDistanceM : 1.0;
-        const double span = m_xMax - m_xMin;
-        if (m_xMin < 0.0) { m_xMin = 0.0; m_xMax = span; }
-        if (m_xMax > total) { m_xMax = total; m_xMin = total - span; }
-        if (m_xMin < 0.0) m_xMin = 0.0;
-    }
-
-    ElevationProfile m_p;
-    bool m_hasVision = false;
-    double m_zA = 0.0, m_zB = 0.0, m_D = 0.0;   // cimas de antena (abs) y distancia A→B
-    double m_critD = -1.0;                       // obstaculo / paso mas justo (m)
-    bool m_bloqueado = false;
-    bool m_curvOn = true;                        // reflejar curvatura de la Tierra
-    double m_k = 4.0 / 3.0, m_R = 6371000.0;
-    double m_techo = 0.0;                        // m a mostrar por encima del objetivo
-    double m_resetMax = 1.0;                     // ventana al abrir / doble clic
-    double m_xMin = 0.0, m_xMax = 1.0;           // ventana de distancia (zoom/arrastre)
-    double m_hoverX = -1.0;
-    bool m_arrastrando = false;
-    int m_lastX = 0;
-};
 
 } // namespace
 
@@ -1094,8 +731,8 @@ private:
 
         auto *ayuda = new QLabel(
             tr("<span style='color:#777'>Azul = visible, amarillo = oculto, rojo = "
-               "obstáculo. El perfil se abre en una ventana aparte (rueda = zoom, "
-               "arrastrar = desplazar, doble clic = restablecer).</span>"), tab);
+               "obstáculo. El perfil se abre en una ventana aparte (QCustomPlot: "
+               "arrastrar = desplazar, rueda = zoom).</span>"), tab);
         ayuda->setWordWrap(true);
         caja->addWidget(ayuda);
         caja->addStretch(1);
@@ -1125,26 +762,148 @@ private:
         if (!m_perfilWin) {
             m_perfilWin = new QDialog(this);
             m_perfilWin->setWindowTitle(tr("Perfil del terreno"));
-            m_perfilWin->resize(900, 460);
+            m_perfilWin->resize(960, 500);
             auto *lay = new QVBoxLayout(m_perfilWin);
             m_perfilInfo = new QLabel(m_perfilWin);
             m_perfilInfo->setWordWrap(true);
             lay->addWidget(m_perfilInfo);
-            m_perfilVista = new PerfilWidget(ElevationProfile(), m_perfilWin);
-            lay->addWidget(m_perfilVista, 1);
+            // Gráfica con QCustomPlot: arrastre y zoom (rueda) en ambos ejes.
+            m_plot = new QCustomPlot(m_perfilWin);
+            m_plot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom | QCP::iSelectLegend);
+            m_plot->legend->setVisible(true);
+            m_plot->xAxis->setLabel(tr("Distancia (m)"));
+            m_plot->yAxis->setLabel(tr("Altura (m)"));
+            lay->addWidget(m_plot, 1);
             auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, m_perfilWin);
             connect(bb, &QDialogButtonBox::rejected, m_perfilWin, &QDialog::hide);
             lay->addWidget(bb);
         }
         m_perfilInfo->setText(resumen);
-        m_perfilVista->setCurvatura(curvaturaOn(), 4.0 / 3.0, 6371000.0);
-        m_perfilVista->setTechoSobreObjetivo(conVision ? 5000.0 : 0.0);
-        m_perfilVista->setProfile(p, maxInicial);
-        if (conVision) m_perfilVista->setVision(zA, zB, D, critD, bloqueado);
-        else           m_perfilVista->setVision(0.0, 0.0, 0.0, -1.0, false);
+        pintarPerfil(p, conVision, zA, zB, D, critD, bloqueado, maxInicial);
         m_perfilWin->show();
         m_perfilWin->raise();
         m_perfilWin->activateWindow();
+    }
+
+    // Dibuja el perfil en el QCustomPlot al estilo DVD_potencial: terreno CRUDO
+    // (verde, relleno hasta la curva de curvatura), curva de curvatura de la Tierra
+    // (−d²/2kR), y —si hay visión— la recta de visibilidad A→B, los mástiles de
+    // antena, el obstáculo y la línea de sombra hasta el final.
+    void pintarPerfil(const ElevationProfile &p, bool conVision,
+                      double zA, double zB, double D, double critD, bool bloqueado,
+                      double maxInicialM)
+    {
+        m_plot->clearGraphs();
+        m_plot->clearItems();
+        if (p.samples.size() < 2) { m_plot->replot(); return; }
+
+        const bool curv = curvaturaOn();
+        const double k = 4.0 / 3.0, R = 6371000.0;
+        auto caida = [&](double d) { return curv ? (d * d) / (2.0 * k * R) : 0.0; };
+
+        QVector<double> dx, terr, curva, objetivo;
+        double dFin = 0.0, terrMin = 1e18, terrMax = -1e18;
+        for (const ElevationSample &s : p.samples) {
+            if (std::isnan(s.elevation)) continue;
+            dx << s.distanceM;
+            terr << s.elevation;
+            curva << -caida(s.distanceM);
+            if (conVision) objetivo << s.elevation + m_altB->value();
+            dFin = s.distanceM;
+            terrMin = qMin(terrMin, s.elevation); terrMax = qMax(terrMax, s.elevation);
+        }
+        if (dx.size() < 2) { m_plot->replot(); return; }
+
+        // Curva de curvatura (referencia del nivel del mar hundiéndose).
+        QCPGraph *gCurva = m_plot->addGraph();
+        gCurva->setName(tr("Curvatura de la Tierra"));
+        gCurva->setPen(QPen(QColor(0x1e, 0x88, 0xe5), 1));
+        gCurva->setData(dx, curva);
+
+        // Terreno crudo (verde), relleno por canal hasta la curva de curvatura.
+        QCPGraph *gTerr = m_plot->addGraph();
+        gTerr->setName(tr("Perfil del terreno"));
+        gTerr->setPen(QPen(QColor(0x1b, 0x5e, 0x20), 1.4));
+        gTerr->setBrush(QBrush(QColor(0x2e, 0x7d, 0x32, 90)));
+        gTerr->setChannelFillGraph(gCurva);
+        gTerr->setData(dx, terr);
+
+        double yTop = terrMax, yBot = qMin(terrMin, -caida(dFin));
+        if (conVision && D > 0.0) {
+            // Recta de visibilidad A→B (naranja) entre las cimas de antena.
+            QCPGraph *gVis = m_plot->addGraph();
+            gVis->setName(tr("Recta de visibilidad"));
+            gVis->setPen(QPen(QColor(0xef, 0x6c, 0x00), 2, Qt::DashLine));
+            gVis->setData({0.0, D}, {zA, zB});
+            yTop = qMax(yTop, qMax(zA, zB));
+
+            // Objetivo a Alt2 sobre el terreno (curva).
+            QCPGraph *gObj = m_plot->addGraph();
+            gObj->setName(tr("Objetivo a %1 m sobre el terreno").arg(m_altB->value(), 0, 'f', 0));
+            gObj->setPen(QPen(QColor(0x15, 0x65, 0xc0), 1, Qt::DotLine));
+            gObj->setData(dx, objetivo);
+
+            // Mástiles de antena en A y B.
+            mastil(0.0, terrEn(p, 0.0), zA);
+            mastil(D, terrEn(p, D), zB);
+
+            // Obstáculo + línea de sombra (si bloquea).
+            if (bloqueado && critD >= 0.0) {
+                const double ct = terrEn(p, critD);
+                marcaObstaculo(critD, ct);
+                if (!std::isnan(ct) && critD > 1.0) {
+                    auto *linea = new QCPItemLine(m_plot);
+                    linea->setPen(QPen(QColor(0xc6, 0x28, 0x28), 1.6));
+                    const double m = (ct - zA) / critD;
+                    linea->start->setCoords(0.0, zA);
+                    linea->end->setCoords(dFin, zA + m * dFin);
+                }
+            }
+        }
+
+        const double margen = qMax(10.0, (yTop - yBot) * 0.08);
+        m_plot->yAxis->setRange(yBot - margen, yTop + margen);
+        const double xMax = (maxInicialM > 0.0) ? qMin(maxInicialM, dFin) : dFin;
+        m_plot->xAxis->setRange(0.0, xMax > 0.0 ? xMax : dFin);
+        m_plot->replot();
+    }
+
+    // Cota del terreno (interpolada) a distancia d del perfil, o NaN.
+    static double terrEn(const ElevationProfile &p, double d)
+    {
+        const auto &s = p.samples;
+        for (int i = 1; i < s.size(); ++i) {
+            if (s[i].distanceM >= d) {
+                const double e0 = s[i - 1].elevation, e1 = s[i].elevation;
+                if (std::isnan(e0) || std::isnan(e1)) return std::numeric_limits<double>::quiet_NaN();
+                const double d0 = s[i - 1].distanceM, d1 = s[i].distanceM;
+                const double t = (d1 > d0) ? (d - d0) / (d1 - d0) : 0.0;
+                return e0 + (e1 - e0) * t;
+            }
+        }
+        return s.isEmpty() ? std::numeric_limits<double>::quiet_NaN() : s.last().elevation;
+    }
+
+    // Mástil de antena: línea vertical del terreno a la cima, con un punto arriba.
+    void mastil(double d, double base, double cima)
+    {
+        if (std::isnan(base)) base = cima;
+        auto *l = new QCPItemLine(m_plot);
+        l->setPen(QPen(QColor(0x33, 0x33, 0x33), 2));
+        l->start->setCoords(d, base);
+        l->end->setCoords(d, cima);
+    }
+
+    // Marca del obstáculo: punto rojo sobre el terreno.
+    void marcaObstaculo(double d, double cota)
+    {
+        if (std::isnan(cota)) return;
+        auto *t = new QCPItemTracer(m_plot);
+        t->setStyle(QCPItemTracer::tsCircle);
+        t->setPen(QPen(QColor(0xc6, 0x28, 0x28)));
+        t->setBrush(QColor(0xc6, 0x28, 0x28));
+        t->setSize(8);
+        t->position->setCoords(d, cota);
     }
 
     // Comprueba que hay DEM; si no, avisa y devuelve false.
@@ -2112,7 +1871,7 @@ private:
     QLabel *m_resultado = nullptr;          //!< lectura del ultimo analisis
     QDialog *m_perfilWin = nullptr;         //!< ventana flotante del perfil
     QLabel *m_perfilInfo = nullptr;
-    PerfilWidget *m_perfilVista = nullptr;
+    QCustomPlot *m_plot = nullptr;          //!< gráfica del perfil (QCustomPlot)
     enum class Analisis { Ninguno, Perfil, Vision, Viewshed };
     Analisis m_ultimo = Analisis::Ninguno;  //!< para re-aplicar al cambiar un check
     const QString kCapaVision = QStringLiteral("elev_vision");

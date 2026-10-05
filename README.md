@@ -362,16 +362,15 @@ La app de ejemplo `demo` lo demuestra en su **pestaña «Elevación»** del pane
 traza la línea de visión entre los extremos con Alt1/Alt2 de antena (**azul** el tramo
 visible, **rojo** el oculto, obstáculo con su distancia) y la dibuja también sobre el
 perfil; **Viewshed** pinta la zona a la altura Alt2 desde el vértice seleccionado (o el
-centro del mapa) con **azul = visible y amarillo = oculto**. El perfil de la Visión
-A→B **refleja la curvatura de la Tierra** (el terreno se hunde con la distancia, con
-una curva azul fina del nivel del mar y la línea de visión recta), se extiende hasta
-**alcance + 5 km**, muestra en vertical hasta **5000 m sobre el objetivo**, dibuja los
-**mástiles de antena** en A y B y, si bloquea, una **línea de sombra roja** (terreno
-oculto por debajo); se arrastra y hace zoom desde el inicio. El check «Mar / sin dato =
-0 m» trata el mar como cota 0 (objetivos sobre el mar) y «Curvatura 4/3» se puede
-desactivar para analizar solo el enmascaramiento por terreno (sobre mar sin obstáculos
-se ve hasta el alcance máximo). **Cambiar un check re-aplica al instante** el último
-análisis.
+centro del mapa) con **azul = visible y amarillo = oculto**. El perfil se abre en una
+ventana con **QCustomPlot** (arrastre y zoom con la rueda, al estilo de la herramienta
+de referencia DVD): **terreno** verde relleno hasta la **curva de curvatura de la
+Tierra** (`−d²/2kR`), y en la Visión A→B la **recta de visibilidad** A→B, la curva del
+objetivo a Alt2, los **mástiles de antena** y, si bloquea, la **línea de sombra roja**.
+El check «Mar / sin dato = 0 m» trata el mar como cota 0 (objetivos sobre el mar) y
+«Curvatura 4/3» se puede desactivar para analizar solo el enmascaramiento por terreno
+(sobre mar sin obstáculos se ve hasta el alcance máximo). **Cambiar un check re-aplica
+al instante** el último análisis.
 
 ## Referencia de comandos (argumentos por herramienta)
 

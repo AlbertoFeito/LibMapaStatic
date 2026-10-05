@@ -221,7 +221,10 @@ endif()
 # -----------------------------------------------------------------------------
 if(LIBMAPA_BUILD_DEMO AND LIBMAPA_HAVE_QCP)
     add_executable(demo demo/main.cpp)
-    target_link_libraries(demo PRIVATE libmapa_widget)
+    target_link_libraries(demo PRIVATE libmapa_widget Qt${QT_VERSION_MAJOR}::PrintSupport)
+    # El demo dibuja el perfil con QCustomPlot (ya compilado dentro de
+    # libmapa_widget); su cabecera va como SYSTEM para que nuestros -W... no la marquen.
+    target_include_directories(demo SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
 endif()
 
 # -----------------------------------------------------------------------------
