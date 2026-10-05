@@ -3327,3 +3327,29 @@ sin tocar la librería:
 Convención de color coherente con el viewshed (azul = visible). Compila sin
 warnings; la librería no cambia, así que **siguen 18 tests** en verde. README al
 día; sin cambios de API, no se regenera el PDF.
+
+## 66. Visión A→B: el obstáculo y la línea de visión SOBRE el perfil
+
+El usuario pidió ver el obstáculo en el perfil como referencia, y planteó —con
+razón— que si Alt1 y Alt2 son iguales en la Visión A→B y en el viewshed, los datos
+deben coincidir. Lo son: el viewshed es la Visión A→B hecha a 360° para un objetivo
+a Alt2 (misma condición por muestra, ya con test). La coincidencia exige el **mismo
+observador**: el viewshed pone Alt1 en el origen y Alt2 en el objetivo, así que hay
+que lanzarlo desde el mismo punto A (en el demo, el 1er vértice de la entidad
+seleccionada). Con Alt1=Alt2 `lineOfSight` es simétrica (da igual la dirección);
+quedan como únicas fuentes de diferencia el muestreo de azimut a 1° justo en el roce
+y, antes del arreglo de `visibleRanges`, la ZVD contigua.
+
+Para verlo, mejora SOLO del `demo` (`PerfilWidget` y `analizarVision`):
+
+- **`PerfilWidget`** admite `setVision(vista, critD, bloqueado)`: superpone la
+  **línea de visión** (recta entre antenas bajada por la curvatura, `recta−bulge`
+  con k=4/3, en naranja) y marca el **obstáculo / paso más justo** (línea vertical
+  + punto sobre el terreno + distancia; rojo si bloqueado, azul si no). El rango
+  vertical pasa a abarcar terreno y línea de visión.
+- **`analizarVision`** calcula el perfil de la línea A→B, monta esa línea de visión
+  muestra a muestra y abre el perfil con todo marcado, además de dibujar en el mapa.
+  Así se ve dónde el terreno corta la recta y a qué distancia.
+
+Compila sin warnings; la librería no cambia, **siguen 18 tests** en verde. Sin
+cambios de API; no se regenera el PDF.
