@@ -3487,3 +3487,41 @@ Nota: sin batimetría (SRTM puro) el mar abierto está en 0 o es hueco, así que
 aparece donde hay cota real < 0; con un DEM batimétrico (GEBCO/ETOPO) el mismo lector
 mostraría la profundidad. Compila sin warnings; la librería no cambia, **18 tests** en
 verde. README y BITÁCORA al día; sin cambios de API, no se regenera el PDF.
+
+## 72. «Mar = 0» como suelo: el obstáculo no puede estar en el fondo del mar
+
+Al probar la Visión A→B sobre batimetría (objetivo a 500 m a 34 km sobre mar hondo), la
+recta naranja llegaba bien a la superficie, pero el **obstáculo rojo aparecía a 5 km bajo
+el agua (~−50 m)** y la línea de sombra se hundía al fondo marino (−850 m). Imposible: el
+lecho marino no puede tapar una visual entre dos objetivos sobre la superficie.
+
+**Causa.** El `demo` ya **dibujaba** la recta clampeada a la superficie (§71), pero
+`lineOfSight` de la **librería** calculaba el bloqueo contra el terreno **crudo**: con
+batimetría, el extremo B se anclaba en el fondo (−800 m + Alt2) y la recta «caía» al
+agua, de modo que la costa la tapaba falsamente. El check «Mar = 0» solo sustituía los
+huecos (NaN), no la batimetría negativa **con dato**.
+
+**Arreglo (semántica del API).** `voidElevation` finito pasa a ser el **suelo** del
+análisis en el helper `cota()` de `ElevationAnalysis.cpp`: sustituye los huecos por él y
+**sube a él cualquier cota por debajo** (la batimetría). Con `voidElevation = 0`, sobre
+el mar la superficie que cuenta es el nivel del agua (0), no el fondo — ni los objetivos
+flotan en el lecho ni el lecho tapa una visual. Afecta a los tres cálculos (perfil, línea
+de visión y viewshed) por igual; con `voidElevation = NaN` (crudo) nada cambia (negativos
+de tierra firme incluidos).
+
+- **`src/dem/ElevationAnalysis.cpp`:** `cota()` → `isnan(voidElev) ? t : (isnan(t) ?
+  voidElev : max(t, voidElev))`.
+- **`include/libmapa/Elevation.h`:** comentarios de `voidElevation` en los tres structs
+  de parámetros (ahora «suelo»).
+- **`demo/main.cpp`:** el **perfil se dibuja siempre crudo** (`ElevationProfileParams{}`)
+  para ver la batimetría en azul; el **análisis** (`lineOfSight`/viewshed) usa `voidElev()`
+  (0 con el check). El obstáculo sobre el perfil se sitúa en la superficie (`max(ct,0)` con
+  el check) para no pintarse bajo el agua, coherente con el análisis.
+- **Test** `lineOfSightSeaFloorClampedToSurface`: tile con costa (+100) al oeste y mar
+  profundo (−1000) al este. En crudo, la recta a un objetivo a 500 m se hunde y la costa la
+  bloquea (`!clear`); con `voidElevation = 0` el objetivo está en superficie y **se ve**
+  (`clear`). Comprueba además que el perfil crudo muestra la batimetría (mín < −500) y que
+  con mar=0 el perfil se clampea (mín = 0, máx = 100).
+
+Compila sin warnings; **18 tests** en verde (un slot nuevo del mismo ejecutable). README,
+BITÁCORA y `arquitectura.html` al día; **cambia la semántica del API → se regenera el PDF**.

@@ -871,9 +871,14 @@ private:
             mastil(0.0, baseMastil(terrEn(p, 0.0)), zA);
             mastil(D, baseMastil(terrEn(p, D)), zB);
 
-            // Obstáculo + línea de sombra (si bloquea).
+            // Obstáculo + línea de sombra (si bloquea). El obstáculo se sitúa en la
+            // misma superficie que usó el análisis: con «Mar = 0» el fondo marino se
+            // sube al nivel del agua, así que un corte sobre el mar queda en 0, no en
+            // la batimetría (el fondo del mar no tapa una visual de superficie).
             if (bloqueado && critD >= 0.0) {
-                const double ct = terrEn(p, critD);
+                double ct = terrEn(p, critD);
+                if (m_marComo0 && m_marComo0->isChecked() && !std::isnan(ct))
+                    ct = qMax(ct, 0.0);
                 marcaObstaculo(critD, ct);
                 if (!std::isnan(ct) && critD > 1.0) {
                     auto *linea = new QCPItemLine(m_plot);
@@ -980,7 +985,9 @@ private:
                 5000);
             return;
         }
-        const ElevationProfile p = m_mapa->elevationProfile(f->geometry, paramsPerfil());
+        // El perfil se DIBUJA con la cota cruda (muestra la batimetría en azul); el
+        // check «Mar = 0» solo afecta al ANÁLISIS de visibilidad, no a la gráfica.
+        const ElevationProfile p = m_mapa->elevationProfile(f->geometry, ElevationProfileParams());
         if (!p.isValid() || std::isnan(p.maxElevation)) {
             statusBar()->showMessage(
                 tr("La ruta no tiene cota en el DEM activo (fuera de cobertura)."),
@@ -1106,7 +1113,9 @@ private:
         const double alcanceM = m_alcanceKm->value() * 1000.0;
         const double largo = qMax(alcanceM + 5000.0, D + 5000.0);
         const QGeoCoordinate fin = a.atDistanceAndAzimuth(largo, a.azimuthTo(b));
-        const ElevationProfile perfil = m_mapa->elevationProfile({ a, fin }, paramsPerfil());
+        // Perfil CRUDO para dibujar (batimetría en azul). La visibilidad (v, arriba)
+        // ya se calculó con «Mar = 0» clampeando el fondo marino a la superficie.
+        const ElevationProfile perfil = m_mapa->elevationProfile({ a, fin }, ElevationProfileParams());
         if (!perfil.isValid() || std::isnan(perfil.maxElevation))
             return;
 

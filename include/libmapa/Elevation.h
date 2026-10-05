@@ -30,8 +30,11 @@ struct ElevationProfileParams
     //! Separacion entre muestras, en metros. 30 m aprovecha el SRTM de 1" y es
     //! barato; se puede subir para recorridos muy largos.
     double stepMeters = 30.0;
-    //! Cota a usar donde el DEM NO tiene dato (hueco, mar, fuera de cobertura).
-    //! NaN (por defecto) = dejar la muestra sin dato; 0 = tratarlo como mar.
+    //! Cota mínima del análisis (SUELO). NaN (por defecto) = dejar la muestra tal
+    //! cual (sin dato donde no hay; cotas negativas de tierra firme incluidas).
+    //! Un valor finito (p. ej. 0 = mar) sustituye los huecos por él Y sube a él
+    //! cualquier cota por debajo (la batimetría negativa del fondo marino): sobre
+    //! el mar la superficie que cuenta es el nivel del agua, no el lecho.
     double voidElevation = std::numeric_limits<double>::quiet_NaN();
 };
 
@@ -68,8 +71,10 @@ struct LineOfSightParams
     double k = 4.0 / 3.0;
     //! Radio medio de la Tierra, en metros.
     double earthRadiusM = 6371000.0;
-    //! Cota a usar donde el DEM no tiene dato (hueco, mar, fuera de cobertura).
-    //! NaN (por defecto) = saltar esa muestra; 0 = tratarla como mar.
+    //! Cota mínima del análisis (SUELO). NaN (por defecto) = cota cruda (salta los
+    //! huecos; mantiene negativos de tierra). 0 = mar: sustituye huecos por 0 y sube
+    //! a 0 la batimetría negativa (el fondo marino no tapa una visual de superficie
+    //! ni los objetivos flotan en él).
     double voidElevation = std::numeric_limits<double>::quiet_NaN();
 };
 
@@ -113,9 +118,10 @@ struct ViewshedParams
     bool curvature = true;
     double k = 4.0 / 3.0;              //!< Radio terrestre efectivo (4/3 estandar).
     double earthRadiusM = 6371000.0;   //!< Radio medio de la Tierra, en metros.
-    //! Cota donde el DEM no tiene dato (hueco, mar, fuera de cobertura). NaN (por
-    //! defecto) = saltar; 0 = tratar como mar (util: objetivos sobre el mar se
-    //! analizan hasta el alcance en vez de cortarse en la costa).
+    //! Cota mínima del análisis (SUELO). NaN (por defecto) = cota cruda (salta los
+    //! huecos; mantiene negativos). 0 = mar: sustituye huecos por 0 y sube a 0 la
+    //! batimetría negativa, así los objetivos sobre el mar se analizan en superficie
+    //! hasta el alcance (el fondo marino no tapa ni corta en la costa).
     double voidElevation = std::numeric_limits<double>::quiet_NaN();
     //! Si cada rayo guarda ademas su perfil completo (\c ViewshedRay::profile).
     //! Por defecto NO, para acotar la memoria con 360 rayos; actívalo para

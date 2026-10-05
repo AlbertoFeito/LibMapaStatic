@@ -57,15 +57,21 @@ double caida(double d, double k, double R)
     return abombamiento(d, d, k, R);
 }
 
-// Cota del terreno en \a p, sustituyendo los huecos del DEM por \a voidElev si
-// este es finito (p. ej. 0 = mar). Con \a voidElev NaN, devuelve el dato tal cual
-// (NaN donde no hay).
+// Cota del terreno en \a p. Con \a voidElev finito (p. ej. 0 = mar) actua como
+// SUELO del analisis: los huecos del DEM se sustituyen por voidElev y cualquier
+// cota por debajo (batimetria negativa, el fondo marino) se sube a voidElev. Sobre
+// el mar la superficie que cuenta para la visibilidad es el nivel del agua, no el
+// fondo: ni un objetivo flota en el fondo ni el lecho marino tapa una visual entre
+// objetivos de superficie. Con \a voidElev NaN, devuelve el dato tal cual (NaN
+// donde no hay), negativos de tierra firme incluidos.
 double cota(const IElevationSource &src, const QGeoCoordinate &p, double voidElev)
 {
     const double t = src.elevationAt(p);
-    if (std::isnan(t) && !std::isnan(voidElev))
-        return voidElev;
-    return t;
+    if (std::isnan(voidElev))
+        return t;                       // modo crudo: pasa cualquier cota, incl. < 0
+    if (std::isnan(t))
+        return voidElev;                // hueco del DEM -> mar
+    return (t < voidElev) ? voidElev : t;   // batimetria/mar bajo 0 -> superficie
 }
 
 } // namespace

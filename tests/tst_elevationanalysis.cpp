@@ -29,6 +29,7 @@ private slots:
     void lineOfSightBlockedByHill();
     void lineOfSightCurvatureOnFlatEarth();
     void lineOfSightInvalid();
+    void lineOfSightSeaFloorClampedToSurface();
     void viewshedPeakAtKnownAzimuth();
     void viewshedTargetHeightVisibility();
     void viewshedCurvatureHorizon();
@@ -258,6 +259,49 @@ void TstElevationAnalysis::lineOfSightInvalid()
     const QGeoCoordinate hueco(19.0 + 5.0 / 6.0, -77.0 + 1.0 / 6.0);
     QVERIFY(std::isnan(m_dem.elevationAt(hueco)));
     QVERIFY(!lineOfSight(m_dem, hueco, b, 0.0, 0.0).isValid());
+}
+
+// Con voidElevation=0 (mar), la BATIMETRIA negativa (cota < 0 CON dato) se trata
+// como superficie: el fondo marino no debe tapar una visual entre objetivos sobre
+// el mar. Tile con costa al oeste (+100) y mar profundo al este (-1000): un objetivo
+// alto sobre el mar lejano es VISIBLE con mar=0, pero en modo crudo la recta baja al
+// fondo (-1000) y la costa la bloquea falsamente.
+void TstElevationAnalysis::lineOfSightSeaFloorClampedToSurface()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const int side = 13;                           // 12 celdas/grado
+    QVector<int> s(side * side);
+    for (int row = 0; row < side; ++row)
+        for (int col = 0; col < side; ++col)
+            s[row * side + col] = (col <= 3) ? 100 : -1000;  // costa | mar profundo
+    QVERIFY(writeHgt(dir.filePath(QStringLiteral("N19W077.hgt")), side, s));
+    HgtElevation dem;
+    dem.setDirectory(dir.path());
+
+    const QGeoCoordinate a(19.5, -76.95);          // observador en la costa (+100)
+    const QGeoCoordinate b(19.5, -76.10);          // objetivo lejano sobre mar hondo
+
+    // El perfil crudo muestra la batimetria (minimo ~-1000); con mar=0 se sube a 0.
+    const ElevationProfile crudo = elevationProfile(dem, { a, b });
+    QVERIFY(crudo.isValid());
+    QVERIFY2(crudo.minElevation < -500.0, "el perfil crudo muestra la batimetria");
+    ElevationProfileParams pp; pp.voidElevation = 0.0;
+    const ElevationProfile mar = elevationProfile(dem, { a, b }, pp);
+    QVERIFY(mar.isValid());
+    QCOMPARE(mar.minElevation, 0.0);               // nada por debajo de la superficie
+    QCOMPARE(mar.maxElevation, 100.0);
+
+    // Objetivo a 500 m sobre el mar. En crudo, la recta cae al fondo (-1000) y la
+    // costa la tapa; con mar=0 el objetivo esta en superficie (0+500) y se ve.
+    const LineOfSightResult crudoLos = lineOfSight(dem, a, b, 10.0, 500.0);
+    QVERIFY(crudoLos.isValid());
+    QVERIFY2(!crudoLos.clear, "en crudo la costa bloquea la recta hundida al fondo");
+
+    LineOfSightParams lp; lp.voidElevation = 0.0;
+    const LineOfSightResult marLos = lineOfSight(dem, a, b, 10.0, 500.0, lp);
+    QVERIFY(marLos.isValid());
+    QVERIFY2(marLos.clear, "con mar=0 el objetivo sobre el mar es visible");
 }
 
 // --- Viewshed (Fase C) ------------------------------------------------------

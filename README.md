@@ -378,9 +378,16 @@ mar (depresiones) y, si el dataset trae **batimetría**, para la profundidad del
 marino (p. ej. el talud al norte de Cuba a ~−1800 m). SRTM puro no trae batimetría
 (sobre el mar es 0 o hueco), pero el mismo lector aceptaría un DEM batimétrico
 (GEBCO/ETOPO). En el perfil, lo que queda **bajo el nivel del mar (cota < 0) se rellena
-de azul** (columna de agua) con una línea de referencia del nivel del mar en y=0. La
-**recta de visibilidad** coloca los objetivos sobre el mar en la **superficie (0)**, no
-en el fondo: los mástiles de antena de un buque arrancan en 0, no a −profundidad.
+de azul** (columna de agua) con una línea de referencia del nivel del mar en y=0.
+
+Para el **análisis de visibilidad**, `voidElevation = 0` (check «Mar = 0») actúa como
+**suelo**: además de rellenar los huecos, **sube a 0 la batimetría negativa**. Sobre el
+mar la superficie que cuenta es el nivel del agua, no el fondo marino: ni los objetivos
+flotan en el lecho ni el fondo tapa una visual entre objetivos de superficie. Así la
+**recta de visibilidad** alcanza el objetivo sobre el mar (mástil del buque desde 0, no
+desde −profundidad) y el **obstáculo** nunca cae en el fondo del mar. El **perfil se
+dibuja siempre con la cota cruda** (se ve la batimetría en azul); el check solo cambia el
+análisis.
 
 ## Referencia de comandos (argumentos por herramienta)
 
