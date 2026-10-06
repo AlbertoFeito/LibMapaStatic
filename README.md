@@ -480,11 +480,13 @@ dem_to_db    <carpeta_hgt> --out <dem.sqlitedb> [--overwrite]
 dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
              (--cuba | --bbox latN,lonO,latS,lonE) [--minzoom 6 --maxzoom 13]
              [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2] [--sea-level 0]
-             [--id relieve --name "…"] [--overwrite]
-             (hornea un relieve sombreado gris a teselas PNG; añádelo al mapa.json.
+             [--colored] [--id relieve --name "…"] [--overwrite]
+             (hornea un relieve sombreado a teselas PNG; añádelo al mapa.json.
               --contrast realza el gris lavado: ancla el llano claro y abre el rango.
               --sea-level m: cotas <= m se dejan transparentes -> costa limpia con
-              DEM que traen batimetría, p. ej. --sea-level 0 para el mar)
+              DEM que traen batimetría, p. ej. --sea-level 0 para el mar.
+              --colored: "mapa físico" = tinte por altura (verde->marrón->cumbres)
+              x sombreado + azul batimétrico en cotas <0, en vez de gris)
 
 demo         [carpeta_paquete | mapa.json | datasets.json]
              [--dem <carpeta>] [--dem-db <db>] [--features <db>]

@@ -16,6 +16,7 @@
  *                    [--minzoom 6 --maxzoom 13]
  *                    [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]
  *                    [--sea-level 0]   (cotas <= ese valor -> transparente)
+ *                    [--colored]       (tinte por altura + batimetría, no gris)
  *                    [--id relieve --name "Relieve"] [--overwrite]
  *
  * En un servidor sin pantalla: QT_QPA_PLATFORM=offscreen (QImage necesita Gui).
@@ -60,6 +61,45 @@ bool crearEsquema(QSqlDatabase &db, QString *error)
     return true;
 }
 
+// Una parada de la rampa de color: clave (metros, o profundidad) -> RGB.
+struct Parada { double clave; int r, g, b; };
+
+// Interpola linealmente el color en una tabla de paradas ordenada por 'clave'
+// ascendente; fuera de rango, satura al extremo.
+void interpolar(const Parada *t, int n, double clave, int &r, int &g, int &b)
+{
+    if (clave <= t[0].clave) { r = t[0].r; g = t[0].g; b = t[0].b; return; }
+    if (clave >= t[n - 1].clave) { r = t[n - 1].r; g = t[n - 1].g; b = t[n - 1].b; return; }
+    for (int i = 0; i < n - 1; ++i) {
+        if (clave <= t[i + 1].clave) {
+            const double f = (clave - t[i].clave) / (t[i + 1].clave - t[i].clave);
+            r = int(double(t[i].r) + double(t[i + 1].r - t[i].r) * f + 0.5);
+            g = int(double(t[i].g) + double(t[i + 1].g - t[i].g) * f + 0.5);
+            b = int(double(t[i].b) + double(t[i + 1].b - t[i].b) * f + 0.5);
+            return;
+        }
+    }
+}
+
+// Color hipsométrico BASE (sin sombrear) de una cota en metros. Tierra (>=0):
+// de verde costa a marrón y cumbres claras. Mar (<0): azul batimétrico, más
+// oscuro cuanto más hondo (clave = profundidad). Se interpola entre paradas.
+void rampaColor(double e, int &r, int &g, int &b)
+{
+    static const Parada tierra[] = {
+        {   0, 170, 200, 140}, { 200, 205, 215, 150}, { 500, 228, 216, 150},
+        {1000, 210, 180, 120}, {1500, 190, 150, 110}, {2000, 236, 230, 224},
+    };
+    static const Parada mar[] = {   // clave = profundidad (metros, positiva)
+        {   0, 150, 194, 218}, {  50, 110, 170, 210}, { 200,  80, 145, 200},
+        {1000,  52, 110, 180}, {3000,  30,  72, 140}, {6000,  14,  40,  92},
+    };
+    if (e >= 0.0)
+        interpolar(tierra, int(sizeof(tierra) / sizeof(Parada)), e, r, g, b);
+    else
+        interpolar(mar, int(sizeof(mar) / sizeof(Parada)), -e, r, g, b);
+}
+
 } // namespace
 
 // Punto de entrada: abre el DEM (carpeta .hgt o .sqlitedb), recorre la pirámide de
@@ -76,7 +116,7 @@ int main(int argc, char *argv[])
     double sunAz = 315.0, sunAlt = 45.0, exag = 2.0, contrast = 2.2;
     double seaLevel = std::numeric_limits<double>::quiet_NaN();  // NaN = no enmascarar mar
     double latN = 90.0, lonW = 180.0, latS = -90.0, lonE = -180.0;
-    bool haveBbox = false, overwrite = false;
+    bool haveBbox = false, overwrite = false, colored = false;
 
     const QStringList args = app.arguments();
     for (int i = 1; i < args.size(); ++i) {
@@ -93,6 +133,7 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--exag")) exag = val().toDouble();
         else if (k == QLatin1String("--contrast")) contrast = val().toDouble();
         else if (k == QLatin1String("--sea-level")) seaLevel = val().toDouble();
+        else if (k == QLatin1String("--colored")) colored = true;
         else if (k == QLatin1String("--overwrite")) overwrite = true;
         else if (k == QLatin1String("--cuba")) {
             latN = 23.3; lonW = -85.0; latS = 19.7; lonE = -74.0; haveBbox = true;
@@ -112,7 +153,7 @@ int main(int argc, char *argv[])
                 "                      (--cuba | --bbox latN,lonO,latS,lonE)\n"
                 "                      [--minzoom 6 --maxzoom 13]\n"
                 "                      [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]\n"
-                "                      [--sea-level 0]\n"
+                "                      [--sea-level 0] [--colored]\n"
                 "                      [--id relieve --name \"Relieve\"] [--overwrite]\n";
         return 2;
     }
@@ -248,8 +289,22 @@ int main(int argc, char *argv[])
                             // Estirado tonal: llano -> grisLlano; el resto se abre
                             // 'realce' veces alrededor del llano y se recorta a [0,1].
                             const double t = qBound(0.0, grisLlano + (hs - llano) * realce, 1.0);
-                            const int v = int(t * 255.0 + 0.5);
-                            fila[i] = qRgba(v, v, v, 255);
+                            if (colored) {
+                                // Modo color: tinte hipsométrico por altura (con azul
+                                // batimétrico en cotas <0) MODULADO por el sombreado,
+                                // para conservar la forma 3D. El factor comprime el
+                                // relieve (0.45..1.1) para que el color siga vivo en
+                                // el llano y solo oscurezca sombras / aclare soleado.
+                                int cr, cg, cb;
+                                rampaColor(zc, cr, cg, cb);
+                                const double f = 0.45 + 0.65 * t;
+                                fila[i] = qRgba(qBound(0, int(double(cr) * f + 0.5), 255),
+                                                qBound(0, int(double(cg) * f + 0.5), 255),
+                                                qBound(0, int(double(cb) * f + 0.5), 255), 255);
+                            } else {
+                                const int v = int(t * 255.0 + 0.5);
+                                fila[i] = qRgba(v, v, v, 255);
+                            }
                             any = true;
                         }
                     }

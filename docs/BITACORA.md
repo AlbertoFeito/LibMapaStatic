@@ -3838,3 +3838,27 @@ gris claro) y la Sierra Maestra (relieve fuerte): con `--contrast 2.2 --sea-leve
 sale nítido y el mar transparente. Sin cambios en la librería ni en el API; compila sin
 warnings y **18 tests** en verde. README y BITÁCORA al día; la herramienta ya existía (solo
 flags opcionales nuevos) → no se regenera el PDF.
+
+## 85. dem_to_hillshade: `--colored` (tinte hipsométrico + batimetría)
+
+El usuario preguntó por qué gris y no color por altura. El gris se mantiene por defecto (neutro
+bajo las capas temáticas de color), pero se añade un modo **«mapa físico»** opcional.
+
+- **Nuevo flag `--colored`.** En vez de gris, cada píxel toma un **color hipsométrico** según
+  su cota y se **modula por el sombreado** para conservar la forma 3D. La rampa (función
+  `rampaColor`, interpolación lineal entre paradas):
+  - **Tierra (cota ≥ 0):** verde costa → verde claro → amarillo-tierra → tostado → marrón →
+    cumbres claras (0 … 2000 m).
+  - **Mar (cota < 0):** azul **batimétrico** por profundidad (orilla clara → azul profundo;
+    0 … −6000 m). Aprovecha que el DEM «Cuba 2026.10» trae fondo marino con cotas negativas.
+  - **Sombreado:** el color se multiplica por un factor `0.45 + 0.65·t` (t = tono del relieve),
+    comprimido para que el color siga vivo en el llano y solo oscurezca sombras / aclare laderas
+    al sol.
+- **Interacción con `--sea-level`:** para **ver** la batimetría en azul, NO pases `--sea-level`
+  (las cotas negativas se pintan). Si lo pasas, el mar queda transparente y manda la máscara.
+
+Validado con crops reales (Sierra Maestra: verde→marrón, Turquino en blanco, mar transparente)
+y con un DEM **sintético** con gradiente tierra→mar profundo que recorre toda la rampa (verde
+costa → azul claro → azul profundo), confirmando la batimetría. Solo cambia la herramienta;
+librería y API intactos, compila sin warnings y **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API → no se regenera el PDF.
