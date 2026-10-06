@@ -94,9 +94,12 @@ QVector<ContourLine> computeContours(const IElevationSource &src,
             double cmax = qMax(qMax(za, zb), qMax(zc, zd));
             const double lonC = lonAt(c), lonC1 = lonAt(c + 1);
 
-            // Niveles que cruzan esta celda: k en (cmin, cmax].
-            int kLo = int(std::ceil((cmin - params.base) / intervalo));
-            int kHi = int(std::floor((cmax - params.base) / intervalo));
+            // Niveles que cruzan esta celda: k en (cmin, cmax], recortado al
+            // rango de cota pedido [minLevel, maxLevel].
+            const double loLim = qMax(cmin, params.minLevel);
+            const double hiLim = qMin(cmax, params.maxLevel);
+            int kLo = int(std::ceil((loLim - params.base) / intervalo));
+            int kHi = int(std::floor((hiLim - params.base) / intervalo));
             for (int k = kLo; k <= kHi; ++k) {
                 const double L = params.base + double(k) * intervalo;
                 // Esquina "por encima" del nivel.

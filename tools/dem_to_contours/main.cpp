@@ -13,6 +13,9 @@
  *                   [--index 500]      (una de cada N es curva índice, gruesa+etiqueta)
  *                   [--step 150]       (resolución de muestreo, m; súbelo en país entero)
  *                   [--min-length 500] (descarta curvas más cortas que esto, m)
+ *                   [--min-level 0]    (no genera curvas por debajo de esa cota;
+ *                                       0 = recorta al nivel del mar, sin batimetría)
+ *                   [--max-level N]    (no genera curvas por encima de esa cota)
  *                   [--layer curvas --name "Curvas de nivel"] [--overwrite]
  */
 
@@ -29,6 +32,7 @@
 #include <QTextStream>
 
 #include <cmath>
+#include <limits>
 #include <memory>
 
 using namespace libmapa;
@@ -43,6 +47,8 @@ int main(int argc, char *argv[])
 
     QString in, out, layer = QStringLiteral("curvas"), name;
     double interval = 100.0, indexEvery = 500.0, step = 150.0, minLen = 0.0;
+    double minLevel = -std::numeric_limits<double>::infinity();
+    double maxLevel = std::numeric_limits<double>::infinity();
     double latN = 90.0, lonW = 180.0, latS = -90.0, lonE = -180.0;
     bool haveBbox = false, overwrite = false;
 
@@ -58,6 +64,8 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--index")) indexEvery = val().toDouble();
         else if (k == QLatin1String("--step")) step = val().toDouble();
         else if (k == QLatin1String("--min-length")) minLen = val().toDouble();
+        else if (k == QLatin1String("--min-level")) minLevel = val().toDouble();
+        else if (k == QLatin1String("--max-level")) maxLevel = val().toDouble();
         else if (k == QLatin1String("--overwrite")) overwrite = true;
         else if (k == QLatin1String("--cuba")) {
             latN = 23.3; lonW = -85.0; latS = 19.7; lonE = -74.0; haveBbox = true;
@@ -76,8 +84,8 @@ int main(int argc, char *argv[])
         cout << "Uso: dem_to_contours --in <carpeta_hgt|dem.sqlitedb> --out curvas.sqlitedb\n"
                 "                     (--cuba | --bbox latN,lonO,latS,lonE)\n"
                 "                     [--interval 100] [--index 500] [--step 150]\n"
-                "                     [--min-length 500] [--layer curvas --name \"...\"]\n"
-                "                     [--overwrite]\n";
+                "                     [--min-length 500] [--min-level 0] [--max-level N]\n"
+                "                     [--layer curvas --name \"...\"] [--overwrite]\n";
         return 2;
     }
     if (name.isEmpty())
@@ -108,6 +116,8 @@ int main(int argc, char *argv[])
     params.interval = interval;
     params.stepMeters = step;
     params.minLengthMeters = minLen;
+    params.minLevel = minLevel;
+    params.maxLevel = maxLevel;
 
     cout << "Calculando curvas (intervalo " << interval << " m, paso " << step << " m)...\n";
     cout.flush();

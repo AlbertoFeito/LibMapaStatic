@@ -3919,3 +3919,9 @@ Validado end-to-end: curvas reales de la Sierra Maestra (intervalo 100 m, índic
 etiquetado) con **curvas batimétricas** azules en el mar (el SRTM de AWS Skadi trae batimetría).
 Compila sin warnings, **19 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
 **API pública nueva → se regenera el PDF**.
+
+- **Recorte por cota (`--min-level` / `--max-level`).** `ContourParams` gana `minLevel`/`maxLevel`
+  (por defecto ±∞): no se generan curvas fuera de ese rango. `--min-level 0` recorta al **nivel
+  del mar** y omite las curvas batimétricas negativas (verificado: cotas 0–1900 m, cero negativas).
+  Test `minLevelClipsBelow` (un cono que baja de 0: sin recorte hay curvas negativas; con
+  `minLevel=0`, ninguna). Sigue en **19 tests**; `arquitectura.html` y PDF al día.

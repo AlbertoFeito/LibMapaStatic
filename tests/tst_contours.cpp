@@ -58,6 +58,7 @@ class TstContours : public QObject
 
 private slots:
     void coneGivesClosedRingsDecreasingRadius();
+    void minLevelClipsBelow();
     void flatTerrainHasNoContours();
     void rampGivesExpectedLevels();
 };
@@ -103,6 +104,36 @@ void TstContours::coneGivesClosedRingsDecreasingRadius()
         QVERIFY(radioMedio < radioPrevio);     // decrece con la cota
         radioPrevio = radioMedio;
     }
+}
+
+// --min-level recorta por abajo: con un cono de -500 a +1000, min-level 0 deja
+// solo las curvas de cota >= 0 (no las "batimétricas" negativas).
+void TstContours::minLevelClipsBelow()
+{
+    // Cono que baja por debajo de 0: cota = H·(1 − d/R) con H=1000, pero sin
+    // recortar a 0 (devolvemos negativos) para simular batimetría alrededor.
+    class ConoConMar : public IElevationSource {
+    public:
+        double elevationAt(const QGeoCoordinate &p) const override
+        {
+            const double d = QGeoCoordinate(20.0, -77.0).distanceTo(p);
+            return 1000.0 * (1.0 - d / 30000.0);   // +1000 centro, negativo lejos
+        }
+    } dem;
+    ContourParams p;
+    p.latN = 20.5; p.lonW = -77.5; p.latS = 19.5; p.lonE = -76.5;
+    p.interval = 100.0; p.base = 0.0; p.stepMeters = 150.0;
+
+    const QVector<ContourLine> todas = computeContours(dem, p);
+    bool hayNegativa = false;
+    for (const ContourLine &c : todas) if (c.elevation < 0.0) hayNegativa = true;
+    QVERIFY(hayNegativa);                 // sin recorte sí hay curvas negativas
+
+    p.minLevel = 0.0;
+    const QVector<ContourLine> recortadas = computeContours(dem, p);
+    QVERIFY(!recortadas.isEmpty());
+    for (const ContourLine &c : recortadas)
+        QVERIFY(c.elevation >= 0.0);      // con min-level 0, ninguna por debajo
 }
 
 // Un terreno plano a cota 55 (fuera de cualquier nivel) no genera ninguna curva.

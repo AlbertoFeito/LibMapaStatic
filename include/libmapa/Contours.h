@@ -7,6 +7,8 @@
 #include <QGeoCoordinate>
 #include <QVector>
 
+#include <limits>
+
 namespace libmapa {
 
 class IElevationSource;
@@ -29,6 +31,12 @@ struct ContourParams
     double stepMeters = 150.0;
     //! Descarta curvas con longitud total menor que esto (metros); 0 = ninguna.
     double minLengthMeters = 0.0;
+    //! Cota mínima a generar (metros): no se emiten curvas por debajo. Por
+    //! defecto -infinito (sin recorte); p. ej. 0 recorta al nivel del mar y
+    //! omite las curvas batimétricas.
+    double minLevel = -std::numeric_limits<double>::infinity();
+    //! Cota máxima a generar (metros); por defecto +infinito (sin recorte).
+    double maxLevel = std::numeric_limits<double>::infinity();
 };
 
 //! Una curva de un nivel de cota (polilínea; cerrada si vuelve a su inicio).
