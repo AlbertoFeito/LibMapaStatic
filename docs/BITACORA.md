@@ -3752,3 +3752,30 @@ Dos ajustes tras probar (solo `demo` salvo el freno, que va en `MapWidget`).
 
 Compila sin warnings; **18 tests** en verde. README y BITÁCORA al día; sin cambios de firma
 de API, no se regenera el PDF.
+
+## 82. dem_to_hillshade: hornear el relieve sombreado a teselas (offline)
+
+Complemento de la capa de hillshade en vivo (§80), que a vista general se desactiva por
+coste (§81). Nueva herramienta de consola **`dem_to_hillshade`** (gemela de `geo_to_tiles`):
+hornea el relieve a una **pirámide de teselas PNG** en un `.sqlitedb` XYZ que viaja en el
+`mapa.json` como una capa base más.
+
+- **Beneficios:** fluido a CUALQUIER zoom (incluida Cuba entera), no necesita el DEM ni CPU
+  en runtime, calidad consistente, y reutiliza el motor de teselas (cero código nuevo de
+  runtime). Coste: espacio en disco, pregeneración una vez, y el **sol/exageración quedan
+  fijos** (para cambiarlos al vuelo está la capa en vivo).
+- **Cálculo:** abre el DEM (carpeta `.hgt` → `HgtElevation`, o `.sqlitedb` →
+  `SqliteElevation`); por cada tesela z/x/y de la bbox calcula una rejilla de cotas 258×258
+  (con halo de 1 px para que no haya costuras), y por píxel el sombreado Lambert con
+  diferencias centrales y exageración. Metros/píxel por Web Mercator (conforme: igual en x e
+  y). Gris opaco en tierra; **sin dato → transparente** (el mar deja ver el fondo). PNG en
+  `tiles(x,y,z,image)`. Imprime el bloque de dataset listo para pegar.
+- **Uso:** `dem_to_hillshade --in <hgt|dem.sqlitedb> --out relieve.sqlitedb --cuba
+  [--minzoom 6 --maxzoom 13] [--sun-az 315 --sun-alt 45 --exag 2] [--overwrite]`.
+- **Build:** `add_executable(dem_to_hillshade …)` con `libmapa_core` + Qt Gui (QImage), y en
+  la lista de `install`. No añade `.cpp` de librería → sin cambios en qmake de core/widget
+  (como `geo_to_tiles`, que tampoco tiene `.pro` propio).
+
+Probado con un `.hgt` sintético (una colina): genera teselas PNG válidas con sombreado real.
+Compila sin warnings; **18 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
+**herramienta nueva → se regenera el PDF**.
