@@ -36,6 +36,8 @@
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QEvent>
+#include <QHash>
 #include <QMouseEvent>
 #include <QHeaderView>
 #include <QIcon>
@@ -718,6 +720,22 @@ private:
         m_alcanceKm->setToolTip(tr("Alcance del viewshed (radio) y del perfil radial desde A "
                                    "(hasta 400 km; en alcances largos el viewshed muestra progreso)."));
         form->addRow(tr("Alcance (viewshed/perfil):"), m_alcanceKm);
+
+        // Parámetros de «10 picos»: radio de búsqueda y separación mínima entre
+        // cumbres (configurables).
+        m_picosRadioKm = new QDoubleSpinBox(tab);
+        m_picosRadioKm->setRange(1.0, 50.0); m_picosRadioKm->setValue(10.0);
+        m_picosRadioKm->setSuffix(tr(" km"));
+        m_picosRadioKm->setToolTip(tr("Radio de búsqueda de los 10 puntos más altos (desde A)."));
+        m_picosSepM = new QSpinBox(tab);
+        m_picosSepM->setRange(50, 5000); m_picosSepM->setValue(800); m_picosSepM->setSingleStep(50);
+        m_picosSepM->setSuffix(tr(" m"));
+        m_picosSepM->setToolTip(tr("Separación mínima entre cumbres (para que sean picos distintos)."));
+        auto *filaPicos = new QHBoxLayout;
+        filaPicos->setContentsMargins(0, 0, 0, 0);
+        filaPicos->addWidget(m_picosRadioKm, 1); filaPicos->addWidget(m_picosSepM, 1);
+        auto *wPicos = new QWidget(tab); wPicos->setLayout(filaPicos);
+        form->addRow(tr("Picos: radio / sep.:"), wPicos);
         caja->addLayout(form);
 
         // Lectura: cota del terreno bajo A y bajo B, y rumbo/distancia de A a B.
@@ -737,6 +755,7 @@ private:
         actualizarInfoPuntos();
         connect(m_mapa, &MapWidget::pointPicked, this,
                 [this](const QGeoCoordinate &p) { onPointPicked(p); });
+        m_mapa->installEventFilter(this);   // hover sobre los picos (cambia de color)
 
         m_marComo0 = new QCheckBox(tr("Mar / sin dato = 0 m"), tab);
         m_marComo0->setChecked(true);
@@ -759,7 +778,7 @@ private:
         caja->addLayout(fila1);
         auto *fila2 = new QHBoxLayout;
         auto *bViewshed = new QPushButton(tr("Viewshed"), tab);
-        auto *bPicos = new QPushButton(tr("10 picos (10 km)"), tab);
+        auto *bPicos = new QPushButton(tr("10 picos altos"), tab);
         fila2->addWidget(bViewshed); fila2->addWidget(bPicos);
         caja->addLayout(fila2);
         auto *fila3 = new QHBoxLayout;
@@ -771,7 +790,8 @@ private:
         bVision->setToolTip(tr("Línea de visión de A (Alt1) a B (Alt2)."));
         bViewshed->setToolTip(tr("Zona de visibilidad 360° desde A (observador Alt1, objetivo Alt2): "
                                  "azul visible, amarillo oculto."));
-        bPicos->setToolTip(tr("Marca los 10 puntos más altos del terreno en un radio de 10 km desde A."));
+        bPicos->setToolTip(tr("Marca los 10 puntos más altos del terreno dentro del radio indicado "
+                              "desde A (cada uno de un color; pasa el cursor por encima para resaltarlo)."));
         connect(bPerfil, &QPushButton::clicked, this, &Ventana::analizarPerfil);
         connect(bVision, &QPushButton::clicked, this, &Ventana::analizarVision);
         connect(bViewshed, &QPushButton::clicked, this, &Ventana::analizarViewshed);
@@ -781,6 +801,7 @@ private:
             m_mapa->removeFeatureLayer(kCapaViewshed);
             m_mapa->removeFeatureLayer(kCapaPuntos);
             m_mapa->removeFeatureLayer(kCapaPicos);
+            m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
             if (m_resultado) m_resultado->clear();
             m_ultimo = Analisis::Ninguno;
             statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
@@ -801,7 +822,8 @@ private:
                "azul=A / rojo=B) o escríbelos; se marcan fijos en el mapa durante el análisis. "
                "<b>Perfil</b>: A + rumbo + alcance. <b>Visión A→B</b>: A (Alt1) y B (Alt2). "
                "<b>Viewshed</b>: A (observador Alt1, objetivo Alt2, alcance). "
-               "<b>10 picos</b>: los 10 puntos más altos en 10 km desde A. "
+               "<b>10 picos altos</b>: los 10 puntos más altos dentro del radio desde A "
+               "(cada uno de un color; cursor encima = se resalta). "
                "El perfil se abre en una ventana aparte (arrastrar = desplazar, rueda = "
                "zoom).</span>"), tab);
         ayuda->setWordWrap(true);
@@ -1064,6 +1086,73 @@ private:
         g.setPen(Qt::NoPen);
         g.drawEllipse(QPointF(cx, cy), 3.2, 3.2);
         return pm;
+    }
+
+    // Icono de un pico: disco del color dado con borde blanco y un punto central
+    // blanco. \a hl (resaltado por hover) lo agranda y le añade un halo amarillo.
+    static QPixmap picoIcon(const QColor &c, bool hl)
+    {
+        const int s = hl ? 26 : 18;
+        QPixmap pm(s, s);
+        pm.fill(Qt::transparent);
+        QPainter g(&pm);
+        g.setRenderHint(QPainter::Antialiasing);
+        const double cx = s / 2.0, cy = s / 2.0;
+        if (hl) {                                   // halo
+            g.setPen(Qt::NoPen);
+            g.setBrush(QColor(0xff, 0xee, 0x58, 180));
+            g.drawEllipse(QPointF(cx, cy), s / 2.0 - 1.0, s / 2.0 - 1.0);
+        }
+        g.setPen(QPen(Qt::white, 2.0));
+        g.setBrush(c);
+        g.drawEllipse(QPointF(cx, cy), hl ? 8.0 : 7.0, hl ? 8.0 : 7.0);
+        g.setPen(Qt::NoPen);
+        g.setBrush(Qt::white);                      // punto central
+        g.drawEllipse(QPointF(cx, cy), 2.4, 2.4);
+        return pm;
+    }
+
+    // Paleta de 10 colores distintos para los picos (1..10).
+    static const QVector<QColor> &paletaPicos()
+    {
+        static const QVector<QColor> p = {
+            QColor(0xe5, 0x39, 0x35), QColor(0x8e, 0x24, 0xaa),
+            QColor(0x34, 0x49, 0xab), QColor(0x03, 0x9b, 0xe5),
+            QColor(0x00, 0x89, 0x7b), QColor(0x7c, 0xb3, 0x42),
+            QColor(0xf9, 0xa8, 0x25), QColor(0xfb, 0x8c, 0x00),
+            QColor(0x6d, 0x4c, 0x41), QColor(0x54, 0x6e, 0x7a)
+        };
+        return p;
+    }
+
+    // Resalta el pico cuyo marcador está bajo el cursor (y restaura el anterior).
+    // \a id es lo que devuelve featureAt; si no es un pico, solo restaura.
+    void resaltarPico(qint64 id)
+    {
+        if (!m_picoIds.contains(id)) id = -1;      // fuera de un pico
+        if (id == m_picoHover) return;
+        auto reponer = [this](qint64 x) {          // vuelve al icono base
+            if (x >= 0 && m_picoBase.contains(x))
+                m_mapa->updateFeature(m_picoBase.value(x));
+        };
+        reponer(m_picoHover);
+        if (id >= 0 && m_picoBase.contains(id)) {  // aplica el icono resaltado
+            MapFeature f = m_picoBase.value(id);
+            f.style.icon = picoIcon(f.style.labelColor, /*hl=*/true);
+            m_mapa->updateFeature(f);
+        }
+        m_picoHover = id;
+    }
+
+    // Filtro de eventos del mapa: al mover el ratón, resalta el pico que haya bajo
+    // el cursor (si hay picos dibujados).
+    bool eventFilter(QObject *obj, QEvent *ev) override
+    {
+        if (obj == m_mapa && ev->type() == QEvent::MouseMove && !m_picoIds.isEmpty()) {
+            const QPoint pos = static_cast<QMouseEvent *>(ev)->pos();
+            resaltarPico(m_mapa->featureAt(pos, 10.0));
+        }
+        return QMainWindow::eventFilter(obj, ev);
     }
 
     // Arranca la captura de un punto (A o B) con el siguiente clic en el mapa.
@@ -1487,70 +1576,115 @@ private:
         }
         m_ultimo = Analisis::Picos;
         marcarPuntosAB(false);              // pin azul fijo en A (centro)
+        m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
 
-        const double R = 10000.0;           // radio 10 km
-        const double paso = 100.0;          // rejilla de 100 m
-        const double sepMin = 800.0;        // separación mínima entre cumbres
+        const double R = m_picosRadioKm->value() * 1000.0;
+        const double sepMin = double(m_picosSepM->value());
+        // La rejilla LOCALIZA cumbres; su paso se escala con el radio para acotar el
+        // coste (~500×500 muestras). La EXACTITUD la da luego el refinamiento fino.
+        const double paso = qMax(30.0, (2.0 * R) / 500.0);
+        const double radioKm = m_picosRadioKm->value();
 
         struct Pico { QGeoCoordinate p; double ele; double dist; double az; };
+        auto cotaEn = [&](const QGeoCoordinate &q) { return m_mapa->elevationAt(q); };
+
+        // Barra de progreso cancelable (radios grandes tardan).
+        const int filas = int((2.0 * R) / paso) + 1;
+        QProgressDialog prog(tr("Buscando cumbres en %1 km…").arg(radioKm, 0, 'f', 0),
+                             tr("Cancelar"), 0, filas, this);
+        prog.setWindowModality(Qt::WindowModal);
+        prog.setMinimumDuration(400);
+
         QVector<Pico> cand;
-        cand.reserve(32000);
-        for (double dy = -R; dy <= R; dy += paso) {
+        cand.reserve(qsizetype(filas) * qsizetype(filas) / 2);
+        int fila = 0;
+        for (double dy = -R; dy <= R; dy += paso, ++fila) {
             for (double dx = -R; dx <= R; dx += paso) {
                 const double dd = std::hypot(dx, dy);
                 if (dd > R) continue;
                 const double az = (dd < 1.0) ? 0.0
                     : std::fmod(qRadiansToDegrees(std::atan2(dx, dy)) + 360.0, 360.0);
                 const QGeoCoordinate q = a.atDistanceAndAzimuth(dd, az);
-                const double e = m_mapa->elevationAt(q);
+                const double e = cotaEn(q);
                 if (std::isnan(e)) continue;
                 cand.push_back({ q, e, dd, az });
             }
+            prog.setValue(fila);
+            QApplication::processEvents();
+            if (prog.wasCanceled()) { statusBar()->showMessage(tr("Búsqueda de picos cancelada."), 4000); return; }
         }
+        prog.reset();
         if (cand.isEmpty()) {
-            statusBar()->showMessage(tr("No hay cota en 10 km alrededor de A (fuera de cobertura)."), 5000);
+            statusBar()->showMessage(tr("No hay cota en %1 km alrededor de A (fuera de cobertura).").arg(radioKm,0,'f',0), 5000);
             return;
         }
         std::sort(cand.begin(), cand.end(),
                   [](const Pico &x, const Pico &y) { return x.ele > y.ele; });
 
+        // Top-10 con separación mínima sobre la rejilla gruesa.
         QVector<Pico> top;
         for (const Pico &c : cand) {
             bool lejos = true;
             for (const Pico &t : top)
                 if (c.p.distanceTo(t.p) < sepMin) { lejos = false; break; }
-            if (lejos) {
-                top.push_back(c);
-                if (top.size() >= 10) break;
-            }
+            if (lejos) { top.push_back(c); if (top.size() >= 10) break; }
         }
 
-        // Dibuja los picos numerados (naranja) sobre el mapa.
-        prepararCapa(kCapaPicos, tr("10 picos (10 km)"), 55);
-        const QColor naranja(0xef, 0x6c, 0x00);
-        QString lista = tr("<b>10 puntos más altos (radio 10 km)</b><br>");
+        // Refinamiento fino: alrededor de cada cumbre, ventana ±150 m a paso 10 m
+        // para clavar la cota exacta (la rejilla gruesa se salta el nodo del pico).
+        auto refinar = [&](Pico t) {
+            const double win = qMax(150.0, paso), st = 10.0;   // cubre ≥ una celda
+            Pico best = t;
+            for (double dy = -win; dy <= win; dy += st)
+                for (double dx = -win; dx <= win; dx += st) {
+                    const double dd = std::hypot(dx, dy);
+                    if (dd > win) continue;
+                    const double az = (dd < 1.0) ? 0.0
+                        : std::fmod(qRadiansToDegrees(std::atan2(dx, dy)) + 360.0, 360.0);
+                    const QGeoCoordinate q = t.p.atDistanceAndAzimuth(dd, az);
+                    const double e = cotaEn(q);
+                    if (!std::isnan(e) && e > best.ele) {
+                        best.ele = e; best.p = q;
+                        best.dist = a.distanceTo(q); best.az = a.azimuthTo(q);
+                    }
+                }
+            return best;
+        };
+        for (Pico &t : top) t = refinar(t);
+        std::sort(top.begin(), top.end(),
+                  [](const Pico &x, const Pico &y) { return x.ele > y.ele; });
+
+        // Dibuja los picos numerados, cada uno de un color distinto (disco con
+        // punto central), y guarda su estilo base para el resaltado por hover.
+        prepararCapa(kCapaPicos, tr("Picos más altos"), 55);
+        QString lista = tr("<b>%1 puntos más altos (radio %2 km)</b><br>")
+                            .arg(top.size()).arg(radioKm, 0, 'f', 0);
         for (int i = 0; i < top.size(); ++i) {
             const Pico &t = top[i];
+            const QColor c = paletaPicos().at(i % paletaPicos().size());
             MapFeature f;
             f.layerId = kCapaPicos;
             f.kind = GeometryKind::Point;
             f.type = QStringLiteral("pico_alto");
             f.name = QString::number(i + 1);
             f.geometry = { t.p };
-            f.style.lineColor = naranja;
-            f.style.fillColor = naranja;
-            f.style.pointRadiusPx = 7.0;
-            f.style.labelColor = naranja;
+            f.style.icon = picoIcon(c, /*hl=*/false);
+            f.style.labelColor = c;             // (reutilizado por resaltarPico)
             f.selectable = false;
-            m_mapa->addFeature(f);
-            lista += tr("%1. <b>%2 m</b> · %3 km · rumbo %4°<br>")
-                         .arg(i + 1).arg(t.ele, 0, 'f', 0)
+            const qint64 id = m_mapa->addFeature(f);
+            if (id >= 0) {
+                m_picoIds.push_back(id);
+                if (auto fg = m_mapa->feature(id)) m_picoBase.insert(id, *fg);
+            }
+            lista += tr("<span style='color:%1'>%2.</span> <b>%3 m</b> · %4 km · rumbo %5°<br>")
+                         .arg(c.name()).arg(i + 1).arg(t.ele, 0, 'f', 0)
                          .arg(t.dist / 1000.0, 0, 'f', 2).arg(t.az, 0, 'f', 0);
         }
         if (m_resultado) m_resultado->setText(lista);
         statusBar()->showMessage(
-            tr("10 picos: %1 muestras con cota en 10 km; el más alto a %2 m.")
-                .arg(cand.size()).arg(top.isEmpty() ? 0.0 : top.first().ele, 0, 'f', 0), 8000);
+            tr("%1 picos en %2 km; el más alto a %3 m.")
+                .arg(top.size()).arg(radioKm, 0, 'f', 0)
+                .arg(top.isEmpty() ? 0.0 : top.first().ele, 0, 'f', 0), 8000);
     }
 
     // ==================================================== arbol ===========
@@ -2224,6 +2358,11 @@ private:
     const QString kCapaPicos = QStringLiteral("elev_picos");     //!< 10 puntos más altos
     const QColor m_colorA = QColor(0x15, 0x65, 0xc0);            //!< azul = punto A
     const QColor m_colorB = QColor(0xc6, 0x28, 0x28);            //!< rojo = punto B
+    QDoubleSpinBox *m_picosRadioKm = nullptr;  //!< radio de búsqueda de picos
+    QSpinBox *m_picosSepM = nullptr;           //!< separación mínima entre cumbres
+    QVector<qint64> m_picoIds;                 //!< ids de los marcadores de pico
+    QHash<qint64, MapFeature> m_picoBase;      //!< estilo base (para restaurar tras hover)
+    qint64 m_picoHover = -1;                   //!< pico resaltado bajo el cursor
 
     bool m_actualizandoPropiedades = false;
     QColor m_colorLinea = QColor(0xd3, 0x2f, 0x2f);

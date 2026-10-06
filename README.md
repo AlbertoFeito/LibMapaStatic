@@ -379,9 +379,12 @@ rojo=B) y, durante el análisis, los puntos quedan **marcados fijos** en el mapa
 pines. La pestaña muestra la **cota del terreno bajo A y bajo B** y el **rumbo y la
 distancia A→B**, que se actualizan al mover los puntos. Cada análisis usa lo suyo:
 **Perfil** = A + **rumbo** + **alcance** (perfil radial desde A); **Visión A→B** = A
-(Alt1) y B (Alt2); **Viewshed** = A (observador Alt1, objetivo Alt2, alcance); **10 picos**
-= los **10 puntos más altos del terreno en un radio de 10 km** desde A (numerados en el
-mapa y listados con cota, distancia y rumbo). **Perfil** abre una **ventana flotante** con el
+(Alt1) y B (Alt2); **Viewshed** = A (observador Alt1, objetivo Alt2, alcance); **10 picos altos**
+= los **10 puntos más altos del terreno** dentro de un **radio y separación configurables**
+desde A. La rejilla de búsqueda se escala con el radio (coste acotado) y cada cumbre se
+**refina** a paso fino (±10 m) para clavar la cota exacta. Se marcan **cada uno de un
+color distinto** (disco con punto central), se **resaltan al pasar el cursor** por encima,
+y se listan con cota, distancia y rumbo. **Perfil** abre una **ventana flotante** con el
 corte del terreno (ejes, rejilla, rueda = zoom, arrastrar = desplazar); **Visión A→B**
 traza la línea de visión de A a B con Alt1/Alt2 de antena (**azul** el tramo visible,
 **rojo** el oculto, obstáculo con su distancia) y la dibuja también sobre el perfil;

@@ -3680,3 +3680,27 @@ Mejoras pedidas para el panel lateral de elevación del `demo` (solo `demo/main.
 
 Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
 día; sin cambios de API, no se regenera el PDF.
+
+## 79. «10 picos»: exactitud (refinamiento), radio/separación configurables, color y hover
+
+Probando sobre el Pico Turquino (1974 m), la herramienta daba 1972 m: la rejilla de 100 m
+se saltaba la cima exacta. Se mejora en varios frentes (solo `demo`).
+
+- **Exactitud.** La rejilla ahora **localiza** cumbres y su paso se **escala con el radio**
+  `paso = max(30, 2R/500)` (~500×500 muestras, coste acotado a cualquier radio). Cada
+  cumbre del top-10 se **refina**: ventana `±max(150, paso)` a paso **10 m**, quedándose
+  con la cota máxima real (clava el nodo del pico que la rejilla gruesa se saltaba). Tras
+  refinar se reordena por cota.
+- **Radio y separación configurables.** Dos controles en la pestaña: **radio** (1–50 km,
+  por defecto 10) y **separación mínima** entre cumbres (50–5000 m, por defecto 800).
+- **Progreso.** Barra cancelable (`QProgressDialog`) durante el barrido de la rejilla
+  (radios grandes tardan); aparece solo si pasa de ~0,4 s.
+- **Color por pico + punto central.** Cada pico se dibuja con un **color distinto** (paleta
+  de 10) como disco con borde blanco y **punto central**, con el número en su color. Icono
+  dibujado con `QPainter` (`picoIcon`).
+- **Resaltado por hover.** Un `eventFilter` sobre el mapa usa `MapWidget::featureAt(píxel)`;
+  al pasar el cursor por un pico, se agranda con un halo amarillo (`updateFeature`) y se
+  restaura al salir. Se guardan los ids y el estilo base de cada pico.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
