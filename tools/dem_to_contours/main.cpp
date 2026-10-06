@@ -31,6 +31,7 @@
 #include "dem/SqliteElevation.h"
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
