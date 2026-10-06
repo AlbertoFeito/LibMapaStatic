@@ -372,19 +372,18 @@ devuelve `false`, **cancela** (resultado vacío). El `demo` lo usa para una **ba
 progreso cancelable** que solo aparece si el cálculo pasa de ~0,4 s.
 
 La app de ejemplo `demo` lo demuestra en su **pestaña «Elevación»** del panel lateral
-(con un DEM activo). Los puntos se introducen en la propia pestaña: **Punto A** y **Punto
-B** con campos lat/lon editables y un botón **«📍 Mapa»** que los fija con el siguiente
-clic en el mapa. Al capturar, el **cursor toma el pin** del color del punto (azul=A,
-rojo=B) y, durante el análisis, los puntos quedan **marcados fijos** en el mapa con esos
-pines. La pestaña muestra la **cota del terreno bajo A y bajo B** y el **rumbo y la
-distancia A→B**, que se actualizan al mover los puntos. Cada análisis usa lo suyo:
-**Perfil** = A + **rumbo** + **alcance** (perfil radial desde A); **Visión A→B** = A
-(Alt1) y B (Alt2); **Viewshed** = A (observador Alt1, objetivo Alt2, alcance); **10 picos altos**
-= los **10 puntos más altos del terreno** dentro de un **radio y separación configurables**
-desde A. La rejilla de búsqueda se escala con el radio (coste acotado) y cada cumbre se
-**refina** a paso fino (±10 m) para clavar la cota exacta. Se marcan **cada uno de un
-color distinto** (disco con punto central), se **resaltan al pasar el cursor** por encima,
-y se listan con cota, distancia y rumbo. **Perfil** abre una **ventana flotante** con el
+(con un DEM activo). Arriba hay un **selector de análisis** y la pestaña **muestra solo los
+campos de ese análisis** (no todos fijos): **Perfil** = posición + **azimut** + distancia;
+**Visión A→B** = posiciones 1 y 2 + antenas; **Viewshed** = observador + antena + alcance +
+altura objetivo; **10 picos** = posición + radio/separación. Las posiciones se fijan con
+**«Mapa»** (el **cursor toma el pin** del color; azul=A, rojo=B) o escribiendo lat/lon, y
+el punto queda marcado con su pin en el mapa —**solo los del análisis activo** (en Visión,
+A y B; en el resto, uno)—. La lectura muestra la **cota** bajo la posición (y, en Visión,
+también la de B y el **rumbo/distancia A→B**). Se pulsa **Calcular**. El **10 picos** marca
+los **puntos más altos** dentro de un **radio y separación configurables**: la rejilla se
+escala con el radio (coste acotado) y cada cumbre se **refina** a paso fino (±10 m) para
+clavar la cota exacta; se dibujan **cada uno de un color distinto** (disco con punto
+central), se **resaltan al pasar el cursor** y se listan con cota, distancia y rumbo. **Perfil** abre una **ventana flotante** con el
 corte del terreno (ejes, rejilla, rueda = zoom, arrastrar = desplazar); **Visión A→B**
 traza la línea de visión de A a B con Alt1/Alt2 de antena (**azul** el tramo visible,
 **rojo** el oculto, obstáculo con su distancia) y la dibuja también sobre el perfil;

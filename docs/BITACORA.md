@@ -3779,3 +3779,30 @@ hornea el relieve a una **pirámide de teselas PNG** en un `.sqlitedb` XYZ que v
 Probado con un `.hgt` sintético (una colina): genera teselas PNG válidas con sombreado real.
 Compila sin warnings; **18 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
 **herramienta nueva → se regenera el PDF**.
+
+## 83. Entrada por análisis (selector) y pines solo del análisis activo
+
+El usuario pidió que los puntos A/B NO estén siempre visibles y que la entrada de cada
+análisis pida SOLO sus datos (no un panel de campos fijos). Rediseño de la pestaña
+Elevación (solo `demo`).
+
+- **Selector + campos contextuales.** Un `QComboBox` «Análisis» (Perfil / Visión A→B /
+  Viewshed / 10 picos) y un único botón **«Calcular»** sustituyen a los cuatro botones.
+  Cada campo vive en una fila que se **muestra/oculta** según el análisis (sin
+  `QFormLayout::setRowVisible`, que es Qt 6.4+: cada fila es un `QWidget` propio). Se
+  relabelan los comunes: la posición A es «Posición A» / «Posición 1» / «Observador» /
+  «Posición»; la distancia es «Distancia» o «Alcance»; las antenas «Antena 1/2» o «Antena
+  obs. / Altura objetivo». `actualizarEntradaAnalisis(idx)` hace el show/hide + relabel.
+  - Perfil: posición + azimut + distancia. Visión: posiciones 1 y 2 + antenas 1/2.
+    Viewshed: observador + antena + alcance + altura objetivo. Picos: posición + radio/sep.
+- **Pines solo del análisis activo.** `marcarPuntosActivos()` dibuja el pin de la posición
+  A siempre y el de B **solo en Visión**; se actualiza al cambiar de análisis, al pinchar o
+  al escribir. Así el icono aparece al seleccionar el punto (sin analizar) pero no sobran
+  pines (B no aparece en perfil/viewshed/picos). «Limpiar» borra los overlays de análisis
+  pero mantiene los pines de entrada.
+- **Lectura contextual.** La cota se muestra de la posición activa; en Visión, además la de
+  B y el rumbo/distancia A→B.
+
+Los slots de cálculo (`analizarPerfil/Vision/Viewshed/PicosAltos`) no cambian: ya leían de
+los mismos spinboxes; «Calcular» despacha según el selector. Compila sin warnings, **18
+tests** en verde. README y BITÁCORA al día; sin cambios de API, no se regenera el PDF.

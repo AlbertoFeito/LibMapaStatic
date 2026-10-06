@@ -673,11 +673,31 @@ private:
         auto *caja = new QVBoxLayout(tab);
         caja->setContentsMargins(8, 8, 8, 8);
 
-        auto *form = new QFormLayout;
+        // Selector de análisis: cada uno pide SOLO sus datos (las demás filas se
+        // ocultan). Así la entrada no es fija: cambia según lo que vayas a calcular.
+        m_tipoAnalisis = new QComboBox(tab);
+        m_tipoAnalisis->addItems(QStringList{ tr("Perfil"), tr("Visión A→B"),
+                                              tr("Viewshed"), tr("10 picos altos") });
+        {
+            auto *fc = new QFormLayout;
+            fc->addRow(tr("Análisis:"), m_tipoAnalisis);
+            caja->addLayout(fc);
+        }
 
-        // Punto A (perfil/visión/zvd) y Punto B (visión): lat/lon editables + un
-        // botón «📍 Mapa» que captura el siguiente clic sobre el mapa.
-        auto filaPunto = [&](QDoubleSpinBox *&lat, QDoubleSpinBox *&lon, Pick cual) {
+        // Crea una fila [etiqueta + contenido] que se puede mostrar/ocultar entera.
+        auto crearFila = [&](const QString &etiqueta, QWidget *contenido, QLabel **outLbl) {
+            auto *lbl = new QLabel(etiqueta, tab);
+            lbl->setMinimumWidth(96);
+            auto *h = new QHBoxLayout; h->setContentsMargins(0, 0, 0, 0);
+            h->addWidget(lbl, 0); h->addWidget(contenido, 1);
+            auto *w = new QWidget(tab); w->setLayout(h);
+            if (outLbl) *outLbl = lbl;
+            caja->addWidget(w);
+            return w;
+        };
+
+        // Contenido de un punto: lat/lon + botón «Mapa» (pin del color del punto).
+        auto contenidoPunto = [&](QDoubleSpinBox *&lat, QDoubleSpinBox *&lon, Pick cual) {
             lat = new QDoubleSpinBox(tab);
             lat->setRange(-90.0, 90.0); lat->setDecimals(5); lat->setSingleStep(0.001);
             lat->setToolTip(tr("Latitud"));
@@ -686,60 +706,33 @@ private:
             lon->setToolTip(tr("Longitud"));
             auto *pick = new QPushButton(tr("Mapa"), tab);
             pick->setIcon(QIcon(pinPixmap(cual == Pick::A ? m_colorA : m_colorB)));
-            pick->setToolTip(tr("Fija este punto con el siguiente clic en el mapa "
-                                "(el cursor toma este pin)."));
+            pick->setToolTip(tr("Fija este punto con el siguiente clic en el mapa."));
             connect(pick, &QPushButton::clicked, this, [this, cual] { iniciarPick(cual); });
-            auto *fila = new QHBoxLayout;
-            fila->setContentsMargins(0, 0, 0, 0);
-            fila->addWidget(lat, 1); fila->addWidget(lon, 1); fila->addWidget(pick, 0);
-            // Al cambiar la coordenada, refresca la lectura de cota/rumbo/distancia.
-            connect(lat, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-                    this, [this] { actualizarInfoPuntos(); });
-            connect(lon, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-                    this, [this] { actualizarInfoPuntos(); });
-            auto *w = new QWidget(tab); w->setLayout(fila);
+            connect(lat, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this] { actualizarInfoPuntos(); });
+            connect(lon, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this] { actualizarInfoPuntos(); });
+            auto *h = new QHBoxLayout; h->setContentsMargins(0, 0, 0, 0);
+            h->addWidget(lat, 1); h->addWidget(lon, 1); h->addWidget(pick, 0);
+            auto *w = new QWidget(tab); w->setLayout(h);
             return w;
         };
-        form->addRow(tr("Punto A (lat/lon):"), filaPunto(m_latA, m_lonA, Pick::A));
-        form->addRow(tr("Punto B (lat/lon):"), filaPunto(m_latB, m_lonB, Pick::B));
 
-        m_altA = new QDoubleSpinBox(tab);
-        m_altA->setRange(0.0, 20000.0); m_altA->setValue(10.0); m_altA->setSuffix(tr(" m"));
-        m_altA->setToolTip(tr("Visión: antena en A.  Viewshed: altura del observador."));
-        form->addRow(tr("Alt1 (observador / A):"), m_altA);
-        m_altB = new QDoubleSpinBox(tab);
-        m_altB->setRange(0.0, 20000.0); m_altB->setValue(10.0); m_altB->setSuffix(tr(" m"));
-        m_altB->setToolTip(tr("Visión: antena en B.  Viewshed: altura del objetivo."));
-        form->addRow(tr("Alt2 (objetivo / B):"), m_altB);
-        m_rumbo = new QDoubleSpinBox(tab);
-        m_rumbo->setRange(0.0, 359.9); m_rumbo->setDecimals(1); m_rumbo->setSuffix(tr(" °"));
-        m_rumbo->setValue(180.0); m_rumbo->setWrapping(true);
-        m_rumbo->setToolTip(tr("Rumbo (azimut) del perfil radial desde A (0=N, 90=E)."));
-        form->addRow(tr("Rumbo (perfil):"), m_rumbo);
-        m_alcanceKm = new QDoubleSpinBox(tab);
-        m_alcanceKm->setRange(1.0, 400.0); m_alcanceKm->setValue(40.0); m_alcanceKm->setSuffix(tr(" km"));
-        m_alcanceKm->setToolTip(tr("Alcance del viewshed (radio) y del perfil radial desde A "
-                                   "(hasta 400 km; en alcances largos el viewshed muestra progreso)."));
-        form->addRow(tr("Alcance (viewshed/perfil):"), m_alcanceKm);
+        m_altA = new QDoubleSpinBox(tab); m_altA->setRange(0.0, 20000.0); m_altA->setValue(10.0); m_altA->setSuffix(tr(" m"));
+        m_altB = new QDoubleSpinBox(tab); m_altB->setRange(0.0, 20000.0); m_altB->setValue(10.0); m_altB->setSuffix(tr(" m"));
+        m_rumbo = new QDoubleSpinBox(tab); m_rumbo->setRange(0.0, 359.9); m_rumbo->setDecimals(1); m_rumbo->setSuffix(tr(" °")); m_rumbo->setValue(180.0); m_rumbo->setWrapping(true);
+        m_alcanceKm = new QDoubleSpinBox(tab); m_alcanceKm->setRange(1.0, 400.0); m_alcanceKm->setValue(40.0); m_alcanceKm->setSuffix(tr(" km"));
+        m_picosRadioKm = new QDoubleSpinBox(tab); m_picosRadioKm->setRange(1.0, 50.0); m_picosRadioKm->setValue(10.0); m_picosRadioKm->setSuffix(tr(" km"));
+        m_picosSepM = new QSpinBox(tab); m_picosSepM->setRange(50, 5000); m_picosSepM->setValue(800); m_picosSepM->setSingleStep(50); m_picosSepM->setSuffix(tr(" m"));
 
-        // Parámetros de «10 picos»: radio de búsqueda y separación mínima entre
-        // cumbres (configurables).
-        m_picosRadioKm = new QDoubleSpinBox(tab);
-        m_picosRadioKm->setRange(1.0, 50.0); m_picosRadioKm->setValue(10.0);
-        m_picosRadioKm->setSuffix(tr(" km"));
-        m_picosRadioKm->setToolTip(tr("Radio de búsqueda de los 10 puntos más altos (desde A)."));
-        m_picosSepM = new QSpinBox(tab);
-        m_picosSepM->setRange(50, 5000); m_picosSepM->setValue(800); m_picosSepM->setSingleStep(50);
-        m_picosSepM->setSuffix(tr(" m"));
-        m_picosSepM->setToolTip(tr("Separación mínima entre cumbres (para que sean picos distintos)."));
-        auto *filaPicos = new QHBoxLayout;
-        filaPicos->setContentsMargins(0, 0, 0, 0);
-        filaPicos->addWidget(m_picosRadioKm, 1); filaPicos->addWidget(m_picosSepM, 1);
-        auto *wPicos = new QWidget(tab); wPicos->setLayout(filaPicos);
-        form->addRow(tr("Picos: radio / sep.:"), wPicos);
-        caja->addLayout(form);
+        m_rowPosA   = crearFila(tr("Posición A:"),  contenidoPunto(m_latA, m_lonA, Pick::A), &m_lblPosA);
+        m_rowPosB   = crearFila(tr("Posición B:"),  contenidoPunto(m_latB, m_lonB, Pick::B), nullptr);
+        m_rowAzimut = crearFila(tr("Azimut:"),       m_rumbo,        nullptr);
+        m_rowDist   = crearFila(tr("Distancia:"),    m_alcanceKm,    &m_lblDist);
+        m_rowAnt1   = crearFila(tr("Antena 1:"),     m_altA,         &m_lblAnt1);
+        m_rowAnt2   = crearFila(tr("Antena 2:"),     m_altB,         &m_lblAnt2);
+        m_rowRadio  = crearFila(tr("Radio:"),        m_picosRadioKm, nullptr);
+        m_rowSep    = crearFila(tr("Separación:"),   m_picosSepM,    nullptr);
 
-        // Lectura: cota del terreno bajo A y bajo B, y rumbo/distancia de A a B.
+        // Lectura: cota del terreno y, en Visión, rumbo/distancia A→B.
         m_infoPuntos = new QLabel(tab);
         m_infoPuntos->setTextFormat(Qt::RichText);
         m_infoPuntos->setWordWrap(true);
@@ -762,54 +755,51 @@ private:
         m_marComo0->setChecked(true);
         m_marComo0->setToolTip(tr("Trata los huecos del DEM (mar, fuera de cobertura) "
                                   "como cota 0, para analizar objetivos sobre el mar."));
-        caja->addWidget(m_marComo0);
-
         m_curvatura = new QCheckBox(tr("Curvatura 4/3"), tab);
         m_curvatura->setChecked(true);
         m_curvatura->setToolTip(tr("Con curvatura, el mar llano se oculta tras el "
                                    "horizonte geométrico. Desactívala para analizar "
                                    "solo el enmascaramiento por terreno (sobre mar sin "
                                    "obstáculos se ve hasta el alcance máximo)."));
-        caja->addWidget(m_curvatura);
+        {
+            auto *h = new QHBoxLayout; h->setContentsMargins(0, 0, 0, 0);
+            h->addWidget(m_marComo0); h->addWidget(m_curvatura);
+            m_rowChecks = new QWidget(tab); m_rowChecks->setLayout(h);
+            caja->addWidget(m_rowChecks);
+        }
 
-        auto *fila1 = new QHBoxLayout;
-        auto *bPerfil = new QPushButton(tr("Perfil"), tab);
-        auto *bVision = new QPushButton(tr("Visión A→B"), tab);
-        fila1->addWidget(bPerfil); fila1->addWidget(bVision);
-        caja->addLayout(fila1);
-        auto *fila2 = new QHBoxLayout;
-        auto *bViewshed = new QPushButton(tr("Viewshed"), tab);
-        auto *bPicos = new QPushButton(tr("10 picos altos"), tab);
-        fila2->addWidget(bViewshed); fila2->addWidget(bPicos);
-        caja->addLayout(fila2);
-        auto *fila3 = new QHBoxLayout;
+        // Botones: «Calcular» lanza el análisis del selector; «Limpiar» borra.
+        auto *filaBtn = new QHBoxLayout;
+        auto *bCalcular = new QPushButton(tr("Calcular"), tab);
         auto *bLimpiar = new QPushButton(tr("Limpiar"), tab);
-        fila3->addWidget(bLimpiar);
-        caja->addLayout(fila3);
+        filaBtn->addWidget(bCalcular, 1); filaBtn->addWidget(bLimpiar, 0);
+        caja->addLayout(filaBtn);
 
-        bPerfil->setToolTip(tr("Perfil del terreno desde A por el rumbo indicado, hasta el alcance."));
-        bVision->setToolTip(tr("Línea de visión de A (Alt1) a B (Alt2)."));
-        bViewshed->setToolTip(tr("Zona de visibilidad 360° desde A (observador Alt1, objetivo Alt2): "
-                                 "azul visible, amarillo oculto."));
-        bPicos->setToolTip(tr("Marca los 10 puntos más altos del terreno dentro del radio indicado "
-                              "desde A (cada uno de un color; pasa el cursor por encima para resaltarlo)."));
-        connect(bPerfil, &QPushButton::clicked, this, &Ventana::analizarPerfil);
-        connect(bVision, &QPushButton::clicked, this, &Ventana::analizarVision);
-        connect(bViewshed, &QPushButton::clicked, this, &Ventana::analizarViewshed);
-        connect(bPicos, &QPushButton::clicked, this, &Ventana::analizarPicosAltos);
+        connect(bCalcular, &QPushButton::clicked, this, [this] {
+            switch (m_tipoAnalisis->currentIndex()) {
+            case 0: analizarPerfil();     break;
+            case 1: analizarVision();     break;
+            case 2: analizarViewshed();   break;
+            case 3: analizarPicosAltos(); break;
+            }
+        });
         connect(bLimpiar, &QPushButton::clicked, this, [this] {
             m_mapa->removeFeatureLayer(kCapaVision);
             m_mapa->removeFeatureLayer(kCapaViewshed);
-            m_mapa->removeFeatureLayer(kCapaPuntos);
             m_mapa->removeFeatureLayer(kCapaPicos);
             m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
             if (m_resultado) m_resultado->clear();
             m_ultimo = Analisis::Ninguno;
+            marcarPuntosActivos();      // deja los pines de los puntos de entrada
             statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
         });
         // Los checks re-aplican al instante el último análisis.
         connect(m_marComo0, &QCheckBox::toggled, this, [this] { reejecutar(); });
         connect(m_curvatura, &QCheckBox::toggled, this, [this] { reejecutar(); });
+        // Al cambiar de análisis, se muestran solo sus campos y se actualizan pines.
+        connect(m_tipoAnalisis, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this](int i) { actualizarEntradaAnalisis(i); });
+        actualizarEntradaAnalisis(0);   // estado inicial (Perfil)
 
         // --- Relieve sombreado (hillshade) en vivo, desde el DEM local ---------
         auto *grupoHs = new QGroupBox(tr("Relieve sombreado (hillshade)"), tab);
@@ -858,14 +848,13 @@ private:
         caja->addWidget(m_resultado);
 
         auto *ayuda = new QLabel(
-            tr("<span style='color:#777'>Fija los puntos con «Mapa» (el cursor toma el pin "
-               "azul=A / rojo=B) o escríbelos; se marcan fijos en el mapa durante el análisis. "
-               "<b>Perfil</b>: A + rumbo + alcance. <b>Visión A→B</b>: A (Alt1) y B (Alt2). "
-               "<b>Viewshed</b>: A (observador Alt1, objetivo Alt2, alcance). "
-               "<b>10 picos altos</b>: los 10 puntos más altos dentro del radio desde A "
-               "(cada uno de un color; cursor encima = se resalta). "
-               "El perfil se abre en una ventana aparte (arrastrar = desplazar, rueda = "
-               "zoom).</span>"), tab);
+            tr("<span style='color:#777'>Elige el <b>Análisis</b> arriba: solo pide sus datos. "
+               "Fija las posiciones con «Mapa» (el cursor toma el pin; azul=A, rojo=B) o "
+               "escríbelas. <b>Perfil</b>: posición + azimut + distancia. <b>Visión A→B</b>: "
+               "posiciones 1 y 2 + antenas. <b>Viewshed</b>: observador + antena + alcance + "
+               "altura objetivo. <b>10 picos</b>: posición + radio/separación. Pulsa "
+               "<b>Calcular</b>. El perfil se abre en una ventana aparte (arrastrar = "
+               "desplazar, rueda = zoom).</span>"), tab);
         ayuda->setWordWrap(true);
         caja->addWidget(ayuda);
         caja->addStretch(1);
@@ -1234,28 +1223,58 @@ private:
     void actualizarInfoPuntos()
     {
         if (!m_infoPuntos) return;
-        const QGeoCoordinate a = puntoA(), b = puntoB();
         auto cota = [this](const QGeoCoordinate &q) {
             const double e = m_mapa ? m_mapa->elevationAt(q) : std::numeric_limits<double>::quiet_NaN();
             return std::isnan(e) ? QStringLiteral("—") : QString::number(e, 'f', 0) + tr(" m");
         };
-        const double d = a.isValid() && b.isValid() ? a.distanceTo(b) : 0.0;
-        const double az = a.isValid() && b.isValid() ? a.azimuthTo(b) : 0.0;
-        m_infoPuntos->setText(
-            tr("<span style='color:%1'>●</span> Cota A: <b>%2</b> &nbsp; "
-               "<span style='color:%3'>●</span> Cota B: <b>%4</b><br>"
-               "A→B: <b>%5 km</b> · rumbo <b>%6°</b>")
-                .arg(m_colorA.name(), cota(a), m_colorB.name(), cota(b))
-                .arg(d / 1000.0, 0, 'f', 2).arg(az, 0, 'f', 0));
-        marcarPuntosAB();   // los pines siguen a los puntos (al pinchar o escribir)
+        const bool vision = m_tipoAnalisis && m_tipoAnalisis->currentIndex() == 1;
+        const QGeoCoordinate a = puntoA();
+        QString t = tr("<span style='color:%1'>●</span> Cota: <b>%2</b>")
+                        .arg(m_colorA.name(), cota(a));
+        if (vision) {                       // en Visión, también B y el rumbo/distancia
+            const QGeoCoordinate b = puntoB();
+            const double d = a.isValid() && b.isValid() ? a.distanceTo(b) : 0.0;
+            const double az = a.isValid() && b.isValid() ? a.azimuthTo(b) : 0.0;
+            t += tr(" &nbsp; <span style='color:%1'>●</span> Cota B: <b>%2</b><br>"
+                    "A→B: <b>%3 km</b> · rumbo <b>%4°</b>")
+                     .arg(m_colorB.name(), cota(b))
+                     .arg(d / 1000.0, 0, 'f', 2).arg(az, 0, 'f', 0);
+        }
+        m_infoPuntos->setText(t);
+        marcarPuntosActivos();   // los pines siguen a los puntos (al pinchar o escribir)
     }
 
-    // Dibuja los pines fijos de A (azul) y B (rojo) sobre el mapa, para que el punto
-    // seleccionado se vea SIEMPRE (no solo durante un análisis).
-    void marcarPuntosAB()
+    // Muestra/oculta los campos de entrada según el análisis elegido y relabela los
+    // comunes (un observador/posición se llama distinto en cada caso).
+    void actualizarEntradaAnalisis(int idx)
+    {
+        const bool perfil = idx == 0, vision = idx == 1, viewshed = idx == 2, picos = idx == 3;
+        if (m_rowPosA) m_rowPosA->setVisible(true);
+        if (m_rowPosB) m_rowPosB->setVisible(vision);
+        if (m_rowAzimut) m_rowAzimut->setVisible(perfil);
+        if (m_rowDist) m_rowDist->setVisible(perfil || viewshed);
+        if (m_rowAnt1) m_rowAnt1->setVisible(vision || viewshed);
+        if (m_rowAnt2) m_rowAnt2->setVisible(vision || viewshed);
+        if (m_rowRadio) m_rowRadio->setVisible(picos);
+        if (m_rowSep) m_rowSep->setVisible(picos);
+        if (m_rowChecks) m_rowChecks->setVisible(!picos);
+        if (m_lblPosA) m_lblPosA->setText(vision ? tr("Posición 1 (A):")
+                                        : viewshed ? tr("Observador:")
+                                        : picos ? tr("Posición:")
+                                                : tr("Posición A:"));
+        if (m_lblDist) m_lblDist->setText(viewshed ? tr("Alcance:") : tr("Distancia:"));
+        if (m_lblAnt1) m_lblAnt1->setText(viewshed ? tr("Antena obs.:") : tr("Antena 1 (Alt1):"));
+        if (m_lblAnt2) m_lblAnt2->setText(viewshed ? tr("Alt. objetivo:") : tr("Antena 2 (Alt2):"));
+        actualizarInfoPuntos();   // redibuja los pines activos y la lectura
+    }
+
+    // Dibuja el/los pin(es) del ANÁLISIS ACTIVO: siempre la posición A (azul) y, solo
+    // en Visión A→B, también B (rojo). Así el punto seleccionado se ve sin analizar,
+    // pero no sobran pines (B no aparece en perfil/viewshed/picos).
+    void marcarPuntosActivos()
     {
         if (!m_mapa) return;
-        prepararCapa(kCapaPuntos, tr("Puntos A/B"), 60);
+        prepararCapa(kCapaPuntos, tr("Puntos"), 60);
         auto pin = [this](const QGeoCoordinate &p, const QColor &c, const QString &txt) {
             if (!p.isValid()) return;
             MapFeature f;
@@ -1271,7 +1290,8 @@ private:
             m_mapa->addFeature(f);
         };
         pin(puntoA(), m_colorA, tr("A"));
-        pin(puntoB(), m_colorB, tr("B"));
+        if (m_tipoAnalisis && m_tipoAnalisis->currentIndex() == 1)   // solo Visión usa B
+            pin(puntoB(), m_colorB, tr("B"));
     }
 
     // (Re)crea vacía una capa donde volcar un resultado de análisis.
@@ -1306,7 +1326,7 @@ private:
             statusBar()->showMessage(tr("Punto A no válido (fíjalo en el mapa o escríbelo)."), 5000);
             return;
         }
-        marcarPuntosAB();              // pin azul fijo en A
+        marcarPuntosActivos();              // pin azul fijo en A
         const double alcanceM = m_alcanceKm->value() * 1000.0;
         const QGeoCoordinate fin = a.atDistanceAndAzimuth(alcanceM, m_rumbo->value());
         // El perfil se DIBUJA con la cota cruda (muestra la batimetría en azul); el
@@ -1341,7 +1361,7 @@ private:
                 tr("Fija los puntos A y B (distintos) en el mapa o escríbelos."), 5000);
             return;
         }
-        marcarPuntosAB();               // pines fijos azul (A) y rojo (B)
+        marcarPuntosActivos();               // pines fijos azul (A) y rojo (B)
         LineOfSightParams lp;
         lp.voidElevation = voidElev();
         lp.curvature = curvaturaOn();
@@ -1487,7 +1507,7 @@ private:
             statusBar()->showMessage(tr("Punto (A) no válido (fíjalo en el mapa o escríbelo)."), 5000);
             return;
         }
-        marcarPuntosAB();              // pin azul fijo en A (observador)
+        marcarPuntosActivos();              // pin azul fijo en A (observador)
 
         ViewshedParams vp;
         vp.observerHeight = m_altA->value();
@@ -1617,7 +1637,7 @@ private:
             return;
         }
         m_ultimo = Analisis::Picos;
-        marcarPuntosAB();              // pin azul fijo en A (centro)
+        marcarPuntosActivos();              // pin azul fijo en A (centro)
         m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
 
         const double R = m_picosRadioKm->value() * 1000.0;
@@ -2402,6 +2422,12 @@ private:
     const QColor m_colorB = QColor(0xc6, 0x28, 0x28);            //!< rojo = punto B
     QDoubleSpinBox *m_picosRadioKm = nullptr;  //!< radio de búsqueda de picos
     QSpinBox *m_picosSepM = nullptr;           //!< separación mínima entre cumbres
+    // Entrada por análisis: un selector y filas que se muestran/ocultan según el tipo.
+    QComboBox *m_tipoAnalisis = nullptr;
+    QWidget *m_rowPosA = nullptr, *m_rowPosB = nullptr, *m_rowAzimut = nullptr;
+    QWidget *m_rowDist = nullptr, *m_rowAnt1 = nullptr, *m_rowAnt2 = nullptr;
+    QWidget *m_rowRadio = nullptr, *m_rowSep = nullptr, *m_rowChecks = nullptr;
+    QLabel *m_lblPosA = nullptr, *m_lblDist = nullptr, *m_lblAnt1 = nullptr, *m_lblAnt2 = nullptr;
     QVector<qint64> m_picoIds;                 //!< ids de los marcadores de pico
     QHash<qint64, MapFeature> m_picoBase;      //!< estilo base (para restaurar tras hover)
     qint64 m_picoHover = -1;                   //!< pico resaltado bajo el cursor
