@@ -1278,7 +1278,7 @@ private:
                 if (const auto f = m_mapa->feature(id))
                     tip = tooltipDe(*f);
             if (!tip.isEmpty())
-                QToolTip::showText(me->globalPosition().toPoint(), tip, m_mapa);
+                QToolTip::showText(QCursor::pos(), tip, m_mapa);   // global, Qt5/Qt6
             else
                 QToolTip::hideText();
         }
