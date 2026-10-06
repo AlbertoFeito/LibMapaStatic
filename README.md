@@ -119,7 +119,7 @@ o junto a la aplicación. Plantilla: [`mapa.example.json`](mapa.example.json).
 | `start` | Capa, centro y zoom de arranque |
 | `datasets` | Las capas base, igual que en `datasets.json` (los campos omitidos toman su valor por defecto) |
 | `elevation` | `"file"` (BD `.sqlitedb`) o `"dir"` (carpeta de `.hgt`) |
-| `overlays` | Capas vectoriales **fijas**: un `.geo` con `style` (un trazado, no seleccionable), o una BD de entidades `.sqlitedb` (p. ej. las **curvas de nivel** de `dem_to_contours`), que conserva el estilo/etiqueta/cota por entidad y es **seleccionable**. Se cargan al abrir, bloqueadas, y **no** se guardan con las del usuario |
+| `overlays` | Capas vectoriales **fijas**: un `.geo` con `style` (un trazado, no seleccionable), o una BD de entidades `.sqlitedb` (p. ej. las **curvas de nivel** de `dem_to_contours`), que conserva el estilo/etiqueta/cota por entidad y es **seleccionable**. `zOrder` ordena el pintado; **`minZoom`/`maxZoom`** limitan el zoom en que se dibuja (capas de detalle que estorban a vista general). Se cargan al abrir, bloqueadas, y **no** se guardan con las del usuario |
 | `features` | BD de entidades del usuario. Una ruta relativa va a la carpeta de datos de la aplicación (`AppData/<app>/<package.id>/`), **no** a la del paquete, que puede ser de solo lectura. `seed` se copia ahí la primera vez |
 
 Un fichero que falte (una capa, la elevación) no impide abrir el resto. Al

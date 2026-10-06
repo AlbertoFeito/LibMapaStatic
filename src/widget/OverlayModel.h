@@ -42,6 +42,7 @@ public:
     bool setLayerVisible(const QString &id, bool visible);
     bool setLayerEditable(const QString &id, bool editable);
     bool setLayerZOrder(const QString &id, int z);
+    bool setLayerZoomRange(const QString &id, int minZoom, int maxZoom);
 
     // --- Entidades -------------------------------------------------------
     /*!

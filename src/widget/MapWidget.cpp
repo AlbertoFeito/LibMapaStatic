@@ -159,6 +159,7 @@ public:
             }
             modelo->setLayerEditable(ov.id, false);
             modelo->setLayerZOrder(ov.id, ov.zOrder);
+            modelo->setLayerZoomRange(ov.id, ov.minZoom, ov.maxZoom);
         }
     }
 };
@@ -539,6 +540,15 @@ bool MapWidget::setFeatureLayerVisible(const QString &id, bool visible)
 bool MapWidget::setFeatureLayerZOrder(const QString &id, int zOrder)
 {
     return d->view ? d->view->overlayModel()->setLayerZOrder(id, zOrder) : false;
+}
+
+// Fija el rango de zoom en que se dibuja (y selecciona) una capa (−1 = sin
+// límite). Útil para capas de detalle como las curvas de nivel, que a vista
+// general estorban: con minZoom se ocultan hasta acercar.
+bool MapWidget::setFeatureLayerZoomRange(const QString &id, int minZoom, int maxZoom)
+{
+    return d->view ? d->view->overlayModel()->setLayerZoomRange(id, minZoom, maxZoom)
+                   : false;
 }
 
 // Anade una entidad; devuelve su id (o -1).

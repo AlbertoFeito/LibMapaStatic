@@ -1,11 +1,26 @@
 #include "widget/FeatureLayer.h"
 
 #include "core/Logging.h"
+#include "widget/MapView.h"
 
 #include <QPainterPath>
 #include <cmath>
 
 namespace libmapa {
+
+namespace {
+// ¿La capa debe dibujarse/consultarse al zoom actual? Fuera de su rango
+// [minZoom, maxZoom] (−1 = sin límite) se omite: así una capa de detalle (p. ej.
+// curvas de nivel) no estorba ni se selecciona a vista general.
+bool capaVisibleAZoom(const LayerInfo &capa, int zoom)
+{
+    if (capa.minZoom >= 0 && zoom < capa.minZoom)
+        return false;
+    if (capa.maxZoom >= 0 && zoom > capa.maxZoom)
+        return false;
+    return true;
+}
+} // namespace
 
 FeatureLayer::FeatureLayer(QCustomPlot *parent, OverlayModel *model)
     : QCPLayerable(parent)
@@ -146,10 +161,15 @@ void FeatureLayer::draw(QCPPainter *painter)
 
     m_lastDrawn = 0;
 
+    const MapView *vista = qobject_cast<MapView *>(plot);
+    const int zoomActual = vista ? vista->zoom() : -1;
+
     // Las capas se recorren en orden de zOrder: la ultima queda encima.
     for (const LayerInfo &capa : m_model->layers()) {
         if (!capa.visible)
             continue;
+        if (zoomActual >= 0 && !capaVisibleAZoom(capa, zoomActual))
+            continue;               // capa de detalle fuera de su rango de zoom
         for (const MapFeature &f : m_model->featuresInLayer(capa.id)) {
             if (!f.visible)
                 continue;
@@ -396,12 +416,17 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
     qint64 mejor = -1;
     double mejorDist = tolerancePx;
 
+    const MapView *vista = qobject_cast<MapView *>(parentPlot());
+    const int zoomActual = vista ? vista->zoom() : -1;
+
     // Se recorre de la capa mas alta a la mas baja: lo que se ve encima es lo
     // que se selecciona.
     const auto capas = m_model->layers();
     for (int i = static_cast<int>(capas.size()) - 1; i >= 0; --i) {
         if (!capas[i].visible)
             continue;
+        if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
+            continue;               // no seleccionable fuera de su rango de zoom
 
         for (const MapFeature &f : m_model->featuresInLayer(capas[i].id)) {
             if (!f.visible || !f.selectable)

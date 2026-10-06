@@ -3960,3 +3960,23 @@ Compila sin warnings, **19 tests** en verde. README, BITÁCORA, `arquitectura.ht
   `PackageCheck` ramifica por extensión igual que la carga: `.sqlitedb`/`.db` se valida como **BD
   vectorial** contando las filas de `entidad` (sin cargarlas todas); `.geo` sigue con `readGeoFile`.
   Test `tst_packagecheck::vectorDbOverlayValidates`. 19 tests en verde.
+
+## 89. Zoom mínimo/máximo por capa (las curvas solo al acercar)
+
+Cargadas las 10 094 curvas como overlay, a vista de país (z8) eran un amasijo de etiquetas
+(«0 m / 500 m» por todas partes, el «0 m» pegado a cada cayo), feo y algo lento, y **siempre
+visibles**. Las curvas son **detalle**: deben salir solo al acercar.
+
+- **`LayerInfo.minZoom`/`maxZoom`** (−1 = sin límite). `FeatureLayer` consulta el zoom actual
+  (vía `MapView::zoom()`) y **omite** las capas fuera de su rango, tanto al **dibujar** como al
+  **seleccionar** (`featureAt`). El caché del `FeatureLayer` ya se invalida al cambiar el zoom
+  (el rango de ejes cambia), así que la puerta se aplica sola.
+- **Fachada:** `MapWidget::setFeatureLayerZoomRange(id, minZoom, maxZoom)` y setter en
+  `OverlayModel`. En el paquete, el overlay acepta **`minZoom`/`maxZoom`** (los lee `DataPackage`
+  y los aplica `loadOverlays`).
+- Para las curvas, en el `mapa.json`: `"minZoom": 11` → invisibles hasta z11, limpio a vista
+  general y más rápido. (El contorno «0 m» conviene quitarlo en el horneado con `--min-level 1`,
+  que ya lo dibuja la capa de costas.)
+- Test `tst_mapwidget::loadsFeaturesDbAsFixedLayer` ampliado (guarda min/max en la `LayerInfo`).
+
+Compila sin warnings, **19 tests** en verde. README, BITÁCORA, `arquitectura.html` y PDF al día.

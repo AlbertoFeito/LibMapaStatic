@@ -2215,6 +2215,18 @@ void TstMapWidget::loadsFeaturesDbAsFixedLayer()
     }
     QCOMPARE(cotas, (QSet<int>{500, 600}));        // atributos conservados
     QCOMPARE(conEtiqueta, 1);                        // estilo por entidad conservado
+
+    // Rango de zoom por capa: se guarda en la LayerInfo (oculta la capa de
+    // detalle a vista general).
+    QVERIFY(w.setFeatureLayerZoomRange(QStringLiteral("curvas"), 10, -1));
+    bool vista = false;
+    for (const LayerInfo &c : w.featureLayers())
+        if (c.id == QStringLiteral("curvas")) {
+            vista = true;
+            QCOMPARE(c.minZoom, 10);
+            QCOMPARE(c.maxZoom, -1);
+        }
+    QVERIFY(vista);
 }
 
 QTEST_MAIN(TstMapWidget)

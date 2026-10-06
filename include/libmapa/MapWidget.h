@@ -186,6 +186,12 @@ public:
     bool setFeatureLayerVisible(const QString &id, bool visible);
     bool setFeatureLayerZOrder(const QString &id, int zOrder);
 
+    //! Fija el rango de zoom [minZoom, maxZoom] en que la capa se dibuja y se
+    //! puede seleccionar (−1 = sin límite por ese lado). Fuera del rango la capa
+    //! se oculta: pensado para capas de detalle (curvas de nivel) que estorban a
+    //! vista general. En el paquete se declara con "minZoom"/"maxZoom" del overlay.
+    bool setFeatureLayerZoomRange(const QString &id, int minZoom, int maxZoom);
+
     // --- Entidades -------------------------------------------------------
     //! Devuelve el identificador asignado, o -1 si la geometria no es valida.
     qint64 addFeature(const MapFeature &feature);

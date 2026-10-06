@@ -45,8 +45,10 @@ struct DataPackage
     struct Overlay {
         QString id;
         QString name;
-        QString file;            //!< Ruta absoluta al .geo.
+        QString file;            //!< Ruta absoluta al .geo o .sqlitedb vectorial.
         int zOrder = 0;
+        int minZoom = -1;        //!< Zoom mínimo para dibujarla (−1 = sin límite).
+        int maxZoom = -1;        //!< Zoom máximo para dibujarla (−1 = sin límite).
         FeatureStyle style;
     };
 

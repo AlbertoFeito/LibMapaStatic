@@ -172,6 +172,11 @@ struct LayerInfo
     //! Orden de dibujo: mayor se pinta encima.
     int zOrder = 0;
     int featureCount = 0;
+    //! Rango de zoom en el que la capa se dibuja (−1 = sin límite). Fuera de
+    //! [minZoom, maxZoom] la capa no se pinta ni se puede seleccionar: útil para
+    //! capas de detalle (p. ej. curvas de nivel) que estorban a vista general.
+    int minZoom = -1;
+    int maxZoom = -1;
 };
 
 } // namespace libmapa
