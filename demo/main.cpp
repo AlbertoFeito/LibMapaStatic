@@ -64,6 +64,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolTip>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -1177,9 +1178,29 @@ private:
     // el cursor (si hay picos dibujados).
     bool eventFilter(QObject *obj, QEvent *ev) override
     {
-        if (obj == m_mapa && ev->type() == QEvent::MouseMove && !m_picoIds.isEmpty()) {
-            const QPoint pos = static_cast<QMouseEvent *>(ev)->pos();
-            resaltarPico(m_mapa->featureAt(pos, 10.0));
+        if (obj == m_mapa && ev->type() == QEvent::MouseMove) {
+            auto *me = static_cast<QMouseEvent *>(ev);
+            const qint64 id = m_mapa->featureAt(me->pos(), 8.0);
+            if (!m_picoIds.isEmpty())
+                resaltarPico(id);
+            // Tooltip con la cota si la entidad bajo el cursor la trae (p. ej.
+            // una curva de nivel): así se lee la altura de cualquier curva, no
+            // solo de las etiquetadas.
+            bool mostrado = false;
+            if (id >= 0) {
+                if (const auto f = m_mapa->feature(id)) {
+                    const QVariant cota = f->attributes.value(QStringLiteral("cota"));
+                    if (cota.isValid()) {
+                        QToolTip::showText(me->globalPosition().toPoint(),
+                                           QString::number(qRound(cota.toDouble()))
+                                               + QStringLiteral(" m"),
+                                           m_mapa);
+                        mostrado = true;
+                    }
+                }
+            }
+            if (!mostrado)
+                QToolTip::hideText();
         }
         return QMainWindow::eventFilter(obj, ev);
     }

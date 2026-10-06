@@ -3997,3 +3997,21 @@ dibujaba **todas** las entidades en cada refresco, aunque a z11+ solo caben unas
 - No cambia el API público (método privado del layer). 19 tests en verde (uno nuevo).
 
 Resultado: el *pan* vuelve a ir fluido; solo se proyecta y pinta lo que se ve.
+
+## 91. Curvas: etiquetas solo en las cimas (espaciadas) y cota por tooltip
+
+Con las curvas de todo el país, etiquetar TODA curva índice llenaba el mapa de «500 m / 1000 m»
+repetidos. Mejor: etiquetar solo las **cimas**, espaciadas, y leer el resto al vuelo.
+
+- **`dem_to_contours --labels peaks|all|none` (defecto `peaks`).** En `peaks` solo se etiqueta un
+  **anillo de cima** por cumbre: curva índice **cerrada** y **pequeña** (envolvente ≤ `--peak-span`,
+  6 km por defecto), quedándose con la **más alta** y separando las etiquetas al menos `--label-sep`
+  (8 km) — una greedy por cota descendente. `all` = toda curva índice (comportamiento anterior);
+  `none` = ninguna. Probado en la Sierra Maestra: de 25 índice → **4 etiquetas** (500/1000/1500),
+  cada una en su cima. Solo cambia la herramienta.
+- **Tooltip de cota en el `demo`.** El `eventFilter` del mapa, al pasar el ratón, consulta
+  `featureAt` y si la entidad trae el atributo `cota` (las curvas lo llevan) muestra
+  «`<cota> m`» en un `QToolTip`. Así se lee la altura de **cualquier** curva, no solo de las
+  etiquetadas. Reutiliza `MapWidget::featureAt`/`feature`; sin cambios de API.
+
+19 tests en verde (la librería no cambia). README y BITÁCORA al día; sin regenerar PDF.

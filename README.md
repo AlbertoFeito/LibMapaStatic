@@ -494,10 +494,13 @@ dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
 dem_to_contours --in <carpeta_hgt | dem.sqlitedb> --out <curvas.sqlitedb>
              (--cuba | --bbox latN,lonO,latS,lonE)
              [--interval 100] [--index 500] [--step 150] [--min-length 500]
-             [--min-level 0] [--max-level N] [--layer curvas --name "…"] [--overwrite]
+             [--min-level 0] [--max-level N] [--labels peaks|all|none]
+             [--layer curvas --name "…"] [--overwrite]
              (genera curvas de nivel -isohipsas- como CAPA VECTORIAL de entidades;
-              índice cada N m más gruesas y con la cota como etiqueta. Cárgalo como
-              capa de entidades: se activa/desactiva y da la cota al seleccionar.
+              índice cada N m más gruesas. Cárgalo como capa de entidades: se
+              activa/desactiva y da la cota al seleccionar o al pasar el ratón.
+              --labels peaks (defecto): etiqueta solo en las cimas, espaciadas;
+              all = toda curva índice; none = ninguna.
               --min-level 0 recorta al nivel del mar -omite las curvas batimétricas-)
 
 demo         [carpeta_paquete | mapa.json | datasets.json]

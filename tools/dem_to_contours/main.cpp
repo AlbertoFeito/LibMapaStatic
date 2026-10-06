@@ -16,6 +16,10 @@
  *                   [--min-level 0]    (no genera curvas por debajo de esa cota;
  *                                       0 = recorta al nivel del mar, sin batimetría)
  *                   [--max-level N]    (no genera curvas por encima de esa cota)
+ *                   [--labels peaks|all|none]  (etiquetas de cota; por defecto
+ *                                       'peaks' = solo en las cimas, espaciadas)
+ *                   [--label-sep 8000 --peak-span 6000]  (separación y tamaño
+ *                                       máx. del anillo de cima, en metros)
  *                   [--layer curvas --name "Curvas de nivel"] [--overwrite]
  */
 
@@ -31,6 +35,7 @@
 #include <QFileInfo>
 #include <QTextStream>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -50,6 +55,9 @@ int main(int argc, char *argv[])
     double minLevel = -std::numeric_limits<double>::infinity();
     double maxLevel = std::numeric_limits<double>::infinity();
     double latN = 90.0, lonW = 180.0, latS = -90.0, lonE = -180.0;
+    QString labelMode = QStringLiteral("peaks");   // peaks | all | none
+    double labelSep = 8000.0;    // separación mínima entre etiquetas (m)
+    double peakSpan = 6000.0;    // tamaño máx. del anillo "cima" a etiquetar (m)
     bool haveBbox = false, overwrite = false;
 
     const QStringList args = app.arguments();
@@ -66,6 +74,9 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--min-length")) minLen = val().toDouble();
         else if (k == QLatin1String("--min-level")) minLevel = val().toDouble();
         else if (k == QLatin1String("--max-level")) maxLevel = val().toDouble();
+        else if (k == QLatin1String("--labels")) labelMode = val().toLower();
+        else if (k == QLatin1String("--label-sep")) labelSep = val().toDouble();
+        else if (k == QLatin1String("--peak-span")) peakSpan = val().toDouble();
         else if (k == QLatin1String("--overwrite")) overwrite = true;
         else if (k == QLatin1String("--cuba")) {
             latN = 23.3; lonW = -85.0; latS = 19.7; lonE = -74.0; haveBbox = true;
@@ -85,6 +96,7 @@ int main(int argc, char *argv[])
                 "                     (--cuba | --bbox latN,lonO,latS,lonE)\n"
                 "                     [--interval 100] [--index 500] [--step 150]\n"
                 "                     [--min-length 500] [--min-level 0] [--max-level N]\n"
+                "                     [--labels peaks|all|none] [--label-sep 8000] [--peak-span 6000]\n"
                 "                     [--layer curvas --name \"...\"] [--overwrite]\n";
         return 2;
     }
@@ -152,6 +164,12 @@ int main(int argc, char *argv[])
     capa.zOrder = 20;
     repo.saveLayer(capa);
 
+    // Candidata a etiqueta de "cima": anillo índice CERRADO y pequeño (una
+    // cumbre), con su cota y centro, para luego quedarnos con las más altas y
+    // separadas (en modo peaks).
+    struct Cand { int idx; double cota; QGeoCoordinate centro; };
+    QVector<Cand> cands;
+
     QVector<MapFeature> feats;
     feats.reserve(curvas.size());
     int nIndex = 0;
@@ -171,14 +189,54 @@ int main(int argc, char *argv[])
             f.name = QString::number(qRound(c.elevation)) + QStringLiteral(" m");
             f.style.lineColor = QColor(110, 70, 40);
             f.style.lineWidth = 0.9;
-            f.style.labelVisible = true;
         } else {
             f.style.lineColor = QColor(150, 100, 60, 180);
             f.style.lineWidth = 0.4;
-            f.style.labelVisible = false;
+        }
+        f.style.labelVisible = false;   // se decide abajo según --labels
+
+        // Anillo de cima: índice, cerrado y pequeño → candidato a etiqueta.
+        if (esIndice && labelMode == QLatin1String("peaks")
+            && c.points.size() >= 4
+            && c.points.first().distanceTo(c.points.last()) < 2.0) {
+            double laMin = 90, laMax = -90, loMin = 180, loMax = -180, sLa = 0, sLo = 0;
+            for (const QGeoCoordinate &p : c.points) {
+                laMin = qMin(laMin, p.latitude());  laMax = qMax(laMax, p.latitude());
+                loMin = qMin(loMin, p.longitude()); loMax = qMax(loMax, p.longitude());
+                sLa += p.latitude();  sLo += p.longitude();
+            }
+            const double span = QGeoCoordinate(laMin, loMin).distanceTo(QGeoCoordinate(laMax, loMax));
+            if (span <= peakSpan) {
+                const double n = double(c.points.size());
+                cands.push_back({int(feats.size()), c.elevation,
+                                 QGeoCoordinate(sLa / n, sLo / n)});
+            }
         }
         feats.push_back(f);
     }
+
+    // Decide qué curvas llevan etiqueta. 'all': todas las índice. 'none': ninguna.
+    // 'peaks' (defecto): una por cima, la más alta, separadas al menos labelSep.
+    int nLabel = 0;
+    if (labelMode == QLatin1String("all")) {
+        for (MapFeature &f : feats)
+            if (!f.name.isEmpty()) { f.style.labelVisible = true; ++nLabel; }
+    } else if (labelMode == QLatin1String("peaks")) {
+        std::sort(cands.begin(), cands.end(),
+                  [](const Cand &a, const Cand &b) { return a.cota > b.cota; });
+        QVector<QGeoCoordinate> puestas;
+        for (const Cand &c : cands) {
+            bool cerca = false;
+            for (const QGeoCoordinate &q : puestas)
+                if (c.centro.distanceTo(q) < labelSep) { cerca = true; break; }
+            if (cerca)
+                continue;
+            feats[c.idx].style.labelVisible = true;
+            puestas.push_back(c.centro);
+            ++nLabel;
+        }
+    }
+    // 'none' deja todas sin etiqueta.
 
     if (!repo.saveFeatures(feats)) {
         qCritical() << "No se pudieron guardar las curvas:" << repo.lastError();
@@ -186,8 +244,8 @@ int main(int argc, char *argv[])
     }
     repo.close();
 
-    cout << "Listo: " << curvas.size() << " curvas (" << nIndex << " índice) en "
-         << QFileInfo(out).fileName() << "\n";
+    cout << "Listo: " << curvas.size() << " curvas (" << nIndex << " índice, "
+         << nLabel << " con etiqueta) en " << QFileInfo(out).fileName() << "\n";
     cout << "Cárgalo en la app como capa de entidades (" << layer << ").\n";
     return 0;
 }
