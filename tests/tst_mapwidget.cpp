@@ -99,6 +99,7 @@ private slots:
     void draggingIsOneUndoStep();
     void savesAndLoadsFeatures();
     void loadsFeaturesDbAsFixedLayer();
+    void viewportCullKeepsCrossingFeatures();
 
     // --- Fase 7: .geo y objetivos moviles --------------------------------
     void loadsGeoFileAsPolygonLayer();
@@ -2227,6 +2228,33 @@ void TstMapWidget::loadsFeaturesDbAsFixedLayer()
             QCOMPARE(c.maxZoom, -1);
         }
     QVERIFY(vista);
+}
+
+// El recorte por viewport NO debe tragarse una entidad que CRUZA la vista con
+// los extremos fuera de pantalla (el caso que un simple "¿algún vértice dentro?"
+// perdería): se sigue pudiendo seleccionar por el centro.
+void TstMapWidget::viewportCullKeepsCrossingFeatures()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("cruza"), QStringLiteral("Cruza"), 5);
+    MapFeature linea;
+    linea.layerId = QStringLiteral("cruza");
+    linea.kind = GeometryKind::Polyline;
+    // Extremos MUY fuera de pantalla (±10° de longitud) pero la linea, a la
+    // latitud del centro, pasa por el centro de la vista.
+    linea.geometry = {QGeoCoordinate(centro.latitude(), centro.longitude() - 10.0),
+                      QGeoCoordinate(centro.latitude(), centro.longitude() + 10.0)};
+    const qint64 id = w.addFeature(linea);
+    QVERIFY(id > 0);
+
+    // En el pixel central debe encontrarse pese a tener los extremos fuera.
+    QCOMPARE(w.featureAt(QPoint(400, 300), 8.0), id);
 }
 
 QTEST_MAIN(TstMapWidget)

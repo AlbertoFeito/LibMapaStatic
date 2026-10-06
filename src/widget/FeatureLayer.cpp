@@ -99,6 +99,56 @@ QPolygonF FeatureLayer::screenPolygon(const MapFeature &f) const
     return screenPolygonOf(f.geometry);
 }
 
+// Rectangulo visible actual en coordenadas de EJE (x=longitud, y=eje-Y de
+// Mercator), ensanchado un 'marginFrac' por lado para no recortar entidades
+// que cruzan justo el borde.
+QRectF FeatureLayer::visibleAxisRect(double marginFrac) const
+{
+    QCustomPlot *plot = parentPlot();
+    if (!plot)
+        return {};
+    const QCPRange rx = plot->xAxis->range();
+    const QCPRange ry = plot->yAxis->range();
+    QRectF r(QPointF(rx.lower, ry.lower), QPointF(rx.upper, ry.upper));
+    r = r.normalized();
+    const double mx = r.width() * marginFrac;
+    const double my = r.height() * marginFrac;
+    return r.adjusted(-mx, -my, mx, my);
+}
+
+// Recorte por viewport: la entidad se pinta/consulta solo si TOCA el rectangulo
+// visible. Camino rapido: en cuanto un vertice cae dentro, dibuja; si no, se
+// compara la caja envolvente (para no perder un tramo que cruza con los
+// extremos fuera). Todo en coordenadas de eje, sin proyectar a pixeles.
+bool FeatureLayer::featureInView(const MapFeature &f, const QRectF &axisRect) const
+{
+    if (axisRect.isNull())
+        return true;
+    double minx = 0, maxx = 0, miny = 0, maxy = 0;
+    bool any = false;
+    for (const QVector<QGeoCoordinate> &parte : f.outlines()) {
+        for (const QGeoCoordinate &c : parte) {
+            if (!c.isValid())
+                continue;
+            const QPointF e = m_toAxis ? m_toAxis(c) : QPointF(c.longitude(), c.latitude());
+            if (axisRect.contains(e))
+                return true;                      // un vertice visible -> seguro
+            if (!any) { minx = maxx = e.x(); miny = maxy = e.y(); any = true; }
+            else {
+                minx = qMin(minx, e.x()); maxx = qMax(maxx, e.x());
+                miny = qMin(miny, e.y()); maxy = qMax(maxy, e.y());
+            }
+        }
+    }
+    if (!any)
+        return false;
+    // Solape de cajas AABB hecho a mano: QRectF::intersects da falso con cajas
+    // degeneradas (una linea horizontal/vertical tiene alto/ancho 0), que SI
+    // deben contar como visibles si cruzan el rectangulo.
+    return !(maxx < axisRect.left() || minx > axisRect.right()
+             || maxy < axisRect.top() || miny > axisRect.bottom());
+}
+
 // Convierte una lista de coordenadas a un poligono de pixeles de pantalla.
 QPolygonF FeatureLayer::screenPolygonOf(const QVector<QGeoCoordinate> &pts) const
 {
@@ -163,6 +213,7 @@ void FeatureLayer::draw(QCPPainter *painter)
 
     const MapView *vista = qobject_cast<MapView *>(plot);
     const int zoomActual = vista ? vista->zoom() : -1;
+    const QRectF visible = visibleAxisRect();     // recorte por viewport
 
     // Las capas se recorren en orden de zOrder: la ultima queda encima.
     for (const LayerInfo &capa : m_model->layers()) {
@@ -173,6 +224,8 @@ void FeatureLayer::draw(QCPPainter *painter)
         for (const MapFeature &f : m_model->featuresInLayer(capa.id)) {
             if (!f.visible)
                 continue;
+            if (!featureInView(f, visible))
+                continue;           // fuera de pantalla: ni se proyecta
             drawFeature(&p, f, f.id == m_model->selectedId());
             ++m_lastDrawn;
         }
@@ -418,6 +471,7 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
 
     const MapView *vista = qobject_cast<MapView *>(parentPlot());
     const int zoomActual = vista ? vista->zoom() : -1;
+    const QRectF vista_ = visibleAxisRect();      // recorte por viewport
 
     // Se recorre de la capa mas alta a la mas baja: lo que se ve encima es lo
     // que se selecciona.
@@ -431,6 +485,8 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
         for (const MapFeature &f : m_model->featuresInLayer(capas[i].id)) {
             if (!f.visible || !f.selectable)
                 continue;
+            if (!featureInView(f, vista_))
+                continue;               // fuera de pantalla: no hace falta probar
 
             double d = std::numeric_limits<double>::max();
 

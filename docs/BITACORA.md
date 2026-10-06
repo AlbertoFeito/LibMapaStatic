@@ -3980,3 +3980,20 @@ visibles**. Las curvas son **detalle**: deben salir solo al acercar.
 - Test `tst_mapwidget::loadsFeaturesDbAsFixedLayer` ampliado (guarda min/max en la `LayerInfo`).
 
 Compila sin warnings, **19 tests** en verde. README, BITÁCORA, `arquitectura.html` y PDF al día.
+
+## 90. Recorte por viewport en `FeatureLayer` (pan fluido con muchas entidades)
+
+Con las 10 094 curvas cargadas, mover el mapa iba algo lento: `FeatureLayer` reproyectaba y
+dibujaba **todas** las entidades en cada refresco, aunque a z11+ solo caben unas pocas.
+
+- **`FeatureLayer::featureInView(f, rectEjes)`**: antes de dibujar (y antes de consultar en
+  `featureAt`), se descarta la entidad cuya caja envolvente **no toca** el rectángulo visible,
+  trabajando en **coordenadas de eje** (sin `coordToPixel` ni construir el trazado). Camino
+  rápido: si un vértice cae dentro, se dibuja ya; si no, se compara la caja.
+- **Solape AABB a mano** (no `QRectF::intersects`): una línea perfectamente horizontal/vertical
+  tiene caja degenerada (alto/ancho 0) y `QRectF::intersects` la daría por **no** solapada,
+  recortándola mal aunque cruce la vista. El test `viewportCullKeepsCrossingFeatures` (una línea
+  con los extremos fuera de pantalla que pasa por el centro) cazó justo ese caso.
+- No cambia el API público (método privado del layer). 19 tests en verde (uno nuevo).
+
+Resultado: el *pan* vuelve a ir fluido; solo se proyecta y pinta lo que se ve.

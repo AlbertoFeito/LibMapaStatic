@@ -99,6 +99,12 @@ private:
     QPolygonF screenPolygon(const MapFeature &f) const;
     QPolygonF screenPolygonOf(const QVector<QGeoCoordinate> &pts) const;
 
+    //! ¿La entidad cae (toca) el rectangulo visible, en coordenadas de EJE?
+    //! Recorte barato (sin proyectar a pixeles): salta las fuera de pantalla.
+    bool featureInView(const MapFeature &f, const QRectF &axisRect) const;
+    //! Rectangulo visible actual en coordenadas de eje, con un margen relativo.
+    QRectF visibleAxisRect(double marginFrac = 0.08) const;
+
     //! Distancia de un punto a un segmento, en pixeles.
     static double distanceToSegment(const QPointF &p, const QPointF &a,
                                     const QPointF &b);
