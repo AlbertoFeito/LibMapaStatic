@@ -192,6 +192,11 @@ public:
     //! vista general. En el paquete se declara con "minZoom"/"maxZoom" del overlay.
     bool setFeatureLayerZoomRange(const QString &id, int minZoom, int maxZoom);
 
+    //! Marca una capa como TEMPORAL: se excluye del guardado (\a saveFeaturesTo),
+    //! como las capas fijas del paquete. Para resultados de análisis o marcadores
+    //! auxiliares que no deben persistir. \a transient=false la vuelve guardable.
+    void setFeatureLayerTransient(const QString &id, bool transient = true);
+
     // --- Entidades -------------------------------------------------------
     //! Devuelve el identificador asignado, o -1 si la geometria no es valida.
     qint64 addFeature(const MapFeature &feature);

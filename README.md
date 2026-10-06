@@ -505,7 +505,9 @@ dem_to_contours --in <carpeta_hgt | dem.sqlitedb> --out <curvas.sqlitedb>
 
 demo         [carpeta_paquete | mapa.json | datasets.json]
              [--dem <carpeta>] [--dem-db <db>] [--features <db>]
-             (app de ejemplo: capas, dibujo, cobertura, cota, elevación, persistencia)
+             (app de ejemplo: capas, dibujo, cobertura, cota, elevación, persistencia;
+              tooltips, clic en la lista → centra/resalta, pines A/B arrastrables,
+              análisis de elevación temporal -no se guarda-)
 ```
 
 ## Estructura

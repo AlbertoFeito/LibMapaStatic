@@ -552,6 +552,40 @@ private:
         connect(m_arbol, &QTreeWidget::itemChanged, this, &Ventana::visibilidadCambiada);
         connect(m_arbol, &QTreeWidget::currentItemChanged, this,
                 &Ventana::seleccionEnArbol);
+        // Clic en una entidad de la lista: centra el mapa en ella (y la resalta,
+        // que ya lo hace la selección). Se usa itemClicked (acción del usuario),
+        // no currentItemChanged, para no centrar al reconstruir el árbol.
+        connect(m_arbol, &QTreeWidget::itemClicked, this,
+                [this](QTreeWidgetItem *it, int) { centrarEnItem(it); });
+        connect(m_arbol, &QTreeWidget::itemActivated, this,
+                [this](QTreeWidgetItem *it, int) { centrarEnItem(it); });
+    }
+
+    // Centroide (lat/lon medios) de una entidad; para un punto, su posición.
+    static QGeoCoordinate centroideDe(const MapFeature &f)
+    {
+        double sLa = 0, sLo = 0; int n = 0;
+        for (const QVector<QGeoCoordinate> &parte : f.outlines())
+            for (const QGeoCoordinate &c : parte)
+                if (c.isValid()) { sLa += c.latitude(); sLo += c.longitude(); ++n; }
+        return n ? QGeoCoordinate(sLa / n, sLo / n) : QGeoCoordinate();
+    }
+
+    // Centra el mapa en la entidad de una hoja del árbol y la deja seleccionada.
+    void centrarEnItem(QTreeWidgetItem *item)
+    {
+        if (!item || !m_mapa)
+            return;
+        const qint64 id = item->data(0, RolEntidad).toLongLong();
+        if (id <= 0)
+            return;
+        if (const auto f = m_mapa->feature(id)) {
+            const QGeoCoordinate c = centroideDe(*f);
+            if (c.isValid())
+                m_mapa->setCenter(c);
+            if (m_mapa->selectedFeature() != id)
+                m_mapa->selectFeature(id);
+        }
     }
 
     // ==================================================== senales =========
@@ -750,7 +784,16 @@ private:
         actualizarInfoPuntos();
         connect(m_mapa, &MapWidget::pointPicked, this,
                 [this](const QGeoCoordinate &p) { onPointPicked(p); });
-        m_mapa->installEventFilter(this);   // hover sobre los picos (cambia de color)
+        // El filtro va sobre la MapView (el QCustomPlot interno) para interceptar
+        // el clic ANTES de que lo use para desplazar: así se arrastran los pines.
+        m_plotObj = m_mapa->customPlot();
+        if (m_plotObj)
+            m_plotObj->installEventFilter(this);
+
+        // Las capas de análisis y los pines A/B son TEMPORALES: viven solo
+        // durante la sesión y NO se guardan con las entidades del usuario.
+        for (const QString &id : {kCapaPuntos, kCapaVision, kCapaViewshed, kCapaPicos})
+            m_mapa->setFeatureLayerTransient(id);
 
         m_marComo0 = new QCheckBox(tr("Mar / sin dato = 0 m"), tab);
         m_marComo0->setChecked(true);
@@ -1176,33 +1219,86 @@ private:
 
     // Filtro de eventos del mapa: al mover el ratón, resalta el pico que haya bajo
     // el cursor (si hay picos dibujados).
+    // Texto de tooltip de una entidad: nombre, tipo y cota si los trae.
+    static QString tooltipDe(const MapFeature &f)
+    {
+        QStringList lin;
+        if (!f.name.isEmpty())
+            lin << QStringLiteral("<b>") + f.name.toHtmlEscaped() + QStringLiteral("</b>");
+        const QVariant cota = f.attributes.value(QStringLiteral("cota"));
+        if (cota.isValid())
+            lin << QString::number(qRound(cota.toDouble())) + QStringLiteral(" m");
+        if (!f.type.isEmpty())
+            lin << QStringLiteral("<span style='color:gray'>") + f.type.toHtmlEscaped()
+                       + QStringLiteral("</span>");
+        return lin.join(QStringLiteral("<br>"));
+    }
+
+    // Intercepta el ratón sobre la MapView: tooltip de la entidad bajo el cursor
+    // (TODA entidad, no solo curvas), resalte de picos por hover, y ARRASTRE de
+    // los pines A/B (su punta sigue al cursor sobre el terreno).
     bool eventFilter(QObject *obj, QEvent *ev) override
     {
-        if (obj == m_mapa && ev->type() == QEvent::MouseMove) {
+        if (obj != m_plotObj)
+            return QMainWindow::eventFilter(obj, ev);
+
+        const QEvent::Type t = ev->type();
+
+        // --- arrastre de un pin A/B ---
+        if (t == QEvent::MouseButtonPress) {
+            auto *me = static_cast<QMouseEvent *>(ev);
+            if (me->button() == Qt::LeftButton && m_picking == Pick::Ninguno) {
+                const qint64 id = m_mapa->featureAt(me->pos(), 8.0);
+                if (id >= 0) {
+                    if (const auto f = m_mapa->feature(id);
+                        f && f->type == QStringLiteral("punto_ab")) {
+                        m_dragPick = (f->name == tr("B")) ? Pick::B : Pick::A;
+                        return true;            // no desplazar el mapa: arrastramos
+                    }
+                }
+            }
+        } else if (t == QEvent::MouseMove && m_dragPick != Pick::Ninguno) {
+            auto *me = static_cast<QMouseEvent *>(ev);
+            moverPinA(m_dragPick, me->pos());
+            return true;
+        } else if (t == QEvent::MouseButtonRelease && m_dragPick != Pick::Ninguno) {
+            m_dragPick = Pick::Ninguno;
+            reejecutar();                        // recalcula el análisis con el punto movido
+            return true;
+        }
+
+        // --- hover: resalte de picos + tooltip de cualquier entidad ---
+        if (t == QEvent::MouseMove) {
             auto *me = static_cast<QMouseEvent *>(ev);
             const qint64 id = m_mapa->featureAt(me->pos(), 8.0);
             if (!m_picoIds.isEmpty())
                 resaltarPico(id);
-            // Tooltip con la cota si la entidad bajo el cursor la trae (p. ej.
-            // una curva de nivel): así se lee la altura de cualquier curva, no
-            // solo de las etiquetadas.
-            bool mostrado = false;
-            if (id >= 0) {
-                if (const auto f = m_mapa->feature(id)) {
-                    const QVariant cota = f->attributes.value(QStringLiteral("cota"));
-                    if (cota.isValid()) {
-                        QToolTip::showText(me->globalPosition().toPoint(),
-                                           QString::number(qRound(cota.toDouble()))
-                                               + QStringLiteral(" m"),
-                                           m_mapa);
-                        mostrado = true;
-                    }
-                }
-            }
-            if (!mostrado)
+            QString tip;
+            if (id >= 0)
+                if (const auto f = m_mapa->feature(id))
+                    tip = tooltipDe(*f);
+            if (!tip.isEmpty())
+                QToolTip::showText(me->globalPosition().toPoint(), tip, m_mapa);
+            else
                 QToolTip::hideText();
         }
         return QMainWindow::eventFilter(obj, ev);
+    }
+
+    // Mueve el pin A o B a la coordenada bajo el píxel dado (arrastre): vuelca la
+    // posición en sus campos lat/lon, que redibujan el pin y la lectura al vuelo.
+    void moverPinA(Pick cual, const QPoint &pixel)
+    {
+        auto *v = m_mapa ? qobject_cast<QCustomPlot *>(m_mapa->customPlot()) : nullptr;
+        if (!v) return;
+        const QPointF axis(v->xAxis->pixelToCoord(pixel.x()),
+                           v->yAxis->pixelToCoord(pixel.y()));
+        const QGeoCoordinate g = m_mapa->fromAxisCoords(axis);
+        if (!g.isValid()) return;
+        QDoubleSpinBox *lat = (cual == Pick::A) ? m_latA : m_latB;
+        QDoubleSpinBox *lon = (cual == Pick::A) ? m_lonA : m_lonB;
+        lat->setValue(g.latitude());
+        lon->setValue(g.longitude());         // dispara actualizarInfoPuntos()->marcarPuntosActivos()
     }
 
     // Arranca la captura de un punto (A o B) con el siguiente clic en el mapa.
@@ -1305,9 +1401,10 @@ private:
             f.name = txt;
             f.geometry = { p };
             f.style.icon = pinPixmap(c);
+            f.style.iconAnchor = QPointF(0.5, 31.0 / 32.0);  // la PUNTA marca el punto
             f.style.labelVisible = true;
             f.style.labelColor = c;
-            f.selectable = false;
+            f.selectable = true;        // arrastrable (ver eventFilter de arrastre)
             m_mapa->addFeature(f);
         };
         pin(puntoA(), m_colorA, tr("A"));
@@ -2426,6 +2523,8 @@ private:
     QDoubleSpinBox *m_altB = nullptr;       //!< antena B / altura del objetivo
     QDoubleSpinBox *m_alcanceKm = nullptr;  //!< alcance del viewshed / perfil
     Pick m_picking = Pick::Ninguno;
+    Pick m_dragPick = Pick::Ninguno;        //!< pin A/B que se está arrastrando
+    QObject *m_plotObj = nullptr;           //!< la MapView, objetivo del eventFilter
     QLabel *m_infoPuntos = nullptr;         //!< cota A/B, rumbo y distancia A→B
     QCheckBox *m_marComo0 = nullptr;        //!< tratar mar/sin dato como 0 m
     QCheckBox *m_curvatura = nullptr;       //!< aplicar curvatura 4/3

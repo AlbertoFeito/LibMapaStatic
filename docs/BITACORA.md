@@ -4015,3 +4015,28 @@ repetidos. Mejor: etiquetar solo las **cimas**, espaciadas, y leer el resto al v
   etiquetadas. Reutiliza `MapWidget::featureAt`/`feature`; sin cambios de API.
 
 19 tests en verde (la librería no cambia). README y BITÁCORA al día; sin regenerar PDF.
+
+## 92. Interacción del demo: tooltips, lista↔mapa, análisis temporal, pines arrastrables y con punta
+
+Bloque de usabilidad pedido antes de cerrar la fase. Toca la librería (aditivo) y el `demo`.
+
+- **Icono anclado por un punto (`FeatureStyle::iconAnchor`, normalizado).** `(0.5,0.5)` = centro
+  (por defecto); `(0.5,1.0)` = pie-centro. `FeatureLayer` dibuja el pixmap respecto a ese ancla
+  (respetando la dpr) y el **hit-test de un punto con icono** usa TODO el rectángulo del pixmap
+  anclado (no solo la punta), para poder **agarrar** el pin. Los pines A/B del demo usan
+  `(0.5, 31/32)`: su **punta** marca el lugar exacto. Test `iconAnchorHitTestCoversPin`.
+- **Capa temporal (`MapWidget::setFeatureLayerTransient`).** Marca una capa para **excluirla del
+  guardado** (como las fijas del paquete). El demo marca las de análisis (`elev_*`) y los pines
+  A/B: son **temporales**, no se guardan ni reaparecen. Test `persistSkipsTransientLayers`.
+- **Tooltip de cualquier entidad (demo).** Al pasar el ratón, `featureAt`+`feature` arman un
+  tooltip con **nombre, cota y tipo** de la entidad bajo el cursor (no solo curvas).
+- **Lista ↔ mapa (demo).** Clic en una entidad del árbol → `centrarEnItem` centra el mapa en su
+  centroide y la **selecciona/resalta** (la selección ya la hacía `seleccionEnArbol`).
+- **Pines A/B arrastrables (demo).** El `eventFilter` se instala sobre la `MapView` para
+  interceptar el clic antes del desplazamiento: al presionar sobre un pin `punto_ab` se arrastra;
+  el `MouseMove` vuelca la coordenada bajo el cursor (`xAxis/yAxis->pixelToCoord` +
+  `fromAxisCoords`) en los campos del punto (que redibujan el pin y la lectura); al soltar,
+  re-ejecuta el análisis.
+
+Compila sin warnings, **19 tests** en verde (dos nuevos en `tst_mapwidget`). README, BITÁCORA,
+`arquitectura.html` y PDF al día. API pública ampliada (`iconAnchor`, `setFeatureLayerTransient`).

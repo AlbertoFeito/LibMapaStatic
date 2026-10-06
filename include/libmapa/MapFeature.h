@@ -5,6 +5,7 @@
 #include <QGeoCoordinate>
 #include <QMetaType>
 #include <QPixmap>
+#include <QPointF>
 #include <QString>
 #include <QVariantMap>
 #include <QVector>
@@ -41,6 +42,11 @@ struct FeatureStyle
 
     //! Vacio = circulo del color de linea.
     QPixmap icon;
+
+    //! Punto de anclaje del icono, NORMALIZADO [0,1] dentro del pixmap: dice qué
+    //! punto de la imagen cae sobre la coordenada. (0.5,0.5) = centro (por
+    //! defecto); (0.5,1.0) = pie-centro, para un pin cuya PUNTA marca el lugar.
+    QPointF iconAnchor = QPointF(0.5, 0.5);
 
     //! Radio del simbolo en PIXELES: no se deforma con el zoom ni con la
     //! latitud, a diferencia de dibujarlo en grados.

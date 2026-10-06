@@ -551,6 +551,17 @@ bool MapWidget::setFeatureLayerZoomRange(const QString &id, int minZoom, int max
                    : false;
 }
 
+// Marca (o desmarca) una capa como TEMPORAL: sus entidades y la propia capa se
+// EXCLUYEN del guardado (saveFeaturesTo), igual que las capas fijas del paquete.
+// Útil para resultados de análisis o pines auxiliares que no deben persistir.
+void MapWidget::setFeatureLayerTransient(const QString &id, bool transient)
+{
+    if (transient)
+        d->fixedLayers.insert(id);
+    else
+        d->fixedLayers.remove(id);
+}
+
 // Anade una entidad; devuelve su id (o -1).
 qint64 MapWidget::addFeature(const MapFeature &feature)
 {

@@ -292,15 +292,31 @@ void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f,
     const double r = f.style.pointRadiusPx;
 
     if (!f.style.icon.isNull()) {
-        const QSize s = f.style.icon.size();
-        painter->drawPixmap(QPointF(pos.x() - s.width() / 2.0,
-                                    pos.y() - s.height() / 2.0),
-                            f.style.icon);
-    } else {
-        painter->setPen(QPen(f.style.lineColor, f.style.lineWidth));
-        painter->setBrush(QBrush(f.style.fillColor));
-        painter->drawEllipse(pos, r, r);
+        // El icono se ancla por 'iconAnchor' (normalizado): asi un pin cuya
+        // PUNTA sea (0.5,1.0) queda con la punta justo sobre la coordenada, y la
+        // dpr del pixmap se respeta (dibujar en tamano logico, no en pixeles).
+        const double dpr = f.style.icon.devicePixelRatio();
+        const double w = f.style.icon.width() / (dpr > 0 ? dpr : 1.0);
+        const double h = f.style.icon.height() / (dpr > 0 ? dpr : 1.0);
+        const QPointF tl(pos.x() - f.style.iconAnchor.x() * w,
+                         pos.y() - f.style.iconAnchor.y() * h);
+        painter->drawPixmap(tl, f.style.icon);
+
+        if (selected) {
+            // Resalte alrededor del icono (en pixeles): recuadro redondeado.
+            painter->setBrush(Qt::NoBrush);
+            const QRectF caja = QRectF(tl, QSizeF(w, h)).adjusted(-3, -3, 3, 3);
+            painter->setPen(QPen(Qt::white, 3, Qt::SolidLine));
+            painter->drawRoundedRect(caja, 4, 4);
+            painter->setPen(QPen(Qt::black, 1, Qt::DashLine));
+            painter->drawRoundedRect(caja, 4, 4);
+        }
+        return;
     }
+
+    painter->setPen(QPen(f.style.lineColor, f.style.lineWidth));
+    painter->setBrush(QBrush(f.style.fillColor));
+    painter->drawEllipse(pos, r, r);
 
     if (selected) {
         // El resalte va en PIXELES alrededor del simbolo, no en grados: si se
@@ -497,9 +513,23 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
                     if (parte.isEmpty())
                         continue;
                     const QPointF c = screenPos(parte.first());
-                    d = qMin(d, qMax(0.0, std::hypot(p.x() - c.x(),
-                                                     p.y() - c.y())
-                                          - f.style.pointRadiusPx));
+                    if (!f.style.icon.isNull()) {
+                        // Con icono, el area sensible es TODO el pixmap (anclado),
+                        // no solo la punta: asi se puede agarrar el pin entero.
+                        const double dpr = f.style.icon.devicePixelRatio();
+                        const double w = f.style.icon.width() / (dpr > 0 ? dpr : 1.0);
+                        const double h = f.style.icon.height() / (dpr > 0 ? dpr : 1.0);
+                        const QRectF caja(QPointF(c.x() - f.style.iconAnchor.x() * w,
+                                                  c.y() - f.style.iconAnchor.y() * h),
+                                          QSizeF(w, h));
+                        const double dx = qMax(qMax(caja.left() - p.x(), 0.0), p.x() - caja.right());
+                        const double dy = qMax(qMax(caja.top() - p.y(), 0.0), p.y() - caja.bottom());
+                        d = qMin(d, std::hypot(dx, dy));
+                    } else {
+                        d = qMin(d, qMax(0.0, std::hypot(p.x() - c.x(),
+                                                         p.y() - c.y())
+                                              - f.style.pointRadiusPx));
+                    }
                     continue;
                 }
                 const QPolygonF poly = screenPolygonOf(parte);
