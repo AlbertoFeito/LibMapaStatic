@@ -134,6 +134,7 @@ add_library(libmapa_core STATIC
     src/dem/SqliteElevation.h
     src/dem/ElevationAnalysis.cpp
     src/dem/ElevationAnalysis.h
+    src/dem/Contours.cpp
 )
 
 target_include_directories(libmapa_core
@@ -260,6 +261,12 @@ if(LIBMAPA_BUILD_TOOLS)
     target_link_libraries(dem_to_hillshade PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Gui)
     target_include_directories(dem_to_hillshade PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+    # Genera curvas de nivel (isohipsas) del DEM y las guarda como capa vectorial
+    # (.sqlitedb de entidades) para activar/desactivar y leer la cota. Solo core.
+    add_executable(dem_to_contours tools/dem_to_contours/main.cpp)
+    target_link_libraries(dem_to_contours PRIVATE libmapa_core)
+    target_include_directories(dem_to_contours PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
     # Rellena huecos de una BD de teselas descargando de una fuente XYZ sin
     # clave (Esri satelite por defecto). El motor (TileFiller) es comun a la
     # version de consola y a la de ventana con mapa. Necesita el modulo Network.
@@ -350,6 +357,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_hgtelevation)
     libmapa_add_test(tst_sqliteelevation)
     libmapa_add_test(tst_elevationanalysis)
+    libmapa_add_test(tst_contours)
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 
@@ -466,7 +474,8 @@ if(LIBMAPA_INSTALL)
 
     # Herramientas de consola que existan en esta configuracion.
     foreach(_libmapa_tool check_data probe_db render_map dem_to_db fill_hgt
-                          fill_tiles fill_map geo_to_tiles bench_tiles dem_to_hillshade)
+                          fill_tiles fill_map geo_to_tiles bench_tiles dem_to_hillshade
+                          dem_to_contours)
         if(TARGET ${_libmapa_tool})
             install(TARGETS ${_libmapa_tool} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
         endif()

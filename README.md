@@ -12,7 +12,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 18 tests (15 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 19 tests (16 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir
@@ -490,6 +490,14 @@ dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
               --water-level m: con --colored, cota <= m se pinta como agua; sube a
               ~8-12 para que bahías/lagunas rellenas con cota baja salgan con agua)
 
+dem_to_contours --in <carpeta_hgt | dem.sqlitedb> --out <curvas.sqlitedb>
+             (--cuba | --bbox latN,lonO,latS,lonE)
+             [--interval 100] [--index 500] [--step 150] [--min-length 500]
+             [--layer curvas --name "…"] [--overwrite]
+             (genera curvas de nivel -isohipsas- como CAPA VECTORIAL de entidades;
+              índice cada N m más gruesas y con la cota como etiqueta. Cárgalo como
+              capa de entidades: se activa/desactiva y da la cota al seleccionar)
+
 demo         [carpeta_paquete | mapa.json | datasets.json]
              [--dem <carpeta>] [--dem-db <db>] [--features <db>]
              (app de ejemplo: capas, dibujo, cobertura, cota, elevación, persistencia)
@@ -508,7 +516,7 @@ src/
   io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               18 tests (15 sin QCustomPlot)
+tests/               19 tests (16 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)

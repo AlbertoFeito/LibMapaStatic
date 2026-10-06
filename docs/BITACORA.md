@@ -3885,3 +3885,37 @@ oliváceas) y (2) que la **Bahía de la Habana se vea con agua** (salía verde c
 
 Solo cambia la herramienta; librería y API intactos, compila sin warnings y **18 tests** en
 verde. README y BITÁCORA al día; sin cambios de API → no se regenera el PDF.
+
+## 87. Curvas de nivel (isohipsas): núcleo `computeContours` + `dem_to_contours`
+
+Siguiente capacidad de trabajo con alturas: **curvas de nivel** como **capa vectorial** (se
+activa/desactiva, nítida a cualquier zoom, con lectura de cota al seleccionar), en vez de
+raster. Se hace en el núcleo (testeable y reutilizable) + herramienta, como el análisis de
+elevación.
+
+- **Núcleo `src/dem/Contours.{h,cpp}`** (cabecera pública `include/libmapa/Contours.h`):
+  `computeContours(src, params)` por **marching squares** sobre una rejilla muestreada del DEM.
+  Por cada celda y cada nivel que la cruza (cota = `base + k·interval`) emite 1–2 segmentos
+  (con los dos cruces saddle resueltos) y luego **encadena** los segmentos de cada nivel en
+  polilíneas: el grafo usa como nodo la **clave exacta de la arista** de rejilla donde cae el
+  cruce, así dos segmentos que comparten cruce se unen sin tolerancias de coma flotante (salen
+  cadenas abiertas y bucles cerrados). **Streaming por filas**: solo dos filas de nodos en
+  memoria a la vez (una rejilla de país entero no cabría). `ContourParams{bbox, interval, base,
+  stepMeters, minLengthMeters}`; `ContourLine{elevation, points}`. Celdas con algún vértice sin
+  dato (NaN) se saltan.
+- **Herramienta `tools/dem_to_contours`**: abre el DEM, calcula y vuelca cada curva como
+  entidad **polilínea** (`VectorRepository`, mismo esquema `entidad`/`entidad_vertice` que lee
+  la app) en una capa; `atributos.cota` lleva la altura. Las **curvas índice** (múltiplos de
+  `--index`, p. ej. 500 m) salen más gruesas, con color más oscuro y **etiqueta** de cota.
+  Args: `--in --out (--cuba|--bbox) [--interval 100] [--index 500] [--step 150]
+  [--min-length 500] [--layer curvas] [--overwrite]`.
+- **Test `tst_contours`** (18→**19**): DEM sintéticos — **cono** (anillos cerrados concéntricos
+  de radio `R·(1−L/H)`, decreciente con la cota), **plano** (ninguna curva) y **rampa** (niveles
+  esperados, curvas casi verticales).
+- **Build:** `Contours.cpp` a `libmapa_core` (CMake + `core.pro`); target `dem_to_contours`
+  (+ install). La cabecera pública se instala por el glob de `include/`.
+
+Validado end-to-end: curvas reales de la Sierra Maestra (intervalo 100 m, índice 500 m
+etiquetado) con **curvas batimétricas** azules en el mar (el SRTM de AWS Skadi trae batimetría).
+Compila sin warnings, **19 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
+**API pública nueva → se regenera el PDF**.
