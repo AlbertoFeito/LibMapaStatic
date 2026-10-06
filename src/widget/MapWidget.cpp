@@ -1277,10 +1277,21 @@ void MapWidget::refreshHillshade()
     const double latN = nw.latitude(),  latS = se.latitude();
     if (!(lonE > lonW) || !(latN > latS)) { capa->clear(); return; }
 
+    // FRENO por area: el coste del hillshade lo domina cargar teselas del DEM, que
+    // crece con el area de la vista. A escala de pais (p. ej. Cuba entera) serian
+    // demasiadas teselas y la GUI se congelaria. Por encima de un ancho/alto se deja
+    // la capa en blanco: el relieve es util al acercar, no a vista general.
+    const double kMaxSpanDeg = 2.0;    // ~220 km; a partir de aqui no se calcula
+    if ((lonE - lonW) > kMaxSpanDeg || (latN - latS) > kMaxSpanDeg) {
+        capa->clear();
+        d->view->replot(QCustomPlot::rpQueuedReplot);
+        return;
+    }
+
     // Resolucion de salida: se limita el lado mayor para acotar el coste.
     const int anchoPx = qMax(16, d->view->width() > 1 ? d->view->width() : 640);
     const int altoPx  = qMax(16, d->view->height() > 1 ? d->view->height() : 480);
-    const int maxDim = 420;
+    const int maxDim = 360;
     int W = qMin(anchoPx, 4000);
     int H = qMin(altoPx, 4000);
     const double esc = double(maxDim) / double(qMax(W, H));

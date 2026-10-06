@@ -406,7 +406,10 @@ terreno según un **sol virtual** (azimut/altura), con **exageración** vertical
 recalcula sola al desplazar/hacer zoom. API: `setHillshadeVisible`, `setHillshadeSun`,
 `setHillshadeOpacity`, `setHillshadeExaggeration`, `setHillshadeColored` (la capa va encima
 de las teselas y debajo de las entidades). El `demo` lo expone en la pestaña «Elevación»
-con un grupo **«Relieve sombreado»** (sol, intensidad, exageración, tintar por altura).
+con un grupo **«Relieve sombreado»** (sol, intensidad, exageración, tintar por altura). A
+**vista muy general** (ancho/alto > ~2°, p. ej. el país entero) **no se dibuja** —serían
+demasiadas teselas del DEM y frenaría la interfaz—: es una capa de detalle, se ve al
+acercar (para relieve a escala de país, lo suyo serían tiles de hillshade horneados).
 
 **Mar, curvatura y batimetría.** El lector del DEM deja pasar **cualquier cota negativa**
 tal cual (solo `−32768` es hueco → NaN); un dataset con **batimetría** (p. ej. el talud al

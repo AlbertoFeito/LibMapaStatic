@@ -3734,3 +3734,21 @@ y el demo (controles).
 
 Compila sin warnings; **18 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
 **API pública nueva → se regenera el PDF**.
+
+## 81. Pines automáticos al seleccionar punto; freno del hillshade por área
+
+Dos ajustes tras probar (solo `demo` salvo el freno, que va en `MapWidget`).
+
+- **El pin aparece al seleccionar/escribir el punto.** Antes los pines A/B solo se
+  dibujaban al lanzar un análisis. Ahora `marcarPuntosAB()` dibuja SIEMPRE A (azul) y B
+  (rojo) y se llama desde `actualizarInfoPuntos()` (que ya se dispara al pinchar «Mapa» o
+  editar lat/lon), así el icono sigue a los puntos sin necesidad de analizar.
+- **Hillshade: freno por área (no congelar a vista general).** El coste del hillshade lo
+  domina cargar teselas del DEM, que crece con el área de la vista; con Cuba entera (z9) la
+  GUI se quedaba «sin responder». `refreshHillshade` ahora **no calcula** si la vista abarca
+  más de ~2° de ancho o alto (deja la capa en blanco): es una capa de detalle, se ve al
+  acercar. Se baja también el lado máx. de la imagen a 360 px. (Para relieve a escala de
+  país, el camino serían tiles de hillshade horneados, offline, en el paquete.)
+
+Compila sin warnings; **18 tests** en verde. README y BITÁCORA al día; sin cambios de firma
+de API, no se regenera el PDF.

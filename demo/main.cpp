@@ -835,7 +835,8 @@ private:
         caja->addWidget(grupoHs);
 
         grupoHs->setToolTip(tr("Sombreado del terreno calculado en vivo del DEM local (sin conexión). "
-                               "Se recalcula al mover la vista."));
+                               "Se recalcula al mover la vista. A vista muy general (p. ej. Cuba "
+                               "entera) no se dibuja: acércate para verlo."));
         m_mapa->setHillshadeSun(az->value(), alt->value());
         m_mapa->setHillshadeOpacity(inten->value() / 100.0);
         m_mapa->setHillshadeExaggeration(exag->value());
@@ -1246,12 +1247,14 @@ private:
                "A→B: <b>%5 km</b> · rumbo <b>%6°</b>")
                 .arg(m_colorA.name(), cota(a), m_colorB.name(), cota(b))
                 .arg(d / 1000.0, 0, 'f', 2).arg(az, 0, 'f', 0));
+        marcarPuntosAB();   // los pines siguen a los puntos (al pinchar o escribir)
     }
 
-    // Dibuja los pines fijos de A (azul) y, si \a conB, de B (rojo) sobre el mapa,
-    // para que se vean los puntos del análisis mientras dure.
-    void marcarPuntosAB(bool conB)
+    // Dibuja los pines fijos de A (azul) y B (rojo) sobre el mapa, para que el punto
+    // seleccionado se vea SIEMPRE (no solo durante un análisis).
+    void marcarPuntosAB()
     {
+        if (!m_mapa) return;
         prepararCapa(kCapaPuntos, tr("Puntos A/B"), 60);
         auto pin = [this](const QGeoCoordinate &p, const QColor &c, const QString &txt) {
             if (!p.isValid()) return;
@@ -1268,7 +1271,7 @@ private:
             m_mapa->addFeature(f);
         };
         pin(puntoA(), m_colorA, tr("A"));
-        if (conB) pin(puntoB(), m_colorB, tr("B"));
+        pin(puntoB(), m_colorB, tr("B"));
     }
 
     // (Re)crea vacía una capa donde volcar un resultado de análisis.
@@ -1303,7 +1306,7 @@ private:
             statusBar()->showMessage(tr("Punto A no válido (fíjalo en el mapa o escríbelo)."), 5000);
             return;
         }
-        marcarPuntosAB(false);              // pin azul fijo en A
+        marcarPuntosAB();              // pin azul fijo en A
         const double alcanceM = m_alcanceKm->value() * 1000.0;
         const QGeoCoordinate fin = a.atDistanceAndAzimuth(alcanceM, m_rumbo->value());
         // El perfil se DIBUJA con la cota cruda (muestra la batimetría en azul); el
@@ -1338,7 +1341,7 @@ private:
                 tr("Fija los puntos A y B (distintos) en el mapa o escríbelos."), 5000);
             return;
         }
-        marcarPuntosAB(true);               // pines fijos azul (A) y rojo (B)
+        marcarPuntosAB();               // pines fijos azul (A) y rojo (B)
         LineOfSightParams lp;
         lp.voidElevation = voidElev();
         lp.curvature = curvaturaOn();
@@ -1484,7 +1487,7 @@ private:
             statusBar()->showMessage(tr("Punto (A) no válido (fíjalo en el mapa o escríbelo)."), 5000);
             return;
         }
-        marcarPuntosAB(false);              // pin azul fijo en A (observador)
+        marcarPuntosAB();              // pin azul fijo en A (observador)
 
         ViewshedParams vp;
         vp.observerHeight = m_altA->value();
@@ -1614,7 +1617,7 @@ private:
             return;
         }
         m_ultimo = Analisis::Picos;
-        marcarPuntosAB(false);              // pin azul fijo en A (centro)
+        marcarPuntosAB();              // pin azul fijo en A (centro)
         m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
 
         const double R = m_picosRadioKm->value() * 1000.0;
