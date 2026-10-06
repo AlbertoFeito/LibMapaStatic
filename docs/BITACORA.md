@@ -3862,3 +3862,26 @@ y con un DEM **sintético** con gradiente tierra→mar profundo que recorre toda
 costa → azul claro → azul profundo), confirmando la batimetría. Solo cambia la herramienta;
 librería y API intactos, compila sin warnings y **18 tests** en verde. README y BITÁCORA al
 día; sin cambios de API → no se regenera el PDF.
+
+## 86. dem_to_hillshade: más verde en llanuras y `--water-level` (bahías con agua)
+
+Probando `--colored` sobre Cuba, el usuario pidió (1) **más verde en las llanuras** (salían
+oliváceas) y (2) que la **Bahía de la Habana se vea con agua** (salía verde como tierra).
+
+- **Diagnóstico de la bahía.** Muestreando el SRTM: la bahía da **~8–12 m** (positivo: el DEM
+  la rellena como tierra baja, no la excava) y su textura/pendiente es **igual** que la de la
+  tierra (la planitud NO la distingue). Pero hay ventana de cota útil: bahía ~10 m frente a las
+  llanuras de alrededor ~48 m.
+- **`--water-level <m>` (nuevo, solo con `--colored`, defecto 0).** Toda cota `≤ m` se pinta
+  como **agua** (rampa azul; las positivas bajas salen azul claro de orilla). Con `0` solo el
+  mar real (`<0`) es agua; subiendo a **~8–12** entran las bahías/lagunas que el DEM rellenó con
+  cota baja positiva, **sin** inundar las llanuras (>15 m siguen verdes). Comparado 0/8/15 en la
+  Bahía de la Habana: **8** es el equilibrio (bahía con agua, llanuras verdes); 15 ya salpica de
+  azul los valles costeros.
+- **Rampa de tierra más verde.** Se rebaja el amarilleo: verde sostenido hasta ~400 m
+  (0:(120,170,95) → 150:(150,185,110) → 400:(180,200,120)) y solo después amarillo-tierra
+  (800), tostado (1200), marrón (1600) y cumbres claras (2000). Las llanuras bajas quedan
+  claramente verdes.
+
+Solo cambia la herramienta; librería y API intactos, compila sin warnings y **18 tests** en
+verde. README y BITÁCORA al día; sin cambios de API → no se regenera el PDF.

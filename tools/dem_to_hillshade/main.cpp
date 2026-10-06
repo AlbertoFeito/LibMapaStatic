@@ -17,6 +17,9 @@
  *                    [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]
  *                    [--sea-level 0]   (cotas <= ese valor -> transparente)
  *                    [--colored]       (tinte por altura + batimetría, no gris)
+ *                    [--water-level 0] (con --colored: cota <= ese valor -> agua azul;
+ *                                       sube a ~15 para que bahías/lagunas que el DEM
+ *                                       rellena con cota baja positiva salgan con agua)
  *                    [--id relieve --name "Relieve"] [--overwrite]
  *
  * En un servidor sin pantalla: QT_QPA_PLATFORM=offscreen (QImage necesita Gui).
@@ -81,23 +84,31 @@ void interpolar(const Parada *t, int n, double clave, int &r, int &g, int &b)
     }
 }
 
-// Color hipsométrico BASE (sin sombrear) de una cota en metros. Tierra (>=0):
-// de verde costa a marrón y cumbres claras. Mar (<0): azul batimétrico, más
-// oscuro cuanto más hondo (clave = profundidad). Se interpola entre paradas.
-void rampaColor(double e, int &r, int &g, int &b)
+// Color hipsométrico BASE (sin sombrear) de una cota en metros.
+//  - Agua (cota <= waterLevel): azul batimétrico, más oscuro cuanto más hondo
+//    (clave = profundidad, = -cota; las aguas interiores a cota positiva baja,
+//    p. ej. una bahía rellena por el SRTM, entran por waterLevel y salen azul
+//    claro de orilla). Con waterLevel=0, solo el mar real (<0) es agua.
+//  - Tierra (cota > waterLevel): verde sostenido en las llanuras (para que no
+//    se vean oliváceas) y luego amarillo-tierra, marrón y cumbres claras.
+// La rampa de tierra guarda más verde en cotas bajas por petición del usuario.
+void rampaColor(double e, double waterLevel, int &r, int &g, int &b)
 {
     static const Parada tierra[] = {
-        {   0, 170, 200, 140}, { 200, 205, 215, 150}, { 500, 228, 216, 150},
-        {1000, 210, 180, 120}, {1500, 190, 150, 110}, {2000, 236, 230, 224},
+        {   0, 120, 170,  95}, { 150, 150, 185, 110}, { 400, 180, 200, 120},
+        { 800, 205, 195, 135}, {1200, 200, 170, 120}, {1600, 180, 145, 110},
+        {2000, 235, 228, 220},
     };
     static const Parada mar[] = {   // clave = profundidad (metros, positiva)
         {   0, 150, 194, 218}, {  50, 110, 170, 210}, { 200,  80, 145, 200},
         {1000,  52, 110, 180}, {3000,  30,  72, 140}, {6000,  14,  40,  92},
     };
-    if (e >= 0.0)
+    if (e <= waterLevel) {
+        const double depth = (e < 0.0) ? -e : 0.0;
+        interpolar(mar, int(sizeof(mar) / sizeof(Parada)), depth, r, g, b);
+    } else {
         interpolar(tierra, int(sizeof(tierra) / sizeof(Parada)), e, r, g, b);
-    else
-        interpolar(mar, int(sizeof(mar) / sizeof(Parada)), -e, r, g, b);
+    }
 }
 
 } // namespace
@@ -115,6 +126,7 @@ int main(int argc, char *argv[])
     int minZ = 6, maxZ = 13;
     double sunAz = 315.0, sunAlt = 45.0, exag = 2.0, contrast = 2.2;
     double seaLevel = std::numeric_limits<double>::quiet_NaN();  // NaN = no enmascarar mar
+    double waterLevel = 0.0;   // cota <= este valor se pinta como agua (solo --colored)
     double latN = 90.0, lonW = 180.0, latS = -90.0, lonE = -180.0;
     bool haveBbox = false, overwrite = false, colored = false;
 
@@ -134,6 +146,7 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--contrast")) contrast = val().toDouble();
         else if (k == QLatin1String("--sea-level")) seaLevel = val().toDouble();
         else if (k == QLatin1String("--colored")) colored = true;
+        else if (k == QLatin1String("--water-level")) waterLevel = val().toDouble();
         else if (k == QLatin1String("--overwrite")) overwrite = true;
         else if (k == QLatin1String("--cuba")) {
             latN = 23.3; lonW = -85.0; latS = 19.7; lonE = -74.0; haveBbox = true;
@@ -153,7 +166,7 @@ int main(int argc, char *argv[])
                 "                      (--cuba | --bbox latN,lonO,latS,lonE)\n"
                 "                      [--minzoom 6 --maxzoom 13]\n"
                 "                      [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]\n"
-                "                      [--sea-level 0] [--colored]\n"
+                "                      [--sea-level 0] [--colored] [--water-level 0]\n"
                 "                      [--id relieve --name \"Relieve\"] [--overwrite]\n";
         return 2;
     }
@@ -296,7 +309,7 @@ int main(int argc, char *argv[])
                                 // relieve (0.45..1.1) para que el color siga vivo en
                                 // el llano y solo oscurezca sombras / aclare soleado.
                                 int cr, cg, cb;
-                                rampaColor(zc, cr, cg, cb);
+                                rampaColor(zc, waterLevel, cr, cg, cb);
                                 const double f = 0.45 + 0.65 * t;
                                 fila[i] = qRgba(qBound(0, int(double(cr) * f + 0.5), 255),
                                                 qBound(0, int(double(cg) * f + 0.5), 255),
