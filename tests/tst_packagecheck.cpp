@@ -1,7 +1,9 @@
 #include "SyntheticTileDb.h"
 
 #include "db/SqliteConnectionPool.h"
+#include "db/VectorRepository.h"
 #include "io/PackageCheck.h"
+#include "libmapa/MapFeature.h"
 
 #include <QDir>
 #include <QFile>
@@ -35,6 +37,7 @@ private slots:
     void notPortableAndMetadataWarn();   // fuera de la carpeta, sin atribucion, start
     void emptyLevelInZoneWarns();        // un nivel declarado sin teselas en la zona
     void unreadableManifestIsAnError();  // sin mapa.json: un unico error claro
+    void vectorDbOverlayValidates();     // overlay .sqlitedb (entidades) -> ok, no .geo
 
 private:
     // Escribe mapa.json en una carpeta nueva 'name' y devuelve la carpeta.
@@ -269,6 +272,40 @@ void TstPackageCheck::unreadableManifestIsAnError()
     QCOMPARE(r.count(PackageCheck::Severity::Error), 1);
     QVERIFY(r.problems().first().contains(QStringLiteral("mapa.json")));
     QVERIFY(r.datasets.isEmpty());
+}
+
+// Un overlay con fichero .sqlitedb (BD de entidades, p. ej. curvas de nivel) se
+// valida como BD vectorial -contando entidades-, NO leyendolo como .geo (que
+// daria un error falso "no contiene trazados validos" y un diluvio de avisos).
+void TstPackageCheck::vectorDbOverlayValidates()
+{
+    const QByteArray manifest = R"({
+        "format": "libmapa-package", "version": 2,
+        "package": { "id": "prueba", "name": "Prueba", "attribution": "Sintetico",
+                     "bounds": { "north": 23.3, "west": -85.0, "south": 19.7, "east": -74.0 } },
+        "start": { "layer": "base" },
+        "datasets": [ { "id": "base", "filePath": "base.sqlitedb",
+                        "minZoom": 6, "maxZoom": 8, "baseZoom": 6 } ],
+        "overlays": [ { "id": "curvas", "name": "Curvas", "file": "curvas.sqlitedb", "zOrder": 20 } ] })";
+
+    const QString dir = writePackage(QStringLiteral("vector_overlay"), manifest);
+    copyDb(dir, QStringLiteral("base.sqlitedb"));
+    {
+        using namespace libmapa;
+        VectorRepository repo;
+        QVERIFY(repo.open(dir + QStringLiteral("/curvas.sqlitedb")));
+        MapFeature a;
+        a.layerId = QStringLiteral("curvas");
+        a.kind = GeometryKind::Polyline;
+        a.type = QStringLiteral("curva_nivel");
+        a.geometry = {QGeoCoordinate(21.0, -80.0), QGeoCoordinate(21.1, -80.1)};
+        a.attributes[QStringLiteral("cota")] = 500;
+        QVERIFY(repo.saveFeatures({a}));
+    }
+
+    const PackageCheck r = PackageCheck::run(dir, PackageCheck::Options());
+    // Sin errores ni avisos: la BD vectorial se valida bien (no como .geo).
+    QVERIFY2(r.problems().isEmpty(), qPrintable(r.problems().join(QLatin1Char('\n'))));
 }
 
 QTEST_MAIN(TstPackageCheck)

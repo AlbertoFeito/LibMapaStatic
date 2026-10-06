@@ -3952,3 +3952,11 @@ lectura.
   2 curvas; comprueba conteo, atributos (`cota` 500/600) y estilo por entidad (1 con etiqueta).
 
 Compila sin warnings, **19 tests** en verde. README, BITÁCORA, `arquitectura.html` y PDF al día.
+
+- **Fix: `PackageCheck` también valida los overlays `.sqlitedb`.** Al cargar el paquete real, el
+  chequeo (`PackageCheck`) seguía leyendo **todo** overlay con `readGeoFile`, así que con el
+  overlay de curvas `.sqlitedb` saltaba un aviso falso *«no contiene trazados válidos»* y un
+  diluvio de *«línea N no es un vértice»* (interpretaba el binario SQLite como texto). Ahora
+  `PackageCheck` ramifica por extensión igual que la carga: `.sqlitedb`/`.db` se valida como **BD
+  vectorial** contando las filas de `entidad` (sin cargarlas todas); `.geo` sigue con `readGeoFile`.
+  Test `tst_packagecheck::vectorDbOverlayValidates`. 19 tests en verde.
