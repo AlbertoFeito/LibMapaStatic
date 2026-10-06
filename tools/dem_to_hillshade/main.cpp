@@ -14,7 +14,7 @@
  *   dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out relieve.sqlitedb
  *                    [--cuba | --bbox latN,lonO,latS,lonE]
  *                    [--minzoom 6 --maxzoom 13]
- *                    [--sun-az 315 --sun-alt 45 --exag 2]
+ *                    [--sun-az 315 --sun-alt 45 --exag 2 --contrast 1.8]
  *                    [--id relieve --name "Relieve"] [--overwrite]
  *
  * En un servidor sin pantalla: QT_QPA_PLATFORM=offscreen (QImage necesita Gui).
@@ -71,7 +71,7 @@ int main(int argc, char *argv[])
 
     QString in, out, id = QStringLiteral("relieve"), name;
     int minZ = 6, maxZ = 13;
-    double sunAz = 315.0, sunAlt = 45.0, exag = 2.0;
+    double sunAz = 315.0, sunAlt = 45.0, exag = 2.0, contrast = 1.8;
     double latN = 90.0, lonW = 180.0, latS = -90.0, lonE = -180.0;
     bool haveBbox = false, overwrite = false;
 
@@ -88,6 +88,7 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--sun-az")) sunAz = val().toDouble();
         else if (k == QLatin1String("--sun-alt")) sunAlt = val().toDouble();
         else if (k == QLatin1String("--exag")) exag = val().toDouble();
+        else if (k == QLatin1String("--contrast")) contrast = val().toDouble();
         else if (k == QLatin1String("--overwrite")) overwrite = true;
         else if (k == QLatin1String("--cuba")) {
             latN = 23.3; lonW = -85.0; latS = 19.7; lonE = -74.0; haveBbox = true;
@@ -106,7 +107,7 @@ int main(int argc, char *argv[])
         cout << "Uso: dem_to_hillshade --in <carpeta_hgt|dem.sqlitedb> --out relieve.sqlitedb\n"
                 "                      (--cuba | --bbox latN,lonO,latS,lonE)\n"
                 "                      [--minzoom 6 --maxzoom 13]\n"
-                "                      [--sun-az 315 --sun-alt 45 --exag 2]\n"
+                "                      [--sun-az 315 --sun-alt 45 --exag 2 --contrast 1.8]\n"
                 "                      [--id relieve --name \"Relieve\"] [--overwrite]\n";
         return 2;
     }
@@ -137,6 +138,15 @@ int main(int argc, char *argv[])
     const double zenith = qDegreesToRadians(90.0 - qBound(1.0, sunAlt, 89.0));
     const double azm = qDegreesToRadians(360.0 - sunAz + 90.0);
     const double cz = std::cos(zenith), sz = std::sin(zenith);
+    // El sombreado Lambert del terreno LLANO vale cz = sin(sunAlt): a 45° son
+    // ~0.707, un gris claro. Como casi todo cae cerca de ese valor, el PNG crudo
+    // salía lavado (poco contraste). Realzamos con un estirado tonal lineal que
+    // ANCLA el llano a un gris claro fijo (0.72) y abre el rango 'contrast' veces
+    // alrededor de él: las laderas en sombra se oscurecen y las soleadas aclaran,
+    // sin salirse del gris. contrast=1 deja el sombreado casi tal cual; >1 realza.
+    const double llano = qBound(0.05, cz, 0.95);  // sombreado del terreno plano
+    const double grisLlano = 0.72;                // gris objetivo del llano
+    const double realce = qMax(0.1, contrast);
     const int kTile = 256;
     const int G = kTile + 2;            // rejilla con halo de 1 px por lado
 
@@ -216,7 +226,10 @@ int main(int argc, char *argv[])
                             const double aspect = std::atan2(dzdy, -dzdx);
                             double hs = cz * std::cos(slope) + sz * std::sin(slope) * std::cos(azm - aspect);
                             hs = qBound(0.0, hs, 1.0);
-                            const int v = int(hs * 255.0);
+                            // Estirado tonal: llano -> grisLlano; el resto se abre
+                            // 'realce' veces alrededor del llano y se recorta a [0,1].
+                            const double t = qBound(0.0, grisLlano + (hs - llano) * realce, 1.0);
+                            const int v = int(t * 255.0 + 0.5);
                             fila[i] = qRgba(v, v, v, 255);
                             any = true;
                         }

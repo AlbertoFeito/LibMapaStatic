@@ -3806,3 +3806,24 @@ Elevación (solo `demo`).
 Los slots de cálculo (`analizarPerfil/Vision/Viewshed/PicosAltos`) no cambian: ya leían de
 los mismos spinboxes; «Calcular» despacha según el selector. Compila sin warnings, **18
 tests** en verde. README y BITÁCORA al día; sin cambios de API, no se regenera el PDF.
+
+## 84. dem_to_hillshade: realce de contraste (el relieve salía lavado)
+
+Al hornear el relieve de Cuba (§82) y cargarlo como capa base, el usuario vio que «no se ve
+bien»: salía un gris plano, de bajo contraste. La causa: se escribía el sombreado Lambert
+crudo (`v = hs·255`). El terreno **llano** vale `cz = sin(sunAlt)` (a 45°, ~0.707 → gris
+claro) y casi todas las laderas caen cerca de ese valor, así que el rango útil se agolpaba en
+una franja estrecha → imagen lavada.
+
+- **Estirado tonal (solo `tools/dem_to_hillshade`).** Tras calcular `hs ∈ [0,1]`, se aplica
+  un realce lineal que **ancla el llano a un gris claro fijo** (`grisLlano = 0.72`) y abre el
+  rango `contrast` veces a su alrededor: `t = clamp(grisLlano + (hs − sin(sunAlt))·contrast,
+  0, 1)`, y `v = 255·t`. Así las laderas en sombra se oscurecen de verdad y las soleadas
+  aclaran, **sin salirse del gris**. El llano queda claro (destaca el relieve bajo las capas
+  de encima); `contrast = 1` deja el sombreado casi tal cual, `> 1` realza (defecto **1.8**).
+- **Nuevo flag `--contrast <k>`** (defecto 1.8) para graduarlo al hornear; el resto del
+  pipeline (rejilla 258×258 con halo, mar transparente, PNG XYZ) no cambia.
+
+Sin cambios en la librería ni en el API; compila sin warnings y **18 tests** en verde.
+README y BITÁCORA al día; la herramienta ya existía (solo nuevo flag opcional) → no se
+regenera el PDF.
