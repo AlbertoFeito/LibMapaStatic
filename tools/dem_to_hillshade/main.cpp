@@ -152,6 +152,7 @@ int main(int argc, char *argv[])
     const double llano = qBound(0.05, cz, 0.95);  // sombreado del terreno plano
     const double grisLlano = 0.72;                // gris objetivo del llano
     const double realce = qMax(0.1, contrast);
+    const bool maskSea = !std::isnan(seaLevel);   // hay enmascarado de mar activo
     const int kTile = 256;
     const int G = kTile + 2;            // rejilla con halo de 1 px por lado
 
@@ -228,8 +229,16 @@ int main(int argc, char *argv[])
                             // transparente (en DEM con batimetria el fondo marino
                             // tiene cotas negativas; asi no se sombrea y la costa
                             // queda limpia, dejando ver la capa base de debajo).
-                            if (!std::isnan(seaLevel) && zc <= seaLevel) continue;
-                            auto nz = [&](int ii, int jj) { const double v = eg(ii, jj); return std::isnan(v) ? zc : v; };
+                            if (maskSea && zc <= seaLevel) continue;
+                            // Vecino para la pendiente: si no tiene dato O es mar
+                            // (<= seaLevel), usa la cota del centro. Asi la costa no
+                            // calcula un acantilado artificial tierra->fondo-marino
+                            // (que dejaba un ribete claro/oscuro de 1 px); sombrea por
+                            // su propia pendiente suave de tierra.
+                            auto nz = [&](int ii, int jj) {
+                                const double v = eg(ii, jj);
+                                return (std::isnan(v) || (maskSea && v <= seaLevel)) ? zc : v;
+                            };
                             const double dzdx = (nz(i + 1, j) - nz(i - 1, j)) / (2.0 * paso) * exag;
                             const double dzdy = (nz(i, j - 1) - nz(i, j + 1)) / (2.0 * paso) * exag;  // j-1 = norte
                             const double slope = std::atan(std::sqrt(dzdx * dzdx + dzdy * dzdy));

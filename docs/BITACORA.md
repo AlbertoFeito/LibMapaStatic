@@ -3828,6 +3828,10 @@ una franja estrecha → imagen lavada.
   sombreaba el fondo del mar y la **costa se perdía** en el gris. Con `--sea-level 0` el mar
   queda transparente (se ve la capa base de debajo) y la línea de costa sale limpia. El resto
   del pipeline (rejilla 258×258 con halo, PNG XYZ; teselas 100 % mar se omiten) no cambia.
+- **Costa sin ribete.** Al calcular la pendiente de un píxel de tierra, los vecinos **sin dato
+  o de mar** (`≤ seaLevel`) se sustituyen por la cota del centro. Así la costa no computa un
+  acantilado artificial tierra→fondo-marino (que dejaba un ribete claro/oscuro de 1 px) y
+  sombrea por su propia pendiente suave de tierra.
 
 Validado horneando crops reales de SRTM 30 m (bajados con `fill_hgt`) de La Habana (llano →
 gris claro) y la Sierra Maestra (relieve fuerte): con `--contrast 2.2 --sea-level 0` el relieve
