@@ -40,7 +40,8 @@ struct Segmento { quint64 a; quint64 b; };
 // vez); por cada celda y cada nivel que la cruza emite 1-2 segmentos; al final
 // une los segmentos de cada nivel en polilíneas encadenando por arista.
 QVector<ContourLine> computeContours(const IElevationSource &src,
-                                     const ContourParams &params)
+                                     const ContourParams &params,
+                                     const ContourProgress &progress)
 {
     QVector<ContourLine> salida;
 
@@ -139,6 +140,10 @@ QVector<ContourLine> computeContours(const IElevationSource &src,
             }
         }
         filaArriba.swap(filaAbajo);
+
+        // Progreso por fila; si el llamador cancela, aborta y devuelve vacío.
+        if (progress && !progress(r + 1, nRows - 1))
+            return QVector<ContourLine>();
     }
 
     // Encadena los segmentos de cada nivel en polilíneas. Grafo cuyos nodos son

@@ -7,11 +7,17 @@
 #include <QGeoCoordinate>
 #include <QVector>
 
+#include <functional>
 #include <limits>
 
 namespace libmapa {
 
 class IElevationSource;
+
+//! Callback de progreso (opcional): se invoca al terminar cada fila de la
+//! rejilla con (filas hechas, filas totales). Devolver \c false CANCELA el
+//! cálculo (computeContours devuelve lo que llevara, normalmente vacío).
+using ContourProgress = std::function<bool(int done, int total)>;
 
 //! Parámetros de generación de curvas de nivel.
 struct ContourParams
@@ -49,6 +55,7 @@ struct ContourLine
 //! Genera las curvas de nivel del DEM dentro de la bbox. Devuelve vacío si no
 //! hay cota en la zona. Las celdas con algún vértice sin dato (NaN) se saltan.
 QVector<ContourLine> computeContours(const IElevationSource &src,
-                                     const ContourParams &params);
+                                     const ContourParams &params,
+                                     const ContourProgress &progress = ContourProgress());
 
 } // namespace libmapa

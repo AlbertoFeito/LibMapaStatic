@@ -121,7 +121,19 @@ int main(int argc, char *argv[])
 
     cout << "Calculando curvas (intervalo " << interval << " m, paso " << step << " m)...\n";
     cout.flush();
-    const QVector<ContourLine> curvas = computeContours(*dem, params);
+    // Progreso en la misma línea (cada ~2 %), para que no parezca colgado.
+    int ultimo = -1;
+    const auto progreso = [&](int hecho, int total) {
+        const int pct = total > 0 ? int(qint64(hecho) * 100 / total) : 100;
+        if (pct != ultimo && (pct % 2 == 0 || pct == 100)) {
+            ultimo = pct;
+            cout << "\r  muestreando rejilla: " << pct << " %   ";
+            cout.flush();
+        }
+        return true;   // la consola no cancela
+    };
+    const QVector<ContourLine> curvas = computeContours(*dem, params, progreso);
+    cout << "\r  muestreando rejilla: 100 %   \n";
     if (curvas.isEmpty()) {
         qCritical() << "No se generaron curvas (¿sin cota en la zona?).";
         return 1;

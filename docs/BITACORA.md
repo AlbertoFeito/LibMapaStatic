@@ -3925,3 +3925,8 @@ Compila sin warnings, **19 tests** en verde. README, BITÁCORA y `arquitectura.h
   del mar** y omite las curvas batimétricas negativas (verificado: cotas 0–1900 m, cero negativas).
   Test `minLevelClipsBelow` (un cono que baja de 0: sin recorte hay curvas negativas; con
   `minLevel=0`, ninguna). Sigue en **19 tests**; `arquitectura.html` y PDF al día.
+- **Progreso al calcular (`ContourProgress`).** Para país entero el muestreo de la rejilla son
+  ~20 M de cotas (1–4 min) y la herramienta parecía colgada. `computeContours` acepta un
+  callback opcional `ContourProgress = function<bool(hecho,total)>` invocado **por fila**
+  (devolver `false` cancela); `dem_to_contours` imprime el porcentaje en la misma línea. API
+  pública ampliada → `arquitectura.html` y PDF al día. 19 tests en verde.
