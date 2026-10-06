@@ -56,6 +56,8 @@ private slots:
     void navigationKeepsCenter();
     void zoomIsClampedToRecommendedRange();
     void fitBoundsFramesTheArea();
+    //! La API de hillshade conmuta y acepta parametros sin colgar (sin DEM: capa vacia).
+    void hillshadeApiTogglesSafely();
 
     void resizeDoesNotLoseTheView();
 
@@ -2131,6 +2133,30 @@ void TstMapWidget::reportsDataWarningsButStillOpens()
     QVERIFY2(avisos.contains(QStringLiteral("no_esta.sqlitedb")), qPrintable(avisos));
     QVERIFY2(avisos.contains(QStringLiteral("corredores.geo")), qPrintable(avisos));
     QVERIFY(w.featuresInLayer(QStringLiteral("corredores")).isEmpty());
+}
+
+// La API de relieve sombreado conmuta su estado y acepta parametros sin colgar.
+// Sin DEM configurado la capa queda vacia (refreshHillshade no dibuja nada), pero
+// todas las rutas del API deben ser seguras.
+void TstMapWidget::hillshadeApiTogglesSafely()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+
+    QVERIFY(!w.isHillshadeVisible());
+    w.setHillshadeSun(315.0, 45.0);
+    w.setHillshadeOpacity(0.6);
+    w.setHillshadeExaggeration(2.0);
+    w.setHillshadeColored(true);
+
+    w.setHillshadeVisible(true);
+    QVERIFY(w.isHillshadeVisible());
+    w.refreshHillshade();                 // sin DEM: no dibuja, no debe colgar
+    w.setHillshadeColored(false);
+    w.refreshHillshade();
+
+    w.setHillshadeVisible(false);
+    QVERIFY(!w.isHillshadeVisible());
 }
 
 QTEST_MAIN(TstMapWidget)

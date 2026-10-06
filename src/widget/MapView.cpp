@@ -87,6 +87,15 @@ MapView::MapView(TileService *service, QWidget *parent)
     m_coverageLayer->setLayer(QStringLiteral("coverage"));
     m_coverageLayer->setVisible(false);
 
+    // Capa de RELIEVE SOMBREADO (hillshade): justo ENCIMA de las teselas y por
+    // DEBAJO de las entidades, para que el sombreado adorne la base sin tapar los
+    // overlays. Oculta por defecto; la calcula MapWidget desde el DEM local.
+    addLayer(QStringLiteral("hillshade"), layer(QStringLiteral("tiles")),
+             QCustomPlot::limAbove);
+    m_hillshadeLayer = new HillshadeLayer(this);
+    m_hillshadeLayer->setLayer(QStringLiteral("hillshade"));
+    m_hillshadeLayer->setVisible(false);
+
     if (service) {
         connect(service, &TileService::tilesReady,
                 this, &MapView::onTilesReady);

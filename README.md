@@ -399,6 +399,15 @@ El check «Mar / sin dato = 0 m» trata el mar como cota 0 (objetivos sobre el m
 (sobre mar sin obstáculos se ve hasta el alcance máximo). **Cambiar un check re-aplica
 al instante** el último análisis.
 
+**Relieve sombreado (hillshade) en vivo.** `MapWidget` puede dibujar una capa de
+**relieve sombreado** calculada **en vivo del DEM local** (100% sin conexión): sombrea el
+terreno según un **sol virtual** (azimut/altura), con **exageración** vertical y, opcional,
+**tintado por altura** (hipsométrico) en vez del gris translúcido sobre la base. Se
+recalcula sola al desplazar/hacer zoom. API: `setHillshadeVisible`, `setHillshadeSun`,
+`setHillshadeOpacity`, `setHillshadeExaggeration`, `setHillshadeColored` (la capa va encima
+de las teselas y debajo de las entidades). El `demo` lo expone en la pestaña «Elevación»
+con un grupo **«Relieve sombreado»** (sol, intensidad, exageración, tintar por altura).
+
 **Mar, curvatura y batimetría.** El lector del DEM deja pasar **cualquier cota negativa**
 tal cual (solo `−32768` es hueco → NaN); un dataset con **batimetría** (p. ej. el talud al
 norte de Cuba a ~−1800 m) se lee sin más, aunque SRTM puro no la trae. Para el **análisis

@@ -3704,3 +3704,33 @@ se saltaba la cima exacta. Se mejora en varios frentes (solo `demo`).
 
 Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
 día; sin cambios de API, no se regenera el PDF.
+
+## 80. Relieve sombreado (hillshade) en vivo, calculado del DEM local (offline)
+
+Nueva capa de **relieve sombreado** sobre el mapa, calculada EN VIVO a partir del DEM
+local del paquete (100% sin conexión, como pidió el usuario). Toca la librería (capa + API)
+y el demo (controles).
+
+- **`src/widget/HillshadeLayer.{h,cpp}`** (nuevo `QCPLayerable`, con `Q_OBJECT`): capa
+  «tonta» que guarda una imagen ya calculada + las esquinas geográficas y la pinta estirada
+  entre sus píxeles (eje X = longitud, Y = grados de Mercator → alineada con la base). Va en
+  una capa propia **encima de las teselas y debajo de las entidades**. Dibuja en *Multiply*
+  (gris sobre la base) o *SourceOver* (tintado por altura), con opacidad.
+- **`MapWidget`**: calcula la imagen en `refreshHillshade()` muestreando el DEM
+  (`elevationAt`) en una rejilla submuestreada del viewport (lado máx 420 px); filas
+  lineales en grados de Mercator (inverso de `WebMercator`) para alinear. Por píxel:
+  pendiente/orientación por diferencias centrales, sombreado Lambert
+  `cos(zenit)cos(pend)+sin(zenit)sin(pend)cos(azSol−orient)` con **exageración** `zFactor`;
+  sin dato → transparente. Gris (fuerza mezclada hacia blanco + *Multiply*) o color
+  **hipsométrico** (rampa por altura × sombreado). Se **recalcula sola** al mover la vista
+  (antirebote 180 ms). API: `setHillshadeVisible/Sun/Opacity/Exaggeration/Colored`,
+  `isHillshadeVisible`, `refreshHillshade`.
+- **`MapView`**: crea la capa `hillshade` entre `tiles` y `features`; `hillshadeLayer()`.
+- **`demo`**: grupo «Relieve sombreado» en la pestaña Elevación (checkable) con sol
+  (azimut/altura), intensidad, exageración y «tintar por altura».
+- **CMake + qmake**: añadido `HillshadeLayer.{cpp,h}` a `libmapa_widget` (mirror).
+- **Test** `hillshadeApiTogglesSafely` (tst_mapwidget): la API conmuta y acepta parámetros
+  sin colgar (sin DEM, la capa queda vacía).
+
+Compila sin warnings; **18 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
+**API pública nueva → se regenera el PDF**.

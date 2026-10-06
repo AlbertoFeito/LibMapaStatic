@@ -323,6 +323,8 @@ la API que usa la aplicación:</p>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
+<tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
+<tr><td>Cobertura / relieve</td><td class="mono">setCoverageVisible · setCoverageZoom · refreshCoverage · <b>setHillshadeVisible · setHillshadeSun · setHillshadeOpacity · setHillshadeExaggeration · setHillshadeColored · refreshHillshade</b></td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
 <tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
 </table>
@@ -340,6 +342,7 @@ añadió para la descarga.</p>
 <tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar.</td></tr>
 <tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas. El símbolo lo decide el proveedor de la app (icono + rotación por rumbo + escala); sin proveedor, un galón por defecto. Para miles de objetivos: culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza.</td></tr>
 <tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
+<tr><td class="cls">HillshadeLayer</td><td><b>Relieve sombreado</b> (hillshade) en vivo: capa «tonta» que pinta una imagen —calculada por <code>MapWidget</code> del DEM LOCAL (sin conexión)— estirada entre los píxeles de sus esquinas (alineada con la base, eje X=longitud, Y=grados de Mercator). Va encima de las teselas y debajo de las entidades. Gris en <i>Multiply</i> sobre la base, o tintado por altura (hipsométrico) en <i>SourceOver</i>.</td></tr>
 </table>
 
 <h3>Modelos (QObject, sin dibujo)</h3>

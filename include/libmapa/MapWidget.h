@@ -412,6 +412,28 @@ public:
     void refreshCoverage();
 
     /*!
+     * \brief Relieve sombreado (hillshade) calculado EN VIVO del DEM local.
+     *
+     * Capa que sombrea el terreno segun un sol virtual (sin conexion: solo usa el
+     * origen de elevacion). Se recalcula sola al desplazar/hacer zoom (con un
+     * pequeno retardo). \c setHillshadeColored activa un tintado por altura
+     * (hipsometrico) en vez del gris translucido. Sin origen de elevacion la capa
+     * queda vacia.
+     */
+    void setHillshadeVisible(bool on);
+    bool isHillshadeVisible() const;
+    //! Sol: azimut (0=N, 90=E) y altura sobre el horizonte, en grados.
+    void setHillshadeSun(double azimuthDeg, double altitudeDeg);
+    //! Intensidad del sombreado en [0,1] (gris) u opacidad del tintado (color).
+    void setHillshadeOpacity(double opacity);
+    //! Exageracion vertical del relieve (1 = real; 2–3 resalta terreno suave).
+    void setHillshadeExaggeration(double zFactor);
+    //! true = tintado por altura (hipsometrico); false = gris sobre la base.
+    void setHillshadeColored(bool on);
+    //! Recalcula el relieve para la vista actual (lo hace solo al mover la vista).
+    void refreshHillshade();
+
+    /*!
      * \brief Geografico -> coordenadas de los ejes del QCustomPlot interno.
      *
      * IMPRESCINDIBLE para cualquier overlay dibujado con coordenadas de eje

@@ -178,6 +178,8 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/TargetLayer.h
         src/widget/CoverageLayer.cpp
         src/widget/CoverageLayer.h
+        src/widget/HillshadeLayer.cpp
+        src/widget/HillshadeLayer.h
         src/widget/MapView.cpp
         src/widget/MapView.h
         src/widget/MapWidget.cpp

@@ -37,6 +37,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QEvent>
+#include <QGroupBox>
 #include <QHash>
 #include <QMouseEvent>
 #include <QHeaderView>
@@ -809,6 +810,44 @@ private:
         // Los checks re-aplican al instante el último análisis.
         connect(m_marComo0, &QCheckBox::toggled, this, [this] { reejecutar(); });
         connect(m_curvatura, &QCheckBox::toggled, this, [this] { reejecutar(); });
+
+        // --- Relieve sombreado (hillshade) en vivo, desde el DEM local ---------
+        auto *grupoHs = new QGroupBox(tr("Relieve sombreado (hillshade)"), tab);
+        grupoHs->setCheckable(true);
+        grupoHs->setChecked(false);
+        auto *fHs = new QFormLayout(grupoHs);
+        auto *az = new QDoubleSpinBox(grupoHs);
+        az->setRange(0.0, 359.0); az->setValue(315.0); az->setSuffix(tr(" °")); az->setWrapping(true);
+        auto *alt = new QDoubleSpinBox(grupoHs);
+        alt->setRange(1.0, 89.0); alt->setValue(45.0); alt->setSuffix(tr(" °"));
+        auto *filaSol = new QHBoxLayout; filaSol->setContentsMargins(0, 0, 0, 0);
+        filaSol->addWidget(az, 1); filaSol->addWidget(alt, 1);
+        auto *wSol = new QWidget(grupoHs); wSol->setLayout(filaSol);
+        fHs->addRow(tr("Sol (azim/alt):"), wSol);
+        auto *inten = new QSpinBox(grupoHs);
+        inten->setRange(0, 100); inten->setValue(60); inten->setSuffix(tr(" %"));
+        fHs->addRow(tr("Intensidad:"), inten);
+        auto *exag = new QDoubleSpinBox(grupoHs);
+        exag->setRange(1.0, 6.0); exag->setValue(2.0); exag->setSingleStep(0.5); exag->setSuffix(tr("×"));
+        fHs->addRow(tr("Exageración:"), exag);
+        auto *color = new QCheckBox(tr("Tintar por altura"), grupoHs);
+        fHs->addRow(QString(), color);
+        caja->addWidget(grupoHs);
+
+        grupoHs->setToolTip(tr("Sombreado del terreno calculado en vivo del DEM local (sin conexión). "
+                               "Se recalcula al mover la vista."));
+        m_mapa->setHillshadeSun(az->value(), alt->value());
+        m_mapa->setHillshadeOpacity(inten->value() / 100.0);
+        m_mapa->setHillshadeExaggeration(exag->value());
+        connect(grupoHs, &QGroupBox::toggled, this, [this](bool on) { m_mapa->setHillshadeVisible(on); });
+        auto aplicarSol = [this, az, alt] { m_mapa->setHillshadeSun(az->value(), alt->value()); };
+        connect(az, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [aplicarSol](double) { aplicarSol(); });
+        connect(alt, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [aplicarSol](double) { aplicarSol(); });
+        connect(inten, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this](int v) { m_mapa->setHillshadeOpacity(v / 100.0); });
+        connect(exag, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+                [this](double v) { m_mapa->setHillshadeExaggeration(v); });
+        connect(color, &QCheckBox::toggled, this, [this](bool on) { m_mapa->setHillshadeColored(on); });
 
         m_resultado = new QLabel(tab);
         m_resultado->setWordWrap(true);
