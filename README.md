@@ -374,9 +374,14 @@ progreso cancelable** que solo aparece si el cálculo pasa de ~0,4 s.
 La app de ejemplo `demo` lo demuestra en su **pestaña «Elevación»** del panel lateral
 (con un DEM activo). Los puntos se introducen en la propia pestaña: **Punto A** y **Punto
 B** con campos lat/lon editables y un botón **«📍 Mapa»** que los fija con el siguiente
-clic en el mapa. Cada análisis usa lo suyo: **Perfil** = A + **rumbo** + **alcance**
-(perfil radial desde A); **Visión A→B** = A (Alt1) y B (Alt2); **Viewshed** = A
-(observador Alt1, objetivo Alt2, alcance). **Perfil** abre una **ventana flotante** con el
+clic en el mapa. Al capturar, el **cursor toma el pin** del color del punto (azul=A,
+rojo=B) y, durante el análisis, los puntos quedan **marcados fijos** en el mapa con esos
+pines. La pestaña muestra la **cota del terreno bajo A y bajo B** y el **rumbo y la
+distancia A→B**, que se actualizan al mover los puntos. Cada análisis usa lo suyo:
+**Perfil** = A + **rumbo** + **alcance** (perfil radial desde A); **Visión A→B** = A
+(Alt1) y B (Alt2); **Viewshed** = A (observador Alt1, objetivo Alt2, alcance); **10 picos**
+= los **10 puntos más altos del terreno en un radio de 10 km** desde A (numerados en el
+mapa y listados con cota, distancia y rumbo). **Perfil** abre una **ventana flotante** con el
 corte del terreno (ejes, rejilla, rueda = zoom, arrastrar = desplazar); **Visión A→B**
 traza la línea de visión de A a B con Alt1/Alt2 de antena (**azul** el tramo visible,
 **rojo** el oculto, obstáculo con su distancia) y la dibuja también sobre el perfil;

@@ -3657,3 +3657,26 @@ llega a z16 en vista y cobertura, y la descarga a z15/16 funciona como ya hacía
 
 Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
 día; sin cambios de API, no se regenera el PDF.
+
+## 78. Pestaña Elevación: cota de A/B, rumbo/distancia, pines de color y «10 picos»
+
+Mejoras pedidas para el panel lateral de elevación del `demo` (solo `demo/main.cpp`).
+
+- **Cota de los puntos.** Debajo de los campos, una lectura muestra la **cota del terreno
+  en A y en B** (`elevationAt` bajo cada punto) y el **rumbo y la distancia A→B**
+  (`QGeoCoordinate::azimuthTo`/`distanceTo`). Se recalcula al cambiar cualquier lat/lon.
+- **Cursor y pines de color.** Un pin se dibuja con `QPainter` (`pinPixmap(color)`) y se usa
+  como **icono del botón «Mapa»**, como **cursor** al capturar (punta = hotspot) y como
+  **marca fija** del punto. Azul = A, rojo = B. Al pulsar «Mapa» el cursor del mapa toma el
+  pin del color del punto; al fijarlo se restaura. Durante cada análisis, A (y B en la
+  Visión) quedan marcados con su pin sobre el mapa (capa `elev_puntos`).
+- **Herramienta «10 picos (10 km)».** Nuevo botón: muestrea una rejilla de 100 m dentro de
+  un radio de **10 km** desde A, descarta el mar/sin dato (NaN), ordena por cota y toma los
+  **10 puntos más altos** exigiendo una separación mínima de 800 m (cumbres distintas, no la
+  misma loma). Los pinta **numerados** (naranja, capa `elev_picos`) y los lista en el panel
+  con **cota · distancia · rumbo**. Reutiliza `MapWidget::elevationAt`; no toca la librería.
+- `FeatureStyle::icon` (QPixmap) permite el pin como icono de punto; `Limpiar` borra también
+  `elev_puntos` y `elev_picos`; el enum de análisis gana `Picos` para re-aplicar al vuelo.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
