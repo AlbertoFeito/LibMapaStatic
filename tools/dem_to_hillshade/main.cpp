@@ -14,7 +14,8 @@
  *   dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out relieve.sqlitedb
  *                    [--cuba | --bbox latN,lonO,latS,lonE]
  *                    [--minzoom 6 --maxzoom 13]
- *                    [--sun-az 315 --sun-alt 45 --exag 2 --contrast 1.8]
+ *                    [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]
+ *                    [--sea-level 0]   (cotas <= ese valor -> transparente)
  *                    [--id relieve --name "Relieve"] [--overwrite]
  *
  * En un servidor sin pantalla: QT_QPA_PLATFORM=offscreen (QImage necesita Gui).
@@ -37,6 +38,7 @@
 #include <QtMath>
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -71,7 +73,8 @@ int main(int argc, char *argv[])
 
     QString in, out, id = QStringLiteral("relieve"), name;
     int minZ = 6, maxZ = 13;
-    double sunAz = 315.0, sunAlt = 45.0, exag = 2.0, contrast = 1.8;
+    double sunAz = 315.0, sunAlt = 45.0, exag = 2.0, contrast = 2.2;
+    double seaLevel = std::numeric_limits<double>::quiet_NaN();  // NaN = no enmascarar mar
     double latN = 90.0, lonW = 180.0, latS = -90.0, lonE = -180.0;
     bool haveBbox = false, overwrite = false;
 
@@ -89,6 +92,7 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--sun-alt")) sunAlt = val().toDouble();
         else if (k == QLatin1String("--exag")) exag = val().toDouble();
         else if (k == QLatin1String("--contrast")) contrast = val().toDouble();
+        else if (k == QLatin1String("--sea-level")) seaLevel = val().toDouble();
         else if (k == QLatin1String("--overwrite")) overwrite = true;
         else if (k == QLatin1String("--cuba")) {
             latN = 23.3; lonW = -85.0; latS = 19.7; lonE = -74.0; haveBbox = true;
@@ -107,7 +111,8 @@ int main(int argc, char *argv[])
         cout << "Uso: dem_to_hillshade --in <carpeta_hgt|dem.sqlitedb> --out relieve.sqlitedb\n"
                 "                      (--cuba | --bbox latN,lonO,latS,lonE)\n"
                 "                      [--minzoom 6 --maxzoom 13]\n"
-                "                      [--sun-az 315 --sun-alt 45 --exag 2 --contrast 1.8]\n"
+                "                      [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]\n"
+                "                      [--sea-level 0]\n"
                 "                      [--id relieve --name \"Relieve\"] [--overwrite]\n";
         return 2;
     }
@@ -219,6 +224,11 @@ int main(int argc, char *argv[])
                         for (int i = 0; i < kTile; ++i) {
                             const double zc = eg(i, j);
                             if (std::isnan(zc)) continue;          // sin dato -> transparente
+                            // Mar: con --sea-level, toda cota <= ese valor se deja
+                            // transparente (en DEM con batimetria el fondo marino
+                            // tiene cotas negativas; asi no se sombrea y la costa
+                            // queda limpia, dejando ver la capa base de debajo).
+                            if (!std::isnan(seaLevel) && zc <= seaLevel) continue;
                             auto nz = [&](int ii, int jj) { const double v = eg(ii, jj); return std::isnan(v) ? zc : v; };
                             const double dzdx = (nz(i + 1, j) - nz(i - 1, j)) / (2.0 * paso) * exag;
                             const double dzdy = (nz(i, j - 1) - nz(i, j + 1)) / (2.0 * paso) * exag;  // j-1 = norte

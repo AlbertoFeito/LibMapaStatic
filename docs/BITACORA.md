@@ -3820,10 +3820,17 @@ una franja estrecha → imagen lavada.
   rango `contrast` veces a su alrededor: `t = clamp(grisLlano + (hs − sin(sunAlt))·contrast,
   0, 1)`, y `v = 255·t`. Así las laderas en sombra se oscurecen de verdad y las soleadas
   aclaran, **sin salirse del gris**. El llano queda claro (destaca el relieve bajo las capas
-  de encima); `contrast = 1` deja el sombreado casi tal cual, `> 1` realza (defecto **1.8**).
-- **Nuevo flag `--contrast <k>`** (defecto 1.8) para graduarlo al hornear; el resto del
-  pipeline (rejilla 258×258 con halo, mar transparente, PNG XYZ) no cambia.
+  de encima); `contrast = 1` deja el sombreado casi tal cual, `> 1` realza (defecto **2.2**).
+- **Nuevo flag `--contrast <k>`** (defecto 2.2) para graduarlo al hornear.
+- **Nuevo flag `--sea-level <m>`** (por defecto desactivado): toda cota `≤ m` se deja
+  **transparente** en vez de sombrearla. Imprescindible con DEM que traen **batimetría** (el
+  «Cuba 2026.10» tiene fondo marino con cotas negativas): sin esto, `dem_to_hillshade`
+  sombreaba el fondo del mar y la **costa se perdía** en el gris. Con `--sea-level 0` el mar
+  queda transparente (se ve la capa base de debajo) y la línea de costa sale limpia. El resto
+  del pipeline (rejilla 258×258 con halo, PNG XYZ; teselas 100 % mar se omiten) no cambia.
 
-Sin cambios en la librería ni en el API; compila sin warnings y **18 tests** en verde.
-README y BITÁCORA al día; la herramienta ya existía (solo nuevo flag opcional) → no se
-regenera el PDF.
+Validado horneando crops reales de SRTM 30 m (bajados con `fill_hgt`) de La Habana (llano →
+gris claro) y la Sierra Maestra (relieve fuerte): con `--contrast 2.2 --sea-level 0` el relieve
+sale nítido y el mar transparente. Sin cambios en la librería ni en el API; compila sin
+warnings y **18 tests** en verde. README y BITÁCORA al día; la herramienta ya existía (solo
+flags opcionales nuevos) → no se regenera el PDF.
