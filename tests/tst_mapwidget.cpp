@@ -29,6 +29,7 @@ static QMouseEvent mouseEvent(QEvent::Type tipo, const QPoint &pos,
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -97,6 +98,7 @@ private slots:
     void undoAndRedoRestoreTheModel();
     void draggingIsOneUndoStep();
     void savesAndLoadsFeatures();
+    void loadsFeaturesDbAsFixedLayer();
 
     // --- Fase 7: .geo y objetivos moviles --------------------------------
     void loadsGeoFileAsPolygonLayer();
@@ -2157,6 +2159,62 @@ void TstMapWidget::hillshadeApiTogglesSafely()
 
     w.setHillshadeVisible(false);
     QVERIFY(!w.isHillshadeVisible());
+}
+
+// loadFeaturesAsLayer AÑADE las entidades de una BD vectorial como capa fija (sin
+// reemplazar las existentes, al reves que loadFeaturesFrom), conservando estilo,
+// etiqueta y atributos por entidad (como la capa de curvas de nivel del paquete).
+void TstMapWidget::loadsFeaturesDbAsFixedLayer()
+{
+    const QString bd = m_dir.filePath(QStringLiteral("curvas_test.db"));
+    QFile::remove(bd);
+    {
+        VectorRepository repo;
+        QVERIFY(repo.open(bd));
+        MapFeature a;
+        a.layerId = QStringLiteral("curvas");
+        a.kind = GeometryKind::Polyline;
+        a.type = QStringLiteral("curva_nivel");
+        a.name = QStringLiteral("500 m");
+        a.geometry = {QGeoCoordinate(20.0, -77.0), QGeoCoordinate(20.1, -77.1)};
+        a.attributes[QStringLiteral("cota")] = 500;
+        a.style.labelVisible = true;               // curva indice (etiquetada)
+        MapFeature b = a;
+        b.name.clear();
+        b.attributes[QStringLiteral("cota")] = 600;
+        b.style.labelVisible = false;              // curva normal
+        b.geometry = {QGeoCoordinate(20.0, -77.2), QGeoCoordinate(20.1, -77.3)};
+        QVERIFY(repo.saveFeatures({a, b}));
+    }
+
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(400, 300);
+
+    // Una entidad propia del usuario, que NO debe perderse al añadir la capa fija.
+    MapFeature mio;
+    mio.kind = GeometryKind::Point;
+    mio.layerId = QStringLiteral("mios");
+    mio.geometry = {QGeoCoordinate(23.0, -82.0)};
+    QVERIFY(w.addFeature(mio) > 0);
+
+    QString err;
+    QVERIFY2(w.loadFeaturesAsLayer(bd, QStringLiteral("curvas"),
+                                   QStringLiteral("Curvas"), &err) > 0, qPrintable(err));
+
+    QCOMPARE(w.featureCount(), 3);                 // añade, no reemplaza (1 + 2)
+    const auto curvas = w.featuresInLayer(QStringLiteral("curvas"));
+    QCOMPARE(curvas.size(), 2);
+
+    int conEtiqueta = 0;
+    QSet<int> cotas;
+    for (const MapFeature &f : curvas) {
+        cotas.insert(f.attributes.value(QStringLiteral("cota")).toInt());
+        if (f.style.labelVisible)
+            ++conEtiqueta;
+    }
+    QCOMPARE(cotas, (QSet<int>{500, 600}));        // atributos conservados
+    QCOMPARE(conEtiqueta, 1);                        // estilo por entidad conservado
 }
 
 QTEST_MAIN(TstMapWidget)

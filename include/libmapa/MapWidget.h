@@ -262,6 +262,24 @@ public:
                           const FeatureStyle &style = FeatureStyle(),
                           QString *error = nullptr);
 
+    /*!
+     * \brief Carga las entidades de una BD vectorial (.sqlitedb con el esquema
+     *        de VectorRepository) como una capa fija MÁS, sin reemplazar las
+     *        entidades existentes (al revés que \a loadFeaturesFrom).
+     *
+     * Cada entidad conserva su estilo, etiqueta y atributos propios (p. ej. una
+     * capa de curvas de nivel de \c dem_to_contours: índice gruesas+etiqueta, la
+     * cota en \c atributos). Todas quedan bajo \a layerId. Pensada para capas de
+     * solo lectura del paquete (overlays con fichero .sqlitedb); las entidades
+     * siguen siendo seleccionables (para leer su cota), pero la capa no editable.
+     *
+     * \return el id de la primera entidad añadida, o -1 si la BD no abre o está
+     *         vacía (el motivo queda en \a error).
+     */
+    qint64 loadFeaturesAsLayer(const QString &databasePath, const QString &layerId,
+                               const QString &displayName = QString(),
+                               QString *error = nullptr);
+
     // --- Objetivos moviles (capa dinamica) -------------------------------
     /*!
      * \brief Da de alta o reemplaza un objetivo movil.

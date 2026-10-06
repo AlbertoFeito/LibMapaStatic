@@ -3930,3 +3930,25 @@ Compila sin warnings, **19 tests** en verde. README, BITÁCORA y `arquitectura.h
   callback opcional `ContourProgress = function<bool(hecho,total)>` invocado **por fila**
   (devolver `false` cancela); `dem_to_contours` imprime el porcentaje en la misma línea. API
   pública ampliada → `arquitectura.html` y PDF al día. 19 tests en verde.
+
+## 88. Overlays del paquete desde una BD vectorial (curvas como capa fija del mapa.json)
+
+Al generar las curvas (10 079 entidades) surgió la pregunta de **cómo meterlas en el
+`mapa.json`**. Las curvas son una BD de entidades (`VectorRepository`), pero `overlays` solo
+cargaba `.geo` (`loadGeoAsLayer`: un trazado, un estilo, sin etiquetas) y `features` es el
+**único** fichero editable del usuario. No había hueco limpio para una capa vectorial de solo
+lectura.
+
+- **`MapWidget::loadFeaturesAsLayer(db, layerId, name)` (nuevo).** Abre una BD de entidades y
+  **añade** sus entidades como una capa más (sin `setContents`, al revés que `loadFeaturesFrom`),
+  conservando **estilo, etiqueta y atributos por entidad**. Pensada para capas fijas del paquete.
+- **`overlays` acepta `.sqlitedb`.** `loadOverlays` distingue por extensión: `.geo` → `loadGeoAsLayer`
+  (decoración fija, no seleccionable); `.sqlitedb`/`.db` → `loadFeaturesAsLayer`. La capa queda
+  **no editable** pero sus entidades **seleccionables** (así al pinchar una curva se lee su cota).
+  No hubo que tocar `DataPackage` (el overlay ya tenía `id`/`file`/`name`/`zOrder`).
+- Así, la entrada en `mapa.json` para las curvas es un `overlays` normal apuntando al `.sqlitedb`.
+  También sirve para cargar `Cuba_vector` (u otra BD) como capa fija.
+- **Test** `tst_mapwidget::loadsFeaturesDbAsFixedLayer`: añade (no reemplaza) una entidad propia +
+  2 curvas; comprueba conteo, atributos (`cota` 500/600) y estilo por entidad (1 con etiqueta).
+
+Compila sin warnings, **19 tests** en verde. README, BITÁCORA, `arquitectura.html` y PDF al día.

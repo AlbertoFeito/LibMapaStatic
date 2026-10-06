@@ -317,7 +317,7 @@ la API que usa la aplicación:</p>
 <tr><td>Capa base</td><td class="mono">availableBaseLayers · baseLayerId · setBaseLayerId · reloadBaseLayer</td></tr>
 <tr><td>Navegación</td><td class="mono">center/setCenter · zoom/setZoom · zoomIn/Out · fitBounds · visibleNorthWest/SouthEast · <b>setMaxZoomOverride</b></td></tr>
 <tr><td>Capas de entidades</td><td class="mono">addFeatureLayer · setFeatureLayerVisible · setFeatureLayerZOrder</td></tr>
-<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer</td></tr>
+<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer · loadFeaturesAsLayer</td></tr>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
@@ -371,7 +371,7 @@ Un <code>datasets.json</code> de la versión 1 se acepta como paquete mínimo.</
 <tr><td>start</td><td>Capa, centro y zoom de arranque.</td></tr>
 <tr><td>datasets</td><td>Capas base (mismo formato que <code>datasets.json</code>; lo omitido toma su valor por defecto).</td></tr>
 <tr><td>elevation</td><td><code>file</code> (BD <code>.sqlitedb</code>) o <code>dir</code> (carpeta <code>.hgt</code>).</td></tr>
-<tr><td>overlays</td><td>Capas vectoriales <b>fijas</b> <code>.geo</code> con estilo: bloqueadas y excluidas del guardado de entidades (<code>fixedLayers</code>), para no duplicarse en cada arranque.</td></tr>
+<tr><td>overlays</td><td>Capas vectoriales <b>fijas</b> (bloqueadas, excluidas del guardado de entidades, <code>fixedLayers</code>): un <code>.geo</code> con <code>style</code> (<code>loadGeoAsLayer</code>, no seleccionable), o una BD <code>.sqlitedb</code> de entidades (<code>loadFeaturesAsLayer</code>) que conserva el <b>estilo/etiqueta/atributos por entidad</b> y queda <b>seleccionable</b> — así una capa de <b>curvas de nivel</b> de <code>dem_to_contours</code> entra como overlay y al pinchar una curva se lee su cota.</td></tr>
 <tr><td>features</td><td>BD de entidades del usuario. Relativa → <code>AppDataLocation/&lt;package.id&gt;/</code> (escribible), nunca la carpeta del paquete; <code>seed</code> se copia la primera vez.</td></tr>
 </table>
 <p><code>MapConfig::dataDir</code> es el único ajuste necesario; cualquier campo de

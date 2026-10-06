@@ -137,14 +137,25 @@ public:
             if (modelo->hasLayer(ov.id))
                 continue;
             QString motivo;
-            const qint64 fid = q->loadGeoAsLayer(ov.file, ov.id, ov.name, ov.style, &motivo);
+            // Una capa fija puede venir de un .geo (un trazado, un estilo) o de
+            // una BD vectorial .sqlitedb (muchas entidades con estilo propio, p.
+            // ej. curvas de nivel). Se distingue por la extension del fichero.
+            const bool esDb = ov.file.endsWith(QLatin1String(".sqlitedb"), Qt::CaseInsensitive)
+                           || ov.file.endsWith(QLatin1String(".db"), Qt::CaseInsensitive);
+            const qint64 fid = esDb
+                ? q->loadFeaturesAsLayer(ov.file, ov.id, ov.name, &motivo)
+                : q->loadGeoAsLayer(ov.file, ov.id, ov.name, ov.style, &motivo);
             if (fid < 0) {
                 qCWarning(lcMapaRender) << "Capa fija" << ov.id << "no cargada:" << motivo;
                 continue;
             }
-            if (auto f = modelo->feature(fid)) {
-                f->selectable = false;
-                modelo->updateFeature(*f);
+            // El .geo es decoracion fija (no seleccionable); la BD vectorial
+            // conserva entidades seleccionables (p. ej. para leer la cota).
+            if (!esDb) {
+                if (auto f = modelo->feature(fid)) {
+                    f->selectable = false;
+                    modelo->updateFeature(*f);
+                }
             }
             modelo->setLayerEditable(ov.id, false);
             modelo->setLayerZOrder(ov.id, ov.zOrder);
@@ -806,6 +817,42 @@ qint64 MapWidget::loadGeoAsLayer(const QString &path, const QString &layerId,
 
     addFeatureLayer(layerId, displayName, 0);
     return addFeature(f);
+}
+
+// Carga una BD vectorial (esquema de VectorRepository) como una capa fija mas,
+// AÑADIENDO sus entidades sin reemplazar las existentes (al reves que
+// loadFeaturesFrom, que hace setContents). Cada entidad conserva su estilo,
+// etiqueta y atributos; todas quedan bajo layerId. Devuelve el id de la primera.
+qint64 MapWidget::loadFeaturesAsLayer(const QString &databasePath,
+                                      const QString &layerId,
+                                      const QString &displayName, QString *error)
+{
+    if (!d->view)
+        return -1;
+
+    VectorRepository repo;
+    if (!repo.open(databasePath)) {
+        if (error)
+            *error = repo.lastError();
+        emit errorOccurred(repo.lastError());
+        return -1;
+    }
+    const QVector<MapFeature> feats = repo.loadFeatures();
+    if (feats.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("%1 no tiene entidades").arg(databasePath);
+        return -1;
+    }
+
+    addFeatureLayer(layerId, displayName.isEmpty() ? layerId : displayName, 0);
+    qint64 primero = -1;
+    for (MapFeature f : feats) {
+        f.layerId = layerId;                 // todas bajo la capa del overlay
+        const qint64 id = addFeature(f);     // conserva estilo/etiqueta/atributos
+        if (primero < 0)
+            primero = id;
+    }
+    return primero;
 }
 
 // ------------------------------------------------------ objetivos moviles --
