@@ -1,18 +1,25 @@
 #include "libmapa/MapWidget.h"
 
 #include "core/Logging.h"
+#include "dem/ElevationAnalysis.h"
 #include "dem/HgtElevation.h"
 #include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
+#include "geo/WebMercator.h"
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileService.h"
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
 #include "io/PackageCheck.h"
 #include "widget/CoverageLayer.h"
+#include "widget/HillshadeLayer.h"
 #include "widget/MapView.h"
 
 #include <QFile>
+#include <QImage>
+#include <QtMath>
+#include <cmath>
+#include <vector>
 #include <QLayout>
 #include <QSet>
 #include <QTimer>
@@ -96,6 +103,16 @@ public:
     int coverageZoom = 14;
     bool coverageVisible = false;
 
+    // Relieve sombreado (hillshade) en vivo: parametros del sol y del render, y un
+    // temporizador antirebote para recalcular al terminar de mover la vista.
+    bool hillshadeVisible = false;
+    double hsSunAz = 315.0;      // NO
+    double hsSunAlt = 45.0;
+    double hsOpacity = 0.6;
+    double hsZFactor = 2.0;      // exageracion suave por defecto
+    bool hsColored = false;
+    QTimer *hsTimer = nullptr;
+
     // Paquete de datos (opcional). Sus capas fijas (overlays) se cargan al abrir
     // pero NO son del usuario: fixedLayers marca sus ids para que el guardado de
     // entidades las salte (si no, se duplicarian en cada arranque).
@@ -120,17 +137,29 @@ public:
             if (modelo->hasLayer(ov.id))
                 continue;
             QString motivo;
-            const qint64 fid = q->loadGeoAsLayer(ov.file, ov.id, ov.name, ov.style, &motivo);
+            // Una capa fija puede venir de un .geo (un trazado, un estilo) o de
+            // una BD vectorial .sqlitedb (muchas entidades con estilo propio, p.
+            // ej. curvas de nivel). Se distingue por la extension del fichero.
+            const bool esDb = ov.file.endsWith(QLatin1String(".sqlitedb"), Qt::CaseInsensitive)
+                           || ov.file.endsWith(QLatin1String(".db"), Qt::CaseInsensitive);
+            const qint64 fid = esDb
+                ? q->loadFeaturesAsLayer(ov.file, ov.id, ov.name, &motivo)
+                : q->loadGeoAsLayer(ov.file, ov.id, ov.name, ov.style, &motivo);
             if (fid < 0) {
                 qCWarning(lcMapaRender) << "Capa fija" << ov.id << "no cargada:" << motivo;
                 continue;
             }
-            if (auto f = modelo->feature(fid)) {
-                f->selectable = false;
-                modelo->updateFeature(*f);
+            // El .geo es decoracion fija (no seleccionable); la BD vectorial
+            // conserva entidades seleccionables (p. ej. para leer la cota).
+            if (!esDb) {
+                if (auto f = modelo->feature(fid)) {
+                    f->selectable = false;
+                    modelo->updateFeature(*f);
+                }
             }
             modelo->setLayerEditable(ov.id, false);
             modelo->setLayerZOrder(ov.id, ov.zOrder);
+            modelo->setLayerZoomRange(ov.id, ov.minZoom, ov.maxZoom);
         }
     }
 };
@@ -250,6 +279,17 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
 
     connect(d->view, &MapView::zoomChanged, this, &MapWidget::zoomChanged);
     connect(d->view, &MapView::centerChanged, this, &MapWidget::centerChanged);
+
+    // Hillshade en vivo: tras mover la vista, recalcular con un pequeno retardo
+    // (antirebote) para no recalcular en cada pixel del arrastre.
+    d->hsTimer = new QTimer(this);
+    d->hsTimer->setSingleShot(true);
+    d->hsTimer->setInterval(180);
+    connect(d->hsTimer, &QTimer::timeout, this, &MapWidget::refreshHillshade);
+    auto programarHs = [this] { if (d->hillshadeVisible) d->hsTimer->start(); };
+    connect(d->view, &MapView::zoomChanged, this, [programarHs](int) { programarHs(); });
+    connect(d->view, &MapView::centerChanged, this, [programarHs](const QGeoCoordinate &) { programarHs(); });
+
     connect(d->view, &MapView::mouseMovedTo, this, &MapWidget::mouseMoved);
     connect(d->view, &MapView::mapClicked, this, &MapWidget::clicked);
     connect(d->view, &MapView::measurementFinished,
@@ -416,6 +456,13 @@ void MapWidget::setZoom(int zoom)
         d->view->setZoom(zoom);
 }
 
+// Permite sobre-zoom por encima del maximo recomendado (-1 lo restaura).
+void MapWidget::setMaxZoomOverride(int zoom)
+{
+    if (d->view)
+        d->view->setMaxZoomOverride(zoom);
+}
+
 // Zoom minimo del dataset activo.
 int MapWidget::minZoom() const
 {
@@ -493,6 +540,26 @@ bool MapWidget::setFeatureLayerVisible(const QString &id, bool visible)
 bool MapWidget::setFeatureLayerZOrder(const QString &id, int zOrder)
 {
     return d->view ? d->view->overlayModel()->setLayerZOrder(id, zOrder) : false;
+}
+
+// Fija el rango de zoom en que se dibuja (y selecciona) una capa (−1 = sin
+// límite). Útil para capas de detalle como las curvas de nivel, que a vista
+// general estorban: con minZoom se ocultan hasta acercar.
+bool MapWidget::setFeatureLayerZoomRange(const QString &id, int minZoom, int maxZoom)
+{
+    return d->view ? d->view->overlayModel()->setLayerZoomRange(id, minZoom, maxZoom)
+                   : false;
+}
+
+// Marca (o desmarca) una capa como TEMPORAL: sus entidades y la propia capa se
+// EXCLUYEN del guardado (saveFeaturesTo), igual que las capas fijas del paquete.
+// Útil para resultados de análisis o pines auxiliares que no deben persistir.
+void MapWidget::setFeatureLayerTransient(const QString &id, bool transient)
+{
+    if (transient)
+        d->fixedLayers.insert(id);
+    else
+        d->fixedLayers.remove(id);
 }
 
 // Anade una entidad; devuelve su id (o -1).
@@ -773,6 +840,42 @@ qint64 MapWidget::loadGeoAsLayer(const QString &path, const QString &layerId,
     return addFeature(f);
 }
 
+// Carga una BD vectorial (esquema de VectorRepository) como una capa fija mas,
+// AÑADIENDO sus entidades sin reemplazar las existentes (al reves que
+// loadFeaturesFrom, que hace setContents). Cada entidad conserva su estilo,
+// etiqueta y atributos; todas quedan bajo layerId. Devuelve el id de la primera.
+qint64 MapWidget::loadFeaturesAsLayer(const QString &databasePath,
+                                      const QString &layerId,
+                                      const QString &displayName, QString *error)
+{
+    if (!d->view)
+        return -1;
+
+    VectorRepository repo;
+    if (!repo.open(databasePath)) {
+        if (error)
+            *error = repo.lastError();
+        emit errorOccurred(repo.lastError());
+        return -1;
+    }
+    const QVector<MapFeature> feats = repo.loadFeatures();
+    if (feats.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("%1 no tiene entidades").arg(databasePath);
+        return -1;
+    }
+
+    addFeatureLayer(layerId, displayName.isEmpty() ? layerId : displayName, 0);
+    qint64 primero = -1;
+    for (MapFeature f : feats) {
+        f.layerId = layerId;                 // todas bajo la capa del overlay
+        const qint64 id = addFeature(f);     // conserva estilo/etiqueta/atributos
+        if (primero < 0)
+            primero = id;
+    }
+    return primero;
+}
+
 // ------------------------------------------------------ objetivos moviles --
 
 // Reenvios al TargetModel (capa dinamica de objetivos moviles), cada uno
@@ -925,6 +1028,40 @@ double MapWidget::elevationAt(const QGeoCoordinate &position) const
 {
     return d->elevation ? d->elevation->elevationAt(position)
                         : std::numeric_limits<double>::quiet_NaN();
+}
+
+// Perfil de elevacion a lo largo de una ruta. Reenvio al calculo del nucleo
+// usando el origen de elevacion configurado; perfil vacio si no hay origen.
+ElevationProfile MapWidget::elevationProfile(
+    const QVector<QGeoCoordinate> &path,
+    const ElevationProfileParams &params) const
+{
+    if (!d->elevation)
+        return ElevationProfile();
+    return libmapa::elevationProfile(*d->elevation, path, params);
+}
+
+// Visibilidad punto a punto. Reenvio al calculo del nucleo con el origen de
+// elevacion configurado; resultado invalido si no hay origen.
+LineOfSightResult MapWidget::lineOfSight(
+    const QGeoCoordinate &a, const QGeoCoordinate &b,
+    double antennaA, double antennaB,
+    const LineOfSightParams &params) const
+{
+    if (!d->elevation)
+        return LineOfSightResult();
+    return libmapa::lineOfSight(*d->elevation, a, b, antennaA, antennaB, params);
+}
+
+// Viewshed 360 grados. Reenvio al calculo del nucleo con el origen de elevacion
+// configurado; resultado invalido si no hay origen.
+Viewshed MapWidget::viewshed(const QGeoCoordinate &origin,
+                             const ViewshedParams &params,
+                             const ViewshedProgress &progress) const
+{
+    if (!d->elevation)
+        return Viewshed();
+    return libmapa::computeViewshed(*d->elevation, origin, params, progress);
 }
 
 // Cambia en caliente el origen a una CARPETA de `.hgt` (vacia = quita elevacion).
@@ -1115,6 +1252,185 @@ void MapWidget::refreshCoverage()
     }
 
     capa->setData(zt, zs, celdas);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// --- Relieve sombreado (hillshade) en vivo -----------------------------------
+
+namespace {
+// Color hipsometrico (tintado por altura) para el modo coloreado. Rampa simple
+// mar/costa -> verde -> marron -> roca -> nieve. Interpola entre paradas.
+QColor hypsometric(double e)
+{
+    struct P { double z; int r, g, b; };
+    static const P ramp[] = {
+        {   0.0, 0xa9, 0xd1, 0x8c}, { 200.0, 0x8c, 0xbf, 0x6a},
+        { 500.0, 0xd9, 0xcf, 0x8f}, {1000.0, 0xc2, 0xa0, 0x6a},
+        {1500.0, 0x9c, 0x6b, 0x4a}, {2000.0, 0xcf, 0xcf, 0xcf},
+        {3000.0, 0xff, 0xff, 0xff}
+    };
+    const int n = int(sizeof(ramp) / sizeof(ramp[0]));
+    if (e <= ramp[0].z) return QColor(ramp[0].r, ramp[0].g, ramp[0].b);
+    if (e >= ramp[n - 1].z) return QColor(ramp[n - 1].r, ramp[n - 1].g, ramp[n - 1].b);
+    for (int i = 1; i < n; ++i) {
+        if (e <= ramp[i].z) {
+            const double t = (e - ramp[i - 1].z) / (ramp[i].z - ramp[i - 1].z);
+            return QColor(int(ramp[i - 1].r + (ramp[i].r - ramp[i - 1].r) * t),
+                          int(ramp[i - 1].g + (ramp[i].g - ramp[i - 1].g) * t),
+                          int(ramp[i - 1].b + (ramp[i].b - ramp[i - 1].b) * t));
+        }
+    }
+    return QColor(ramp[n - 1].r, ramp[n - 1].g, ramp[n - 1].b);
+}
+} // namespace
+
+void MapWidget::setHillshadeVisible(bool on)
+{
+    d->hillshadeVisible = on;
+    HillshadeLayer *capa = d->view ? d->view->hillshadeLayer() : nullptr;
+    if (!capa) return;
+    capa->setVisible(on);
+    if (on) {
+        refreshHillshade();
+    } else {
+        capa->clear();
+        d->view->replot(QCustomPlot::rpQueuedReplot);
+    }
+}
+
+bool MapWidget::isHillshadeVisible() const { return d->hillshadeVisible; }
+
+void MapWidget::setHillshadeSun(double azimuthDeg, double altitudeDeg)
+{
+    d->hsSunAz = azimuthDeg;
+    d->hsSunAlt = qBound(1.0, altitudeDeg, 89.0);
+    if (d->hillshadeVisible) refreshHillshade();
+}
+
+void MapWidget::setHillshadeOpacity(double opacity)
+{
+    d->hsOpacity = qBound(0.0, opacity, 1.0);
+    if (d->hillshadeVisible) refreshHillshade();
+}
+
+void MapWidget::setHillshadeExaggeration(double zFactor)
+{
+    d->hsZFactor = qMax(0.1, zFactor);
+    if (d->hillshadeVisible) refreshHillshade();
+}
+
+void MapWidget::setHillshadeColored(bool on)
+{
+    d->hsColored = on;
+    if (d->hillshadeVisible) refreshHillshade();
+}
+
+// Calcula el relieve sombreado para la vista actual a partir del DEM LOCAL (sin
+// conexion) y lo deja en la capa. Submuestrea el area para ser rapido; la imagen
+// se calcula en (longitud lineal, grados de Mercator) para alinear con la base.
+void MapWidget::refreshHillshade()
+{
+    HillshadeLayer *capa = d->view ? d->view->hillshadeLayer() : nullptr;
+    if (!capa) return;
+    d->syncGeometry();
+    if (!d->hillshadeVisible || !d->elevation) {
+        capa->clear();
+        if (d->view) d->view->replot(QCustomPlot::rpQueuedReplot);
+        return;
+    }
+
+    const QGeoCoordinate nw = d->view->visibleNorthWest();
+    const QGeoCoordinate se = d->view->visibleSouthEast();
+    const double lonW = nw.longitude(), lonE = se.longitude();
+    const double latN = nw.latitude(),  latS = se.latitude();
+    if (!(lonE > lonW) || !(latN > latS)) { capa->clear(); return; }
+
+    // FRENO por area: el coste del hillshade lo domina cargar teselas del DEM, que
+    // crece con el area de la vista. A escala de pais (p. ej. Cuba entera) serian
+    // demasiadas teselas y la GUI se congelaria. Por encima de un ancho/alto se deja
+    // la capa en blanco: el relieve es util al acercar, no a vista general.
+    const double kMaxSpanDeg = 2.0;    // ~220 km; a partir de aqui no se calcula
+    if ((lonE - lonW) > kMaxSpanDeg || (latN - latS) > kMaxSpanDeg) {
+        capa->clear();
+        d->view->replot(QCustomPlot::rpQueuedReplot);
+        return;
+    }
+
+    // Resolucion de salida: se limita el lado mayor para acotar el coste.
+    const int anchoPx = qMax(16, d->view->width() > 1 ? d->view->width() : 640);
+    const int altoPx  = qMax(16, d->view->height() > 1 ? d->view->height() : 480);
+    const int maxDim = 360;
+    int W = qMin(anchoPx, 4000);
+    int H = qMin(altoPx, 4000);
+    const double esc = double(maxDim) / double(qMax(W, H));
+    if (esc < 1.0) { W = qMax(16, int(double(W) * esc)); H = qMax(16, int(double(H) * esc)); }
+    const std::size_t WH = std::size_t(W) * std::size_t(H);
+
+    // Latitud de cada fila por el inverso de Mercator (filas lineales en el eje Y).
+    const double ayTop = WebMercator::latitudeToMercatorDegrees(latN);
+    const double ayBot = WebMercator::latitudeToMercatorDegrees(latS);
+    std::vector<double> lats;
+    lats.resize(std::size_t(H));
+    for (int j = 0; j < H; ++j) {
+        const double ay = ayTop + (ayBot - ayTop) * (H == 1 ? 0.0 : double(j) / double(H - 1));
+        lats[std::size_t(j)] = WebMercator::mercatorDegreesToLatitude(ay);
+    }
+    // Rejilla de cotas.
+    std::vector<double> z(WH);
+    for (int j = 0; j < H; ++j)
+        for (int i = 0; i < W; ++i) {
+            const double lon = lonW + (lonE - lonW) * (W == 1 ? 0.0 : double(i) / double(W - 1));
+            z[std::size_t(j) * std::size_t(W) + std::size_t(i)] =
+                d->elevation->elevationAt(QGeoCoordinate(lats[std::size_t(j)], lon));
+        }
+
+    // Metros por pixel (aprox, con la latitud central).
+    const double latC = 0.5 * (latN + latS);
+    const double mLon = 111320.0 * std::cos(qDegreesToRadians(latC));
+    const double dxm = qMax(1.0, (lonE - lonW) / qMax(1, W - 1) * mLon);
+    const double dym = qMax(1.0, (latN - latS) / qMax(1, H - 1) * 110540.0);
+
+    const double ze = d->hsZFactor;
+    const double zenith = qDegreesToRadians(90.0 - d->hsSunAlt);
+    const double azm = qDegreesToRadians(360.0 - d->hsSunAz + 90.0);
+    const double cz = std::cos(zenith), sz = std::sin(zenith);
+    const double fuerza = d->hsOpacity;
+
+    auto at = [&](int i, int j) -> double {
+        return z[std::size_t(qBound(0, j, H - 1)) * std::size_t(W) + std::size_t(qBound(0, i, W - 1))];
+    };
+
+    QImage img(W, H, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    for (int j = 0; j < H; ++j) {
+        QRgb *fila = reinterpret_cast<QRgb *>(img.scanLine(j));
+        for (int i = 0; i < W; ++i) {
+            const double zc = at(i, j);
+            if (std::isnan(zc)) { fila[i] = qRgba(0, 0, 0, 0); continue; }  // sin dato
+            auto nz = [&](int ii, int jj) { const double v = at(ii, jj); return std::isnan(v) ? zc : v; };
+            const double dzdx = (nz(i + 1, j) - nz(i - 1, j)) / (2.0 * dxm) * ze;
+            const double dzdy = (nz(i, j - 1) - nz(i, j + 1)) / (2.0 * dym) * ze;  // j-1 = norte
+            const double slope = std::atan(std::sqrt(dzdx * dzdx + dzdy * dzdy));
+            const double aspect = std::atan2(dzdy, -dzdx);
+            double hs = cz * std::cos(slope) + sz * std::sin(slope) * std::cos(azm - aspect);
+            hs = qBound(0.0, hs, 1.0);
+            if (d->hsColored) {
+                const QColor c = hypsometric(zc);
+                fila[i] = qRgba(int(c.red() * hs), int(c.green() * hs), int(c.blue() * hs), 255);
+            } else {
+                // Gris para Multiply; la fuerza mezcla hacia blanco (255 = sin efecto).
+                const int v = 255 - int(fuerza * (255.0 - hs * 255.0));
+                fila[i] = qRgb(v, v, v);
+            }
+        }
+    }
+
+    // Gris -> Multiply a opacidad 1 (la fuerza ya va en el pixel). Color ->
+    // SourceOver con la opacidad elegida.
+    if (d->hsColored)
+        capa->setImage(img, lonW, lonE, latN, latS, QPainter::CompositionMode_SourceOver, d->hsOpacity);
+    else
+        capa->setImage(img, lonW, lonE, latN, latS, QPainter::CompositionMode_Multiply, 1.0);
     d->view->replot(QCustomPlot::rpQueuedReplot);
 }
 

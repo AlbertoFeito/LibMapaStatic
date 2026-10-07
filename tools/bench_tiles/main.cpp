@@ -18,6 +18,7 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QEventLoop>
 #include <QTextStream>
 #include <QTimer>
@@ -102,8 +103,16 @@ int main(int argc, char *argv[])
     parser.addOption(optPans);
     parser.process(app);
 
+    // Sin --datasets explícito: prefiere un `mapa.json` del directorio actual
+    // (paquete) y, si no, `datasets.json`. loadDatasets lee el array "datasets" de
+    // ambos. Así todas las herramientas convergen en el mismo mapa.json.
+    QString jsonPath = parser.value(optJson);
+    if (!parser.isSet(optJson) && !QFile::exists(jsonPath)
+        && QFile::exists(QStringLiteral("mapa.json")))
+        jsonPath = QStringLiteral("mapa.json");
+
     QString error;
-    const auto datasets = TileService::loadDatasets(parser.value(optJson), &error);
+    const auto datasets = TileService::loadDatasets(jsonPath, &error);
     if (datasets.isEmpty()) {
         err << "No se pudieron cargar los datasets: " << error << "\n";
         return 2;

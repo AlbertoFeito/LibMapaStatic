@@ -132,6 +132,9 @@ add_library(libmapa_core STATIC
     src/dem/HgtElevation.h
     src/dem/SqliteElevation.cpp
     src/dem/SqliteElevation.h
+    src/dem/ElevationAnalysis.cpp
+    src/dem/ElevationAnalysis.h
+    src/dem/Contours.cpp
 )
 
 target_include_directories(libmapa_core
@@ -176,6 +179,8 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/TargetLayer.h
         src/widget/CoverageLayer.cpp
         src/widget/CoverageLayer.h
+        src/widget/HillshadeLayer.cpp
+        src/widget/HillshadeLayer.h
         src/widget/MapView.cpp
         src/widget/MapView.h
         src/widget/MapWidget.cpp
@@ -219,7 +224,10 @@ endif()
 # -----------------------------------------------------------------------------
 if(LIBMAPA_BUILD_DEMO AND LIBMAPA_HAVE_QCP)
     add_executable(demo demo/main.cpp)
-    target_link_libraries(demo PRIVATE libmapa_widget)
+    target_link_libraries(demo PRIVATE libmapa_widget Qt${QT_VERSION_MAJOR}::PrintSupport)
+    # El demo dibuja el perfil con QCustomPlot (ya compilado dentro de
+    # libmapa_widget); su cabecera va como SYSTEM para que nuestros -W... no la marquen.
+    target_include_directories(demo SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
 endif()
 
 # -----------------------------------------------------------------------------
@@ -246,6 +254,18 @@ if(LIBMAPA_BUILD_TOOLS)
     add_executable(geo_to_tiles tools/geo_to_tiles/main.cpp)
     target_link_libraries(geo_to_tiles PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Gui)
     target_include_directories(geo_to_tiles PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    # Hornea un relieve sombreado (hillshade) del DEM a una piramide de teselas
+    # SQLite (offline, para la vista general). Tambien necesita Gui (QImage).
+    add_executable(dem_to_hillshade tools/dem_to_hillshade/main.cpp)
+    target_link_libraries(dem_to_hillshade PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Gui)
+    target_include_directories(dem_to_hillshade PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    # Genera curvas de nivel (isohipsas) del DEM y las guarda como capa vectorial
+    # (.sqlitedb de entidades) para activar/desactivar y leer la cota. Solo core.
+    add_executable(dem_to_contours tools/dem_to_contours/main.cpp)
+    target_link_libraries(dem_to_contours PRIVATE libmapa_core)
+    target_include_directories(dem_to_contours PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
     # Rellena huecos de una BD de teselas descargando de una fuente XYZ sin
     # clave (Esri satelite por defecto). El motor (TileFiller) es comun a la
@@ -336,6 +356,8 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_vectorrepository)
     libmapa_add_test(tst_hgtelevation)
     libmapa_add_test(tst_sqliteelevation)
+    libmapa_add_test(tst_elevationanalysis)
+    libmapa_add_test(tst_contours)
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 
@@ -452,7 +474,8 @@ if(LIBMAPA_INSTALL)
 
     # Herramientas de consola que existan en esta configuracion.
     foreach(_libmapa_tool check_data probe_db render_map dem_to_db fill_hgt
-                          fill_tiles fill_map geo_to_tiles bench_tiles)
+                          fill_tiles fill_map geo_to_tiles bench_tiles dem_to_hillshade
+                          dem_to_contours)
         if(TARGET ${_libmapa_tool})
             install(TARGETS ${_libmapa_tool} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
         endif()

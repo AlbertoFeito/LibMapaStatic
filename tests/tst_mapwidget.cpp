@@ -29,6 +29,7 @@ static QMouseEvent mouseEvent(QEvent::Type tipo, const QPoint &pos,
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -56,6 +57,8 @@ private slots:
     void navigationKeepsCenter();
     void zoomIsClampedToRecommendedRange();
     void fitBoundsFramesTheArea();
+    //! La API de hillshade conmuta y acepta parametros sin colgar (sin DEM: capa vacia).
+    void hillshadeApiTogglesSafely();
 
     void resizeDoesNotLoseTheView();
 
@@ -95,6 +98,10 @@ private slots:
     void undoAndRedoRestoreTheModel();
     void draggingIsOneUndoStep();
     void savesAndLoadsFeatures();
+    void loadsFeaturesDbAsFixedLayer();
+    void viewportCullKeepsCrossingFeatures();
+    void persistSkipsTransientLayers();
+    void iconAnchorHitTestCoversPin();
 
     // --- Fase 7: .geo y objetivos moviles --------------------------------
     void loadsGeoFileAsPolygonLayer();
@@ -2131,6 +2138,186 @@ void TstMapWidget::reportsDataWarningsButStillOpens()
     QVERIFY2(avisos.contains(QStringLiteral("no_esta.sqlitedb")), qPrintable(avisos));
     QVERIFY2(avisos.contains(QStringLiteral("corredores.geo")), qPrintable(avisos));
     QVERIFY(w.featuresInLayer(QStringLiteral("corredores")).isEmpty());
+}
+
+// La API de relieve sombreado conmuta su estado y acepta parametros sin colgar.
+// Sin DEM configurado la capa queda vacia (refreshHillshade no dibuja nada), pero
+// todas las rutas del API deben ser seguras.
+void TstMapWidget::hillshadeApiTogglesSafely()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+
+    QVERIFY(!w.isHillshadeVisible());
+    w.setHillshadeSun(315.0, 45.0);
+    w.setHillshadeOpacity(0.6);
+    w.setHillshadeExaggeration(2.0);
+    w.setHillshadeColored(true);
+
+    w.setHillshadeVisible(true);
+    QVERIFY(w.isHillshadeVisible());
+    w.refreshHillshade();                 // sin DEM: no dibuja, no debe colgar
+    w.setHillshadeColored(false);
+    w.refreshHillshade();
+
+    w.setHillshadeVisible(false);
+    QVERIFY(!w.isHillshadeVisible());
+}
+
+// loadFeaturesAsLayer AÑADE las entidades de una BD vectorial como capa fija (sin
+// reemplazar las existentes, al reves que loadFeaturesFrom), conservando estilo,
+// etiqueta y atributos por entidad (como la capa de curvas de nivel del paquete).
+void TstMapWidget::loadsFeaturesDbAsFixedLayer()
+{
+    const QString bd = m_dir.filePath(QStringLiteral("curvas_test.db"));
+    QFile::remove(bd);
+    {
+        VectorRepository repo;
+        QVERIFY(repo.open(bd));
+        MapFeature a;
+        a.layerId = QStringLiteral("curvas");
+        a.kind = GeometryKind::Polyline;
+        a.type = QStringLiteral("curva_nivel");
+        a.name = QStringLiteral("500 m");
+        a.geometry = {QGeoCoordinate(20.0, -77.0), QGeoCoordinate(20.1, -77.1)};
+        a.attributes[QStringLiteral("cota")] = 500;
+        a.style.labelVisible = true;               // curva indice (etiquetada)
+        MapFeature b = a;
+        b.name.clear();
+        b.attributes[QStringLiteral("cota")] = 600;
+        b.style.labelVisible = false;              // curva normal
+        b.geometry = {QGeoCoordinate(20.0, -77.2), QGeoCoordinate(20.1, -77.3)};
+        QVERIFY(repo.saveFeatures({a, b}));
+    }
+
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(400, 300);
+
+    // Una entidad propia del usuario, que NO debe perderse al añadir la capa fija.
+    MapFeature mio;
+    mio.kind = GeometryKind::Point;
+    mio.layerId = QStringLiteral("mios");
+    mio.geometry = {QGeoCoordinate(23.0, -82.0)};
+    QVERIFY(w.addFeature(mio) > 0);
+
+    QString err;
+    QVERIFY2(w.loadFeaturesAsLayer(bd, QStringLiteral("curvas"),
+                                   QStringLiteral("Curvas"), &err) > 0, qPrintable(err));
+
+    QCOMPARE(w.featureCount(), 3);                 // añade, no reemplaza (1 + 2)
+    const auto curvas = w.featuresInLayer(QStringLiteral("curvas"));
+    QCOMPARE(curvas.size(), 2);
+
+    int conEtiqueta = 0;
+    QSet<int> cotas;
+    for (const MapFeature &f : curvas) {
+        cotas.insert(f.attributes.value(QStringLiteral("cota")).toInt());
+        if (f.style.labelVisible)
+            ++conEtiqueta;
+    }
+    QCOMPARE(cotas, (QSet<int>{500, 600}));        // atributos conservados
+    QCOMPARE(conEtiqueta, 1);                        // estilo por entidad conservado
+
+    // Rango de zoom por capa: se guarda en la LayerInfo (oculta la capa de
+    // detalle a vista general).
+    QVERIFY(w.setFeatureLayerZoomRange(QStringLiteral("curvas"), 10, -1));
+    bool vista = false;
+    for (const LayerInfo &c : w.featureLayers())
+        if (c.id == QStringLiteral("curvas")) {
+            vista = true;
+            QCOMPARE(c.minZoom, 10);
+            QCOMPARE(c.maxZoom, -1);
+        }
+    QVERIFY(vista);
+}
+
+// El recorte por viewport NO debe tragarse una entidad que CRUZA la vista con
+// los extremos fuera de pantalla (el caso que un simple "¿algún vértice dentro?"
+// perdería): se sigue pudiendo seleccionar por el centro.
+void TstMapWidget::viewportCullKeepsCrossingFeatures()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("cruza"), QStringLiteral("Cruza"), 5);
+    MapFeature linea;
+    linea.layerId = QStringLiteral("cruza");
+    linea.kind = GeometryKind::Polyline;
+    // Extremos MUY fuera de pantalla (±10° de longitud) pero la linea, a la
+    // latitud del centro, pasa por el centro de la vista.
+    linea.geometry = {QGeoCoordinate(centro.latitude(), centro.longitude() - 10.0),
+                      QGeoCoordinate(centro.latitude(), centro.longitude() + 10.0)};
+    const qint64 id = w.addFeature(linea);
+    QVERIFY(id > 0);
+
+    // En el pixel central debe encontrarse pese a tener los extremos fuera.
+    QCOMPARE(w.featureAt(QPoint(400, 300), 8.0), id);
+}
+
+// Una capa marcada TEMPORAL (setFeatureLayerTransient) no se guarda: al recargar
+// solo quedan las entidades de las capas guardables.
+void TstMapWidget::persistSkipsTransientLayers()
+{
+    const QString bd = m_dir.filePath(QStringLiteral("transient.db"));
+    QFile::remove(bd);
+    {
+        MapWidget w(baseConfig(m_jsonPath));
+        QVERIFY(w.isReady());
+        w.addFeatureLayer(QStringLiteral("guardable"), QStringLiteral("Guardable"), 5);
+        MapFeature a;
+        a.kind = GeometryKind::Point;
+        a.layerId = QStringLiteral("guardable");
+        a.geometry = {QGeoCoordinate(21.0, -79.0)};
+        QVERIFY(w.addFeature(a) > 0);
+
+        w.addFeatureLayer(QStringLiteral("tmp"), QStringLiteral("Temporal"), 6);
+        w.setFeatureLayerTransient(QStringLiteral("tmp"));
+        MapFeature b = a;
+        b.layerId = QStringLiteral("tmp");
+        b.geometry = {QGeoCoordinate(21.1, -79.1)};
+        QVERIFY(w.addFeature(b) > 0);
+
+        QVERIFY(w.saveFeaturesTo(bd));
+    }
+    MapWidget w2(baseConfig(m_jsonPath));
+    QVERIFY(w2.isReady());
+    QVERIFY(w2.loadFeaturesFrom(bd));
+    QCOMPARE(w2.featureCount(), 1);                               // la temporal no se guardó
+    QCOMPARE(w2.featuresInLayer(QStringLiteral("guardable")).size(), 1);
+    QCOMPARE(w2.featuresInLayer(QStringLiteral("tmp")).size(), 0);
+}
+
+// Con icono anclado por la PUNTA (0.5,1.0), el área sensible es TODO el pixmap:
+// se acierta en la punta y en el cuerpo (arriba), pero no por debajo de la punta.
+void TstMapWidget::iconAnchorHitTestCoversPin()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("pines"), QStringLiteral("Pines"), 60);
+    MapFeature pin;
+    pin.kind = GeometryKind::Point;
+    pin.layerId = QStringLiteral("pines");
+    pin.geometry = {centro};
+    QPixmap pm(24, 32);
+    pm.fill(Qt::transparent);
+    pin.style.icon = pm;
+    pin.style.iconAnchor = QPointF(0.5, 31.0 / 32.0);   // la punta marca el punto
+    const qint64 id = w.addFeature(pin);
+    QVERIFY(id > 0);
+
+    QCOMPARE(w.featureAt(QPoint(400, 300), 4.0), id);        // la punta
+    QCOMPARE(w.featureAt(QPoint(400, 280), 4.0), id);        // cuerpo del pin (arriba)
+    QCOMPARE(w.featureAt(QPoint(400, 320), 4.0), qint64(-1)); // por debajo: nada
 }
 
 QTEST_MAIN(TstMapWidget)

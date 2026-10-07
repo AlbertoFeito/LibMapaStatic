@@ -37,7 +37,9 @@ SOURCES += \
     $$ROOT/src/io/PackageCheck.cpp \
     $$ROOT/src/dem/GridElevation.cpp \
     $$ROOT/src/dem/HgtElevation.cpp \
-    $$ROOT/src/dem/SqliteElevation.cpp
+    $$ROOT/src/dem/SqliteElevation.cpp \
+    $$ROOT/src/dem/ElevationAnalysis.cpp \
+    $$ROOT/src/dem/Contours.cpp
 
 # Cabeceras con Q_OBJECT (para el MOC).
 HEADERS += \

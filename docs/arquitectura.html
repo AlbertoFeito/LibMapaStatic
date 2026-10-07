@@ -92,7 +92,7 @@ se pueda probar sin ventanas.</p>
   <li><b>Teselas base:</b> abre una o varias BD de teselas (OSM, satélite…), las cachea y las pinta fluido según navegas.</li>
   <li><b>Entidades:</b> dibuja y edita puntos/líneas/polígonos en capas, con guardado/carga en SQLite y carga de ficheros <code>.geo</code>.</li>
   <li><b>Objetivos móviles:</b> móviles con traza y etiqueta, actualizables varias veces por segundo, en una capa que se repinta sola. <b>Agnósticos del dominio</b>: cada objetivo lleva un <code>kind</code> y un juego de <code>attributes</code> libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta, así el mismo modelo sirve a seguimiento naval, aéreo o de UAVs. La <b>simbología va por hooks</b>: la app registra un proveedor (<code>setTargetSymbolProvider</code>) que elige el icono de cada objetivo según su <code>kind</code>/estado; la librería lo coloca y lo gira por el rumbo, y sin proveedor usa un galón por defecto. <b>Escala a miles</b> (ADS-B regional): culling por vista, <b>nivel de detalle</b> (por encima de un presupuesto se apagan etiquetas y trazas, que a esa densidad son ilegibles), <b>declutter</b> de etiquetas (una por celda) y decimación de la traza.</li>
-  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), y <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa).</li>
+  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa), elevación (<code>fill_hgt</code> descarga SRTM, <code>dem_to_db</code> lo empaqueta), <b>hornear relieve sombreado</b> del DEM a teselas (<code>dem_to_hillshade</code>, gris o <code>--colored</code> con batimetría, offline) y <b>generar curvas de nivel</b> del DEM como capa vectorial (<code>dem_to_contours</code>).</li>
 </ul>
 </div>
 
@@ -315,14 +315,16 @@ un <code>Impl</code> con el <code>TileService</code> y el <code>MapView</code>. 
 la API que usa la aplicación:</p>
 <table><tr><th>Grupo</th><th>Funciones (ejemplos)</th></tr>
 <tr><td>Capa base</td><td class="mono">availableBaseLayers · baseLayerId · setBaseLayerId · reloadBaseLayer</td></tr>
-<tr><td>Navegación</td><td class="mono">center/setCenter · zoom/setZoom · zoomIn/Out · fitBounds · visibleNorthWest/SouthEast</td></tr>
+<tr><td>Navegación</td><td class="mono">center/setCenter · zoom/setZoom · zoomIn/Out · fitBounds · visibleNorthWest/SouthEast · <b>setMaxZoomOverride</b></td></tr>
 <tr><td>Capas de entidades</td><td class="mono">addFeatureLayer · setFeatureLayerVisible · setFeatureLayerZOrder</td></tr>
-<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer</td></tr>
+<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer · loadFeaturesAsLayer · setFeatureLayerZoomRange · setFeatureLayerTransient</td></tr>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
+<tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
+<tr><td>Cobertura / relieve</td><td class="mono">setCoverageVisible · setCoverageZoom · refreshCoverage · <b>setHillshadeVisible · setHillshadeSun · setHillshadeOpacity · setHillshadeExaggeration · setHillshadeColored · refreshHillshade</b></td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
 <tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
 </table>
@@ -337,9 +339,10 @@ añadió para la descarga.</p>
 <h3>Capas de dibujo (QCPLayerable)</h3>
 <table><tr><th>Clase</th><th>Rol</th></tr>
 <tr><td class="cls">TileLayer</td><td>Pinta las teselas del plan (con la escalera de respaldo). Lee del <code>TileCache</code>.</td></tr>
-<tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar.</td></tr>
+<tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar. <b>Recorte por viewport</b>: salta (sin proyectar a píxeles) las entidades cuya caja no toca la vista, y respeta el <b>rango de zoom</b> de la capa — así una capa densa (curvas de nivel) no frena el <i>pan</i>. Un punto con icono se ancla por <code>FeatureStyle::iconAnchor</code> (normalizado; <code>(0.5,1.0)</code> = la punta del pin marca el lugar) y su <b>hit-test</b> cubre todo el pixmap, para poder agarrarlo.</td></tr>
 <tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas. El símbolo lo decide el proveedor de la app (icono + rotación por rumbo + escala); sin proveedor, un galón por defecto. Para miles de objetivos: culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza.</td></tr>
 <tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
+<tr><td class="cls">HillshadeLayer</td><td><b>Relieve sombreado</b> (hillshade) en vivo: capa «tonta» que pinta una imagen —calculada por <code>MapWidget</code> del DEM LOCAL (sin conexión)— estirada entre los píxeles de sus esquinas (alineada con la base, eje X=longitud, Y=grados de Mercator). Va encima de las teselas y debajo de las entidades. Gris en <i>Multiply</i> sobre la base, o tintado por altura (hipsométrico) en <i>SourceOver</i>.</td></tr>
 </table>
 
 <h3>Modelos (QObject, sin dibujo)</h3>
@@ -368,7 +371,7 @@ Un <code>datasets.json</code> de la versión 1 se acepta como paquete mínimo.</
 <tr><td>start</td><td>Capa, centro y zoom de arranque.</td></tr>
 <tr><td>datasets</td><td>Capas base (mismo formato que <code>datasets.json</code>; lo omitido toma su valor por defecto).</td></tr>
 <tr><td>elevation</td><td><code>file</code> (BD <code>.sqlitedb</code>) o <code>dir</code> (carpeta <code>.hgt</code>).</td></tr>
-<tr><td>overlays</td><td>Capas vectoriales <b>fijas</b> <code>.geo</code> con estilo: bloqueadas y excluidas del guardado de entidades (<code>fixedLayers</code>), para no duplicarse en cada arranque.</td></tr>
+<tr><td>overlays</td><td>Capas vectoriales <b>fijas</b> (bloqueadas, excluidas del guardado de entidades, <code>fixedLayers</code>): un <code>.geo</code> con <code>style</code> (<code>loadGeoAsLayer</code>, no seleccionable), o una BD <code>.sqlitedb</code> de entidades (<code>loadFeaturesAsLayer</code>) que conserva el <b>estilo/etiqueta/atributos por entidad</b> y queda <b>seleccionable</b> — así una capa de <b>curvas de nivel</b> de <code>dem_to_contours</code> entra como overlay y al pinchar una curva se lee su cota. <code>minZoom</code>/<code>maxZoom</code> (por capa, en <code>LayerInfo</code>) limitan el zoom en que se dibuja y se selecciona: una capa de detalle (curvas) se oculta a vista general para no ensuciarla ni frenarla.</td></tr>
 <tr><td>features</td><td>BD de entidades del usuario. Relativa → <code>AppDataLocation/&lt;package.id&gt;/</code> (escribible), nunca la carpeta del paquete; <code>seed</code> se copia la primera vez.</td></tr>
 </table>
 <p><code>MapConfig::dataDir</code> es el único ajuste necesario; cualquier campo de
@@ -415,6 +418,43 @@ se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m,
 </table>
 <p>El <code>.hgt</code> es crudo y <b>sin cabecera</b>: rejilla <b>cuadrada</b> de <code>int16</code> <b>big-endian</b> de 1°×1°, nombre = esquina SO (<code>N19W077.hgt</code>), fila 0 = norte, col 0 = oeste. La resolución se deduce del tamaño (<code>lado = isqrt(bytes/2)</code> → 1201 = 90 m, 3601 = 30 m). La <b>BD</b> guarda esas mismas muestras <code>qCompress</code>-adas: <code>dem_tiles(lat,lon,side,data)</code> + <code>dem_meta</code>; se abre read-only por el <code>SqliteConnectionPool</code>.</p>
 <p><b>Propiedades:</b> <span class="tag">caché LRU</span> de tiles abiertos; <span class="tag">huecos→NaN</span> no inventa terreno; <span class="tag">dos orígenes</span> carpeta <code>.hgt</code> o BD empaquetable, misma cota. Se expone por la fachada: <code>MapConfig.elevationDir</code>/<code>elevationDbFile</code>, <code>MapWidget::elevationAt()</code> y <code>setElevationDir/Db()</code>; <code>fill_map</code> muestra la cota bajo el cursor (<code>--dem</code> carpeta, <code>--dem-db</code> base de datos, o el botón <b>DEM…</b>).</p>
+
+<h2 class="sec">8c · Análisis de elevación — perfiles sobre el DEM</h2>
+<p>Sobre ese mismo <code>IElevationSource</code>, el núcleo calcula <b>perfiles del
+terreno</b> con funciones libres en <span class="tag">src/dem/ElevationAnalysis.{h,cpp}</span>
+y tipos de resultado públicos en <span class="tag">include/libmapa/Elevation.h</span>.
+Son cálculos de <b>visibilidad directa</b> (nada de radar). La primera capacidad es
+el <b>perfil de una ruta</b>.</p>
+<table>
+<tr><th>Elemento</th><th>Qué hace</th></tr>
+<tr><td class="mono">elevationProfile(src, path, params)</td><td>Cota del terreno a lo largo de una polilínea, muestreada a paso constante (por defecto <b>30 m</b>) de forma uniforme por toda la ruta (incluye siempre el último punto exacto). Camina rayos geodésicos con <code>atDistanceAndAzimuth</code> + <code>GeoMath</code>.</td></tr>
+<tr><td class="mono">ElevationProfile</td><td><code>samples[]</code> (<code>{distanceM, position, elevation}</code>, NaN = hueco), <code>totalDistanceM</code>, <code>min/maxElevation</code>, <code>gain</code>, <code>loss</code>. Las estadísticas ignoran los NaN.</td></tr>
+<tr><td class="mono">lineOfSight(src, a, b, antA, antB, params)</td><td>Visibilidad directa entre dos puntos con altura de antena en cada extremo. Muestrea el terreno intermedio y lo compara con la recta entre las cimas de antena, <b>más el abombamiento de la Tierra</b> (radio efectivo <b>k·R</b>, k=4/3; <code>curvature=false</code> → geométrico).</td></tr>
+<tr><td class="mono">LineOfSightResult</td><td><code>clear</code> (¿hay visión?), <code>clearanceM</code> (holgura mínima; negativa = cuánto falta), <code>blockPosition</code>/<code>blockDistanceM</code> (punto crítico), <code>isValid()</code> (falso sin dato en un extremo).</td></tr>
+<tr><td class="mono">computeViewshed(src, origin, params, progress)</td><td>Viewshed 360°: un rayo por azimut (<code>azimuthStepDeg</code>) hasta <code>maxRangeM</code>. Por rayo: ángulo de cierre del terreno, horizonte acumulado y <b>picos</b> de la silueta, y la visibilidad de un objetivo a <code>targetHeight</code>. Curvatura k·R como en <code>lineOfSight</code> (y <b>consistente punto a punto</b> con él). <code>progress</code> (opcional, <code>ViewshedProgress = function&lt;bool(hecho,total)&gt;</code>) se invoca tras cada azimut; devolver <code>false</code> cancela (resultado vacío) → barras de progreso en alcances largos (hasta 400&nbsp;km).</td></tr>
+<tr><td class="mono">Viewshed / ViewshedRay / VisibleRange</td><td><code>Viewshed{origin, rays[]}</code>; cada <code>ViewshedRay{azimuthDeg, horizonDeg, peaks[], visibleRanges[], hiddenRanges[], visibilityReachM, profile}</code>. <code>visibleRanges</code> = TODOS los tramos visibles del rayo (la <b>zona real, con huecos</b>); <code>hiddenRanges</code> = los ocultos (ambos parten el rayo cubierto, para sombrear); <code>visibilityReachM</code> = solo el primer tramo contiguo. <code>keepProfiles</code> llena <code>profile</code> por rayo.</td></tr>
+<tr><td class="mono">voidElevation (en los 3 params)</td><td>Cota mínima del análisis (<b>suelo</b>). NaN (por defecto) = cota cruda (salta los huecos; mantiene los negativos de tierra firme). <code>0</code> = mar: sustituye los huecos por 0 <b>y sube a 0 la batimetría negativa</b> (el fondo marino), porque sobre el mar la superficie que cuenta para la visibilidad es el nivel del agua, no el lecho — ni un objetivo flota en el fondo ni el fondo tapa una visual de superficie. Así los objetivos sobre el mar se analizan hasta el alcance en vez de cortar en la costa.</td></tr>
+<tr><td class="mono">computeContours(src, params)</td><td>Curvas de nivel (isohipsas) por <b>marching squares</b> sobre una rejilla muestreada del DEM (<code>include/libmapa/Contours.h</code>). Por celda y nivel (cota = <code>base + k·interval</code>) emite segmentos y los <b>encadena</b> en polilíneas uniendo por arista de rejilla (cada cruce tiene clave exacta, sin tolerancias). Streaming por filas (solo 2 filas de nodos en memoria). <code>ContourParams</code> acota con <code>minLevel</code>/<code>maxLevel</code> (p. ej. <code>minLevel=0</code> recorta al nivel del mar y omite la batimetría). <code>progress</code> opcional (<code>ContourProgress = function&lt;bool(hecho,total)&gt;</code>) se invoca por fila y permite cancelar → barra de progreso al hornear país entero. Devuelve <code>ContourLine{elevation, points[]}</code>; celdas con algún vértice sin dato se saltan. La herramienta <code>dem_to_contours</code> las guarda como capa vectorial (índice cada N m, con etiqueta de cota).</td></tr>
+</table>
+<p>El <b>perfil de ruta</b> es altura <b>real</b> del terreno EN EL LUGAR —no aplica
+curvatura terrestre—, para dibujar el corte del recorrido o medir desniveles. La
+<b>visibilidad punto a punto</b> y el <b>viewshed 360°</b> sí corrigen la
+curvatura+refracción (la constante <code>d1·d2/(2·k·R)</code> es la misma física que
+<code>DVD_potencial</code>, k=4/3; la caída desde el observador es <code>d²/(2·k·R)</code>);
+son visibilidad <b>directa</b>, no radar: el horizonte geométrico (<code>≈4.12·√h</code>)
+<b>emerge</b> de la geometría (atan2 + caída), no se codifica. La visibilidad del
+viewshed por muestra es, término a término, la misma condición que <code>lineOfSight</code>
+(la ZVD y la Visión A→B no se contradicen en un azimut). Un viewshed de 360° a
+30 m y 50 km tarda ~0,1 s. La librería devuelve los datos; la gráfica la pinta la app.
+Se exponen por la fachada: <code>MapWidget::elevationProfile(path, params)</code>,
+<code>MapWidget::lineOfSight(a, b, antA, antB, params)</code> y
+<code>MapWidget::viewshed(origin, params)</code> (vacío / inválido si no hay origen
+DEM configurado). La app <span class="mono">demo</span> lo prueba en su <b>pestaña
+«Elevación»</b> del panel lateral: el perfil se abre en una ventana flotante
+interactiva (ejes/rejilla, zoom con la rueda, arrastre, cursor con lectura); la
+Visión A→B se dibuja sobre el mapa y sobre el perfil (azul visible, rojo oculto,
+obstáculo con su distancia); y el viewshed sombrea <b>azul lo visible y amarillo lo
+oculto</b>, con opción de tratar el mar/sin dato como cota 0.</p>
 
 <!-- ===================== 9. FLUJOS ===================== -->
 <h2 class="sec">9 · Flujos de interacción entre objetos</h2>

@@ -3,6 +3,7 @@
 
 #include "libmapa/DataPackage.h"
 #include "libmapa/GeoFile.h"
+#include "libmapa/Elevation.h"
 #include "libmapa/MapFeature.h"
 #include "libmapa/MapTarget.h"
 #include "libmapa/TargetSymbol.h"
@@ -143,6 +144,12 @@ public:
     int minZoom() const;
     int maxZoom() const;
 
+    //! Permite SOBRE-ZOOM por encima del maximo recomendado del dataset (hasta
+    //! \a zoom). -1 restaura el limite normal. Pensado para herramientas de
+    //! descarga (fill_map): navegar/enmarcar niveles altos (z15/16) que se van a
+    //! bajar, aunque la base recomiende un maximo menor.
+    void setMaxZoomOverride(int zoom);
+
     /*!
      * \brief Olvida las teselas en cache y vuelve a pedir las del viewport.
      *
@@ -178,6 +185,17 @@ public:
     QVector<LayerInfo> featureLayers() const;
     bool setFeatureLayerVisible(const QString &id, bool visible);
     bool setFeatureLayerZOrder(const QString &id, int zOrder);
+
+    //! Fija el rango de zoom [minZoom, maxZoom] en que la capa se dibuja y se
+    //! puede seleccionar (−1 = sin límite por ese lado). Fuera del rango la capa
+    //! se oculta: pensado para capas de detalle (curvas de nivel) que estorban a
+    //! vista general. En el paquete se declara con "minZoom"/"maxZoom" del overlay.
+    bool setFeatureLayerZoomRange(const QString &id, int minZoom, int maxZoom);
+
+    //! Marca una capa como TEMPORAL: se excluye del guardado (\a saveFeaturesTo),
+    //! como las capas fijas del paquete. Para resultados de análisis o marcadores
+    //! auxiliares que no deben persistir. \a transient=false la vuelve guardable.
+    void setFeatureLayerTransient(const QString &id, bool transient = true);
 
     // --- Entidades -------------------------------------------------------
     //! Devuelve el identificador asignado, o -1 si la geometria no es valida.
@@ -254,6 +272,24 @@ public:
                           const QString &displayName = QString(),
                           const FeatureStyle &style = FeatureStyle(),
                           QString *error = nullptr);
+
+    /*!
+     * \brief Carga las entidades de una BD vectorial (.sqlitedb con el esquema
+     *        de VectorRepository) como una capa fija MÁS, sin reemplazar las
+     *        entidades existentes (al revés que \a loadFeaturesFrom).
+     *
+     * Cada entidad conserva su estilo, etiqueta y atributos propios (p. ej. una
+     * capa de curvas de nivel de \c dem_to_contours: índice gruesas+etiqueta, la
+     * cota en \c atributos). Todas quedan bajo \a layerId. Pensada para capas de
+     * solo lectura del paquete (overlays con fichero .sqlitedb); las entidades
+     * siguen siendo seleccionables (para leer su cota), pero la capa no editable.
+     *
+     * \return el id de la primera entidad añadida, o -1 si la BD no abre o está
+     *         vacía (el motivo queda en \a error).
+     */
+    qint64 loadFeaturesAsLayer(const QString &databasePath, const QString &layerId,
+                               const QString &displayName = QString(),
+                               QString *error = nullptr);
 
     // --- Objetivos moviles (capa dinamica) -------------------------------
     /*!
@@ -332,6 +368,38 @@ public:
     //! Usa en caliente una BASE DE DATOS `.sqlitedb` como origen (vacia = quita).
     void setElevationDb(const QString &dbFile);
 
+    //! Perfil de elevacion del terreno a lo largo de una ruta (polilinea): la
+    //! cota en cada lugar, muestreada cada \c params.stepMeters (30 m por
+    //! defecto), con distancia total y desniveles. Perfil vacio si no hay origen
+    //! de elevacion o la ruta tiene menos de dos puntos validos.
+    ElevationProfile elevationProfile(
+        const QVector<QGeoCoordinate> &path,
+        const ElevationProfileParams &params = ElevationProfileParams()) const;
+
+    //! Visibilidad directa entre \a a y \a b con altura de antena en cada extremo
+    //! (metros sobre el terreno). Corrige la curvatura+refraccion de la Tierra
+    //! (radio efectivo 4/3 por defecto; ver \c LineOfSightParams). Indica si hay
+    //! vision, la holgura minima y el punto critico. Resultado invalido
+    //! (isValid()==false) si no hay origen de elevacion o falta la cota de un
+    //! extremo.
+    LineOfSightResult lineOfSight(
+        const QGeoCoordinate &a, const QGeoCoordinate &b,
+        double antennaA = 0.0, double antennaB = 0.0,
+        const LineOfSightParams &params = LineOfSightParams()) const;
+
+    //! Viewshed 360 grados desde \a origin: por azimut, el angulo de cierre del
+    //! terreno (horizonte y picos) y hasta donde se ve un objetivo a
+    //! \c ViewshedParams::targetHeight (zona de visibilidad). Corrige la
+    //! curvatura 4/3 (configurable). Resultado invalido (isValid()==false) si no
+    //! hay origen de elevacion o falta la cota del origen.
+    //! \a progress (opcional) se invoca tras cada azimut con (rayos hechos,
+    //! total); si devuelve false se cancela (resultado invalido). Para barras de
+    //! progreso cancelables en alcances largos.
+    Viewshed viewshed(
+        const QGeoCoordinate &origin,
+        const ViewshedParams &params = ViewshedParams(),
+        const ViewshedProgress &progress = ViewshedProgress()) const;
+
     // --- Herramientas ----------------------------------------------------
     MapTool activeTool() const;
     void setActiveTool(MapTool tool);
@@ -371,6 +439,28 @@ public:
     int coverageZoom() const;
     //! Vuelve a consultar la BD y redibuja la mancha (p.ej. tras una descarga).
     void refreshCoverage();
+
+    /*!
+     * \brief Relieve sombreado (hillshade) calculado EN VIVO del DEM local.
+     *
+     * Capa que sombrea el terreno segun un sol virtual (sin conexion: solo usa el
+     * origen de elevacion). Se recalcula sola al desplazar/hacer zoom (con un
+     * pequeno retardo). \c setHillshadeColored activa un tintado por altura
+     * (hipsometrico) en vez del gris translucido. Sin origen de elevacion la capa
+     * queda vacia.
+     */
+    void setHillshadeVisible(bool on);
+    bool isHillshadeVisible() const;
+    //! Sol: azimut (0=N, 90=E) y altura sobre el horizonte, en grados.
+    void setHillshadeSun(double azimuthDeg, double altitudeDeg);
+    //! Intensidad del sombreado en [0,1] (gris) u opacidad del tintado (color).
+    void setHillshadeOpacity(double opacity);
+    //! Exageracion vertical del relieve (1 = real; 2–3 resalta terreno suave).
+    void setHillshadeExaggeration(double zFactor);
+    //! true = tintado por altura (hipsometrico); false = gris sobre la base.
+    void setHillshadeColored(bool on);
+    //! Recalcula el relieve para la vista actual (lo hace solo al mover la vista).
+    void refreshHillshade();
 
     /*!
      * \brief Geografico -> coordenadas de los ejes del QCustomPlot interno.

@@ -1,11 +1,26 @@
 #include "widget/FeatureLayer.h"
 
 #include "core/Logging.h"
+#include "widget/MapView.h"
 
 #include <QPainterPath>
 #include <cmath>
 
 namespace libmapa {
+
+namespace {
+// ¿La capa debe dibujarse/consultarse al zoom actual? Fuera de su rango
+// [minZoom, maxZoom] (−1 = sin límite) se omite: así una capa de detalle (p. ej.
+// curvas de nivel) no estorba ni se selecciona a vista general.
+bool capaVisibleAZoom(const LayerInfo &capa, int zoom)
+{
+    if (capa.minZoom >= 0 && zoom < capa.minZoom)
+        return false;
+    if (capa.maxZoom >= 0 && zoom > capa.maxZoom)
+        return false;
+    return true;
+}
+} // namespace
 
 FeatureLayer::FeatureLayer(QCustomPlot *parent, OverlayModel *model)
     : QCPLayerable(parent)
@@ -84,6 +99,56 @@ QPolygonF FeatureLayer::screenPolygon(const MapFeature &f) const
     return screenPolygonOf(f.geometry);
 }
 
+// Rectangulo visible actual en coordenadas de EJE (x=longitud, y=eje-Y de
+// Mercator), ensanchado un 'marginFrac' por lado para no recortar entidades
+// que cruzan justo el borde.
+QRectF FeatureLayer::visibleAxisRect(double marginFrac) const
+{
+    QCustomPlot *plot = parentPlot();
+    if (!plot)
+        return {};
+    const QCPRange rx = plot->xAxis->range();
+    const QCPRange ry = plot->yAxis->range();
+    QRectF r(QPointF(rx.lower, ry.lower), QPointF(rx.upper, ry.upper));
+    r = r.normalized();
+    const double mx = r.width() * marginFrac;
+    const double my = r.height() * marginFrac;
+    return r.adjusted(-mx, -my, mx, my);
+}
+
+// Recorte por viewport: la entidad se pinta/consulta solo si TOCA el rectangulo
+// visible. Camino rapido: en cuanto un vertice cae dentro, dibuja; si no, se
+// compara la caja envolvente (para no perder un tramo que cruza con los
+// extremos fuera). Todo en coordenadas de eje, sin proyectar a pixeles.
+bool FeatureLayer::featureInView(const MapFeature &f, const QRectF &axisRect) const
+{
+    if (axisRect.isNull())
+        return true;
+    double minx = 0, maxx = 0, miny = 0, maxy = 0;
+    bool any = false;
+    for (const QVector<QGeoCoordinate> &parte : f.outlines()) {
+        for (const QGeoCoordinate &c : parte) {
+            if (!c.isValid())
+                continue;
+            const QPointF e = m_toAxis ? m_toAxis(c) : QPointF(c.longitude(), c.latitude());
+            if (axisRect.contains(e))
+                return true;                      // un vertice visible -> seguro
+            if (!any) { minx = maxx = e.x(); miny = maxy = e.y(); any = true; }
+            else {
+                minx = qMin(minx, e.x()); maxx = qMax(maxx, e.x());
+                miny = qMin(miny, e.y()); maxy = qMax(maxy, e.y());
+            }
+        }
+    }
+    if (!any)
+        return false;
+    // Solape de cajas AABB hecho a mano: QRectF::intersects da falso con cajas
+    // degeneradas (una linea horizontal/vertical tiene alto/ancho 0), que SI
+    // deben contar como visibles si cruzan el rectangulo.
+    return !(maxx < axisRect.left() || minx > axisRect.right()
+             || maxy < axisRect.top() || miny > axisRect.bottom());
+}
+
 // Convierte una lista de coordenadas a un poligono de pixeles de pantalla.
 QPolygonF FeatureLayer::screenPolygonOf(const QVector<QGeoCoordinate> &pts) const
 {
@@ -146,13 +211,21 @@ void FeatureLayer::draw(QCPPainter *painter)
 
     m_lastDrawn = 0;
 
+    const MapView *vista = qobject_cast<MapView *>(plot);
+    const int zoomActual = vista ? vista->zoom() : -1;
+    const QRectF visible = visibleAxisRect();     // recorte por viewport
+
     // Las capas se recorren en orden de zOrder: la ultima queda encima.
     for (const LayerInfo &capa : m_model->layers()) {
         if (!capa.visible)
             continue;
+        if (zoomActual >= 0 && !capaVisibleAZoom(capa, zoomActual))
+            continue;               // capa de detalle fuera de su rango de zoom
         for (const MapFeature &f : m_model->featuresInLayer(capa.id)) {
             if (!f.visible)
                 continue;
+            if (!featureInView(f, visible))
+                continue;           // fuera de pantalla: ni se proyecta
             drawFeature(&p, f, f.id == m_model->selectedId());
             ++m_lastDrawn;
         }
@@ -219,15 +292,31 @@ void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f,
     const double r = f.style.pointRadiusPx;
 
     if (!f.style.icon.isNull()) {
-        const QSize s = f.style.icon.size();
-        painter->drawPixmap(QPointF(pos.x() - s.width() / 2.0,
-                                    pos.y() - s.height() / 2.0),
-                            f.style.icon);
-    } else {
-        painter->setPen(QPen(f.style.lineColor, f.style.lineWidth));
-        painter->setBrush(QBrush(f.style.fillColor));
-        painter->drawEllipse(pos, r, r);
+        // El icono se ancla por 'iconAnchor' (normalizado): asi un pin cuya
+        // PUNTA sea (0.5,1.0) queda con la punta justo sobre la coordenada, y la
+        // dpr del pixmap se respeta (dibujar en tamano logico, no en pixeles).
+        const double dpr = f.style.icon.devicePixelRatio();
+        const double w = f.style.icon.width() / (dpr > 0 ? dpr : 1.0);
+        const double h = f.style.icon.height() / (dpr > 0 ? dpr : 1.0);
+        const QPointF tl(pos.x() - f.style.iconAnchor.x() * w,
+                         pos.y() - f.style.iconAnchor.y() * h);
+        painter->drawPixmap(tl, f.style.icon);
+
+        if (selected) {
+            // Resalte alrededor del icono (en pixeles): recuadro redondeado.
+            painter->setBrush(Qt::NoBrush);
+            const QRectF caja = QRectF(tl, QSizeF(w, h)).adjusted(-3, -3, 3, 3);
+            painter->setPen(QPen(Qt::white, 3, Qt::SolidLine));
+            painter->drawRoundedRect(caja, 4, 4);
+            painter->setPen(QPen(Qt::black, 1, Qt::DashLine));
+            painter->drawRoundedRect(caja, 4, 4);
+        }
+        return;
     }
+
+    painter->setPen(QPen(f.style.lineColor, f.style.lineWidth));
+    painter->setBrush(QBrush(f.style.fillColor));
+    painter->drawEllipse(pos, r, r);
 
     if (selected) {
         // El resalte va en PIXELES alrededor del simbolo, no en grados: si se
@@ -396,16 +485,24 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
     qint64 mejor = -1;
     double mejorDist = tolerancePx;
 
+    const MapView *vista = qobject_cast<MapView *>(parentPlot());
+    const int zoomActual = vista ? vista->zoom() : -1;
+    const QRectF vista_ = visibleAxisRect();      // recorte por viewport
+
     // Se recorre de la capa mas alta a la mas baja: lo que se ve encima es lo
     // que se selecciona.
     const auto capas = m_model->layers();
     for (int i = static_cast<int>(capas.size()) - 1; i >= 0; --i) {
         if (!capas[i].visible)
             continue;
+        if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
+            continue;               // no seleccionable fuera de su rango de zoom
 
         for (const MapFeature &f : m_model->featuresInLayer(capas[i].id)) {
             if (!f.visible || !f.selectable)
                 continue;
+            if (!featureInView(f, vista_))
+                continue;               // fuera de pantalla: no hace falta probar
 
             double d = std::numeric_limits<double>::max();
 
@@ -416,9 +513,23 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
                     if (parte.isEmpty())
                         continue;
                     const QPointF c = screenPos(parte.first());
-                    d = qMin(d, qMax(0.0, std::hypot(p.x() - c.x(),
-                                                     p.y() - c.y())
-                                          - f.style.pointRadiusPx));
+                    if (!f.style.icon.isNull()) {
+                        // Con icono, el area sensible es TODO el pixmap (anclado),
+                        // no solo la punta: asi se puede agarrar el pin entero.
+                        const double dpr = f.style.icon.devicePixelRatio();
+                        const double w = f.style.icon.width() / (dpr > 0 ? dpr : 1.0);
+                        const double h = f.style.icon.height() / (dpr > 0 ? dpr : 1.0);
+                        const QRectF caja(QPointF(c.x() - f.style.iconAnchor.x() * w,
+                                                  c.y() - f.style.iconAnchor.y() * h),
+                                          QSizeF(w, h));
+                        const double dx = qMax(qMax(caja.left() - p.x(), 0.0), p.x() - caja.right());
+                        const double dy = qMax(qMax(caja.top() - p.y(), 0.0), p.y() - caja.bottom());
+                        d = qMin(d, std::hypot(dx, dy));
+                    } else {
+                        d = qMin(d, qMax(0.0, std::hypot(p.x() - c.x(),
+                                                         p.y() - c.y())
+                                              - f.style.pointRadiusPx));
+                    }
                     continue;
                 }
                 const QPolygonF poly = screenPolygonOf(parte);

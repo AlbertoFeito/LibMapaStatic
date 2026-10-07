@@ -5,6 +5,7 @@
 #include <QGeoCoordinate>
 #include <QMetaType>
 #include <QPixmap>
+#include <QPointF>
 #include <QString>
 #include <QVariantMap>
 #include <QVector>
@@ -41,6 +42,11 @@ struct FeatureStyle
 
     //! Vacio = circulo del color de linea.
     QPixmap icon;
+
+    //! Punto de anclaje del icono, NORMALIZADO [0,1] dentro del pixmap: dice qué
+    //! punto de la imagen cae sobre la coordenada. (0.5,0.5) = centro (por
+    //! defecto); (0.5,1.0) = pie-centro, para un pin cuya PUNTA marca el lugar.
+    QPointF iconAnchor = QPointF(0.5, 0.5);
 
     //! Radio del simbolo en PIXELES: no se deforma con el zoom ni con la
     //! latitud, a diferencia de dibujarlo en grados.
@@ -172,6 +178,11 @@ struct LayerInfo
     //! Orden de dibujo: mayor se pinta encima.
     int zOrder = 0;
     int featureCount = 0;
+    //! Rango de zoom en el que la capa se dibuja (−1 = sin límite). Fuera de
+    //! [minZoom, maxZoom] la capa no se pinta ni se puede seleccionar: útil para
+    //! capas de detalle (p. ej. curvas de nivel) que estorban a vista general.
+    int minZoom = -1;
+    int maxZoom = -1;
 };
 
 } // namespace libmapa

@@ -144,6 +144,16 @@ int main(int argc, char *argv[])
         else { cerr() << "Opcion desconocida: " << k << '\n'; return 2; }
     }
 
+    // Sin --datasets: usa un `mapa.json` del directorio actual (paquete), si lo
+    // hay; si no, `datasets.json`. loadDataset lee el array "datasets" de ambos y
+    // resuelve los filePath junto al JSON. Así todas las herramientas usan mapa.json.
+    if (datasetsPath.isEmpty()) {
+        if (QFile::exists(QStringLiteral("mapa.json")))
+            datasetsPath = QStringLiteral("mapa.json");
+        else if (QFile::exists(QStringLiteral("datasets.json")))
+            datasetsPath = QStringLiteral("datasets.json");
+    }
+
     const bool modoNuevo = !newFile.isEmpty();
     // Hace falta zona (bbox O poly) y, si no es base nueva, datasets+id.
     const bool faltanArgs = (bbox.isEmpty() && poly.isEmpty())

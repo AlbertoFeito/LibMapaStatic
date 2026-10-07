@@ -290,6 +290,19 @@ bool OverlayModel::setLayerZOrder(const QString &id, int z)
     return true;
 }
 
+// Fija el rango de zoom en que se dibuja la capa (−1 = sin límite por ese lado).
+bool OverlayModel::setLayerZoomRange(const QString &id, int minZoom, int maxZoom)
+{
+    auto it = m_layers.find(id);
+    if (it == m_layers.end())
+        return false;
+    it->minZoom = minZoom;
+    it->maxZoom = maxZoom;
+    emit layersChanged();
+    emit changed();
+    return true;
+}
+
 // -------------------------------------------------------------- entidades --
 
 // Anade una entidad nueva: valida su geometria, la asigna a su capa (creandola si

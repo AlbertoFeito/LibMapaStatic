@@ -3076,3 +3076,967 @@ tenía proyecto qmake.
 **Estado: VectorRepository es ya solo el almacén de entidades que usa MapWidget;
 esquema sin modelo legado; 17 tests en verde. Con esto, el alcance acordado de la
 librería (Fases 1–5 + hit-testing + corte limpio) queda cerrado.**
+
+## 60. Análisis de elevación: perfil de una ruta (Fase A)
+
+Con el seguimiento cerrado, el usuario pidió **cálculos de elevación** sobre el
+DEM que la librería ya tiene (`IElevationSource`, bilineal, hueco→NaN). Son tres
+capacidades, de visibilidad **directa** (nada de radar: sin horizonte radioeléctrico
+`4.12√h`, sin haz, sin factores empíricos): **A)** perfil del terreno a lo largo de
+una ruta, **B)** visibilidad punto a punto con altura de antenas y curvatura 4/3, y
+**C)** viewshed 360° (perfil + ángulo de cierre + zona de visibilidad a una altura).
+Se revisó `DVD_potencial` como referencia física y se confirmó que su constante de
+curvatura `d²/17e6` es `d²/(2·k·R)` con radio efectivo **k=4/3** y R=6371 km — la
+misma física que usarán B y C. Esta sección cubre la **Fase A**.
+
+Decisión de alcance de A: el **perfil de ruta** es la cota del terreno EN EL LUGAR,
+no desde un punto; por eso **no** aplica curvatura (es altura real, para dibujar el
+corte o medir desniveles). La curvatura entra solo en los cálculos de visibilidad
+(B y C). Muestreo configurable, **por defecto 30 m**: como `elevationAt` es bilineal,
+muestrear a 30 m sobre un DEM de 90 m interpola sin coste extra de datos.
+
+Cambios:
+
+- **`include/libmapa/Elevation.h` (cabecera pública nueva):** tipos de resultado
+  `ElevationSample{distanceM, position, elevation}` (NaN = sin dato),
+  `ElevationProfile{samples, totalDistanceM, min/maxElevation, gain, loss}` y los
+  parámetros `ElevationProfileParams{stepMeters=30}`. Se instala por el glob de
+  `include/libmapa/*.h`.
+- **`src/dem/ElevationAnalysis.{h,cpp}` (núcleo nuevo):** función libre
+  `elevationProfile(const IElevationSource&, path, params)`. Camina la polilínea
+  vértice a vértice con `QGeoCoordinate::atDistanceAndAzimuth` y `GeoMath`,
+  muestreando a paso uniforme a lo largo de TODA la ruta (lleva un "resto" entre
+  tramos para no reiniciar el paso en cada vértice) e incluye siempre el último
+  punto exacto. Estadísticas (min/máx/ganancia/pérdida) que ignoran las muestras
+  sin dato. Con menos de dos vértices válidos → perfil vacío.
+- **Fachada `MapWidget`:** reenvío fino `elevationProfile(path, params)` que usa el
+  origen DEM configurado (`d->elevation`); sin origen, perfil vacío.
+- **`tests/tst_elevationanalysis.cpp` (nuevo, test 18):** `.hgt` sintético N19W077
+  de lado 7 en rampa (`col·100+row`) con un hueco en el nodo (1,1). Comprueba el
+  perfil a lo largo de una línea (muestras cada 30 m, distancia creciente, cuesta
+  arriba = solo ganancia, extremos exactos que coinciden con `elevationAt`), que la
+  distancia total de una ruta multi-tramo suma los tramos, y el tratamiento de
+  huecos→NaN (una línea que arranca en la banda bilineal del hueco y sale a terreno
+  con dato: hay muestras NaN y, aun así, estadísticas de las válidas) y de rutas
+  degeneradas / sin origen DEM (geometría válida pero cotas NaN).
+- **Build:** `src/dem/ElevationAnalysis.cpp` añadido a `libmapa_core` en
+  `CMakeLists.txt` y, en espejo, en `qmake/libmapa/core/core.pro`;
+  `libmapa_add_test(tst_elevationanalysis)`.
+- **Docs:** README (sección «Análisis de elevación», recuento 17→18, hito 16) y
+  `arquitectura.html` + PDF.
+
+**Estado: perfil de ruta disponible en el núcleo y por la fachada; 18 tests en
+verde, sin warnings. Siguientes: Fase B (visibilidad punto a punto) y Fase C
+(viewshed 360°).**
+
+## 61. Análisis de elevación: visibilidad punto a punto (Fase B)
+
+Segunda capacidad: la **línea de visión** entre dos puntos con **altura de antena
+en cada extremo**. A diferencia del perfil de ruta (altura real del terreno), aquí
+**sí** se corrige el abombamiento de la Tierra, porque lo que se decide es si una
+recta en el espacio queda despejada.
+
+Física (la misma de `DVD_potencial`, revisada en la fase de diseño): el
+abombamiento de la superficie sobre la cuerda recta A–B en un punto intermedio que
+dista `d1` de un extremo y `d2` del otro es `d1·d2/(2·k·R)`, con R=6371 km y radio
+efectivo **k=4/3** (refracción estándar; k=1 = geométrico puro). Equivale a la
+constante `d²/17e6` de DVD. Se **suma al terreno** y se compara con la recta entre
+las cimas de antena: `holgura = recta − (terreno + abombamiento)`. El mínimo de esa
+holgura a lo largo del trayecto decide la visión y marca el punto crítico.
+
+Cambios:
+
+- **`include/libmapa/Elevation.h`:** tipos nuevos `LineOfSightParams`
+  (`stepMeters=30`, `curvature=true`, `k=4/3`, `earthRadiusM`) y
+  `LineOfSightResult` (`clear`, `clearanceM` —holgura mínima, negativa = cuánto
+  falta—, `blockPosition`/`blockDistanceM` —punto crítico—, `isValid()`).
+- **`src/dem/ElevationAnalysis.{h,cpp}`:** función libre
+  `lineOfSight(src, a, b, antennaA, antennaB, params)` y el helper interno
+  `abombamiento(d1, d2, k, R)` (que reutilizará el viewshed). Camina el rayo
+  geodésico A→B con `atDistanceAndAzimuth`, salta las muestras sin dato (un hueco
+  no afirma nada), y devuelve resultado inválido si falta la cota de un extremo
+  (no se puede anclar la recta).
+- **Fachada `MapWidget`:** `lineOfSight(a, b, antennaA=0, antennaB=0, params)`
+  sobre el origen DEM configurado (inválido si no hay origen).
+- **`tests/tst_elevationanalysis.cpp`:** tres casos nuevos (el ejecutable sigue
+  siendo uno, con más slots): una colina central que bloquea a ras de suelo y se
+  despeja al subir las antenas; terreno plano a cota 0 donde la única obstrucción
+  es la curvatura, comprobando que la holgura mínima = −D²/(8·k·R) con k=4/3 (y que
+  desactivar la curvatura deja la vista justo a ras); y casos inválidos (sin origen
+  DEM, o un extremo sobre un hueco SRTM).
+- **Docs:** README (visibilidad en la sección «Análisis de elevación», hito 17),
+  `arquitectura.html` (8c) + PDF.
+
+No cambian ni CMake ni qmake: no se añadió ningún `.cpp` (todo va en el
+`ElevationAnalysis.cpp` ya listado), y los casos nuevos son slots del test
+existente, así que **siguen 18 tests** en verde, sin warnings.
+
+**Estado: visibilidad punto a punto disponible en el núcleo y por la fachada.
+Siguiente: Fase C (viewshed 360° — perfil + ángulo de cierre + zona de
+visibilidad a una altura).**
+
+## 62. Análisis de elevación: viewshed 360° (Fase C)
+
+Tercera y última capacidad: el **viewshed** desde un punto. Por cada azimut (0..360
+a paso configurable, 1° = 360 rayos) se camina el rayo geodésico y se calcula el
+**ángulo de cierre** del terreno, el **horizonte acumulado** con sus **picos** (la
+silueta), y hasta dónde se ve un **objetivo a una altura H** (la zona de visibilidad
+directa, el polígono ZVD que pedía el usuario). Cierra el alcance de análisis de
+elevación acordado tras revisar `DVD_potencial`.
+
+Física (reutiliza la de la Fase B). Observador en el origen con plano horizontal
+tangente; para un punto a distancia `d`: caída de la Tierra bajo la tangente
+`d²/(2·k·R)` (= `abombamiento(d, d, k, R)`, envuelto en el helper `caida`), altura
+respecto al observador `y = (terreno + [H] − zObs) − caída`, y **ángulo de cierre**
+`atan2(y, d)` en grados con su tangente (no la aproximación de ángulo pequeño
+`3440·Δh/d` de DVD; usamos `atan2`). El horizonte es el máximo acumulado del ángulo
+del terreno; un objetivo a altura H es visible mientras su ángulo supere ese
+horizonte acumulado hasta esa distancia. Es visibilidad **directa**, no radar: el
+horizonte geométrico (`≈4.12·√h`) **emerge** de la geometría; no se codifica la
+fórmula. El test lo confirma: sobre terreno plano el alcance con curvatura sale
+26040 m frente a los 26069 m de `sqrt(2·k·R)·(√hObs+√H)`.
+
+Cambios:
+
+- **`include/libmapa/Elevation.h`:** tipos nuevos `ViewshedParams` (`stepMeters=30`,
+  `azimuthStepDeg=1`, `maxRangeM=50000`, `observerHeight`, `targetHeight`,
+  `curvature`, `k=4/3`, `earthRadiusM`, `keepProfiles=false`), `ClosingAnglePeak`
+  (`distanceM`, `position`, `elevation`, `angleDeg`, `tangent`), `ViewshedRay`
+  (`azimuthDeg`, `visibilityReachM`, `horizonDeg`, `peaks`, `profile`) y `Viewshed`
+  (`origin`, alturas, `rays`, `isValid()`).
+- **`src/dem/ElevationAnalysis.{h,cpp}`:** función libre
+  `computeViewshed(src, origin, params)` (+ helper interno `rayoViewshed` por azimut
+  y `caida(d,k,R)`). El objetivo de un punto se comprueba contra el horizonte de lo
+  MÁS cercano (antes de incorporar el terreno de ese mismo `d`, que no se tapa a sí
+  mismo); con H=0 es el viewshed del propio terreno. Huecos/fuera de cobertura se
+  saltan. **Memoria acotada:** con `keepProfiles=false` (defecto) cada rayo guarda
+  solo picos y escalares (360 rayos → trivial); `keepProfiles=true` llena el perfil
+  por rayo.
+- **Fachada `MapWidget`:** `viewshed(origin, params)` sobre el origen DEM
+  configurado (inválido si no hay origen).
+- **`tests/tst_elevationanalysis.cpp`:** cuatro casos nuevos (slots del test
+  existente): colina al este → pico de la silueta a distancia conocida y horizonte
+  mucho mayor que hacia el oeste (plano); el alcance de visibilidad crece con la
+  altura del objetivo; terreno plano → alcance finito que coincide con el horizonte
+  geométrico (y, sin curvatura, hasta el alcance máximo); casos inválidos. Un
+  `qDebug` registra el tiempo de un viewshed 360° (≈136 ms a 30 m, 50 km). Siguen
+  **18 tests** en verde, sin warnings.
+- **Docs:** README (viewshed en «Análisis de elevación», hito 18),
+  `arquitectura.html` (8c) + PDF.
+
+Sin cambios en CMake ni qmake: todo va en `ElevationAnalysis.cpp` y los casos son
+slots del test existente.
+
+**Estado: las tres capacidades de análisis de elevación (perfil de ruta, visibilidad
+punto a punto, viewshed 360°) están en el núcleo y por la fachada, verdes (18 tests),
+solo visibilidad directa. Queda cerrado lo pedido tras revisar `DVD_potencial`.**
+
+## 63. El `demo` prueba el análisis de elevación
+
+Las tres capacidades (Fases A–C) estaban en la librería pero **invisibles**: el
+`demo` solo mostraba la cota bajo el cursor. Se le añade una barra **Elevación**
+para probarlas, **sin quitar nada** de lo que ya había (es cambio solo de la app de
+ejemplo; no toca la librería, su API ni los tests).
+
+Qué se añadió (en `demo/main.cpp`):
+
+- **Barra «Elevación»** (`construirBarraElevacion`), con dos alturas `Alt1`/`Alt2`
+  (antena A/B para la visión; observador/objetivo para el viewshed) y un `Alcance`
+  (radio del viewshed), más cuatro acciones:
+  - **Perfil:** sobre la línea/polígono seleccionado llama a
+    `MapWidget::elevationProfile` y abre un diálogo con el **corte del terreno**
+    dibujado (clase `PerfilWidget`, QPainter) y las estadísticas (distancia,
+    mín/máx, subida/bajada). Las muestras sin dato dejan hueco.
+  - **Visión A→B:** entre el 1º y el último vértice de la línea seleccionada llama a
+    `MapWidget::lineOfSight` con `Alt1`/`Alt2`, y dibuja el resultado como entidades
+    en la capa «Análisis: visión»: la recta en verde (hay visión) o roja (bloqueada)
+    y un punto en el obstáculo; la barra de estado da holgura/distancia.
+  - **Viewshed:** desde el vértice de la entidad seleccionada (o el centro del mapa)
+    llama a `MapWidget::viewshed` y dibuja el **polígono de la zona de visibilidad**
+    (ZVD) a la altura `Alt2` en la capa «Análisis: viewshed», más el punto del
+    observador; informa de alcance medio/máx y del tiempo de cálculo.
+  - **Limpiar análisis:** quita esas dos capas.
+- Las acciones avisan si no hay DEM activo o si falta selección/cobertura; los
+  resultados van a capas propias que se recrean vacías en cada cálculo (así no se
+  mezclan con las entidades del usuario).
+
+Verificación: compila `demo` sin warnings; los **18 tests** siguen en verde (la
+librería no cambió). La validación visual la hace el usuario en su PC (en el
+contenedor no hay paquete de datos). Docs: README (fila del `demo` y sección
+«Análisis de elevación»), `arquitectura.html` (8c) + PDF.
+
+## 64. Viewshed: zona de visibilidad REAL (con huecos), consistente con la Visión
+
+Al probar el `demo`, el usuario vio que la **línea verde «Visión directa»** (Visión
+A→B) llegaba a un punto que quedaba **fuera** del polígono azul de la ZVD, y señaló
+—con razón— que no pueden contradecirse en un azimut.
+
+Diagnóstico: **no era física distinta**. El test de visibilidad del viewshed por
+muestra es, desarrollado con `caida(d)=d²/(2kR)`, **exactamente** la condición de
+`lineOfSight` (con `abombamiento(d1,d2)=d1·d2/(2kR)`); coinciden punto a punto. La
+discrepancia venía de una decisión de representación: `visibilityReachM` era el
+alcance **contiguo** (se cortaba en el PRIMER obstáculo), así que un punto que se ve
+de verdad pero está tras una vaguada oculta quedaba fuera de la estrella, aunque
+`lineOfSight` lo diera visible.
+
+Corrección (el usuario eligió «zona real con huecos»):
+
+- **`include/libmapa/Elevation.h`:** tipo nuevo `VisibleRange{startM,endM}` y campo
+  `QVector<VisibleRange> visibleRanges` en `ViewshedRay`: TODOS los tramos visibles
+  del rayo (la zona real; tras una loma, el terreno de más allá vuelve a verse como
+  una bolsa). `visibilityReachM` se conserva como el primer tramo contiguo (útil
+  para un polígono simple), documentado como tal.
+- **`src/dem/ElevationAnalysis.cpp` (`rayoViewshed`):** además del alcance contiguo,
+  abre/cierra tramos visibles según el MISMO test por muestra (los huecos y los
+  NaN cierran el tramo). El primer tramo que arranca en la 1ª muestra incluye el
+  origen; los demás empiezan en su muestra exacta.
+- **`tests/tst_elevationanalysis.cpp` (test 19 en slots):** `viewshedMatchesLineOfSight`
+  sobre un tile con loma + vaguada + pico: para CADA distancia del rayo comprueba
+  que estar en un tramo visible del viewshed == `lineOfSight(origen, punto).clear`
+  (saltando el roce, holgura ≈ 0, por el muestreo), y confirma que hay zona oculta
+  y una **bolsa visible** detrás (≥ 2 tramos). Garantiza la consistencia y evita
+  regresiones. Siguen 18 ejecutables de test (más slots), todos en verde.
+- **`demo/main.cpp` (`analizarViewshed`):** la ZVD se dibuja ahora como la zona
+  **real**: una cuña por cada tramo visible de cada rayo, todas como partes de UNA
+  entidad (polígono multiparte), de modo que los huecos se ven como entrantes y la
+  zona concuerda con la Visión A→B. La barra de estado informa de nº de tramos y
+  distancia máxima visible.
+- **Docs:** README y `arquitectura.html` (8c) + PDF: `visibleRanges` vs
+  `visibilityReachM` y la nota de consistencia viewshed↔`lineOfSight`.
+
+**Estado: la ZVD del viewshed es la zona de visibilidad real (con huecos) y
+concuerda, azimut a azimut, con la línea de visión; 18 tests en verde, sin
+warnings.**
+
+## 65. Visión A→B: tramo visible/oculto en dos colores y distancia del obstáculo
+
+Probando la Visión A→B, el usuario pidió más detalle (distancia del obstáculo) y
+que quedara claro qué color es visible. Mejora SOLO del `demo` (`analizarVision`),
+sin tocar la librería:
+
+- Si hay visión directa, la línea va entera en **azul**.
+- Si está bloqueada, se parte en el obstáculo (`blockPosition`): el tramo
+  observador→obstáculo en **azul** (hasta aquí llega la vista) y el tramo
+  obstáculo→B en **rojo discontinuo** (oculto por detrás). El punto del obstáculo
+  lleva en su etiqueta la **distancia** y cuántos metros falta de altura
+  (`blockDistanceM`, `−clearanceM`).
+- La barra de estado lo resume: en directa, distancia, holgura mínima y dónde está
+  el paso más justo; en bloqueada, obstáculo a X km de Y km, metros que faltan y la
+  leyenda «azul = visible, rojo = oculto».
+
+Convención de color coherente con el viewshed (azul = visible). Compila sin
+warnings; la librería no cambia, así que **siguen 18 tests** en verde. README al
+día; sin cambios de API, no se regenera el PDF.
+
+## 66. Visión A→B: el obstáculo y la línea de visión SOBRE el perfil
+
+El usuario pidió ver el obstáculo en el perfil como referencia, y planteó —con
+razón— que si Alt1 y Alt2 son iguales en la Visión A→B y en el viewshed, los datos
+deben coincidir. Lo son: el viewshed es la Visión A→B hecha a 360° para un objetivo
+a Alt2 (misma condición por muestra, ya con test). La coincidencia exige el **mismo
+observador**: el viewshed pone Alt1 en el origen y Alt2 en el objetivo, así que hay
+que lanzarlo desde el mismo punto A (en el demo, el 1er vértice de la entidad
+seleccionada). Con Alt1=Alt2 `lineOfSight` es simétrica (da igual la dirección);
+quedan como únicas fuentes de diferencia el muestreo de azimut a 1° justo en el roce
+y, antes del arreglo de `visibleRanges`, la ZVD contigua.
+
+Para verlo, mejora SOLO del `demo` (`PerfilWidget` y `analizarVision`):
+
+- **`PerfilWidget`** admite `setVision(vista, critD, bloqueado)`: superpone la
+  **línea de visión** (recta entre antenas bajada por la curvatura, `recta−bulge`
+  con k=4/3, en naranja) y marca el **obstáculo / paso más justo** (línea vertical
+  + punto sobre el terreno + distancia; rojo si bloqueado, azul si no). El rango
+  vertical pasa a abarcar terreno y línea de visión.
+- **`analizarVision`** calcula el perfil de la línea A→B, monta esa línea de visión
+  muestra a muestra y abre el perfil con todo marcado, además de dibujar en el mapa.
+  Así se ve dónde el terreno corta la recta y a qué distancia.
+
+Compila sin warnings; la librería no cambia, **siguen 18 tests** en verde. Sin
+cambios de API; no se regenera el PDF.
+
+## 67. Pestaña de elevación, perfil interactivo y viewshed azul/amarillo (mar=0)
+
+El usuario pidió: mover el análisis de elevación a una **pestaña lateral**, un
+**perfil interactivo**, y que el viewshed **sombree de amarillo lo no visible**,
+tratando el **mar/sin dato como 0 m** (objetivos en el mar). Casi todo es del
+`demo`; dos añadidos a la librería (API aditiva, compatible).
+
+Librería (`include/libmapa/Elevation.h`, `src/dem/ElevationAnalysis.cpp`):
+- **`voidElevation`** en `ElevationProfileParams`, `LineOfSightParams` y
+  `ViewshedParams`: cota con la que sustituir los huecos del DEM (NaN = saltar,
+  por defecto; 0 = mar). El helper interno `cota()` la aplica en el perfil, la
+  línea de visión y el viewshed, así un objetivo sobre el mar se analiza hasta el
+  alcance en vez de cortarse en la costa.
+- **`hiddenRanges`** en `ViewshedRay`: los tramos NO visibles (con dato); junto a
+  `visibleRanges` parten el rayo cubierto, sin solape. Para sombrear lo oculto.
+- Tests nuevos: `viewshedSeaAsVoidElevation` (un tile todo hueco, inválido sin la
+  opción, válido como mar con `voidElevation=0`) y `viewshedVisibleHiddenPartition`
+  (en cada muestra con dato el objetivo está en EXACTAMENTE uno de los dos). **18
+  tests** en verde, sin warnings.
+
+Demo (`demo/main.cpp`):
+- **Pestaña «Elevación»** (`construirTabElevacion`): `QTabWidget` en el dock con
+  «Capas» y «Elevación»; esta última lleva Alt1/Alt2/Alcance, los botones
+  (Perfil/Visión A→B/Viewshed/Limpiar), el check «Mar / sin dato = 0 m», una
+  lectura (`m_resultado`) y una leyenda. Se quitó la barra superior de elevación.
+- **`PerfilWidget` interactivo:** ejes y rejilla con ticks «bonitos», **zoom** con
+  la rueda sobre la distancia, **arrastre** para desplazar, **doble clic** para
+  restablecer y un **cursor** con la lectura (distancia, cota, altura de la visión,
+  holgura), leyenda, y `setProfile`/`setVision`. Se abre en una **ventana flotante
+  reutilizable** (`mostrarPerfil`), no modal, que Perfil y Visión A→B actualizan.
+- **Viewshed azul/amarillo:** cuñas **azules** de `visibleRanges` y **amarillas**
+  de `hiddenRanges` (dos entidades multiparte); con `voidElevation=0` el mar entra
+  como objetivo. La Visión A→B usa el mismo `voidElevation` para seguir coherente.
+
+Docs: `Elevation.h` (comentarios), README, `arquitectura.html` (8c) + **PDF**.
+
+## 68. Perfil: mástiles, +5 km tras B, línea de sombra y check de curvatura
+
+Afinados del `demo` tras probar (solo `demo/main.cpp`, sin tocar la librería):
+
+- **Perfil +5 km tras B:** la Visión A→B calcula el perfil de `{A, B+5 km}` (mismo
+  rumbo) para ver el terreno detrás del objetivo; la recta de visión sigue yendo
+  solo de A a B (no se extrapola).
+- **Mástiles de antena:** en el perfil se dibuja, en A y B, la línea vertical del
+  terreno a la cima de la antena (Alt1/Alt2) con su punto y etiqueta.
+- **Línea de sombra (dead ground):** si bloquea, un rayo rojo desde la antena de A
+  que roza el obstáculo y sigue hasta el final del perfil; por debajo, tras el
+  obstáculo, el terreno queda oculto.
+- **Check «Curvatura 4/3»:** con curvatura (por defecto) el mar llano se oculta tras
+  el horizonte geométrico; al desactivarla, el análisis es solo de enmascaramiento
+  por terreno y sobre mar sin obstáculos se ve hasta el alcance máximo. Se aplica a
+  la línea de visión, al viewshed y a la recta dibujada en el perfil.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README al día;
+sin cambios de API, no se regenera el PDF.
+
+## 69. Perfil con curvatura de la Tierra y checks que re-aplican
+
+Más afinados del `demo` tras probar (solo `demo/main.cpp`; la librería no cambia):
+
+- **Checks que re-aplican al instante:** al marcar/desmarcar «Mar = 0» o
+  «Curvatura 4/3» se vuelve a ejecutar el último análisis (perfil/visión/viewshed)
+  sin pulsar otra vez el botón (`enum Analisis m_ultimo` + `reejecutar()`).
+- **Perfil que refleja la curvatura:** `PerfilWidget` reescrito a coordenadas
+  proyectadas `cota − caida(d)` (con `caida=d²/(2kR)` si hay curvatura): el terreno
+  se **hunde con la distancia**, se dibuja una **curva azul fina** del nivel del mar
+  y la **línea de visión queda recta** entre las cimas de antena (equivalente, punto
+  a punto, a la representación anterior). Nueva API del widget:
+  `setVision(zA, zB, D, critD, bloqueado)` (cimas absolutas), `setCurvatura(on,k,R)`,
+  `setTechoSobreObjetivo(m)` y `setProfile(p, maxInicial)`.
+- **Mayor área:** el perfil de la Visión A→B llega hasta **alcance + 5 km** (datos),
+  con vista inicial `[0, alcance]` para **arrastrar desde el inicio**; en vertical
+  muestra hasta **5000 m por encima del objetivo**. Mástiles de antena, línea de
+  sombra y cursor (lectura en cotas absolutas) se mantienen.
+
+Compila sin warnings; **18 tests** en verde. README y BITÁCORA al día; sin cambios de
+API, no se regenera el PDF.
+
+## 70. Perfil del `demo` con QCustomPlot, al estilo de DVD_potencial
+
+El perfil hecho a mano «seguía sin funcionar» (arrastre/zoom/curvatura). Revisado
+`DVD_potencial/graficaperfil.cpp`: usa **QCustomPlot** (arrastre y zoom reales con
+`setInteractions(iRangeDrag|iRangeZoom)`, leyenda) y dibuja el **terreno crudo**
+(verde, relleno por canal hasta) una **curva de curvatura** aparte `−d²/17e6`, más la
+recta de visibilidad y curvas de altura. LibMapaStatic **ya trae QCustomPlot** (se
+compila dentro de `libmapa_widget`), así que se sustituye el widget a mano del `demo`
+por un QCustomPlot con esa misma representación.
+
+- **CMake (target `demo`):** se enlaza `Qt::PrintSupport` y se añade el include de
+  QCustomPlot como `SYSTEM` (los símbolos ya están en `libmapa_widget`). El `demo`
+  sigue construyéndose solo cuando hay QCustomPlot, como antes.
+- **`demo/main.cpp`:** se elimina la clase `PerfilWidget` (QWidget a mano) y la ventana
+  flotante embebe un `QCustomPlot`. `pintarPerfil(...)` dibuja: curva de **curvatura**
+  (`curvOn ? −d²/2kR : 0`), **terreno** crudo verde con `setChannelFillGraph` hasta la
+  curvatura, y en la Visión A→B la **recta de visibilidad** A→B, la **curva del objetivo
+  a Alt2**, los **mástiles** (`QCPItemLine`), el **obstáculo** (`QCPItemTracer`) y la
+  **línea de sombra** hasta el final. Arrastre y zoom (rueda) en ambos ejes; rango X
+  inicial `[0, alcance]` con datos hasta `alcance+5 km`; Y auto-ajustado al dato con
+  margen (se quita el techo fijo de 5000 m que aplastaba el relieve). Se mantienen los
+  checks «Mar=0»/«Curvatura 4/3» que re-aplican al instante.
+
+Reconfigurar CMake (`cmake -S . -B build`). Compila sin warnings; la librería no
+cambia, **18 tests** en verde. README y BITÁCORA al día; sin cambios de API, no se
+regenera el PDF.
+
+## 71. Perfil: agua azul bajo el nivel del mar y recta de visibilidad sobre el mar
+
+Probando sobre el dataset «Cuba 2026.10», el usuario vio que la barra de estado marcaba
+**−1891 m** con el cursor en mar abierto al norte de Mariel. Esa lectura es la cota cruda
+bajo el cursor (`m_mapa->elevationAt`, sin aplicar el check «Mar=0»): que salga negativa
+sobre el mar confirma que **este dataset trae batimetría** (profundidad del fondo; el
+talud al norte de Cuba cae a ~−1800 m hacia el Estrecho de Florida). El lector del DEM ya
+dejaba pasar los negativos (solo `−32768` es hueco), así que no hubo que tocar la
+librería; basta aprovecharlo en el `demo`. Dos cambios, **solo en `demo/main.cpp`**:
+
+- **Agua azul en el perfil (`pintarPerfil`).** Se añade una línea de **nivel del mar** en
+  `y=0` (azul discontinua) y una **columna de agua** azul translúcida: un graph con
+  `min(terreno, 0)` relleno por canal hasta una línea constante 0. Donde la tierra está
+  sobre el mar ambos coinciden (sin relleno); donde la cota es < 0 (mar con batimetría o
+  depresión) se rellena entre el terreno y 0 → se ve la diferencia tierra/agua. El cuerpo
+  verde del terreno sigue yendo hasta la curva de curvatura (tierra bajo el agua).
+- **Recta de visibilidad sobre el mar (`analizarVision` + mástiles).** Los objetivos son
+  por ahora **sobre el nivel del mar** (buques): si un extremo no tiene dato (NaN) o cae
+  bajo 0 (mar/batimetría), la base de la antena se asienta en la **superficie (0)**, no en
+  el fondo marino (`base = isnan ? 0 : max(cota,0)`). Así la recta «busca» el objetivo en
+  la superficie y el mástil arranca en 0, en vez de a −profundidad. (Una depresión de
+  tierra firme bajo 0 se trata igual en el `demo` por simplicidad; distinguir mar de
+  tierra firme negativa necesitaría una máscara de costa, fuera de alcance.)
+
+Nota: sin batimetría (SRTM puro) el mar abierto está en 0 o es hueco, así que el azul solo
+aparece donde hay cota real < 0; con un DEM batimétrico (GEBCO/ETOPO) el mismo lector
+mostraría la profundidad. Compila sin warnings; la librería no cambia, **18 tests** en
+verde. README y BITÁCORA al día; sin cambios de API, no se regenera el PDF.
+
+## 72. «Mar = 0» como suelo: el obstáculo no puede estar en el fondo del mar
+
+Al probar la Visión A→B sobre batimetría (objetivo a 500 m a 34 km sobre mar hondo), la
+recta naranja llegaba bien a la superficie, pero el **obstáculo rojo aparecía a 5 km bajo
+el agua (~−50 m)** y la línea de sombra se hundía al fondo marino (−850 m). Imposible: el
+lecho marino no puede tapar una visual entre dos objetivos sobre la superficie.
+
+**Causa.** El `demo` ya **dibujaba** la recta clampeada a la superficie (§71), pero
+`lineOfSight` de la **librería** calculaba el bloqueo contra el terreno **crudo**: con
+batimetría, el extremo B se anclaba en el fondo (−800 m + Alt2) y la recta «caía» al
+agua, de modo que la costa la tapaba falsamente. El check «Mar = 0» solo sustituía los
+huecos (NaN), no la batimetría negativa **con dato**.
+
+**Arreglo (semántica del API).** `voidElevation` finito pasa a ser el **suelo** del
+análisis en el helper `cota()` de `ElevationAnalysis.cpp`: sustituye los huecos por él y
+**sube a él cualquier cota por debajo** (la batimetría). Con `voidElevation = 0`, sobre
+el mar la superficie que cuenta es el nivel del agua (0), no el fondo — ni los objetivos
+flotan en el lecho ni el lecho tapa una visual. Afecta a los tres cálculos (perfil, línea
+de visión y viewshed) por igual; con `voidElevation = NaN` (crudo) nada cambia (negativos
+de tierra firme incluidos).
+
+- **`src/dem/ElevationAnalysis.cpp`:** `cota()` → `isnan(voidElev) ? t : (isnan(t) ?
+  voidElev : max(t, voidElev))`.
+- **`include/libmapa/Elevation.h`:** comentarios de `voidElevation` en los tres structs
+  de parámetros (ahora «suelo»).
+- **`demo/main.cpp`:** el **perfil se dibuja siempre crudo** (`ElevationProfileParams{}`)
+  para ver la batimetría en azul; el **análisis** (`lineOfSight`/viewshed) usa `voidElev()`
+  (0 con el check). El obstáculo sobre el perfil se sitúa en la superficie (`max(ct,0)` con
+  el check) para no pintarse bajo el agua, coherente con el análisis.
+- **Test** `lineOfSightSeaFloorClampedToSurface`: tile con costa (+100) al oeste y mar
+  profundo (−1000) al este. En crudo, la recta a un objetivo a 500 m se hunde y la costa la
+  bloquea (`!clear`); con `voidElevation = 0` el objetivo está en superficie y **se ve**
+  (`clear`). Comprueba además que el perfil crudo muestra la batimetría (mín < −500) y que
+  con mar=0 el perfil se clampea (mín = 0, máx = 100).
+
+Compila sin warnings; **18 tests** en verde (un slot nuevo del mismo ejecutable). README,
+BITÁCORA y `arquitectura.html` al día; **cambia la semántica del API → se regenera el PDF**.
+
+## 73. Perfil al estilo DVD: curvatura en el eje Y, el mar es solo una línea
+
+Con el relleno azul (§71) el perfil quedaba feo: la batimetría (−1891 m) dominaba la
+gráfica con una gran mancha azul, y el objetivo sobre el mar no reflejaba la curvatura.
+Revisando a fondo `DVD_potencial/graficaperfil.cpp` (`graph(0)` terreno relleno por canal
+hasta `graph(1)` curvatura; `curva = −d²/17e6`; y donde no hay terreno, **`altu = curva`**
+→ el terreno SIGUE la línea del mar), se reescribe `pintarPerfil` con ese modelo. Cambio
+**solo del `demo`**.
+
+- **El eje Y refleja la curvatura de la Tierra:** todo se hunde con la distancia restando
+  `caída(d) = d²/2kR` (k=4/3). El **nivel del mar es una sola línea** `y = −caída(d)` que
+  baja con la distancia; **el mar no se rellena**, es esa línea (antes se rellenaba de
+  azul: eliminado).
+- **Terreno:** `max(cota, 0) − caída(d)`. La tierra firme (cota > 0) va a su altura,
+  hundida; el mar y la batimetría (cota ≤ 0) se tratan como superficie 0 y **rielan sobre
+  la línea del mar** (relleno verde por canal hasta ella → nulo sobre el mar). Ya no se
+  dibuja la batimetría: el usuario pidió el mar como una línea, no como relleno.
+- **Objetivo sobre el mar:** a `Alt2` por encima de la línea del mar (hundida); «el punto
+  va sobre la línea del mar con curvatura».
+- **Recta de visibilidad:** recta en el plano hundido, de la cima de antena en A
+  `(0, zA)` a la del objetivo en B `(D, zB − caída(D))`, que es justo el punto del objetivo
+  rielando sobre el mar. Mástiles y obstáculo se sitúan sobre la superficie hundida.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
+
+## 74. Perfil: ángulo de cierre, picos de la silueta y recta al pico dominante
+
+El usuario pidió reflejar en el perfil el **ángulo de cierre** al estilo DVD: una recta
+directa entre los puntos, tracers en los **picos máximos** y una recta hasta el **pico
+dominante**, el que de verdad provoca la no visibilidad. En DVD, los tracers se ponen en
+cada punto de ángulo de cierre sobre el terreno y la recta de visibilidad se dibuja como
+`tangente·d + posición` (recta desde el observador con la pendiente del ángulo de cierre
+dominante). Se replica en `pintarPerfil` (solo `demo`):
+
+- **Recta directa A→B** (naranja): se mantiene, es la línea de visión entre A y B.
+- **Ángulo de cierre:** desde el observador en `(0, zA)`, la tangente a cada muestra es
+  `(y − zA)/d` (en el plano ya hundido por la curvatura). Cada muestra que supera el
+  **máximo acumulado** es un **pico** que eleva el horizonte.
+- **Tracers (círculos) en los picos** de la silueta (`gPicos`, scatter sin línea).
+- **Recta al pico dominante** (`gCierre`): recta tangente del observador `(0, zA)` por el
+  pico de mayor ángulo hasta B `(domD, domY)`, **extendida con esa pendiente hasta la
+  distancia máxima** `dFin` (lo que queda por debajo detrás del pico está oculto). Es la
+  línea de cierre que limita la visibilidad. **Roja si bloquea, morada si no**; el pico se
+  marca con un tracer del mismo color. Si no hay pico hasta B, cae al corte más justo
+  (`critD`) de `lineOfSight`.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
+
+## 75. Entrada de puntos en la pestaña Elevación (pick en el mapa / lat-lon)
+
+Antes el análisis tomaba la geometría de la entidad SELECCIONADA en el mapa (una línea
+para perfil/visión, un vértice para el viewshed). Ahora los puntos se introducen en la
+propia pestaña, por análisis. Cambio **solo del `demo`**.
+
+- **Punto A** y **Punto B**: cada uno con campos **lat/lon** editables y un botón
+  **«📍 Mapa»** que captura el siguiente clic. Se aprovecha el API público del widget:
+  `setActiveTool(MapTool::PickPoint)` + señal `pointPicked(coord)`. Como `PickPoint` no se
+  auto-resetea, tras capturar se vuelve a `MapTool::None` y se re-ejecuta el último
+  análisis para verlo al vuelo. A y B arrancan en el centro del mapa y 20 km al este.
+- **Perfil** (radial): A + **rumbo** (azimut, 0=N) + **alcance**; perfil del terreno desde
+  A por ese rumbo hasta el alcance (`a.atDistanceAndAzimuth`).
+- **Visión A→B**: A (Alt1) y B (Alt2) de los campos; se exige A≠B.
+- **Viewshed**: origen = A; observador Alt1, objetivo Alt2, alcance.
+- Nuevos campos: `m_latA/m_lonA`, `m_latB/m_lonB`, `m_rumbo`; enum `Pick{Ninguno,A,B}` y
+  `m_picking`. Se elimina `entidadSeleccionada()` (ya no se usa). Los botones y la ayuda
+  del tab describen el nuevo flujo.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
+
+## 76. Alcances de 400 km, progreso cancelable del viewshed y sobre-zoom en fill_map
+
+Tres mejoras para ir preparando escenarios grandes.
+
+**1. Rangos largos (demo).** El alcance (viewshed/perfil) sube a **400 km**; las alturas
+de antena/objetivo ya llegaban a **20 km** (0–20000 m). El viewshed, el perfil radial y la
+visión A→B operan sin cambios a esos alcances (caminan varias teselas del DEM).
+
+**2. Progreso cancelable del viewshed (librería + demo).** Un viewshed de 360° a 400 km
+son millones de muestras y puede tardar. Se añade un **callback de progreso** opcional al
+API:
+- `include/libmapa/Elevation.h`: `using ViewshedProgress = std::function<bool(int done,
+  int total)>;`.
+- `computeViewshed(src, origin, params, progress = {})`: invoca `progress(hecho, total)`
+  tras cada azimut; si devuelve `false`, **cancela** y devuelve un viewshed vacío.
+- `MapWidget::viewshed(origin, params, progress = {})`: reenvío.
+- `demo`: `analizarViewshed` muestra un `QProgressDialog` **cancelable** (modal, aparece
+  solo si pasa de ~0,4 s); el callback procesa eventos y propaga «Cancelar».
+- Test `viewshedProgressAndCancel`: el callback se llama una vez por rayo hasta
+  `(total,total)`; devolver `false` al 5º rayo deja el resultado inválido.
+
+**3. Sobre-zoom en fill_map (librería + fill_map).** El mapa recortaba el zoom a
+`recommendedMaxZoom` del dataset (p. ej. 14), así que no se podían **navegar ni enmarcar**
+niveles altos (z15/16) para descargarlos. Se añade:
+- `MapView::setMaxZoomOverride(int)` / `MapWidget::setMaxZoomOverride(int)`: tope de
+  sobre-zoom por encima del recomendado (−1 lo restaura). Se aplica en `setZoom` y
+  `fitBounds`.
+- `fill_map`: `m_mapa->setMaxZoomOverride(19)` al arrancar; así la vista previa llega a
+  z19 para enmarcar. Los spinboxes de descarga ya llegaban a z22 (sin recorte), de modo
+  que **z15/z16 se descargan cuando se desee**.
+
+Compila sin warnings; **18 tests** en verde (slot nuevo). README, BITÁCORA y
+`arquitectura.html` al día; **cambia el API público (callback de progreso, sobre-zoom) →
+se regenera el PDF**.
+
+## 77. Todas las herramientas de teselas leen el paquete mapa.json
+
+El usuario tenía su configuración en `D:\QtPro\recursos\mapa.json` (paquete v2, con
+`clarity` a maxZoom 16), pero `fill_map` mostraba `clarity z[3..14]`: estaba leyendo un
+`datasets.json` suelto de su directorio de trabajo, no el paquete. `fill_map`,
+`fill_tiles` y `bench_tiles` solo entendían `datasets.json`; el `demo`, `render_map` y
+`check_data` ya aceptaban el paquete. Se unifica: **todas usan `mapa.json`**.
+
+- **`fill_map`** (GUI): el constructor pasa a `(origen, esPaquete, demDir, demDb)`. Con un
+  paquete, `cfg.dataDir = origen` (la vista previa lee capas, elevación y overlays del
+  paquete); los datasets para la descarga se leen con `DataPackage::load(origen)`, que
+  acepta tanto un `mapa.json` (rutas resueltas a absolutas) como un `datasets.json` plano.
+  `main` detecta paquete (carpeta o fichero `mapa.json`) y, sin argumento, prefiere
+  `mapa.json` del directorio actual y si no `datasets.json`.
+- **`fill_tiles`** / **`bench_tiles`** (consola): su lector ya tomaba el array `datasets`
+  (común a `mapa.json` y `datasets.json`) resolviendo rutas junto al JSON; se añade que, sin
+  `--datasets`, usen `mapa.json` del directorio actual (si no, `datasets.json`).
+
+Así, ejecutando las herramientas desde la carpeta de recursos, todas ven el mismo
+`mapa.json` y los mismos zooms. (El «z14» era la config vieja; con el paquete, `clarity`
+llega a z16 en vista y cobertura, y la descarga a z15/16 funciona como ya hacía.)
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
+
+## 78. Pestaña Elevación: cota de A/B, rumbo/distancia, pines de color y «10 picos»
+
+Mejoras pedidas para el panel lateral de elevación del `demo` (solo `demo/main.cpp`).
+
+- **Cota de los puntos.** Debajo de los campos, una lectura muestra la **cota del terreno
+  en A y en B** (`elevationAt` bajo cada punto) y el **rumbo y la distancia A→B**
+  (`QGeoCoordinate::azimuthTo`/`distanceTo`). Se recalcula al cambiar cualquier lat/lon.
+- **Cursor y pines de color.** Un pin se dibuja con `QPainter` (`pinPixmap(color)`) y se usa
+  como **icono del botón «Mapa»**, como **cursor** al capturar (punta = hotspot) y como
+  **marca fija** del punto. Azul = A, rojo = B. Al pulsar «Mapa» el cursor del mapa toma el
+  pin del color del punto; al fijarlo se restaura. Durante cada análisis, A (y B en la
+  Visión) quedan marcados con su pin sobre el mapa (capa `elev_puntos`).
+- **Herramienta «10 picos (10 km)».** Nuevo botón: muestrea una rejilla de 100 m dentro de
+  un radio de **10 km** desde A, descarta el mar/sin dato (NaN), ordena por cota y toma los
+  **10 puntos más altos** exigiendo una separación mínima de 800 m (cumbres distintas, no la
+  misma loma). Los pinta **numerados** (naranja, capa `elev_picos`) y los lista en el panel
+  con **cota · distancia · rumbo**. Reutiliza `MapWidget::elevationAt`; no toca la librería.
+- `FeatureStyle::icon` (QPixmap) permite el pin como icono de punto; `Limpiar` borra también
+  `elev_puntos` y `elev_picos`; el enum de análisis gana `Picos` para re-aplicar al vuelo.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
+
+## 79. «10 picos»: exactitud (refinamiento), radio/separación configurables, color y hover
+
+Probando sobre el Pico Turquino (1974 m), la herramienta daba 1972 m: la rejilla de 100 m
+se saltaba la cima exacta. Se mejora en varios frentes (solo `demo`).
+
+- **Exactitud.** La rejilla ahora **localiza** cumbres y su paso se **escala con el radio**
+  `paso = max(30, 2R/500)` (~500×500 muestras, coste acotado a cualquier radio). Cada
+  cumbre del top-10 se **refina**: ventana `±max(150, paso)` a paso **10 m**, quedándose
+  con la cota máxima real (clava el nodo del pico que la rejilla gruesa se saltaba). Tras
+  refinar se reordena por cota.
+- **Radio y separación configurables.** Dos controles en la pestaña: **radio** (1–50 km,
+  por defecto 10) y **separación mínima** entre cumbres (50–5000 m, por defecto 800).
+- **Progreso.** Barra cancelable (`QProgressDialog`) durante el barrido de la rejilla
+  (radios grandes tardan); aparece solo si pasa de ~0,4 s.
+- **Color por pico + punto central.** Cada pico se dibuja con un **color distinto** (paleta
+  de 10) como disco con borde blanco y **punto central**, con el número en su color. Icono
+  dibujado con `QPainter` (`picoIcon`).
+- **Resaltado por hover.** Un `eventFilter` sobre el mapa usa `MapWidget::featureAt(píxel)`;
+  al pasar el cursor por un pico, se agranda con un halo amarillo (`updateFeature`) y se
+  restaura al salir. Se guardan los ids y el estilo base de cada pico.
+
+Compila sin warnings; la librería no cambia, **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API, no se regenera el PDF.
+
+## 80. Relieve sombreado (hillshade) en vivo, calculado del DEM local (offline)
+
+Nueva capa de **relieve sombreado** sobre el mapa, calculada EN VIVO a partir del DEM
+local del paquete (100% sin conexión, como pidió el usuario). Toca la librería (capa + API)
+y el demo (controles).
+
+- **`src/widget/HillshadeLayer.{h,cpp}`** (nuevo `QCPLayerable`, con `Q_OBJECT`): capa
+  «tonta» que guarda una imagen ya calculada + las esquinas geográficas y la pinta estirada
+  entre sus píxeles (eje X = longitud, Y = grados de Mercator → alineada con la base). Va en
+  una capa propia **encima de las teselas y debajo de las entidades**. Dibuja en *Multiply*
+  (gris sobre la base) o *SourceOver* (tintado por altura), con opacidad.
+- **`MapWidget`**: calcula la imagen en `refreshHillshade()` muestreando el DEM
+  (`elevationAt`) en una rejilla submuestreada del viewport (lado máx 420 px); filas
+  lineales en grados de Mercator (inverso de `WebMercator`) para alinear. Por píxel:
+  pendiente/orientación por diferencias centrales, sombreado Lambert
+  `cos(zenit)cos(pend)+sin(zenit)sin(pend)cos(azSol−orient)` con **exageración** `zFactor`;
+  sin dato → transparente. Gris (fuerza mezclada hacia blanco + *Multiply*) o color
+  **hipsométrico** (rampa por altura × sombreado). Se **recalcula sola** al mover la vista
+  (antirebote 180 ms). API: `setHillshadeVisible/Sun/Opacity/Exaggeration/Colored`,
+  `isHillshadeVisible`, `refreshHillshade`.
+- **`MapView`**: crea la capa `hillshade` entre `tiles` y `features`; `hillshadeLayer()`.
+- **`demo`**: grupo «Relieve sombreado» en la pestaña Elevación (checkable) con sol
+  (azimut/altura), intensidad, exageración y «tintar por altura».
+- **CMake + qmake**: añadido `HillshadeLayer.{cpp,h}` a `libmapa_widget` (mirror).
+- **Test** `hillshadeApiTogglesSafely` (tst_mapwidget): la API conmuta y acepta parámetros
+  sin colgar (sin DEM, la capa queda vacía).
+
+Compila sin warnings; **18 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
+**API pública nueva → se regenera el PDF**.
+
+## 81. Pines automáticos al seleccionar punto; freno del hillshade por área
+
+Dos ajustes tras probar (solo `demo` salvo el freno, que va en `MapWidget`).
+
+- **El pin aparece al seleccionar/escribir el punto.** Antes los pines A/B solo se
+  dibujaban al lanzar un análisis. Ahora `marcarPuntosAB()` dibuja SIEMPRE A (azul) y B
+  (rojo) y se llama desde `actualizarInfoPuntos()` (que ya se dispara al pinchar «Mapa» o
+  editar lat/lon), así el icono sigue a los puntos sin necesidad de analizar.
+- **Hillshade: freno por área (no congelar a vista general).** El coste del hillshade lo
+  domina cargar teselas del DEM, que crece con el área de la vista; con Cuba entera (z9) la
+  GUI se quedaba «sin responder». `refreshHillshade` ahora **no calcula** si la vista abarca
+  más de ~2° de ancho o alto (deja la capa en blanco): es una capa de detalle, se ve al
+  acercar. Se baja también el lado máx. de la imagen a 360 px. (Para relieve a escala de
+  país, el camino serían tiles de hillshade horneados, offline, en el paquete.)
+
+Compila sin warnings; **18 tests** en verde. README y BITÁCORA al día; sin cambios de firma
+de API, no se regenera el PDF.
+
+## 82. dem_to_hillshade: hornear el relieve sombreado a teselas (offline)
+
+Complemento de la capa de hillshade en vivo (§80), que a vista general se desactiva por
+coste (§81). Nueva herramienta de consola **`dem_to_hillshade`** (gemela de `geo_to_tiles`):
+hornea el relieve a una **pirámide de teselas PNG** en un `.sqlitedb` XYZ que viaja en el
+`mapa.json` como una capa base más.
+
+- **Beneficios:** fluido a CUALQUIER zoom (incluida Cuba entera), no necesita el DEM ni CPU
+  en runtime, calidad consistente, y reutiliza el motor de teselas (cero código nuevo de
+  runtime). Coste: espacio en disco, pregeneración una vez, y el **sol/exageración quedan
+  fijos** (para cambiarlos al vuelo está la capa en vivo).
+- **Cálculo:** abre el DEM (carpeta `.hgt` → `HgtElevation`, o `.sqlitedb` →
+  `SqliteElevation`); por cada tesela z/x/y de la bbox calcula una rejilla de cotas 258×258
+  (con halo de 1 px para que no haya costuras), y por píxel el sombreado Lambert con
+  diferencias centrales y exageración. Metros/píxel por Web Mercator (conforme: igual en x e
+  y). Gris opaco en tierra; **sin dato → transparente** (el mar deja ver el fondo). PNG en
+  `tiles(x,y,z,image)`. Imprime el bloque de dataset listo para pegar.
+- **Uso:** `dem_to_hillshade --in <hgt|dem.sqlitedb> --out relieve.sqlitedb --cuba
+  [--minzoom 6 --maxzoom 13] [--sun-az 315 --sun-alt 45 --exag 2] [--overwrite]`.
+- **Build:** `add_executable(dem_to_hillshade …)` con `libmapa_core` + Qt Gui (QImage), y en
+  la lista de `install`. No añade `.cpp` de librería → sin cambios en qmake de core/widget
+  (como `geo_to_tiles`, que tampoco tiene `.pro` propio).
+
+Probado con un `.hgt` sintético (una colina): genera teselas PNG válidas con sombreado real.
+Compila sin warnings; **18 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
+**herramienta nueva → se regenera el PDF**.
+
+## 83. Entrada por análisis (selector) y pines solo del análisis activo
+
+El usuario pidió que los puntos A/B NO estén siempre visibles y que la entrada de cada
+análisis pida SOLO sus datos (no un panel de campos fijos). Rediseño de la pestaña
+Elevación (solo `demo`).
+
+- **Selector + campos contextuales.** Un `QComboBox` «Análisis» (Perfil / Visión A→B /
+  Viewshed / 10 picos) y un único botón **«Calcular»** sustituyen a los cuatro botones.
+  Cada campo vive en una fila que se **muestra/oculta** según el análisis (sin
+  `QFormLayout::setRowVisible`, que es Qt 6.4+: cada fila es un `QWidget` propio). Se
+  relabelan los comunes: la posición A es «Posición A» / «Posición 1» / «Observador» /
+  «Posición»; la distancia es «Distancia» o «Alcance»; las antenas «Antena 1/2» o «Antena
+  obs. / Altura objetivo». `actualizarEntradaAnalisis(idx)` hace el show/hide + relabel.
+  - Perfil: posición + azimut + distancia. Visión: posiciones 1 y 2 + antenas 1/2.
+    Viewshed: observador + antena + alcance + altura objetivo. Picos: posición + radio/sep.
+- **Pines solo del análisis activo.** `marcarPuntosActivos()` dibuja el pin de la posición
+  A siempre y el de B **solo en Visión**; se actualiza al cambiar de análisis, al pinchar o
+  al escribir. Así el icono aparece al seleccionar el punto (sin analizar) pero no sobran
+  pines (B no aparece en perfil/viewshed/picos). «Limpiar» borra los overlays de análisis
+  pero mantiene los pines de entrada.
+- **Lectura contextual.** La cota se muestra de la posición activa; en Visión, además la de
+  B y el rumbo/distancia A→B.
+
+Los slots de cálculo (`analizarPerfil/Vision/Viewshed/PicosAltos`) no cambian: ya leían de
+los mismos spinboxes; «Calcular» despacha según el selector. Compila sin warnings, **18
+tests** en verde. README y BITÁCORA al día; sin cambios de API, no se regenera el PDF.
+
+## 84. dem_to_hillshade: realce de contraste (el relieve salía lavado)
+
+Al hornear el relieve de Cuba (§82) y cargarlo como capa base, el usuario vio que «no se ve
+bien»: salía un gris plano, de bajo contraste. La causa: se escribía el sombreado Lambert
+crudo (`v = hs·255`). El terreno **llano** vale `cz = sin(sunAlt)` (a 45°, ~0.707 → gris
+claro) y casi todas las laderas caen cerca de ese valor, así que el rango útil se agolpaba en
+una franja estrecha → imagen lavada.
+
+- **Estirado tonal (solo `tools/dem_to_hillshade`).** Tras calcular `hs ∈ [0,1]`, se aplica
+  un realce lineal que **ancla el llano a un gris claro fijo** (`grisLlano = 0.72`) y abre el
+  rango `contrast` veces a su alrededor: `t = clamp(grisLlano + (hs − sin(sunAlt))·contrast,
+  0, 1)`, y `v = 255·t`. Así las laderas en sombra se oscurecen de verdad y las soleadas
+  aclaran, **sin salirse del gris**. El llano queda claro (destaca el relieve bajo las capas
+  de encima); `contrast = 1` deja el sombreado casi tal cual, `> 1` realza (defecto **2.2**).
+- **Nuevo flag `--contrast <k>`** (defecto 2.2) para graduarlo al hornear.
+- **Nuevo flag `--sea-level <m>`** (por defecto desactivado): toda cota `≤ m` se deja
+  **transparente** en vez de sombrearla. Imprescindible con DEM que traen **batimetría** (el
+  «Cuba 2026.10» tiene fondo marino con cotas negativas): sin esto, `dem_to_hillshade`
+  sombreaba el fondo del mar y la **costa se perdía** en el gris. Con `--sea-level 0` el mar
+  queda transparente (se ve la capa base de debajo) y la línea de costa sale limpia. El resto
+  del pipeline (rejilla 258×258 con halo, PNG XYZ; teselas 100 % mar se omiten) no cambia.
+- **Costa sin ribete.** Al calcular la pendiente de un píxel de tierra, los vecinos **sin dato
+  o de mar** (`≤ seaLevel`) se sustituyen por la cota del centro. Así la costa no computa un
+  acantilado artificial tierra→fondo-marino (que dejaba un ribete claro/oscuro de 1 px) y
+  sombrea por su propia pendiente suave de tierra.
+
+Validado horneando crops reales de SRTM 30 m (bajados con `fill_hgt`) de La Habana (llano →
+gris claro) y la Sierra Maestra (relieve fuerte): con `--contrast 2.2 --sea-level 0` el relieve
+sale nítido y el mar transparente. Sin cambios en la librería ni en el API; compila sin
+warnings y **18 tests** en verde. README y BITÁCORA al día; la herramienta ya existía (solo
+flags opcionales nuevos) → no se regenera el PDF.
+
+## 85. dem_to_hillshade: `--colored` (tinte hipsométrico + batimetría)
+
+El usuario preguntó por qué gris y no color por altura. El gris se mantiene por defecto (neutro
+bajo las capas temáticas de color), pero se añade un modo **«mapa físico»** opcional.
+
+- **Nuevo flag `--colored`.** En vez de gris, cada píxel toma un **color hipsométrico** según
+  su cota y se **modula por el sombreado** para conservar la forma 3D. La rampa (función
+  `rampaColor`, interpolación lineal entre paradas):
+  - **Tierra (cota ≥ 0):** verde costa → verde claro → amarillo-tierra → tostado → marrón →
+    cumbres claras (0 … 2000 m).
+  - **Mar (cota < 0):** azul **batimétrico** por profundidad (orilla clara → azul profundo;
+    0 … −6000 m). Aprovecha que el DEM «Cuba 2026.10» trae fondo marino con cotas negativas.
+  - **Sombreado:** el color se multiplica por un factor `0.45 + 0.65·t` (t = tono del relieve),
+    comprimido para que el color siga vivo en el llano y solo oscurezca sombras / aclare laderas
+    al sol.
+- **Interacción con `--sea-level`:** para **ver** la batimetría en azul, NO pases `--sea-level`
+  (las cotas negativas se pintan). Si lo pasas, el mar queda transparente y manda la máscara.
+
+Validado con crops reales (Sierra Maestra: verde→marrón, Turquino en blanco, mar transparente)
+y con un DEM **sintético** con gradiente tierra→mar profundo que recorre toda la rampa (verde
+costa → azul claro → azul profundo), confirmando la batimetría. Solo cambia la herramienta;
+librería y API intactos, compila sin warnings y **18 tests** en verde. README y BITÁCORA al
+día; sin cambios de API → no se regenera el PDF.
+
+## 86. dem_to_hillshade: más verde en llanuras y `--water-level` (bahías con agua)
+
+Probando `--colored` sobre Cuba, el usuario pidió (1) **más verde en las llanuras** (salían
+oliváceas) y (2) que la **Bahía de la Habana se vea con agua** (salía verde como tierra).
+
+- **Diagnóstico de la bahía.** Muestreando el SRTM: la bahía da **~8–12 m** (positivo: el DEM
+  la rellena como tierra baja, no la excava) y su textura/pendiente es **igual** que la de la
+  tierra (la planitud NO la distingue). Pero hay ventana de cota útil: bahía ~10 m frente a las
+  llanuras de alrededor ~48 m.
+- **`--water-level <m>` (nuevo, solo con `--colored`, defecto 0).** Toda cota `≤ m` se pinta
+  como **agua** (rampa azul; las positivas bajas salen azul claro de orilla). Con `0` solo el
+  mar real (`<0`) es agua; subiendo a **~8–12** entran las bahías/lagunas que el DEM rellenó con
+  cota baja positiva, **sin** inundar las llanuras (>15 m siguen verdes). Comparado 0/8/15 en la
+  Bahía de la Habana: **8** es el equilibrio (bahía con agua, llanuras verdes); 15 ya salpica de
+  azul los valles costeros.
+- **Rampa de tierra más verde.** Se rebaja el amarilleo: verde sostenido hasta ~400 m
+  (0:(120,170,95) → 150:(150,185,110) → 400:(180,200,120)) y solo después amarillo-tierra
+  (800), tostado (1200), marrón (1600) y cumbres claras (2000). Las llanuras bajas quedan
+  claramente verdes.
+
+Solo cambia la herramienta; librería y API intactos, compila sin warnings y **18 tests** en
+verde. README y BITÁCORA al día; sin cambios de API → no se regenera el PDF.
+
+## 87. Curvas de nivel (isohipsas): núcleo `computeContours` + `dem_to_contours`
+
+Siguiente capacidad de trabajo con alturas: **curvas de nivel** como **capa vectorial** (se
+activa/desactiva, nítida a cualquier zoom, con lectura de cota al seleccionar), en vez de
+raster. Se hace en el núcleo (testeable y reutilizable) + herramienta, como el análisis de
+elevación.
+
+- **Núcleo `src/dem/Contours.{h,cpp}`** (cabecera pública `include/libmapa/Contours.h`):
+  `computeContours(src, params)` por **marching squares** sobre una rejilla muestreada del DEM.
+  Por cada celda y cada nivel que la cruza (cota = `base + k·interval`) emite 1–2 segmentos
+  (con los dos cruces saddle resueltos) y luego **encadena** los segmentos de cada nivel en
+  polilíneas: el grafo usa como nodo la **clave exacta de la arista** de rejilla donde cae el
+  cruce, así dos segmentos que comparten cruce se unen sin tolerancias de coma flotante (salen
+  cadenas abiertas y bucles cerrados). **Streaming por filas**: solo dos filas de nodos en
+  memoria a la vez (una rejilla de país entero no cabría). `ContourParams{bbox, interval, base,
+  stepMeters, minLengthMeters}`; `ContourLine{elevation, points}`. Celdas con algún vértice sin
+  dato (NaN) se saltan.
+- **Herramienta `tools/dem_to_contours`**: abre el DEM, calcula y vuelca cada curva como
+  entidad **polilínea** (`VectorRepository`, mismo esquema `entidad`/`entidad_vertice` que lee
+  la app) en una capa; `atributos.cota` lleva la altura. Las **curvas índice** (múltiplos de
+  `--index`, p. ej. 500 m) salen más gruesas, con color más oscuro y **etiqueta** de cota.
+  Args: `--in --out (--cuba|--bbox) [--interval 100] [--index 500] [--step 150]
+  [--min-length 500] [--layer curvas] [--overwrite]`.
+- **Test `tst_contours`** (18→**19**): DEM sintéticos — **cono** (anillos cerrados concéntricos
+  de radio `R·(1−L/H)`, decreciente con la cota), **plano** (ninguna curva) y **rampa** (niveles
+  esperados, curvas casi verticales).
+- **Build:** `Contours.cpp` a `libmapa_core` (CMake + `core.pro`); target `dem_to_contours`
+  (+ install). La cabecera pública se instala por el glob de `include/`.
+
+Validado end-to-end: curvas reales de la Sierra Maestra (intervalo 100 m, índice 500 m
+etiquetado) con **curvas batimétricas** azules en el mar (el SRTM de AWS Skadi trae batimetría).
+Compila sin warnings, **19 tests** en verde. README, BITÁCORA y `arquitectura.html` al día;
+**API pública nueva → se regenera el PDF**.
+
+- **Recorte por cota (`--min-level` / `--max-level`).** `ContourParams` gana `minLevel`/`maxLevel`
+  (por defecto ±∞): no se generan curvas fuera de ese rango. `--min-level 0` recorta al **nivel
+  del mar** y omite las curvas batimétricas negativas (verificado: cotas 0–1900 m, cero negativas).
+  Test `minLevelClipsBelow` (un cono que baja de 0: sin recorte hay curvas negativas; con
+  `minLevel=0`, ninguna). Sigue en **19 tests**; `arquitectura.html` y PDF al día.
+- **Progreso al calcular (`ContourProgress`).** Para país entero el muestreo de la rejilla son
+  ~20 M de cotas (1–4 min) y la herramienta parecía colgada. `computeContours` acepta un
+  callback opcional `ContourProgress = function<bool(hecho,total)>` invocado **por fila**
+  (devolver `false` cancela); `dem_to_contours` imprime el porcentaje en la misma línea. API
+  pública ampliada → `arquitectura.html` y PDF al día. 19 tests en verde.
+
+## 88. Overlays del paquete desde una BD vectorial (curvas como capa fija del mapa.json)
+
+Al generar las curvas (10 079 entidades) surgió la pregunta de **cómo meterlas en el
+`mapa.json`**. Las curvas son una BD de entidades (`VectorRepository`), pero `overlays` solo
+cargaba `.geo` (`loadGeoAsLayer`: un trazado, un estilo, sin etiquetas) y `features` es el
+**único** fichero editable del usuario. No había hueco limpio para una capa vectorial de solo
+lectura.
+
+- **`MapWidget::loadFeaturesAsLayer(db, layerId, name)` (nuevo).** Abre una BD de entidades y
+  **añade** sus entidades como una capa más (sin `setContents`, al revés que `loadFeaturesFrom`),
+  conservando **estilo, etiqueta y atributos por entidad**. Pensada para capas fijas del paquete.
+- **`overlays` acepta `.sqlitedb`.** `loadOverlays` distingue por extensión: `.geo` → `loadGeoAsLayer`
+  (decoración fija, no seleccionable); `.sqlitedb`/`.db` → `loadFeaturesAsLayer`. La capa queda
+  **no editable** pero sus entidades **seleccionables** (así al pinchar una curva se lee su cota).
+  No hubo que tocar `DataPackage` (el overlay ya tenía `id`/`file`/`name`/`zOrder`).
+- Así, la entrada en `mapa.json` para las curvas es un `overlays` normal apuntando al `.sqlitedb`.
+  También sirve para cargar `Cuba_vector` (u otra BD) como capa fija.
+- **Test** `tst_mapwidget::loadsFeaturesDbAsFixedLayer`: añade (no reemplaza) una entidad propia +
+  2 curvas; comprueba conteo, atributos (`cota` 500/600) y estilo por entidad (1 con etiqueta).
+
+Compila sin warnings, **19 tests** en verde. README, BITÁCORA, `arquitectura.html` y PDF al día.
+
+- **Fix: `PackageCheck` también valida los overlays `.sqlitedb`.** Al cargar el paquete real, el
+  chequeo (`PackageCheck`) seguía leyendo **todo** overlay con `readGeoFile`, así que con el
+  overlay de curvas `.sqlitedb` saltaba un aviso falso *«no contiene trazados válidos»* y un
+  diluvio de *«línea N no es un vértice»* (interpretaba el binario SQLite como texto). Ahora
+  `PackageCheck` ramifica por extensión igual que la carga: `.sqlitedb`/`.db` se valida como **BD
+  vectorial** contando las filas de `entidad` (sin cargarlas todas); `.geo` sigue con `readGeoFile`.
+  Test `tst_packagecheck::vectorDbOverlayValidates`. 19 tests en verde.
+
+## 89. Zoom mínimo/máximo por capa (las curvas solo al acercar)
+
+Cargadas las 10 094 curvas como overlay, a vista de país (z8) eran un amasijo de etiquetas
+(«0 m / 500 m» por todas partes, el «0 m» pegado a cada cayo), feo y algo lento, y **siempre
+visibles**. Las curvas son **detalle**: deben salir solo al acercar.
+
+- **`LayerInfo.minZoom`/`maxZoom`** (−1 = sin límite). `FeatureLayer` consulta el zoom actual
+  (vía `MapView::zoom()`) y **omite** las capas fuera de su rango, tanto al **dibujar** como al
+  **seleccionar** (`featureAt`). El caché del `FeatureLayer` ya se invalida al cambiar el zoom
+  (el rango de ejes cambia), así que la puerta se aplica sola.
+- **Fachada:** `MapWidget::setFeatureLayerZoomRange(id, minZoom, maxZoom)` y setter en
+  `OverlayModel`. En el paquete, el overlay acepta **`minZoom`/`maxZoom`** (los lee `DataPackage`
+  y los aplica `loadOverlays`).
+- Para las curvas, en el `mapa.json`: `"minZoom": 11` → invisibles hasta z11, limpio a vista
+  general y más rápido. (El contorno «0 m» conviene quitarlo en el horneado con `--min-level 1`,
+  que ya lo dibuja la capa de costas.)
+- Test `tst_mapwidget::loadsFeaturesDbAsFixedLayer` ampliado (guarda min/max en la `LayerInfo`).
+
+Compila sin warnings, **19 tests** en verde. README, BITÁCORA, `arquitectura.html` y PDF al día.
+
+## 90. Recorte por viewport en `FeatureLayer` (pan fluido con muchas entidades)
+
+Con las 10 094 curvas cargadas, mover el mapa iba algo lento: `FeatureLayer` reproyectaba y
+dibujaba **todas** las entidades en cada refresco, aunque a z11+ solo caben unas pocas.
+
+- **`FeatureLayer::featureInView(f, rectEjes)`**: antes de dibujar (y antes de consultar en
+  `featureAt`), se descarta la entidad cuya caja envolvente **no toca** el rectángulo visible,
+  trabajando en **coordenadas de eje** (sin `coordToPixel` ni construir el trazado). Camino
+  rápido: si un vértice cae dentro, se dibuja ya; si no, se compara la caja.
+- **Solape AABB a mano** (no `QRectF::intersects`): una línea perfectamente horizontal/vertical
+  tiene caja degenerada (alto/ancho 0) y `QRectF::intersects` la daría por **no** solapada,
+  recortándola mal aunque cruce la vista. El test `viewportCullKeepsCrossingFeatures` (una línea
+  con los extremos fuera de pantalla que pasa por el centro) cazó justo ese caso.
+- No cambia el API público (método privado del layer). 19 tests en verde (uno nuevo).
+
+Resultado: el *pan* vuelve a ir fluido; solo se proyecta y pinta lo que se ve.
+
+## 91. Curvas: etiquetas solo en las cimas (espaciadas) y cota por tooltip
+
+Con las curvas de todo el país, etiquetar TODA curva índice llenaba el mapa de «500 m / 1000 m»
+repetidos. Mejor: etiquetar solo las **cimas**, espaciadas, y leer el resto al vuelo.
+
+- **`dem_to_contours --labels peaks|all|none` (defecto `peaks`).** En `peaks` solo se etiqueta un
+  **anillo de cima** por cumbre: curva índice **cerrada** y **pequeña** (envolvente ≤ `--peak-span`,
+  6 km por defecto), quedándose con la **más alta** y separando las etiquetas al menos `--label-sep`
+  (8 km) — una greedy por cota descendente. `all` = toda curva índice (comportamiento anterior);
+  `none` = ninguna. Probado en la Sierra Maestra: de 25 índice → **4 etiquetas** (500/1000/1500),
+  cada una en su cima. Solo cambia la herramienta.
+- **Tooltip de cota en el `demo`.** El `eventFilter` del mapa, al pasar el ratón, consulta
+  `featureAt` y si la entidad trae el atributo `cota` (las curvas lo llevan) muestra
+  «`<cota> m`» en un `QToolTip`. Así se lee la altura de **cualquier** curva, no solo de las
+  etiquetadas. Reutiliza `MapWidget::featureAt`/`feature`; sin cambios de API.
+
+19 tests en verde (la librería no cambia). README y BITÁCORA al día; sin regenerar PDF.
+
+## 92. Interacción del demo: tooltips, lista↔mapa, análisis temporal, pines arrastrables y con punta
+
+Bloque de usabilidad pedido antes de cerrar la fase. Toca la librería (aditivo) y el `demo`.
+
+- **Icono anclado por un punto (`FeatureStyle::iconAnchor`, normalizado).** `(0.5,0.5)` = centro
+  (por defecto); `(0.5,1.0)` = pie-centro. `FeatureLayer` dibuja el pixmap respecto a ese ancla
+  (respetando la dpr) y el **hit-test de un punto con icono** usa TODO el rectángulo del pixmap
+  anclado (no solo la punta), para poder **agarrar** el pin. Los pines A/B del demo usan
+  `(0.5, 31/32)`: su **punta** marca el lugar exacto. Test `iconAnchorHitTestCoversPin`.
+- **Capa temporal (`MapWidget::setFeatureLayerTransient`).** Marca una capa para **excluirla del
+  guardado** (como las fijas del paquete). El demo marca las de análisis (`elev_*`) y los pines
+  A/B: son **temporales**, no se guardan ni reaparecen. Test `persistSkipsTransientLayers`.
+- **Tooltip de cualquier entidad (demo).** Al pasar el ratón, `featureAt`+`feature` arman un
+  tooltip con **nombre, cota y tipo** de la entidad bajo el cursor (no solo curvas).
+- **Lista ↔ mapa (demo).** Clic en una entidad del árbol → `centrarEnItem` centra el mapa en su
+  centroide y la **selecciona/resalta** (la selección ya la hacía `seleccionEnArbol`).
+- **Pines A/B arrastrables (demo).** El `eventFilter` se instala sobre la `MapView` para
+  interceptar el clic antes del desplazamiento: al presionar sobre un pin `punto_ab` se arrastra;
+  el `MouseMove` vuelca la coordenada bajo el cursor (`xAxis/yAxis->pixelToCoord` +
+  `fromAxisCoords`) en los campos del punto (que redibujan el pin y la lectura); al soltar,
+  re-ejecuta el análisis.
+
+Compila sin warnings, **19 tests** en verde (dos nuevos en `tst_mapwidget`). README, BITÁCORA,
+`arquitectura.html` y PDF al día. API pública ampliada (`iconAnchor`, `setFeatureLayerTransient`).

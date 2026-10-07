@@ -12,6 +12,7 @@
 #include <QImageReader>
 #include <QSet>
 #include <QSqlDatabase>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
 
@@ -296,13 +297,46 @@ PackageCheck PackageCheck::run(const DataPackage &p, const Options &options)
             continue;
         }
         r.totalBytes += sizeOf(ov.file);
-        QString motivo;
-        const QVector<GeoPath> trazados = readGeoFile(ov.file, &motivo);
-        if (trazados.isEmpty())
-            r.add(Severity::Error, ov.id, QStringLiteral("No se puede leer: %1").arg(motivo));
-        else
-            r.add(Severity::Info, ov.id,
-                  QStringLiteral("%1 trazado(s)").arg(trazados.size()));
+        // Una capa fija puede ser un .geo (trazados) o una BD vectorial .sqlitedb
+        // de entidades (p. ej. curvas de nivel); se valida distinto segun el tipo.
+        const bool esDb = ov.file.endsWith(QLatin1String(".sqlitedb"), Qt::CaseInsensitive)
+                       || ov.file.endsWith(QLatin1String(".db"), Qt::CaseInsensitive);
+        if (esDb) {
+            // BD vectorial: cuenta las filas de 'entidad' (sin cargarlas todas).
+            const QString conn = QStringLiteral("pkgcheck_ov_") + ov.id;
+            int n = -1;
+            QString motivo;
+            {
+                QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+                db.setDatabaseName(ov.file);
+                if (db.open()) {
+                    QSqlQuery q(db);
+                    if (q.exec(QStringLiteral("SELECT COUNT(*) FROM entidad")) && q.next())
+                        n = q.value(0).toInt();
+                    else
+                        motivo = q.lastError().text();
+                } else {
+                    motivo = db.lastError().text();
+                }
+                db.close();
+            }
+            QSqlDatabase::removeDatabase(conn);
+            if (n < 0)
+                r.add(Severity::Error, ov.id,
+                      QStringLiteral("No se puede leer (BD vectorial): %1").arg(motivo));
+            else if (n == 0)
+                r.add(Severity::Warning, ov.id, QStringLiteral("BD vectorial sin entidades"));
+            else
+                r.add(Severity::Info, ov.id, QStringLiteral("%1 entidad(es)").arg(n));
+        } else {
+            QString motivo;
+            const QVector<GeoPath> trazados = readGeoFile(ov.file, &motivo);
+            if (trazados.isEmpty())
+                r.add(Severity::Error, ov.id, QStringLiteral("No se puede leer: %1").arg(motivo));
+            else
+                r.add(Severity::Info, ov.id,
+                      QStringLiteral("%1 trazado(s)").arg(trazados.size()));
+        }
     }
 
     // --- entidades de partida -------------------------------------------

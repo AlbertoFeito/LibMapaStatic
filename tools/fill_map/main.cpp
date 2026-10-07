@@ -10,7 +10,9 @@
  * El motor de descarga es el MISMO que la herramienta de consola fill_tiles
  * (libmapa::TileFiller): misma codificacion probada, solo cambia la carcasa.
  *
- * Uso:  fill_map [ruta/a/datasets.json]      (por defecto ./datasets.json)
+ * Uso:  fill_map [ruta/a/mapa.json | carpeta_paquete | datasets.json]
+ *        Sin argumento: `mapa.json` del directorio actual (paquete) si existe; si
+ *        no, `datasets.json`. Acepta un paquete (mapa.json) igual que el demo.
  */
 
 #include "TileFiller.h"
@@ -18,12 +20,15 @@
 #include "libmapa/MapWidget.h"
 #include "libmapa/MapTypes.h"
 #include "tiles/TileService.h"
+#include "io/DataPackage.h"
 
 #include <QApplication>
 #include <QComboBox>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGeoCoordinate>
@@ -64,20 +69,28 @@ public:
     // centrado en Cuba, prepara el antirebote del modo "al navegar", construye la
     // barra de herramientas y la de estado, y conecta las senales del mapa
     // (seleccion de area, cambios de zoom/centro) a los slots correspondientes.
-    Ventana(const QString &datasetsFile, const QString &demDir = QString(),
+    Ventana(const QString &origen, bool esPaquete, const QString &demDir = QString(),
             const QString &demDb = QString())
-        : m_datasetsFile(datasetsFile)
+        : m_datasetsFile(origen)
     {
         setWindowTitle(tr("Rellenar teselas - libmapa"));
         resize(1200, 800);
 
-        // Codificacion de cada capa (para pasarsela al motor de descarga).
-        for (const TileDataset &d : TileService::loadDatasets(datasetsFile))
-            m_datasets.insert(d.id, d);
+        // Codificacion de cada capa (para pasarsela al motor de descarga). Se lee
+        // con DataPackage::load, que acepta TANTO un paquete `mapa.json` (filePath
+        // resueltos a absolutos) COMO un `datasets.json` plano (version 1).
+        QString errPaq;
+        if (const auto paq = DataPackage::load(origen, &errPaq)) {
+            for (const TileDataset &d : paq->datasets)
+                m_datasets.insert(d.id, d);
+        }
 
         // --- Mapa -----------------------------------------------------------
         MapConfig cfg;
-        cfg.datasetsFile = datasetsFile;
+        if (esPaquete)
+            cfg.dataDir = origen;           // el paquete trae capas, elevacion, etc.
+        else
+            cfg.datasetsFile = origen;      // datasets.json plano
         cfg.elevationDir = demDir;          // carpeta .hgt (vacio = sin carpeta)
         cfg.elevationDbFile = demDb;        // BD .sqlitedb (prioritaria si viene)
         cfg.initialCenter = QGeoCoordinate(21.5, -79.5);   // Cuba entera
@@ -89,6 +102,11 @@ public:
             QMessageBox::critical(this, tr("Error"),
                 tr("No se pudo abrir el mapa:\n%1").arg(m_mapa->lastError()));
         }
+
+        // fill_map es la herramienta de DESCARGA: permite sobre-zoom hasta z19
+        // para poder navegar y enmarcar niveles altos (z15/16…) que se van a bajar,
+        // aunque la base recomiende un maximo menor (p. ej. 14).
+        m_mapa->setMaxZoomOverride(19);
 
         // Antirebote del modo "al navegar": espera a que el mapa se pare antes
         // de descargar, para no lanzar en cada pixel del arrastre.
@@ -786,10 +804,19 @@ int main(int argc, char *argv[])
         else if (datasets.isEmpty() && !a.startsWith(QLatin1String("--")))
             datasets = a;
     }
-    if (datasets.isEmpty())
-        datasets = QStringLiteral("datasets.json");
+    // Sin argumento: un `mapa.json` en la carpeta actual (paquete), si lo hay; si
+    // no, un `datasets.json`. Asi todas las herramientas convergen en el mismo
+    // `mapa.json` cuando se ejecutan desde la carpeta de recursos.
+    if (datasets.isEmpty()) {
+        datasets = QFile::exists(QDir::currentPath() + QStringLiteral("/mapa.json"))
+                       ? QStringLiteral("mapa.json")
+                       : QStringLiteral("datasets.json");
+    }
+    const QFileInfo fiOrigen(datasets);
+    const bool esPaquete = fiOrigen.isDir()
+        || fiOrigen.fileName().compare(QLatin1String("mapa.json"), Qt::CaseInsensitive) == 0;
 
-    Ventana v(datasets, demDir, demDb);
+    Ventana v(datasets, esPaquete, demDir, demDb);
     v.show();
     // Sin TLS, toda descarga HTTPS falla: avisar en claro (Windows: falta OpenSSL).
     if (!QSslSocket::supportsSsl()) {

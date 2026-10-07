@@ -6,6 +6,7 @@
 #include "libmapa/MapTypes.h"
 #include "tiles/TileService.h"
 #include "widget/CoverageLayer.h"
+#include "widget/HillshadeLayer.h"
 #include "widget/FeatureLayer.h"
 #include "widget/OverlayModel.h"
 #include "widget/TargetLayer.h"
@@ -47,12 +48,19 @@ public:
     TargetModel *targetModel() const { return m_targetModel; }
     TargetLayer *targetLayer() const { return m_targetLayer; }
     CoverageLayer *coverageLayer() const { return m_coverageLayer; }
+    HillshadeLayer *hillshadeLayer() const { return m_hillshadeLayer; }
 
     QGeoCoordinate center() const;
     void setCenter(const QGeoCoordinate &center);
 
     int zoom() const { return m_zoom; }
     void setZoom(int zoom, const QPointF *anchorPx = nullptr);
+
+    //! Tope de zoom por encima del recomendado del dataset (sobre-zoom). -1 (por
+    //! defecto) = usar recommendedMaxZoom. Lo usan herramientas como fill_map para
+    //! poder navegar/enmarcar niveles altos (z15/16) que se van a descargar.
+    void setMaxZoomOverride(int zoom) { m_maxZoomOverride = zoom; }
+    int maxZoomOverride() const { return m_maxZoomOverride; }
 
     void fitBounds(const QGeoCoordinate &northWest,
                    const QGeoCoordinate &southEast);
@@ -189,8 +197,10 @@ private:
     TargetModel *m_targetModel = nullptr;
     TargetLayer *m_targetLayer = nullptr;
     CoverageLayer *m_coverageLayer = nullptr;
+    HillshadeLayer *m_hillshadeLayer = nullptr;
 
     int m_zoom = 10;
+    int m_maxZoomOverride = -1;     //!< tope de sobre-zoom (-1 = recommendedMaxZoom)
     QGeoCoordinate m_center{23.1136, -82.3666};
     qint64 m_selectedTarget = -1;    //!< Objetivo resaltado (-1 = ninguno).
 
