@@ -4095,3 +4095,13 @@ también es la máscara —una fuente de verdad en vez del ráster `Cuba_Vector`
 / `--line-width` (por defecto línea azul `#1565c0` fina, relleno transparente) y los escribe en las
 columnas `color_linea`/`color_relleno`/`ancho_linea` como ARGB (QRgb) sin signo. El estilo no afecta
 a `--water-mask`, que solo lee geometría.
+
+Probado el overlay vectorial en el demo: se ve **más fino y detallado** que el ráster `Cuba_Vector`
+(hecho de un `.geo` más basto), pero **dibujar 384.895 vértices como vector arrastra** a zoom medio.
+La solución sin perder la silueta fina: regenerar el ráster **desde la misma costa OSM**. El conversor
+gana `--geo FICHERO.geo`, que vuelca los anillos en formato `.geo` (`lon,lat`, `0.0,0.0` separa
+trazados); `geo_to_tiles` lo rasteriza con decimado sub-píxel por zoom (detalle íntegro en cada nivel,
+solo se pintan los 256×256 visibles, cacheados). Cuba a z4–13 = 3.688 teselas, 21 MB; a z4–15, 100 MB.
+Flujo recomendado: ráster OSM como capa base rápida y, si se quiere nitidez a zoom extremo, el overlay
+`cuba_tierra` **solo desde z14** (`minZoom`), donde entran pocos anillos en pantalla. Una sola fuente
+(la costa OSM) alimenta máscara, overlay y ráster.

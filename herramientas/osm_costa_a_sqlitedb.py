@@ -190,6 +190,22 @@ def escribir(con, capa, anillos, linea, relleno, grosor):
     return len(filas)
 
 
+# Escribe los anillos como un fichero .geo de texto (una coordenada "lon,lat"
+# por linea; "0.0,0.0" separa trazados), el formato que consume geo_to_tiles
+# para rasterizar la costa a una piramide de teselas rapida. Asi la MISMA costa
+# OSM sirve para la mascara, para el overlay vectorial y para regenerar el
+# raster Cuba_Vector con el mismo detalle. Devuelve el numero de vertices.
+def escribir_geo(ruta, anillos):
+    n = 0
+    with open(ruta, "w", encoding="utf-8") as f:
+        for anillo in anillos:
+            for lon, lat in anillo:
+                f.write("%.7f,%.7f\n" % (lon, lat))
+                n += 1
+            f.write("0.0,0.0\n")   # cierra este trazado y empieza el siguiente
+    return n
+
+
 # Orquesta la conversion: lee, cose, cierra los pocos tramos que queden sueltos
 # (uniendo sus extremos) y vuelca la BD. Devuelve un pequeno informe por stdout.
 def main():
@@ -208,6 +224,9 @@ def main():
                     help="Relleno de la tierra como overlay (por defecto transparente).")
     ap.add_argument("--line-width", type=float, default=1.0,
                     help="Grosor de la línea de costa (px) como overlay.")
+    ap.add_argument("--geo", metavar="FICHERO.geo",
+                    help="Además, escribe la costa como .geo (para geo_to_tiles: "
+                         "regenerar el ráster Cuba_Vector con el detalle OSM).")
     args = ap.parse_args()
 
     segmentos, ya_cerrados = leer_geojson(args.geojson)
@@ -230,12 +249,17 @@ def main():
     finally:
         con.close()
 
+    if args.geo:
+        escribir_geo(args.geo, anillos)
+
     print("Entrada:   %s" % args.geojson)
     print("Salida:    %s  (capa '%s')" % (args.salida, args.capa))
     print("Anillos:   %d  (cosidos %d + ya cerrados %d + forzados %d)"
           % (len(anillos), len(cerrados) - len(abiertas), len(ya_cerrados),
              len(abiertas)))
     print("Vertices:  %d" % nvert)
+    if args.geo:
+        print("GEO:       %s  (para geo_to_tiles -> raster Cuba_Vector)" % args.geo)
     print("Listo. Prueba:  dem_to_hillshade ... --water-mask %s --land-layer %s"
           % (args.salida, args.capa))
     return 0
