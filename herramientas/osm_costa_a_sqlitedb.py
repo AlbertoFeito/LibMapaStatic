@@ -23,6 +23,7 @@ Esquema escrito (identico a src/db/Schema.cpp, version 2): tablas
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import time
@@ -237,6 +238,14 @@ def main():
         if len(cad) >= 3:
             cerrados.append(cad + [cad[0]])
     anillos = [a for a in (ya_cerrados + cerrados) if len(a) >= 4]
+
+    # Sobrescribe: si el .sqlitedb ya existe (y sus sidecars WAL), se borra, para
+    # no intentar crear el esquema sobre una BD que ya lo tiene.
+    for sufijo in ("", "-wal", "-shm"):
+        try:
+            os.remove(args.salida + sufijo)
+        except OSError:
+            pass
 
     con = sqlite3.connect(args.salida)
     try:
