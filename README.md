@@ -495,7 +495,8 @@ dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
               --water-mask: BD vectorial de entidades con POLÍGONOS de tierra; solo
               se sombrea dentro de ellos (mar/bahías/lagos transparentes, con el
               borde EXACTO del vector). Es la forma precisa de recortar el agua
-              cuando el DEM no la distingue de la tierra baja)
+              cuando el DEM no la distingue de la tierra baja. Para generar esa BD
+              desde la costa de OSM, usa herramientas/osm_costa_a_sqlitedb.py)
 
 dem_to_contours --in <carpeta_hgt | dem.sqlitedb> --out <curvas.sqlitedb>
              (--cuba | --bbox latN,lonO,latS,lonE)
@@ -536,7 +537,8 @@ examples/app_minima/ plantilla de producto que usa la librería instalada (CMake
 cmake/               libmapaConfig.cmake.in (para find_package)
 qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri)
 qmake/*.pro          herramientas sueltas con qmake
-herramientas/        desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete
+herramientas/        desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete;
+                     osm_costa_a_sqlitedb.py: costa de OSM -> máscara de tierra (--water-mask)
 docs/DESPLIEGUE.md   guía paso a paso: integrar la librería y llevar la app a otro PC
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, flujos)

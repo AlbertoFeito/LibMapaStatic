@@ -4062,3 +4062,27 @@ Validado con un DEM sintético (relieve en todo el tile) + una BD de entidades c
 «isla» y un hueco «laguna»: se sombrea solo la isla, el mar y la laguna quedan transparentes.
 Solo cambia la herramienta; librería y API intactos. Compila sin warnings, **19 tests** en verde.
 README y BITÁCORA al día.
+
+## 94. `herramientas/osm_costa_a_sqlitedb.py`: costa de OSM → máscara de tierra
+
+La `--water-mask` necesita una BD de **polígonos de tierra**; la fuente natural y gratuita es la
+línea de costa de OpenStreetMap (`natural=coastline`). Pero OSM la publica como **líneas dirigidas
+partidas en muchos tramos** (no polígonos), así que hace falta un conversor.
+
+- **Entrada:** el GeoJSON que exporta overpass-turbo de
+  `way["natural"="coastline"](19.6,-85.5,23.7,-73.5); out geom;` (los cayos pequeños ya vienen como
+  `Polygon` cerrados; la costa principal, como muchos `LineString`).
+- **Cosido:** une los tramos por sus **extremos comunes** (tolerancia ~1 cm) hasta **cerrar cada
+  anillo** de tierra; los pocos tramos sueltos (recortados por el bbox) se cierran uniendo sus
+  extremos. En Cuba: 5512 tramos → 3779 anillos + 1238 cayos ya cerrados = **5020 polígonos**
+  (el continente = un anillo de 103 153 vértices), solo **3** cadenas quedaban abiertas.
+- **Salida:** **una** entidad polígono multi-parte (una parte por anillo) en el esquema exacto
+  (`schema_version`=2, `entidad` geometría=2, `entidad_vertice` WITHOUT ROWID, `capa`), que
+  `VectorRepository` lee sin migrar. No hace falta orientar los anillos: el **par-impar** del
+  rasterizador convierte los interiores (lagunas, bahías) en huecos de agua.
+
+Verificado de punta a punta: `dem_to_hillshade … --water-mask cuba_tierra.sqlitedb --land-layer
+tierra` sobre SRTM real de La Habana lee `1 polígono, 5020 partes` y recorta la costa (bahía de La
+Habana y su canal salen como agua) con mucho más detalle que Natural Earth. Es un script de
+reproducibilidad en `herramientas/` (Python estándar, sin dependencias); no toca la librería ni los
+tests.
