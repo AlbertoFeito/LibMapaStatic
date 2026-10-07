@@ -151,17 +151,34 @@ def crear_esquema(con):
         "  z_orden INTEGER NOT NULL DEFAULT 0)")
 
 
+# Convierte un color "#RRGGBB" o "#AARRGGBB" en el entero ARGB (QRgb) que
+# guarda la columna. Sin prefijo alfa se asume opaco (0xFF). Se almacena como
+# entero SIN signo para que VectorRepository lo lea con toUInt() -> fromRgba().
+def color_argb(texto):
+    s = texto.lstrip("#")
+    if len(s) == 6:
+        s = "ff" + s
+    if len(s) != 8:
+        raise ValueError("color debe ser #RRGGBB o #AARRGGBB: %r" % texto)
+    return int(s, 16)
+
+
 # Escribe todos los anillos como UNA entidad poligono multi-parte en la capa
-# dada. Una parte por anillo; los vertices van (parte, orden) con lat/lon. El
-# par-impar del rasterizador convierte los anillos anidados en huecos de agua.
-def escribir(con, capa, anillos):
+# dada, con el estilo (línea/relleno/grosor) que se vera si la capa se dibuja
+# como overlay vectorial. Una parte por anillo; los vertices van (parte, orden)
+# con lat/lon. El par-impar del rasterizador convierte los anillos anidados en
+# huecos de agua (el estilo no afecta a --water-mask, que solo lee geometria).
+def escribir(con, capa, anillos, linea, relleno, grosor):
     ahora = int(time.time())
     con.execute(
         "INSERT INTO capa (id, nombre, visible, editable, z_orden)"
         " VALUES (?,?,1,0,0)", (capa, capa))
     cur = con.execute(
-        "INSERT INTO entidad (capa, tipo, geometria, nombre, creado_utc)"
-        " VALUES (?,?,2,?,?)", (capa, "tierra", "costa_osm", ahora))
+        "INSERT INTO entidad (capa, tipo, geometria, nombre,"
+        " color_linea, color_relleno, ancho_linea, estilo_linea, creado_utc)"
+        " VALUES (?,?,2,?,?,?,?,1,?)",
+        (capa, "tierra", "costa_osm", color_argb(linea), color_argb(relleno),
+         grosor, ahora))
     eid = cur.lastrowid
     filas = []
     for parte, anillo in enumerate(anillos):
@@ -185,6 +202,12 @@ def main():
                     help="Nombre de la capa de tierra (por defecto 'tierra').")
     ap.add_argument("--tol", type=float, default=1e-7,
                     help="Tolerancia de union de nodos en grados (~1 cm).")
+    ap.add_argument("--line-color", default="#1565c0",
+                    help="Color de la costa como overlay (#RRGGBB o #AARRGGBB).")
+    ap.add_argument("--fill-color", default="#00000000",
+                    help="Relleno de la tierra como overlay (por defecto transparente).")
+    ap.add_argument("--line-width", type=float, default=1.0,
+                    help="Grosor de la línea de costa (px) como overlay.")
     args = ap.parse_args()
 
     segmentos, ya_cerrados = leer_geojson(args.geojson)
@@ -201,7 +224,8 @@ def main():
         con.execute("PRAGMA journal_mode=OFF")
         con.execute("PRAGMA synchronous=OFF")
         crear_esquema(con)
-        nvert = escribir(con, args.capa, anillos)
+        nvert = escribir(con, args.capa, anillos,
+                         args.line_color, args.fill_color, args.line_width)
         con.commit()
     finally:
         con.close()

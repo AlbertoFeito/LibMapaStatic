@@ -4086,3 +4086,12 @@ tierra` sobre SRTM real de La Habana lee `1 polígono, 5020 partes` y recorta la
 Habana y su canal salen como agua) con mucho más detalle que Natural Earth. Es un script de
 reproducibilidad en `herramientas/` (Python estándar, sin dependencias); no toca la librería ni los
 tests.
+
+La misma BD sirve además como **capa de costa vectorial**: cargada como overlay `.sqlitedb` (igual
+que `curvas`) dibuja la costa OSM exacta, escalable a cualquier zoom y en un solo fichero (12 MB) que
+también es la máscara —una fuente de verdad en vez del ráster `Cuba_Vector` (64 MB, hecho con
+`geo_to_tiles`). Como los overlays `.sqlitedb` usan el estilo guardado en cada entidad (no el bloque
+`style` del manifiesto, que es solo para `.geo`), el conversor acepta `--line-color` / `--fill-color`
+/ `--line-width` (por defecto línea azul `#1565c0` fina, relleno transparente) y los escribe en las
+columnas `color_linea`/`color_relleno`/`ancho_linea` como ARGB (QRgb) sin signo. El estilo no afecta
+a `--water-mask`, que solo lee geometría.
