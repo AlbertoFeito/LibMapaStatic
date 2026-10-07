@@ -4040,3 +4040,25 @@ Bloque de usabilidad pedido antes de cerrar la fase. Toca la librería (aditivo)
 
 Compila sin warnings, **19 tests** en verde (dos nuevos en `tst_mapwidget`). README, BITÁCORA,
 `arquitectura.html` y PDF al día. API pública ampliada (`iconAnchor`, `setFeatureLayerTransient`).
+
+## 93. dem_to_hillshade: `--water-mask` (máscara de agua vectorial, costa exacta)
+
+El umbral de cota (`--sea-level`/`--water-level`) no basta cuando el DEM no distingue agua de
+tierra baja (bahías/lagunas que el SRTM rellena con cota positiva). La solución exacta es una
+**máscara vectorial**: sombrear solo dentro de los polígonos de tierra.
+
+- **`--water-mask <vector.sqlitedb>` (+ `--land-layer <capa>`).** Lee los **polígonos** (geometría
+  = polígono) de una BD de entidades (`VectorRepository`, esquema `entidad`/`entidad_vertice`),
+  opcionalmente de una capa. Guarda cada parte con su bbox.
+- **Por tesela**, rasteriza con `QPainter` (fill-rule par-impar, así los **huecos** = lagunas
+  interiores restan) los polígonos cuyo bbox la toca, en coordenadas de píxel de tesela → una
+  máscara de 256×256. El bucle de píxeles **solo sombrea donde hay tierra**; el resto queda
+  transparente, con la **costa en el borde exacto del vector**. La pendiente en la orilla usa
+  vecinos de tierra (como con `--sea-level`), sin acantilado artificial.
+- Si la BD no trae polígonos (p. ej. es una base de **teselas**, no de entidades), aborta con un
+  mensaje claro.
+
+Validado con un DEM sintético (relieve en todo el tile) + una BD de entidades con un polígono
+«isla» y un hueco «laguna»: se sombrea solo la isla, el mar y la laguna quedan transparentes.
+Solo cambia la herramienta; librería y API intactos. Compila sin warnings, **19 tests** en verde.
+README y BITÁCORA al día.

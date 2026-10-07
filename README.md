@@ -481,7 +481,9 @@ dem_to_db    <carpeta_hgt> --out <dem.sqlitedb> [--overwrite]
 dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
              (--cuba | --bbox latN,lonO,latS,lonE) [--minzoom 6 --maxzoom 13]
              [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2] [--sea-level 0]
-             [--colored] [--water-level 0] [--id relieve --name "…"] [--overwrite]
+             [--colored] [--water-level 0]
+             [--water-mask <vector.sqlitedb> [--land-layer <capa>]]
+             [--id relieve --name "…"] [--overwrite]
              (hornea un relieve sombreado a teselas PNG; añádelo al mapa.json.
               --contrast realza el gris lavado: ancla el llano claro y abre el rango.
               --sea-level m: cotas <= m se dejan transparentes -> costa limpia con
@@ -489,7 +491,11 @@ dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
               --colored: "mapa físico" = tinte por altura (verde->marrón->cumbres)
               x sombreado + azul batimétrico en cotas <0, en vez de gris.
               --water-level m: con --colored, cota <= m se pinta como agua; sube a
-              ~8-12 para que bahías/lagunas rellenas con cota baja salgan con agua)
+              ~8-12 para que bahías/lagunas rellenas con cota baja salgan con agua.
+              --water-mask: BD vectorial de entidades con POLÍGONOS de tierra; solo
+              se sombrea dentro de ellos (mar/bahías/lagos transparentes, con el
+              borde EXACTO del vector). Es la forma precisa de recortar el agua
+              cuando el DEM no la distingue de la tierra baja)
 
 dem_to_contours --in <carpeta_hgt | dem.sqlitedb> --out <curvas.sqlitedb>
              (--cuba | --bbox latN,lonO,latS,lonE)
