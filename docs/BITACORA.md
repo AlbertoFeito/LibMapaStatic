@@ -4105,3 +4105,30 @@ solo se pintan los 256×256 visibles, cacheados). Cuba a z4–13 = 3.688 teselas
 Flujo recomendado: ráster OSM como capa base rápida y, si se quiere nitidez a zoom extremo, el overlay
 `cuba_tierra` **solo desde z14** (`minZoom`), donde entran pocos anillos en pantalla. Una sola fuente
 (la costa OSM) alimenta máscara, overlay y ráster.
+
+## 95. `herramientas/osm_divisiones_a_sqlitedb.py`: divisiones de OSM → capa vectorial
+
+Mismo patrón que la costa, aplicado a **divisiones administrativas** (provincias, municipios…). La
+diferencia esencial: la costa se funde en **una** máscara de tierra, pero cada división es **una
+entidad CON NOMBRE**, así que se escribe **una `entidad` por relación** (para rotularla y
+seleccionarla), no una fundida.
+
+- **Entrada:** el GeoJSON de overpass-turbo de
+  `{{geocodeArea:Cuba}}->.cu; relation["boundary"="administrative"]["admin_level"="4"](area.cu); out geom;`
+  Overpass-turbo (osmtogeojson) **ya ensambla** las relaciones boundary en `Polygon`/`MultiPolygon`
+  con sus propiedades (`name`, `admin_level`…); los `Point` de etiqueta del export se ignoran. Cuba
+  admin_level=4 = **16 provincias**, 36 479 vértices.
+- **Salida:** una `entidad` polígono por división (multi-parte si tiene varias islas/anillos), con
+  `nombre` = `name` (clave configurable con `--name-key`), en la capa `--capa` (por defecto
+  `provincias`), estilo `--line-color`/`--fill-color`/`--line-width` (defecto frontera roja `#c62828`
+  fina, relleno transparente) y `etiqueta_visible=1` (quitable con `--no-labels`). Mismo esquema v2
+  que el resto; se carga como **overlay `.sqlitedb`** (como `curvas`/`costa_osm`).
+- **Respaldo:** si el export trajera `LineString` en vez de polígonos, se cosen (como la costa) en
+  una capa sin nombres, con aviso.
+- Opcional `--geo` para rasterizar las fronteras con `geo_to_tiles` (pierde los nombres).
+
+Verificado con `render_map`: las 16 provincias salen como contorno rojo sobre el relieve, con su
+etiqueta, y maneja `Polygon` y `MultiPolygon`. Nota: las fronteras OSM admin_level=4 **incluyen el
+mar territorial**, así que se extienden mar adentro y la etiqueta (centroide) puede caer sobre agua;
+es correcto para límites administrativos. Script de reproducibilidad, Python estándar sin
+dependencias; no toca la librería ni los tests.
