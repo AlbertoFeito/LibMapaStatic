@@ -4153,4 +4153,6 @@ tocarlo. Cambios acotados a `TileDatasetProbe` (`detectZMapping`/`detectScheme` 
 `mbtiles` que corta la inferencia y fija lo conocido). Nuevo caso en `tst_probe`
 (`buildSyntheticMbtiles`: vista `tiles`, TMS, `bounds`): se sonda sin referencia y se verifica
 TMS, `storedZ=logicalZ`, columnas, extensión sobre Cuba y lectura real a través de la vista. **19
-tests** en verde. README al día; sin cambios de API pública (no se regenera el PDF).
+tests** en verde. README con el ejemplo de uso. No cambia la API pública, pero sí se actualizó
+`docs/arquitectura.html` (sonda MBTiles + los scripts OSM de costa y divisiones) y se **regeneró el
+PDF** `docs/LibMapaStatic_Documentacion.pdf`.

@@ -92,7 +92,7 @@ se pueda probar sin ventanas.</p>
   <li><b>Teselas base:</b> abre una o varias BD de teselas (OSM, satélite…), las cachea y las pinta fluido según navegas.</li>
   <li><b>Entidades:</b> dibuja y edita puntos/líneas/polígonos en capas, con guardado/carga en SQLite y carga de ficheros <code>.geo</code>.</li>
   <li><b>Objetivos móviles:</b> móviles con traza y etiqueta, actualizables varias veces por segundo, en una capa que se repinta sola. <b>Agnósticos del dominio</b>: cada objetivo lleva un <code>kind</code> y un juego de <code>attributes</code> libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta, así el mismo modelo sirve a seguimiento naval, aéreo o de UAVs. La <b>simbología va por hooks</b>: la app registra un proveedor (<code>setTargetSymbolProvider</code>) que elige el icono de cada objetivo según su <code>kind</code>/estado; la librería lo coloca y lo gira por el rumbo, y sin proveedor usa un galón por defecto. <b>Escala a miles</b> (ADS-B regional): culling por vista, <b>nivel de detalle</b> (por encima de un presupuesto se apagan etiquetas y trazas, que a esa densidad son ilegibles), <b>declutter</b> de etiquetas (una por celda) y decimación de la traza.</li>
-  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa), elevación (<code>fill_hgt</code> descarga SRTM, <code>dem_to_db</code> lo empaqueta), <b>hornear relieve sombreado</b> del DEM a teselas (<code>dem_to_hillshade</code>, gris o <code>--colored</code> con batimetría, offline) y <b>generar curvas de nivel</b> del DEM como capa vectorial (<code>dem_to_contours</code>).</li>
+  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa), elevación (<code>fill_hgt</code> descarga SRTM, <code>dem_to_db</code> lo empaqueta), <b>hornear relieve sombreado</b> del DEM a teselas (<code>dem_to_hillshade</code>, gris o <code>--colored</code> con batimetría, offline) y <b>generar curvas de nivel</b> del DEM como capa vectorial (<code>dem_to_contours</code>). Scripts aparte convierten datos de <b>OpenStreetMap</b> a capas de entidades: la <b>costa</b> (<code>osm_costa_a_sqlitedb.py</code>, máscara de tierra para <code>--water-mask</code> y overlay de costa) y las <b>divisiones administrativas</b> (<code>osm_divisiones_a_sqlitedb.py</code>, una entidad con nombre por provincia/municipio). La librería lee también <b>MBTiles</b> ráster (<code>probe_db</code> los detecta solos).</li>
 </ul>
 </div>
 
@@ -303,6 +303,11 @@ Es lo que usa el widget.</p>
 <p>Sonda: abre una BD «a ciegas» y <b>deduce</b> su configuración (mapeo de zoom,
 esquema, relleno, bbox) analizando qué hay en la tabla. Es el cerebro de
 <code>probe_db</code>. Devuelve <code>ProbeResult</code> con <code>ZoomLevelStats</code> por nivel.</p>
+<p>Reconoce además los <b>MBTiles</b> (ráster PNG/JPG/WebP): localiza la tabla
+<i>o vista</i> <code>tiles</code>, y al detectar la tabla <code>metadata</code> fija por
+especificación el eje Y en <b>TMS</b> y el zoom estándar (<code>storedZ = logicalZ</code>),
+tomando la extensión de <code>metadata.bounds</code> — así se sondan <b>sin</b>
+<code>--ref-bbox</code>. Los MBTiles vectoriales (MVT/PBF) no se dibujan y se avisa.</p>
 
 <!-- ===================== 7. WIDGET ===================== -->
 <h2 class="sec">7 · Módulo <span class="mono">widget</span> — el mapa en pantalla</h2>
