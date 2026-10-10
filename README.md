@@ -250,6 +250,14 @@ Detecta el mapeo de zoom, el esquema del eje Y (XYZ o TMS), el nivel de fondo
 garantizado, el relleno típico y la extensión cubierta. Copia
 `datasets.example.json` como plantilla si prefieres escribirlo a mano.
 
+**MBTiles:** la librería lee también ficheros **`.mbtiles`** (SQLite de teselas
+ráster PNG/JPG/WebP) sin tocar código, y `probe_db` los **detecta solos** —sin
+necesidad de `--ref-bbox`—: reconoce la tabla/vista `tiles` (`zoom_level`,
+`tile_column`, `tile_row`, `tile_data`), fija el eje Y en **TMS** y el zoom
+estándar (`storedZ = logicalZ`) por especificación, y toma la extensión de la
+tabla `metadata`. Los MBTiles **vectoriales** (MVT/PBF) no se dibujan: la
+librería pinta teselas de imagen, no vectoriales (`probe_db` lo avisa).
+
 ## Herramientas
 
 | | |

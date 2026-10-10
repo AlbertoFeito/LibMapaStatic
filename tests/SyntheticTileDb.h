@@ -151,6 +151,89 @@ inline int buildSyntheticDb(const SyntheticSpec &spec)
     return written;
 }
 
+//! Genera un MBTiles NORMALIZADO (tablas map+images, vista 'tiles', tabla
+//! 'metadata') como los de MapTiler/tippecanoe: eje Y en TMS, zoom estandar
+//! (storedZ = logicalZ) y 'bounds' en metadata. Sirve para probar que la sonda
+//! lo reconoce sin --ref-bbox. Devuelve el numero de teselas, o -1 si fallo.
+inline int buildSyntheticMbtiles(const QString &path,
+                                 const QGeoCoordinate &nw,
+                                 const QGeoCoordinate &se,
+                                 int minZ, int maxZ)
+{
+    static int counter = 0;
+    const QString conn = QStringLiteral("mbt_%1_%2").arg(path).arg(++counter);
+    int written = 0;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+        db.setDatabaseName(path);
+        if (!db.open())
+            return -1;
+
+        QSqlQuery q(db);
+        q.exec(QStringLiteral("CREATE TABLE map (zoom_level INTEGER, "
+                              "tile_column INTEGER, tile_row INTEGER, tile_id TEXT)"));
+        q.exec(QStringLiteral("CREATE TABLE images (tile_id TEXT, tile_data BLOB)"));
+        q.exec(QStringLiteral(
+            "CREATE VIEW tiles AS SELECT map.zoom_level AS zoom_level, "
+            "map.tile_column AS tile_column, map.tile_row AS tile_row, "
+            "images.tile_data AS tile_data FROM map "
+            "JOIN images ON map.tile_id = images.tile_id"));
+        q.exec(QStringLiteral("CREATE TABLE metadata (name TEXT, value TEXT)"));
+        q.prepare(QStringLiteral("INSERT INTO metadata VALUES (:n,:v)"));
+        const QString bounds = QStringLiteral("%1,%2,%3,%4")
+            .arg(nw.longitude()).arg(se.latitude())
+            .arg(se.longitude()).arg(nw.latitude());
+        const QList<QPair<QString, QString>> meta{
+            {QStringLiteral("name"), QStringLiteral("Prueba")},
+            {QStringLiteral("format"), QStringLiteral("png")},
+            {QStringLiteral("minzoom"), QString::number(minZ)},
+            {QStringLiteral("maxzoom"), QString::number(maxZ)},
+            {QStringLiteral("bounds"), bounds}};
+        for (const auto &m : meta) {
+            q.bindValue(QStringLiteral(":n"), m.first);
+            q.bindValue(QStringLiteral(":v"), m.second);
+            q.exec();
+        }
+
+        db.transaction();
+        int tid = 0;
+        for (int lz = minZ; lz <= maxZ; ++lz) {
+            const auto range = TileMatrix::rangeFor(nw, se, lz);
+            for (int x = range.xMin; x <= range.xMax; ++x) {
+                for (int y = range.yMin; y <= range.yMax; ++y) {
+                    QImage img(256, 256, QImage::Format_RGB32);
+                    img.fill(QColor((x * 37) % 256, (y * 53) % 256, (lz * 17) % 256));
+                    QByteArray blob;
+                    QBuffer buf(&blob);
+                    buf.open(QIODevice::WriteOnly);
+                    img.save(&buf, "PNG");
+                    buf.close();
+
+                    const QString id = QString::number(tid++);
+                    const int yTms = TileMatrix::toStorageY(y, lz, TileScheme::TMS);
+                    q.prepare(QStringLiteral("INSERT INTO images VALUES (:id,:img)"));
+                    q.bindValue(QStringLiteral(":id"), id);
+                    q.bindValue(QStringLiteral(":img"), blob);
+                    if (!q.exec())
+                        return -1;
+                    q.prepare(QStringLiteral("INSERT INTO map VALUES (:z,:x,:y,:id)"));
+                    q.bindValue(QStringLiteral(":z"), lz);
+                    q.bindValue(QStringLiteral(":x"), x);
+                    q.bindValue(QStringLiteral(":y"), yTms);
+                    q.bindValue(QStringLiteral(":id"), id);
+                    if (!q.exec())
+                        return -1;
+                    ++written;
+                }
+            }
+        }
+        db.commit();
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(conn);
+    return written;
+}
+
 } // namespace test
 } // namespace libmapa
 

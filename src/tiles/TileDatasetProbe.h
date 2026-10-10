@@ -108,9 +108,11 @@ private:
                               QStringList &warnings);
     static bool detectZMapping(QSqlDatabase &db, TileDataset &ds,
                                ProbeResult &result,
-                               const QGeoRectangle &reference);
+                               const QGeoRectangle &reference,
+                               bool mbtiles = false);
     static void detectScheme(QSqlDatabase &db, TileDataset &ds,
-                             ProbeResult &result, const QGeoRectangle &reference);
+                             ProbeResult &result, const QGeoRectangle &reference,
+                             bool mbtiles = false);
     static void detectTileSize(QSqlDatabase &db, TileDataset &ds,
                                ProbeResult &result);
 };

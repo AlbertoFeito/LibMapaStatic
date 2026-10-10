@@ -4132,3 +4132,25 @@ etiqueta, y maneja `Polygon` y `MultiPolygon`. Nota: las fronteras OSM admin_lev
 mar territorial**, así que se extienden mar adentro y la etiqueta (centroide) puede caer sobre agua;
 es correcto para límites administrativos. Script de reproducibilidad, Python estándar sin
 dependencias; no toca la librería ni los tests.
+
+## 96. `probe_db`: detección automática de MBTiles
+
+El lector de teselas ya era configurable (tabla, columnas `colZ/colX/colY/colImage`, esquema
+XYZ/TMS), así que un **MBTiles** —SQLite de teselas ráster, estándar de Mapbox— se podía usar
+describiéndolo a mano. Pero MBTiles tiene particularidades que hacían fallar la sonda genérica:
+
+1. La tabla de teselas suele ser una **VISTA** `tiles` sobre `map`+`images` (esquema normalizado);
+   `probe_db` solo buscaba `type='table'` y no la encontraba. Ahora lista `type IN ('table','view')`.
+2. MBTiles usa **TMS** y **zoom estándar** (`storedZ = logicalZ`) por especificación, pero sin
+   `--ref-bbox` la sonda no podía decidir XYZ/TMS ni el offset. Ahora **reconoce el MBTiles** (tabla
+   `metadata` + columna `tile_data`) y **fija** TMS y `zFactor=1/zOffset=0` por especificación, y toma
+   la extensión de `metadata.bounds` — así se sonda **sin `--ref-bbox`**.
+3. Si `metadata.format` es `pbf`/`mvt` (**MBTiles vectorial**), avisa claramente: la librería dibuja
+   teselas de imagen, no vectoriales.
+
+`detectColumns` ya reconocía `zoom_level/tile_column/tile_row/tile_data`, así que no hubo que
+tocarlo. Cambios acotados a `TileDatasetProbe` (`detectZMapping`/`detectScheme` reciben un flag
+`mbtiles` que corta la inferencia y fija lo conocido). Nuevo caso en `tst_probe`
+(`buildSyntheticMbtiles`: vista `tiles`, TMS, `bounds`): se sonda sin referencia y se verifica
+TMS, `storedZ=logicalZ`, columnas, extensión sobre Cuba y lectura real a través de la vista. **19
+tests** en verde. README al día; sin cambios de API pública (no se regenera el PDF).
