@@ -258,6 +258,29 @@ estándar (`storedZ = logicalZ`) por especificación, y toma la extensión de la
 tabla `metadata`. Los MBTiles **vectoriales** (MVT/PBF) no se dibujan: la
 librería pinta teselas de imagen, no vectoriales (`probe_db` lo avisa).
 
+```bash
+probe_db --id mundo --file mapa.mbtiles --out datasets.json
+```
+
+escribe el bloque ya correcto para pegar en `datasets`/`mapa.json` (`tableName`,
+`scheme`, nombres de columna y zoom salen de la propia BD):
+
+```json
+{
+  "id": "mundo", "displayName": "Mundo (MBTiles)",
+  "filePath": "mapa.mbtiles",
+  "tableName": "tiles", "scheme": "TMS",
+  "zFactor": 1, "zOffset": 0,
+  "colZ": "zoom_level", "colX": "tile_column", "colY": "tile_row", "colImage": "tile_data",
+  "hasSColumn": false, "tileSize": 256,
+  "minZoom": 0, "maxZoom": 1, "recommendedMaxZoom": 1, "baseZoom": 0,
+  "typicalFill": 1.0
+}
+```
+
+Un buen generador local de MBTiles **ráster** es QGIS (*Processing → Generate XYZ
+tiles (MBTiles)*), que la librería consume tal cual.
+
 ## Herramientas
 
 | | |
