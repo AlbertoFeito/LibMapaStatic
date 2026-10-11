@@ -900,6 +900,13 @@ bool MapWidget::setTargetLabel(qint64 id, const QString &text)
     return d->view && d->view->targetModel()->setLabel(id, text);
 }
 
+// Desplazamiento de la etiqueta del objetivo (px). Reenvio al modelo, que avisa
+// para repintar. La etiqueta queda unida al simbolo por una linea guia.
+bool MapWidget::setTargetLabelOffset(qint64 id, const QPointF &offsetPx)
+{
+    return d->view && d->view->targetModel()->setLabelOffset(id, offsetPx);
+}
+
 // Cuelga un dato de dominio (AIS, ADS-B, telemetria...) en un objetivo. La
 // libreria no lo interpreta; solo lo guarda y lo devuelve tal cual.
 bool MapWidget::setTargetAttribute(qint64 id, const QString &key, const QVariant &value)
@@ -1020,6 +1027,32 @@ qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx) const
 {
     d->syncGeometry();
     return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx) : -1;
+}
+
+// Entidad cuyo rotulo cae bajo el pixel (hit-test de la caja de etiqueta).
+qint64 MapWidget::featureLabelAt(const QPoint &pixel) const
+{
+    d->syncGeometry();
+    return d->view ? d->view->featureLayer()->labelAt(pixel) : -1;
+}
+
+// Objetivo cuyo rotulo dibujado cae bajo el pixel.
+qint64 MapWidget::targetLabelAt(const QPoint &pixel) const
+{
+    return (d->view && d->view->targetLayer())
+               ? d->view->targetLayer()->labelAt(pixel) : -1;
+}
+
+// Fija el desplazamiento de la etiqueta de una entidad y lo PERSISTE: lee la
+// entidad, le cambia el offset del estilo y la actualiza por el camino normal
+// (que repinta y guarda con antirebote).
+bool MapWidget::setFeatureLabelOffset(qint64 id, const QPointF &offsetPx)
+{
+    std::optional<MapFeature> f = feature(id);
+    if (!f)
+        return false;
+    f->style.labelOffsetPx = offsetPx;
+    return updateFeature(*f);
 }
 
 // Cota del terreno (m) en una coordenada. Reenvio fino al origen de elevacion

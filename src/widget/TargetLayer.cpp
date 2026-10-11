@@ -5,6 +5,7 @@
 #include <QPainter>
 #include <QPolygonF>
 #include <QStringList>
+#include <algorithm>
 #include <cmath>
 
 namespace libmapa {
@@ -130,6 +131,7 @@ void TargetLayer::draw(QCPPainter *painter)
     m_lastLabels = 0;
     m_lastTrails = 0;
     m_labelCells.clear();
+    m_labelBoxes.clear();   // cajas de etiqueta de este frame, para hit-test
 
     // --- Pasada 2: dibujo ----------------------------------------------------
     for (const auto &v : m_visibles) {
@@ -251,8 +253,27 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
             t.label.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
         const QFontMetricsF fm(painter->font());
         const double h = fm.height();
-        double y = pos.y() + r * 0.5 + fm.ascent();
-        const double x = pos.x() + r + 3.0;
+        // El desplazamiento de la etiqueta (relativo al simbolo) permite
+        // arrastrarla a voluntad; como es relativo, al mover el objetivo la
+        // etiqueta lo sigue.
+        const QPointF off = t.labelOffsetPx;
+        double y = pos.y() + r * 0.5 + fm.ascent() + off.y();
+        const double x = pos.x() + r + 3.0 + off.x();
+
+        // Caja del bloque de texto (para la linea guia y el hit-test).
+        double anchoMax = 0.0;
+        for (const QString &linea : lineas)
+            anchoMax = std::max(anchoMax, double(fm.horizontalAdvance(linea)));
+        const QRectF caja(QPointF(x, pos.y() + r * 0.5 + off.y()),
+                          QSizeF(anchoMax, h * std::max(1, int(lineas.size()))));
+        m_labelBoxes.append({t.id, caja});
+
+        // Linea guia del simbolo a la etiqueta cuando esta desplazada.
+        if (off.manhattanLength() > 1.0) {
+            painter->setPen(QPen(t.color, 1.0));
+            painter->setBrush(Qt::NoBrush);
+            painter->drawLine(pos, caja.center());
+        }
 
         for (const QString &linea : lineas) {
             const QPointF a(x, y);
@@ -267,6 +288,17 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
             y += h;
         }
     }
+}
+
+// Objetivo cuya etiqueta dibujada contiene el pixel. Se recorre al reves (la
+// ultima dibujada queda encima) sobre las cajas del ultimo frame.
+qint64 TargetLayer::labelAt(const QPoint &pixel) const
+{
+    const QPointF p(pixel);
+    for (int i = int(m_labelBoxes.size()) - 1; i >= 0; --i)
+        if (m_labelBoxes[i].second.contains(p))
+            return m_labelBoxes[i].first;
+    return -1;
 }
 
 } // namespace libmapa

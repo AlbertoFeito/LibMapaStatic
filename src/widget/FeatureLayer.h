@@ -55,6 +55,10 @@ public:
     //! Entidad bajo un punto de la pantalla, o -1. La mas cercana gana.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
 
+    //! Entidad cuya CAJA DE ETIQUETA cae bajo el pixel, o -1 (la de encima gana).
+    //! Permite seleccionar/arrastrar el rotulo por separado de la geometria.
+    qint64 labelAt(const QPoint &pixel) const;
+
     /*!
      * \brief Vertice bajo un punto de la pantalla.
      * \return indice del vertice, o -1.
@@ -94,6 +98,14 @@ private:
     void drawDraft(QPainter *painter) const;
     void drawLabel(QPainter *painter, const MapFeature &f,
                    const QPointF &anchor) const;
+    //! Punto (en pixeles) del que CUELGA la etiqueta: el vertice de anclaje
+    //! (style.labelAnchorVertex), o el punto, o el centro de la geometria.
+    QPointF labelAnchorScreen(const MapFeature &f) const;
+    //! Caja (en pixeles) de la etiqueta: anclaje + hueco por defecto + offset,
+    //! con el tamano del texto (multilinea por '\n'). La comparten dibujo y
+    //! hit-test para que coincidan exactamente.
+    QRectF labelBoxFor(const MapFeature &f, const QPointF &base,
+                       const QFontMetricsF &fm) const;
 
     QPointF screenPos(const QGeoCoordinate &c) const;
     QPolygonF screenPolygon(const MapFeature &f) const;

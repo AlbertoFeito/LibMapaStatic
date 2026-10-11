@@ -165,7 +165,7 @@ por un entero cuando hace falta.</p>
 <tr><th>Tipo</th><th>Rol</th></tr>
 <tr><td>TileKey</td><td>Identidad de una tesela: <code>{z, x, y}</code> lógicos. Se usa como clave del caché (con <code>qHash</code>).</td></tr>
 <tr><td>TileDataset</td><td>Todo lo que se sabe de una BD de teselas: ruta, tabla, mapeo de zoom (<code>zFactor/zOffset</code>), esquema (XYZ/TMS), columnas, <code>hasSColumn/sValue</code>, min/max/recommended zoom, relleno típico. Se lee de <code>datasets.json</code>.</td></tr>
-<tr><td>MapFeature</td><td>Entidad vectorial: geometría multi-parte (puntos/líneas/polígonos), estilo (<code>FeatureStyle</code>), etiqueta y «tipo de dominio». Identidad = <code>qint64</code>.</td></tr>
+<tr><td>MapFeature</td><td>Entidad vectorial: geometría multi-parte (puntos/líneas/polígonos), estilo (<code>FeatureStyle</code>), etiqueta y «tipo de dominio». Identidad = <code>qint64</code>. La etiqueta puede <b>desplazarse</b> (<code>FeatureStyle::labelOffsetPx</code>, con línea guía) y anclarse a un vértice concreto (<code>labelAnchorVertex</code>); igual en <code>MapTarget::labelOffsetPx</code>.</td></tr>
 <tr><td>MapTarget</td><td>Objetivo móvil: posición, rumbo, velocidad, color, etiqueta, visibilidad de traza, más <code>kind</code> y un <code>QVariantMap attributes</code> libre para datos de dominio (AIS/ADS-B/telemetría) que la librería no interpreta. Pensado para tiempo real y agnóstico del dominio.</td></tr>
 <tr><td>LayerInfo / BaseLayerInfo</td><td>Descriptor de una capa (de entidades / base) para poblar menús.</td></tr>
 <tr><td>GeoPath</td><td>Un trazado leído de un fichero <code>.geo</code> (lista de coordenadas + si cierra).</td></tr>
@@ -222,7 +222,10 @@ objeto muere sin confirmar, hace <i>rollback</i>. Evita transacciones a medias.<
 
 <h3><span class="cls">Schema</span> <span class="tag">db/Schema.h</span></h3>
 <p>Crea/verifica el esquema de la BD de <b>entidades</b> (capas, geometrías, estilos)
-que usa <code>VectorRepository</code>.</p>
+que usa <code>VectorRepository</code>. Versionado y migrado por pasos acumulativos
+(<code>kCurrentVersion</code>): <b>v2</b> esquema base; <b>v3</b> añade el desplazamiento de
+la etiqueta (<code>label_dx/label_dy</code>) con <code>ALTER TABLE</code>, de modo que una BD
+anterior (incluida una máscara generada por script) se abre y se migra sola.</p>
 
 <h3><span class="cls">VectorRepository</span> <span class="tag">db/VectorRepository.h · QObject</span></h3>
 <p>Persiste entidades vectoriales y capas en SQLite: guardar/cargar todo el mapa de

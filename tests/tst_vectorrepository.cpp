@@ -33,6 +33,11 @@ private slots:
     void removesAndClearsFeatures();
     void filtersFeaturesByLayer();
     void savesMultiPartFeature();
+    //! El desplazamiento de la etiqueta (v3) sobrevive guardar/cargar.
+    void savesAndLoadsLabelOffset();
+    //! Una BD v2 (sin las columnas label_dx/dy) se abre, se migra a v3 y sus
+    //! entidades se leen con offset 0, sin romper.
+    void migratesV2DatabaseToV3();
     void handlesQuotesAndInjectionInNames();
     void savesAndLoadsLayers();
     void rejectsInvalidGeometry();
@@ -141,6 +146,77 @@ void TstVectorRepository::savesAndLoadsFeatures()
     QCOMPARE(f.attributes.value(QStringLiteral("techo_m")).toInt(), 120);
     QCOMPARE(f.attributes.value(QStringLiteral("vigencia")).toString(),
              QStringLiteral("2026-09-01"));
+}
+
+void TstVectorRepository::savesAndLoadsLabelOffset()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("labeloffset.db"))));
+
+    MapFeature p;
+    p.layerId = QStringLiteral("obj");
+    p.kind = GeometryKind::Point;
+    p.name = QStringLiteral("Objetivo");
+    p.geometry.append(QGeoCoordinate(23.1, -82.3));
+    p.style.labelOffsetPx = QPointF(40.0, -25.0);
+
+    const auto id = repo.saveFeature(p);
+    QVERIFY(id.has_value());
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 1);
+    QVERIFY(qAbs(cargadas.first().style.labelOffsetPx.x() - 40.0) < 1e-9);
+    QVERIFY(qAbs(cargadas.first().style.labelOffsetPx.y() + 25.0) < 1e-9);
+}
+
+void TstVectorRepository::migratesV2DatabaseToV3()
+{
+    const QString ruta = dbPath(QStringLiteral("legacy_v2.db"));
+
+    // Fabrica a mano una BD en el esquema v2 (sin label_dx/label_dy), como la
+    // que generan los scripts de costa/provincias.
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
+                                                    QStringLiteral("mkv2"));
+        db.setDatabaseName(ruta);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE schema_version (version INTEGER NOT NULL)")));
+        QVERIFY(q.exec(QStringLiteral("INSERT INTO schema_version (version) VALUES (2)")));
+        QVERIFY(q.exec(QStringLiteral(
+            "CREATE TABLE entidad (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " capa TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT '',"
+            " geometria INTEGER NOT NULL, nombre TEXT NOT NULL DEFAULT '',"
+            " descripcion TEXT NOT NULL DEFAULT '', color_linea INTEGER NOT NULL DEFAULT 0,"
+            " color_relleno INTEGER NOT NULL DEFAULT 0, ancho_linea REAL NOT NULL DEFAULT 2,"
+            " estilo_linea INTEGER NOT NULL DEFAULT 1, radio_px REAL NOT NULL DEFAULT 6,"
+            " etiqueta_visible INTEGER NOT NULL DEFAULT 1, visible INTEGER NOT NULL DEFAULT 1,"
+            " simbolo BLOB, atributos TEXT NOT NULL DEFAULT '{}', creado_utc INTEGER NOT NULL)")));
+        QVERIFY(q.exec(QStringLiteral(
+            "CREATE TABLE entidad_vertice (entidad_id INTEGER NOT NULL, parte INTEGER NOT NULL DEFAULT 0,"
+            " orden INTEGER NOT NULL, latitud REAL NOT NULL, longitud REAL NOT NULL,"
+            " PRIMARY KEY (entidad_id, parte, orden)) WITHOUT ROWID")));
+        QVERIFY(q.exec(QStringLiteral(
+            "INSERT INTO entidad (capa, geometria, nombre, creado_utc)"
+            " VALUES ('tierra', 2, 'Isla', 0)")));
+        QVERIFY(q.exec(QStringLiteral(
+            "INSERT INTO entidad_vertice VALUES (1,0,0,23.0,-82.0)")));
+        QVERIFY(q.exec(QStringLiteral(
+            "INSERT INTO entidad_vertice VALUES (1,0,1,23.1,-82.0)")));
+        QVERIFY(q.exec(QStringLiteral(
+            "INSERT INTO entidad_vertice VALUES (1,0,2,23.1,-82.1)")));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("mkv2"));
+
+    VectorRepository repo;
+    QVERIFY(repo.open(ruta));                       // open() debe migrar a v3
+    QCOMPARE(repo.schemaVersion(), schema::kCurrentVersion);
+
+    const auto cargadas = repo.loadFeatures();      // sin romper por las columnas
+    QCOMPARE(cargadas.size(), 1);
+    QCOMPARE(cargadas.first().name, QStringLiteral("Isla"));
+    QCOMPARE(cargadas.first().style.labelOffsetPx, QPointF(0.0, 0.0));
 }
 
 void TstVectorRepository::removesAndClearsFeatures()

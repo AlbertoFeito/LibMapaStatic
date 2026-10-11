@@ -4156,3 +4156,34 @@ TMS, `storedZ=logicalZ`, columnas, extensión sobre Cuba y lectura real a travé
 tests** en verde. README con el ejemplo de uso. No cambia la API pública, pero sí se actualizó
 `docs/arquitectura.html` (sonda MBTiles + los scripts OSM de costa y divisiones) y se **regeneró el
 PDF** `docs/LibMapaStatic_Documentacion.pdf`.
+
+## 97. Etiquetas ancladas, movibles y seleccionables con línea guía (Fase 0)
+
+Primera fase del bloque de **objetivos y áreas**. La pieza base, que comparten objetivos y entidades:
+una **etiqueta de texto** (multilínea por `\n`) que cuelga de un punto por una **línea guía**, con un
+**desplazamiento en píxeles** relativo al anclaje. Como el desplazamiento es relativo, **al mover el
+elemento la etiqueta lo sigue** (se mueven al unísono); al arrastrar la etiqueta solo cambia el
+offset.
+
+- **Datos (API pública, aditivos):** `FeatureStyle.labelOffsetPx` y `FeatureStyle.labelAnchorVertex`
+  (−1 = automático: el punto o el centro de la geometría; ≥0 = ese vértice, p. ej. 0 para colgar el
+  rótulo del primer punto de un área); `MapTarget.labelOffsetPx`. Todos con valor por defecto neutro:
+  el comportamiento actual no cambia.
+- **Dibujo (dentro de las capas QCustomPlot):** `FeatureLayer` y `TargetLayer` colocan el rótulo en
+  `anclaje + hueco + offset`, lo parten por `\n` y trazan la línea guía cuando está desplazado. El
+  cálculo de la caja se comparte con el hit-test para que coincidan al píxel.
+- **Hit-test:** `FeatureLayer::labelAt` / `TargetLayer::labelAt`, expuestos por la fachada como
+  `MapWidget::featureLabelAt` / `targetLabelAt` (permiten seleccionar/arrastrar el rótulo aparte de la
+  geometría). `TargetLayer` guarda las cajas realmente dibujadas (respeta nivel de detalle y
+  declutter).
+- **Setters:** `MapWidget::setFeatureLabelOffset` (persiste vía `updateFeature`) y
+  `setTargetLabelOffset` (`TargetModel::setLabelOffset`).
+- **Persistencia:** esquema **v3** (`kCurrentVersion=3`): `ALTER TABLE entidad ADD COLUMN label_dx/dy
+  REAL DEFAULT 0`. Migración acumulativa y segura: una BD v2 (p. ej. una máscara generada por script)
+  se abre y se migra sola; la lectura es tolerante (si faltan las columnas, offset 0).
+
+Falta (fases siguientes): el **arrastre con ratón** en vivo (enrutado en `MapView`), el polígono
+«área objetivo» (≤10 vértices, selección por el 1er punto, tipo propio) y el demo que lo muestre. Sin
+`.cpp` nuevos → CMake/qmake intactos. Compila sin warnings, **19 tests** en verde (nuevos:
+`savesAndLoadsLabelOffset`, `migratesV2DatabaseToV3`, `movableLabelHitTestAndOffset`). README y
+`arquitectura.html` + PDF al día.

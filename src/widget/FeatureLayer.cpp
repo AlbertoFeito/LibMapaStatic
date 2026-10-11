@@ -4,6 +4,8 @@
 #include "widget/MapView.h"
 
 #include <QPainterPath>
+#include <QStringList>
+#include <algorithm>
 #include <cmath>
 
 namespace libmapa {
@@ -263,19 +265,9 @@ void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
         drawVertices(painter, f);
 
     if (f.style.labelVisible && !f.name.isEmpty()) {
-        if (f.kind == GeometryKind::Point && !f.isMultiPart()) {
-            const QPointF pos = screenPos(f.position());
-            const double r = f.style.pointRadiusPx;
-            drawLabel(painter, f, pos + QPointF(r + 4, -r - 2));
-        } else {
-            // La etiqueta va en el centro del rectangulo que contiene TODA la
-            // geometria, estable al desplazar el mapa.
-            QRectF caja;
-            for (const QVector<QGeoCoordinate> &parte : partes)
-                caja = caja.united(screenPolygonOf(parte).boundingRect());
-            if (!caja.isNull())
-                drawLabel(painter, f, caja.center());
-        }
+        const QPointF base = labelAnchorScreen(f);
+        if (!base.isNull())
+            drawLabel(painter, f, base);
     }
 }
 
@@ -435,23 +427,105 @@ void FeatureLayer::drawDraft(QPainter *painter) const
     painter->restore();
 }
 
-// Dibuja la etiqueta (nombre) de una entidad en 'anchor', con un fondo claro
-// redondeado detras para que se lea sobre fotografia aerea.
+// Punto del que cuelga la etiqueta (en pixeles): el vertice de anclaje si se
+// fijo uno (p. ej. 0 para un area objetivo), o el punto, o el centro del
+// rectangulo que contiene toda la geometria (estable al desplazar el mapa).
+QPointF FeatureLayer::labelAnchorScreen(const MapFeature &f) const
+{
+    if (f.style.labelAnchorVertex >= 0) {
+        const QVector<QVector<QGeoCoordinate>> partes = f.outlines();
+        if (!partes.isEmpty()) {
+            const QVector<QGeoCoordinate> &pts = partes.first();
+            if (f.style.labelAnchorVertex < pts.size())
+                return screenPos(pts.at(f.style.labelAnchorVertex));
+        }
+    }
+    if (f.kind == GeometryKind::Point && !f.isMultiPart())
+        return screenPos(f.position());
+
+    QRectF caja;
+    for (const QVector<QGeoCoordinate> &parte : f.outlines())
+        caja = caja.united(screenPolygonOf(parte).boundingRect());
+    return caja.isNull() ? QPointF() : caja.center();
+}
+
+// Caja de la etiqueta en pixeles. El rotulo se coloca en: anclaje + hueco por
+// defecto + desplazamiento del estilo. El hueco separa el texto del punto; el
+// desplazamiento es lo que cambia al arrastrar la etiqueta. Multilinea por '\n'.
+QRectF FeatureLayer::labelBoxFor(const MapFeature &f, const QPointF &base,
+                                 const QFontMetricsF &fm) const
+{
+    const QStringList lineas = f.name.split(QLatin1Char('\n'));
+    double w = 0.0;
+    for (const QString &l : lineas)
+        w = std::max(w, fm.horizontalAdvance(l));
+    const double h = fm.height() * std::max(1, int(lineas.size()));
+
+    // Junto a un punto/vertice el rotulo va arriba-derecha; en el centro de una
+    // geometria arranca en el propio centro (como venia saliendo).
+    const bool junar = (f.kind == GeometryKind::Point && !f.isMultiPart())
+                       || f.style.labelAnchorVertex >= 0;
+    const QPointF hueco = junar
+        ? QPointF(f.style.pointRadiusPx + 4.0, -f.style.pointRadiusPx - 2.0)
+        : QPointF(0.0, 0.0);
+
+    const QPointF tl = base + hueco + f.style.labelOffsetPx;
+    return QRectF(tl, QSizeF(w, h)).adjusted(-3, -2, 3, 2);
+}
+
+// Dibuja la etiqueta (nombre) de una entidad colgando de 'base', con un fondo
+// claro redondeado para que se lea sobre fotografia aerea. Si la etiqueta esta
+// desplazada, traza una LINEA GUIA del anclaje a la caja. Multilinea por '\n'.
 void FeatureLayer::drawLabel(QPainter *painter, const MapFeature &f,
-                             const QPointF &anchor) const
+                             const QPointF &base) const
 {
     const QFontMetricsF fm(painter->font());
-    const QRectF caja = fm.boundingRect(f.name).adjusted(-3, -2, 3, 2)
-                            .translated(anchor);
+    const QRectF caja = labelBoxFor(f, base, fm);
 
-    // Fondo semitransparente: sobre fotografia aerea el texto suelto no se
-    // lee. Es el mismo motivo por el que las etiquetas de OSM llevan halo.
+    // Linea guia solo cuando el rotulo esta separado del punto: une anclaje y caja.
+    if (f.style.labelOffsetPx.manhattanLength() > 1.0) {
+        painter->setPen(QPen(f.style.labelColor, 1.0, Qt::SolidLine));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawLine(base, caja.center());
+    }
+
+    // Fondo semitransparente: sobre fotografia aerea el texto suelto no se lee.
     painter->setPen(Qt::NoPen);
     painter->setBrush(QBrush(QColor(255, 255, 255, 190)));
     painter->drawRoundedRect(caja, 3, 3);
 
     painter->setPen(QPen(f.style.labelColor));
     painter->drawText(caja, Qt::AlignCenter, f.name);
+}
+
+// Entidad cuyo rotulo cae bajo el pixel. Recorre de la capa mas alta a la mas
+// baja (lo de encima gana) y respeta visibilidad y rango de zoom, como featureAt.
+qint64 FeatureLayer::labelAt(const QPoint &pixel) const
+{
+    if (!m_model || !m_toAxis)
+        return -1;
+
+    const MapView *vista = qobject_cast<MapView *>(parentPlot());
+    const int zoomActual = vista ? vista->zoom() : -1;
+    const QFontMetricsF fm(parentPlot() ? parentPlot()->font() : QFont());
+
+    const auto capas = m_model->layers();
+    for (int i = static_cast<int>(capas.size()) - 1; i >= 0; --i) {
+        if (!capas[i].visible)
+            continue;
+        if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
+            continue;
+        for (const MapFeature &f : m_model->featuresInLayer(capas[i].id)) {
+            if (!f.visible || !f.selectable || !f.style.labelVisible || f.name.isEmpty())
+                continue;
+            const QPointF base = labelAnchorScreen(f);
+            if (base.isNull())
+                continue;
+            if (labelBoxFor(f, base, fm).contains(QPointF(pixel)))
+                return f.id;
+        }
+    }
+    return -1;
 }
 
 // ----------------------------------------------------------- localizacion --

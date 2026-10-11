@@ -308,6 +308,11 @@ public:
 
     bool setTargetLabel(qint64 id, const QString &text);
 
+    //! Desplazamiento de la ETIQUETA del objetivo respecto a su simbolo, en
+    //! pixeles. Relativo: al moverse el objetivo la etiqueta lo sigue. Cuando no
+    //! es nulo se traza una linea guia. false si el id no existe.
+    bool setTargetLabelOffset(qint64 id, const QPointF &offsetPx);
+
     //! Cuelga (o reemplaza) un dato de dominio en un objetivo: AIS (mmsi, imo),
     //! ADS-B (callsign, squawk), telemetria de un UAV... La libreria los guarda
     //! y los devuelve tal cual, sin interpretarlos. false si el id no existe.
@@ -357,6 +362,16 @@ public:
 
     //! Entidad bajo un punto de la pantalla, o -1.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+
+    //! Entidad cuyo ROTULO cae bajo el pixel, o -1. Permite seleccionar/arrastrar
+    //! la etiqueta por separado de la geometria.
+    qint64 featureLabelAt(const QPoint &pixel) const;
+    //! Objetivo cuyo ROTULO dibujado cae bajo el pixel, o -1.
+    qint64 targetLabelAt(const QPoint &pixel) const;
+
+    //! Fija el desplazamiento de la etiqueta de una entidad (px) y lo persiste.
+    //! false si el id no existe.
+    bool setFeatureLabelOffset(qint64 id, const QPointF &offsetPx);
 
     // --- Elevacion -------------------------------------------------------
     //! Cota del terreno (metros) en \a position leida del origen de elevacion

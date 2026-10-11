@@ -102,6 +102,9 @@ private slots:
     void viewportCullKeepsCrossingFeatures();
     void persistSkipsTransientLayers();
     void iconAnchorHitTestCoversPin();
+    //! La etiqueta desplazada se puede localizar por su caja (featureLabelAt) y
+    //! el offset se fija y persiste a traves de la fachada.
+    void movableLabelHitTestAndOffset();
 
     // --- Fase 7: .geo y objetivos moviles --------------------------------
     void loadsGeoFileAsPolygonLayer();
@@ -2318,6 +2321,37 @@ void TstMapWidget::iconAnchorHitTestCoversPin()
     QCOMPARE(w.featureAt(QPoint(400, 300), 4.0), id);        // la punta
     QCOMPARE(w.featureAt(QPoint(400, 280), 4.0), id);        // cuerpo del pin (arriba)
     QCOMPARE(w.featureAt(QPoint(400, 320), 4.0), qint64(-1)); // por debajo: nada
+}
+
+void TstMapWidget::movableLabelHitTestAndOffset()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("obj"), QStringLiteral("Objetivos"), 60);
+    MapFeature p;
+    p.kind = GeometryKind::Point;
+    p.layerId = QStringLiteral("obj");
+    p.geometry = {centro};               // cae en el centro de la vista (400,300)
+    p.name = QStringLiteral("OBJ");
+    const qint64 id = w.addFeature(p);
+    QVERIFY(id > 0);
+
+    // Fijar el offset de la etiqueta (y comprobar que persiste en el estilo).
+    QVERIFY(w.setFeatureLabelOffset(id, QPointF(50.0, -30.0)));
+    const auto f = w.feature(id);
+    QVERIFY(f.has_value());
+    QCOMPARE(f->style.labelOffsetPx, QPointF(50.0, -30.0));
+
+    // El rotulo ya no esta sobre el punto, sino desplazado: su caja arranca en
+    // punto + hueco(10,-8) + offset(50,-30). Un pixel dentro de la caja lo acierta.
+    QCOMPARE(w.featureLabelAt(QPoint(465, 266)), id);
+    // Sobre el propio punto ya no hay etiqueta (se movio).
+    QCOMPARE(w.featureLabelAt(QPoint(400, 300)), qint64(-1));
 }
 
 QTEST_MAIN(TstMapWidget)

@@ -16,6 +16,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir
+- **Etiquetas ancladas y movibles**: el rótulo de una entidad o de un objetivo puede desplazarse (`setFeatureLabelOffset` / `setTargetLabelOffset`), queda unido a su punto por una línea guía y, al ser relativo, lo sigue cuando se mueve; se localiza aparte con `featureLabelAt` / `targetLabelAt` (hasta 3 líneas, por `\n`)
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
 
 ## Uso

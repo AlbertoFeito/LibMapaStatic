@@ -56,6 +56,11 @@ public:
     //! desactivan ese elemento. Por defecto 150 etiquetas y 400 trazas.
     void setDetailBudget(int maxLabels, int maxTrails);
 
+    //! Objetivo cuya CAJA DE ETIQUETA dibujada cae bajo el pixel, o -1 (la de
+    //! encima gana). Solo considera etiquetas realmente pintadas en el ultimo
+    //! frame (respeta nivel de detalle y declutter).
+    qint64 labelAt(const QPoint &pixel) const;
+
     //! Objetivos dibujados en el ultimo repintado (los que caian en pantalla).
     int lastDrawnCount() const { return m_lastDrawn; }
     //! Etiquetas y trazas realmente dibujadas en el ultimo repintado (tras el
@@ -94,6 +99,9 @@ private:
     // Buffers reusados entre repintados para no reservar memoria cada frame.
     mutable QVector<std::pair<const TargetModel::Entry *, QPointF>> m_visibles;
     mutable QSet<qint64> m_labelCells;
+    //! Cajas de etiqueta dibujadas en el ultimo frame (id -> rect en pixeles),
+    //! para que labelAt() acierte justo donde se ve el rotulo.
+    mutable QVector<std::pair<qint64, QRectF>> m_labelBoxes;
 };
 
 } // namespace libmapa
