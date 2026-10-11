@@ -4257,3 +4257,24 @@ warnings (demo incluido), **19 tests** en verde (el de offset ahora cubre `label
 ningún `.cpp` (solo el demo y columnas de esquema) → CMake/qmake intactos. README, `arquitectura.html`
 + PDF al día. Pendiente opcional: migrar el arrastre de los pines A/B del demo (hoy por `eventFilter`)
 al mecanismo de la librería.
+
+## 101. Arrastre de marcadores en la librería (pines A/B del demo migrados)
+
+El demo arrastraba sus pines A/B con un `eventFilter` propio sobre el `QCustomPlot` (hit-test manual,
+mover spinboxes, recalcular al soltar). Se **sube ese gesto a la librería** como un mecanismo general.
+
+- **`MapFeature::draggable`** (nuevo, por defecto false, no se persiste): si un **punto** lo lleva, la
+  herramienta **Navegar** (None) lo **arrastra** al pulsar sobre él (en vez de desplazar el mapa),
+  con prioridad por debajo del arrastre de etiquetas y por encima de seleccionar objetivo / mover el
+  mapa.
+- **Señales** (`MapView` → fachada): `featureDragStarted(id)`, `featureDragMovedTo(id, coord)` y
+  `featureDragFinished(id)`. La librería además **mueve el punto en el modelo** (`moveVertex`), así el
+  marcador se mueve por defecto; la app decide la semántica con las señales.
+- **Demo:** los pines A/B se marcan `draggable`; se borra el bloque de arrastre del `eventFilter` (el
+  hover/tooltip se queda) y se conectan las señales: al empezar se resuelve A o B, en cada movimiento
+  se vuelca la coordenada en los campos lat/lon (que redibujan el pin) y al soltar se recalcula el
+  análisis. Comportamiento idéntico al anterior, pero el gesto lo provee la librería.
+
+Sin cambios de esquema (draggable es una pista de interacción, no se guarda). Compila sin warnings
+(demo incluido), **19 tests** en verde. `arquitectura.html` + PDF y README al día. Con esto el bloque
+de objetivos/áreas queda cerrado también en el lado de interacción.

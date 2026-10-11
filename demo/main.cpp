@@ -731,6 +731,26 @@ private:
         connect(m_mapa, &MapWidget::drawingCancelled, this,
                 [this] { statusBar()->showMessage(tr("Trazado cancelado"), 3000); });
 
+        // Arrastre de los pines A/B por la LIBRERÍA: al empezar se resuelve si es
+        // A o B; en cada movimiento se vuelca la coordenada en los campos; al
+        // soltar se recalcula el análisis. (Antes esto lo hacía un eventFilter.)
+        connect(m_mapa, &MapWidget::featureDragStarted, this, [this](qint64 id) {
+            const auto f = m_mapa->feature(id);
+            if (f && f->type == QStringLiteral("punto_ab"))
+                m_dragPick = (f->name == tr("B")) ? Pick::B : Pick::A;
+        });
+        connect(m_mapa, &MapWidget::featureDragMovedTo, this,
+                [this](qint64, const QGeoCoordinate &g) {
+                    if (m_dragPick != Pick::Ninguno)
+                        moverPinCoord(m_dragPick, g);
+                });
+        connect(m_mapa, &MapWidget::featureDragFinished, this, [this](qint64) {
+            if (m_dragPick != Pick::Ninguno) {
+                m_dragPick = Pick::Ninguno;
+                reejecutar();            // recalcula el análisis con el punto movido
+            }
+        });
+
         m_coords = new QLabel(this);
         m_cota = new QLabel(this);
         m_cota->setMinimumWidth(80);
@@ -1328,28 +1348,8 @@ private:
 
         const QEvent::Type t = ev->type();
 
-        // --- arrastre de un pin A/B ---
-        if (t == QEvent::MouseButtonPress) {
-            auto *me = static_cast<QMouseEvent *>(ev);
-            if (me->button() == Qt::LeftButton && m_picking == Pick::Ninguno) {
-                const qint64 id = m_mapa->featureAt(me->pos(), 8.0);
-                if (id >= 0) {
-                    if (const auto f = m_mapa->feature(id);
-                        f && f->type == QStringLiteral("punto_ab")) {
-                        m_dragPick = (f->name == tr("B")) ? Pick::B : Pick::A;
-                        return true;            // no desplazar el mapa: arrastramos
-                    }
-                }
-            }
-        } else if (t == QEvent::MouseMove && m_dragPick != Pick::Ninguno) {
-            auto *me = static_cast<QMouseEvent *>(ev);
-            moverPinA(m_dragPick, me->pos());
-            return true;
-        } else if (t == QEvent::MouseButtonRelease && m_dragPick != Pick::Ninguno) {
-            m_dragPick = Pick::Ninguno;
-            reejecutar();                        // recalcula el análisis con el punto movido
-            return true;
-        }
+        // El arrastre de los pines A/B ya NO se hace aquí: lo gestiona la librería
+        // (entidad marcada draggable + señales featureDrag*, ver construirPanel).
 
         // --- hover: resalte de picos + tooltip de cualquier entidad ---
         if (t == QEvent::MouseMove) {
@@ -1369,15 +1369,11 @@ private:
         return QMainWindow::eventFilter(obj, ev);
     }
 
-    // Mueve el pin A o B a la coordenada bajo el píxel dado (arrastre): vuelca la
-    // posición en sus campos lat/lon, que redibujan el pin y la lectura al vuelo.
-    void moverPinA(Pick cual, const QPoint &pixel)
+    // Vuelca una coordenada (arrastre de un pin A/B) en sus campos lat/lon, que
+    // redibujan el pin y la lectura al vuelo. La coordenada la da la librería por
+    // la señal featureDragMovedTo.
+    void moverPinCoord(Pick cual, const QGeoCoordinate &g)
     {
-        auto *v = m_mapa ? qobject_cast<QCustomPlot *>(m_mapa->customPlot()) : nullptr;
-        if (!v) return;
-        const QPointF axis(v->xAxis->pixelToCoord(pixel.x()),
-                           v->yAxis->pixelToCoord(pixel.y()));
-        const QGeoCoordinate g = m_mapa->fromAxisCoords(axis);
         if (!g.isValid()) return;
         QDoubleSpinBox *lat = (cual == Pick::A) ? m_latA : m_latB;
         QDoubleSpinBox *lon = (cual == Pick::A) ? m_lonA : m_lonB;
@@ -1488,7 +1484,8 @@ private:
             f.style.iconAnchor = QPointF(0.5, 31.0 / 32.0);  // la PUNTA marca el punto
             f.style.labelVisible = true;
             f.style.labelColor = c;
-            f.selectable = true;        // arrastrable (ver eventFilter de arrastre)
+            f.selectable = true;
+            f.draggable = true;         // la librería lo arrastra con «Navegar»
             m_mapa->addFeature(f);
         };
         pin(puntoA(), m_colorA, tr("A"));

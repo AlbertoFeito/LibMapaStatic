@@ -520,6 +520,12 @@ signals:
     void featureLayersChanged();
     //! Emitida al crear una entidad con el raton.
     void featureCreated(qint64 id);
+    //! Arrastre (herramienta Navegar) de una entidad marcada \c draggable: al
+    //! empezar, en cada movimiento (coordenada bajo el cursor) y al soltar. Para
+    //! marcadores que el operador reposiciona (p. ej. los puntos A/B).
+    void featureDragStarted(qint64 id);
+    void featureDragMovedTo(qint64 id, const QGeoCoordinate &position);
+    void featureDragFinished(qint64 id);
     void drawingCancelled();
     void zoomChanged(int zoom);
     void centerChanged(const QGeoCoordinate &center);

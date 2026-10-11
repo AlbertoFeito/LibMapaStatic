@@ -706,7 +706,24 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 break;
             }
 
-            // Prioridad 2: un clic sobre un objetivo lo SELECCIONA (no inicia
+            // Prioridad 2: un clic sobre una entidad PUNTO marcada 'draggable'
+            // (p. ej. un pin A/B) la arrastra, en vez de desplazar el mapa. La
+            // semantica (que hacer con la nueva posicion) la decide la app por
+            // las senales featureDrag*; la libreria ademas la mueve en el modelo.
+            const qint64 fid = m_featureLayer->featureAt(event->pos());
+            if (fid >= 0) {
+                const auto f = m_model->feature(fid);
+                if (f && f->draggable && f->kind == GeometryKind::Point) {
+                    m_dragFeature = fid;
+                    m_model->setSelected(fid);
+                    m_model->beginUndoGroup();
+                    setCursor(Qt::ClosedHandCursor);
+                    emit featureDragStarted(fid);
+                    break;
+                }
+            }
+
+            // Prioridad 3: un clic sobre un objetivo lo SELECCIONA (no inicia
             // arrastre); sobre el mapa vacio, arrastra para desplazar.
             const qint64 tid = targetAt(event->pos());
             if (tid >= 0) {
@@ -867,6 +884,15 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    // Arrastre de una entidad draggable: la mueve en el modelo (no-op si la app
+    // la recreo) y avisa con la coordenada para que la app actualice su estado.
+    if (m_dragFeature >= 0 && bajo.isValid()) {
+        m_model->moveVertex(m_dragFeature, 0, bajo);
+        emit featureDragMovedTo(m_dragFeature, bajo);
+        event->accept();
+        return;
+    }
+
     // Edicion en curso: tiene prioridad sobre el desplazamiento del mapa.
     if (m_tool == MapTool::EditFeature
         && (m_editVertex >= 0 || m_movingFeature)) {
@@ -951,6 +977,17 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
     if (m_dragLabelTarget >= 0) {
         m_dragLabelTarget = -1;
         unsetCursor();
+        event->accept();
+        return;
+    }
+
+    // Fin del arrastre de una entidad draggable.
+    if (m_dragFeature >= 0) {
+        m_model->endUndoGroup();
+        const qint64 id = m_dragFeature;
+        m_dragFeature = -1;
+        unsetCursor();
+        emit featureDragFinished(id);
         event->accept();
         return;
     }

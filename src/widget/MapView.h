@@ -150,6 +150,11 @@ signals:
     void featureCreated(qint64 id);
     void featureClicked(qint64 id, const QGeoCoordinate &position);
     void targetClicked(qint64 id, const QGeoCoordinate &position);
+    //! Arrastre (herramienta Navegar) de una entidad marcada \c draggable: al
+    //! empezar, en cada movimiento (con la coordenada bajo el cursor) y al soltar.
+    void featureDragStarted(qint64 id);
+    void featureDragMovedTo(qint64 id, const QGeoCoordinate &position);
+    void featureDragFinished(qint64 id);
     void drawingCancelled();
     void centerChanged(const QGeoCoordinate &center);
     void mouseMovedTo(const QGeoCoordinate &position);
@@ -223,6 +228,9 @@ private:
     qint64 m_dragLabelTarget = -1;
     QPoint m_dragLabelStartPx;
     QPointF m_dragLabelStartOffset;
+
+    //! Entidad (punto) marcada draggable que se arrastra con la herramienta None.
+    qint64 m_dragFeature = -1;
 
     int m_draftMaxVertices = -1;     //!< Tope de vertices del trazado (−1 = sin).
 

@@ -121,6 +121,13 @@ struct MapFeature
     bool visible = true;
     bool selectable = true;
 
+    //! Si es true y es un PUNTO, la herramienta «Navegar» (None) lo arrastra:
+    //! al pulsar sobre él empieza el arrastre (en vez de desplazar el mapa) y la
+    //! librería emite las señales de arrastre. Pensado para marcadores que el
+    //! operador reposiciona (p. ej. los puntos A/B de un análisis). No se
+    //! persiste: es una pista de interacción que la app vuelve a poner.
+    bool draggable = false;
+
     bool isMultiPart() const { return !parts.isEmpty(); }
 
     //! Las partes a dibujar/consultar: \a parts si las hay, si no \a geometry.

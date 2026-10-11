@@ -341,7 +341,9 @@ la API que usa la aplicación:</p>
 <p>El lienzo real: hereda de QCustomPlot, gestiona el ratón (arrastrar, rueda,
 herramientas), traduce píxeles↔coordenadas y coordina las capas. Sin herramienta,
 un clic sobre la <b>caja de una etiqueta</b> (de entidad u objetivo) la <b>arrastra</b>
-—cambiando su desplazamiento relativo— con prioridad sobre seleccionar o desplazar.
+—cambiando su desplazamiento relativo— con prioridad sobre seleccionar o desplazar. Un
+<b>punto marcado <code>draggable</code></b> (p. ej. un pin A/B) se arrastra igual, moviéndose
+en el modelo y avisando con las señales <code>featureDrag*</code>.
 El trazado punto a punto admite un <b>tope de vértices</b> (<code>setDraftMaxVertices</code>,
 que persiste como atributo <code>max_vertices</code>): un «área objetivo» de ≤10 puntos
 es un polígono con <code>type="objetivo_area"</code> y la etiqueta anclada a su primer vértice

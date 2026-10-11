@@ -316,6 +316,9 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
     connect(d->view, &MapView::targetClicked, this, &MapWidget::targetClicked);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
+    connect(d->view, &MapView::featureDragStarted, this, &MapWidget::featureDragStarted);
+    connect(d->view, &MapView::featureDragMovedTo, this, &MapWidget::featureDragMovedTo);
+    connect(d->view, &MapView::featureDragFinished, this, &MapWidget::featureDragFinished);
     connect(d->view, &MapView::drawingCancelled, this, &MapWidget::drawingCancelled);
 
     // Persistencia automatica: el timer de antirebote agrupa las rafagas de
