@@ -34,6 +34,8 @@ private slots:
     //! setLabelOffset guarda el desplazamiento del rotulo y avisa (lo usa el
     //! arrastre de la etiqueta).
     void setsLabelOffsetAndNotifies();
+    //! insertVertex respeta el tope 'max_vertices' (área objetivo de ≤N puntos).
+    void insertVertexRespectsMaxVerticesCap();
 
     // --- Seleccion y senales ---------------------------------------------
     void tracksSelection();
@@ -419,6 +421,26 @@ void TstOverlayModel::setsLabelOffsetAndNotifies()
 
     // Id inexistente: no hace nada y lo dice.
     QVERIFY(!m.setLabelOffset(99999, QPointF(1.0, 1.0)));
+}
+
+void TstOverlayModel::insertVertexRespectsMaxVerticesCap()
+{
+    OverlayModel m;
+    MapFeature area = poligono(QStringLiteral("Area"), 10);  // ya tiene 10 vertices
+    area.type = QStringLiteral("objetivo_area");
+    area.attributes.insert(QStringLiteral("max_vertices"), 10);
+    const qint64 id = m.addFeature(area);
+    QVERIFY(id > 0);
+
+    // En el tope (10/10): no se puede insertar un vertice mas.
+    QVERIFY(!m.insertVertex(id, 10, QGeoCoordinate(24.0, -83.0)));
+    QCOMPARE(m.feature(id)->geometry.size(), 10);
+
+    // Sin tope, un poligono equivalente sí admite el vertice 11.
+    MapFeature libre = poligono(QStringLiteral("Libre"), 10);
+    const qint64 id2 = m.addFeature(libre);
+    QVERIFY(m.insertVertex(id2, 10, QGeoCoordinate(24.0, -83.0)));
+    QCOMPARE(m.feature(id2)->geometry.size(), 11);
 }
 
 QTEST_MAIN(TstOverlayModel)

@@ -4209,3 +4209,27 @@ Sin cambios en la API pública ni en CMake/qmake. Compila sin warnings, **19 tes
 `setsLabelOffsetAndNotifies` en `tst_overlaymodel`). El gesto en vivo se valida en el demo (Fase 3);
 la lógica de modelo/capa queda cubierta por tests. Falta: el polígono «área objetivo» (Fase 2) y el
 demo (Fase 3).
+
+## 99. Objetivos/áreas Fase 2: «área objetivo» (≤N vértices, etiqueta en el 1er punto)
+
+El «área objetivo» que pidió el usuario NO es un tipo de geometría nuevo: es un **polígono** con un
+**tipo de dominio** propio (`type = "objetivo_area"`), un **tope de vértices** y la **etiqueta
+anclada a su primer punto**. Todo con piezas ya existentes + un único añadido (el tope).
+
+- **Tope de vértices (nuevo):** `MapView::setDraftMaxVertices(n)` (−1 = sin límite), expuesto por
+  `MapWidget::setDraftMaxVertices`. Al trazar punto a punto, pasado el tope se **ignoran los clics**;
+  el límite se guarda en la entidad (atributo `max_vertices`) y `OverlayModel::insertVertex` lo
+  **respeta también al editar**. Así un «área objetivo» se limita a ≤10 puntos de principio a fin.
+- **Etiqueta en el primer punto:** `FeatureStyle::labelAnchorVertex = 0` (de la Fase 0) hace que el
+  rótulo cuelgue del vértice 0 (y se arrastre/seleccione como el de un objetivo, Fases 0–1).
+- **Selección y coordenadas:** ya estaban: clic dentro del polígono lo selecciona (acierto directo por
+  área, aunque el relleno sea transparente), los tiradores de vértice salen al seleccionar, y
+  `feature(id)->geometry` da sus ≤10 coordenadas.
+- **Tipo propio:** `type`/`featuresOfType` (ya existentes) distinguen el «área objetivo» de un
+  polígono normal, sin tocar la librería.
+
+La app arma el área con lo que ya hay: `setActiveFeatureLayer`, `setDraftType("objetivo_area")`,
+`setDraftStyle(...labelAnchorVertex=0...)`, `setDraftMaxVertices(10)`, `setActiveTool(DrawPolygon)`.
+Sin `.cpp` nuevos (CMake/qmake intactos). Compila sin warnings, **19 tests** en verde (nuevos:
+`insertVertexRespectsMaxVerticesCap`, `areaLabelHangsFromFirstVertex`). El trazado por clics con tope
+se valida en el demo (Fase 3). README, `arquitectura.html` + PDF al día.

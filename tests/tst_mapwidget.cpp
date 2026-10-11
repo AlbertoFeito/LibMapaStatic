@@ -105,6 +105,9 @@ private slots:
     //! La etiqueta desplazada se puede localizar por su caja (featureLabelAt) y
     //! el offset se fija y persiste a traves de la fachada.
     void movableLabelHitTestAndOffset();
+    //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
+    //! del PRIMER vértice, no del centro.
+    void areaLabelHangsFromFirstVertex();
 
     // --- Fase 7: .geo y objetivos moviles --------------------------------
     void loadsGeoFileAsPolygonLayer();
@@ -2352,6 +2355,33 @@ void TstMapWidget::movableLabelHitTestAndOffset()
     QCOMPARE(w.featureLabelAt(QPoint(465, 266)), id);
     // Sobre el propio punto ya no hay etiqueta (se movio).
     QCOMPARE(w.featureLabelAt(QPoint(400, 300)), qint64(-1));
+}
+
+void TstMapWidget::areaLabelHangsFromFirstVertex()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("areas"), QStringLiteral("Areas"), 60);
+    MapFeature area;
+    area.kind = GeometryKind::Polygon;
+    area.layerId = QStringLiteral("areas");
+    area.type = QStringLiteral("objetivo_area");
+    area.name = QStringLiteral("Area 1");
+    // El PRIMER vertice cae en el centro de la vista (400,300); los demas quedan
+    // lejos (al sur/este), asi que el centroide esta muy desplazado.
+    area.geometry = {centro, QGeoCoordinate(20.5, -79.5),
+                     QGeoCoordinate(20.5, -78.5)};
+    area.style.labelAnchorVertex = 0;             // cuelga del primer punto
+    const qint64 id = w.addFeature(area);
+    QVERIFY(id > 0);
+
+    // La caja de la etiqueta arranca junto al primer vertice (400,300)+hueco.
+    QCOMPARE(w.featureLabelAt(QPoint(414, 296)), id);
 }
 
 QTEST_MAIN(TstMapWidget)

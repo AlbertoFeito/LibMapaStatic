@@ -102,6 +102,13 @@ public:
     MapTool activeTool() const { return m_tool; }
     void setActiveTool(MapTool tool);
 
+    //! Tope de vertices del trazado punto a punto (polilinea/poligono). −1 = sin
+    //! limite. Al llegar al tope se ignoran los clics siguientes; el límite se
+    //! guarda en la entidad (atributo \c max_vertices) para que la edicion
+    //! posterior tambien lo respete. Sirve para un «area objetivo» de ≤10 puntos.
+    void setDraftMaxVertices(int n) { m_draftMaxVertices = n; }
+    int draftMaxVertices() const { return m_draftMaxVertices; }
+
     /*!
      * \brief Pone al dia el viewport y la disposicion sin esperar eventos.
      *
@@ -216,6 +223,8 @@ private:
     qint64 m_dragLabelTarget = -1;
     QPoint m_dragLabelStartPx;
     QPointF m_dragLabelStartOffset;
+
+    int m_draftMaxVertices = -1;     //!< Tope de vertices del trazado (−1 = sin).
 
     // Estado de las herramientas de dos clics.
     bool m_toolFirstPointSet = false;

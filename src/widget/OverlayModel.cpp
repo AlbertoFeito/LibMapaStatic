@@ -529,6 +529,11 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
         return false;                       // un punto tiene un solo vertice
     if (index < 0 || index > it->geometry.size())
         return false;
+    // Tope opcional de vertices (p. ej. un «area objetivo» de ≤10 puntos): si la
+    // entidad lo declara en sus atributos, no se inserta por encima del limite.
+    const int cap = it->attributes.value(QStringLiteral("max_vertices")).toInt();
+    if (cap > 0 && it->geometry.size() >= cap)
+        return false;
 
     pushUndo();
     it->geometry.insert(index, at);

@@ -775,9 +775,18 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 m_draft.layerId = m_activeLayer;
                 m_draft.type = m_draftType;
                 m_draft.style = m_draftStyle;
+                // El tope se guarda en la entidad para que la edicion posterior
+                // (insertVertex) tambien lo respete.
+                if (m_draftMaxVertices > 0)
+                    m_draft.attributes.insert(QStringLiteral("max_vertices"),
+                                              m_draftMaxVertices);
             }
-            m_draft.geometry.append(coordinateAt(event->pos()));
-            m_featureLayer->setDraft(&m_draft);
+            // Tope de vertices: al llegar al limite se ignoran los clics nuevos.
+            if (m_draftMaxVertices < 0
+                || m_draft.geometry.size() < m_draftMaxVertices) {
+                m_draft.geometry.append(coordinateAt(event->pos()));
+                m_featureLayer->setDraft(&m_draft);
+            }
             break;
 
         case MapTool::SelectPolygon:

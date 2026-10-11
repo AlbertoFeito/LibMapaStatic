@@ -427,6 +427,12 @@ public:
     void setDraftStyle(const FeatureStyle &style);
     void setDraftType(const QString &type);
 
+    //! Tope de vertices del trazado punto a punto (−1 = sin límite). Al llegar al
+    //! tope se ignoran los clics; el límite queda en la entidad (atributo
+    //! \c max_vertices) para que la edicion posterior también lo respete. Para un
+    //! «area objetivo» de ≤10 puntos: setDraftMaxVertices(10).
+    void setDraftMaxVertices(int n);
+
     //! true mientras hay una geometria a medio trazar.
     bool isDrawing() const;
     //! Cierra el trazado en curso. Devuelve el identificador, o -1.

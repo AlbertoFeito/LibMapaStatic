@@ -1166,6 +1166,13 @@ void MapWidget::setDraftType(const QString &type)
         d->view->setDraftType(type);
 }
 
+// Tope de vertices del trazado punto a punto (p. ej. 10 para un area objetivo).
+void MapWidget::setDraftMaxVertices(int n)
+{
+    if (d->view)
+        d->view->setDraftMaxVertices(n);
+}
+
 // ¿Hay un trazado en curso?
 bool MapWidget::isDrawing() const
 {
