@@ -320,10 +320,24 @@ private:
         nuevaHerramienta(barra, tr("Medir"),     MapTool::Measure);
         nuevaHerramienta(barra, tr("Zoom area"), MapTool::AreaZoom);
         barra->addSeparator();
-        nuevaHerramienta(barra, tr("Punto"),     MapTool::DrawPoint,    QStringLiteral("1"));
-        nuevaHerramienta(barra, tr("Linea"),     MapTool::DrawPolyline, QStringLiteral("2"));
-        nuevaHerramienta(barra, tr("Poligono"),  MapTool::DrawPolygon,  QStringLiteral("3"));
+        // Las herramientas de dibujo genericas reponen el borrador por defecto
+        // (sin tipo, sin tope), para no heredar la configuracion de "objetivo".
+        QAction *p = nuevaHerramienta(barra, tr("Punto"),     MapTool::DrawPoint,    QStringLiteral("1"));
+        QAction *l = nuevaHerramienta(barra, tr("Linea"),     MapTool::DrawPolyline, QStringLiteral("2"));
+        QAction *g = nuevaHerramienta(barra, tr("Poligono"),  MapTool::DrawPolygon,  QStringLiteral("3"));
         nuevaHerramienta(barra, tr("Editar"),    MapTool::EditFeature,  QStringLiteral("4"));
+        for (QAction *a : {p, l, g})
+            connect(a, &QAction::triggered, this, &Ventana::reponerBorrador);
+
+        barra->addSeparator();
+        // Objetivo: un PUNTO con etiqueta (hasta 3 líneas) que se arrastra solo o
+        // junto a su punto. Área objetivo: un POLÍGONO de <=10 puntos con la
+        // etiqueta colgada de su PRIMER vértice. Se diferencian por su 'type'.
+        QAction *obj = nuevaHerramienta(barra, tr("Objetivo"), MapTool::DrawPoint);
+        connect(obj, &QAction::triggered, this, &Ventana::modoObjetivo);
+        QAction *area = nuevaHerramienta(barra, tr("Área objetivo"), MapTool::DrawPolygon);
+        connect(area, &QAction::triggered, this, &Ventana::modoAreaObjetivo);
+
         m_accNavegar->setChecked(true);
 
         barra->addSeparator();
@@ -351,6 +365,65 @@ private:
             a->setShortcut(QKeySequence(atajo));
         m_grupo->addAction(a);
         return a;
+    }
+
+    //! Repone el borrador por defecto (herramientas de dibujo genericas): sin
+    //! tipo de dominio, sin tope de vertices y con el estilo por defecto.
+    void reponerBorrador()
+    {
+        m_mapa->setDraftType(QString());
+        m_mapa->setDraftMaxVertices(-1);
+        m_mapa->setDraftStyle(FeatureStyle());
+    }
+
+    //! Modo "Objetivo": el siguiente punto se crea como un objetivo (type
+    //! "objetivo") con etiqueta visible; su rotulo (y el punto) se arrastran.
+    void modoObjetivo()
+    {
+        FeatureStyle s;
+        s.labelVisible = true;
+        s.pointRadiusPx = 7.0;
+        s.lineColor = QColor(0xff, 0x8f, 0x00);
+        s.fillColor = QColor(0xff, 0x8f, 0x00, 160);
+        m_mapa->setDraftType(QStringLiteral("objetivo"));
+        m_mapa->setDraftStyle(s);
+        m_mapa->setDraftMaxVertices(-1);
+        statusBar()->showMessage(
+            tr("Objetivo: clic para situarlo. Arrastra su etiqueta (Navegar) "
+               "o el punto (Editar)."), 6000);
+    }
+
+    //! Modo "Área objetivo": polígono de <=10 vértices (type "objetivo_area")
+    //! con la etiqueta colgada de su PRIMER punto (labelAnchorVertex=0).
+    void modoAreaObjetivo()
+    {
+        FeatureStyle s;
+        s.labelVisible = true;
+        s.labelAnchorVertex = 0;
+        s.lineColor = QColor(0xc6, 0x28, 0x28);
+        s.fillColor = QColor(0xc6, 0x28, 0x28, 40);
+        s.lineWidth = 2.0;
+        m_mapa->setDraftType(QStringLiteral("objetivo_area"));
+        m_mapa->setDraftStyle(s);
+        m_mapa->setDraftMaxVertices(10);
+        statusBar()->showMessage(
+            tr("Área objetivo: hasta 10 puntos. Doble clic para cerrar."), 6000);
+    }
+
+    //! Si la entidad seleccionada es un área objetivo, lista sus coordenadas en
+    //! la barra de estado (demuestra el acceso a los puntos vía feature()).
+    void mostrarCoordsArea(qint64 id)
+    {
+        const auto f = m_mapa->feature(id);
+        if (!f || f->type != QLatin1String("objetivo_area"))
+            return;
+        QStringList pts;
+        for (const QGeoCoordinate &c : f->geometry)
+            pts << QStringLiteral("%1,%2")
+                       .arg(c.latitude(), 0, 'f', 5).arg(c.longitude(), 0, 'f', 5);
+        statusBar()->showMessage(
+            tr("Área (%1 pts): %2").arg(f->geometry.size()).arg(pts.join(QStringLiteral("  "))),
+            8000);
     }
 
     //! Barra: cargar ficheros .geo y simular objetivos moviles.
@@ -636,8 +709,19 @@ private:
         connect(m_mapa, &MapWidget::featureSelected, this, &Ventana::seleccionEnMapa);
 
         connect(m_mapa, &MapWidget::featureCreated, this, [this](qint64 id) {
+            auto f = m_mapa->feature(id);
+            // A un objetivo/área recién creado se le pone un nombre por defecto
+            // (3 líneas en el objetivo) para que su etiqueta se vea al momento.
+            if (f && f->name.isEmpty()) {
+                if (f->type == QLatin1String("objetivo")) {
+                    f->name = tr("Objetivo %1\nrumbo —\nestado —").arg(id);
+                    m_mapa->updateFeature(*f);
+                } else if (f->type == QLatin1String("objetivo_area")) {
+                    f->name = tr("Área %1").arg(id);
+                    m_mapa->updateFeature(*f);
+                }
+            }
             m_mapa->selectFeature(id);
-            const auto f = m_mapa->feature(id);
             statusBar()->showMessage(
                 tr("Creada entidad %1 con %2 vertices en la capa '%3'")
                     .arg(id).arg(f ? f->geometry.size() : 0)
@@ -1949,6 +2033,7 @@ private:
     void seleccionEnMapa(qint64 id)
     {
         mostrarPropiedades(id);
+        mostrarCoordsArea(id);
         actualizarEstado();
         if (!m_arbol)
             return;

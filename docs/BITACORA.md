@@ -4233,3 +4233,27 @@ La app arma el área con lo que ya hay: `setActiveFeatureLayer`, `setDraftType("
 Sin `.cpp` nuevos (CMake/qmake intactos). Compila sin warnings, **19 tests** en verde (nuevos:
 `insertVertexRespectsMaxVerticesCap`, `areaLabelHangsFromFirstVertex`). El trazado por clics con tope
 se valida en el demo (Fase 3). README, `arquitectura.html` + PDF al día.
+
+## 100. Objetivos/áreas Fase 3: demo (Objetivo, Área objetivo) + anclaje persistente
+
+Cierre del bloque: el **demo** demuestra las capacidades, y se completa la persistencia.
+
+- **Demo (`demo/main.cpp`):** dos herramientas nuevas en la barra de entidades.
+  **Objetivo** configura el borrador (`type="objetivo"`, estilo con etiqueta) y crea un punto; al
+  crearse se le pone un nombre de **3 líneas** por defecto para que su etiqueta se vea al momento. Se
+  arrastra el rótulo con **Navegar** (Fase 1) y el punto con **Editar**; al mover el punto la etiqueta
+  lo sigue. **Área objetivo** configura `type="objetivo_area"`, `labelAnchorVertex=0` y
+  `setDraftMaxVertices(10)`: polígono de ≤10 puntos con la etiqueta en el **primer vértice**. Las
+  herramientas de dibujo genéricas reponen el borrador por defecto (`reponerBorrador`), para no
+  heredar la configuración de objetivo. Al seleccionar un área, la barra de estado **lista sus
+  coordenadas** (`mostrarCoordsArea`, usando `feature()->geometry`).
+- **Persistencia del anclaje:** el esquema v3 gana además `label_anchor` (−1 = automático), para que
+  `labelAnchorVertex` sobreviva guardar/cargar (si no, un área recargada perdería la etiqueta del 1er
+  punto). Lectura tolerante: en una BD anterior la columna no existe → se queda en −1, no en 0.
+
+Verificado con `render_map` sobre un `.sqlitedb` v3 real: el objetivo sale con su etiqueta de 3 líneas
+desplazada y su línea guía, y el área con la etiqueta colgando del primer vértice. Compila sin
+warnings (demo incluido), **19 tests** en verde (el de offset ahora cubre `label_anchor`). No se añade
+ningún `.cpp` (solo el demo y columnas de esquema) → CMake/qmake intactos. README, `arquitectura.html`
++ PDF al día. Pendiente opcional: migrar el arrastre de los pines A/B del demo (hoy por `eventFilter`)
+al mecanismo de la librería.

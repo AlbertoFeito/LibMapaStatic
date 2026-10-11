@@ -76,6 +76,10 @@ QStringList migrations(int from)
             "ALTER TABLE entidad ADD COLUMN label_dx REAL NOT NULL DEFAULT 0");
         sql << QStringLiteral(
             "ALTER TABLE entidad ADD COLUMN label_dy REAL NOT NULL DEFAULT 0");
+        // Vertice al que se ancla la etiqueta (−1 = automatico; 0 = primer punto,
+        // para un area objetivo). Asi el anclaje sobrevive guardar/cargar.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN label_anchor INTEGER NOT NULL DEFAULT -1");
     }
 
     return sql;

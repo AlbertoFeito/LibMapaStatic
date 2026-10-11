@@ -159,6 +159,7 @@ void TstVectorRepository::savesAndLoadsLabelOffset()
     p.name = QStringLiteral("Objetivo");
     p.geometry.append(QGeoCoordinate(23.1, -82.3));
     p.style.labelOffsetPx = QPointF(40.0, -25.0);
+    p.style.labelAnchorVertex = 0;              // como un área objetivo
 
     const auto id = repo.saveFeature(p);
     QVERIFY(id.has_value());
@@ -167,6 +168,7 @@ void TstVectorRepository::savesAndLoadsLabelOffset()
     QCOMPARE(cargadas.size(), 1);
     QVERIFY(qAbs(cargadas.first().style.labelOffsetPx.x() - 40.0) < 1e-9);
     QVERIFY(qAbs(cargadas.first().style.labelOffsetPx.y() + 25.0) < 1e-9);
+    QCOMPARE(cargadas.first().style.labelAnchorVertex, 0);
 }
 
 void TstVectorRepository::migratesV2DatabaseToV3()
@@ -217,6 +219,7 @@ void TstVectorRepository::migratesV2DatabaseToV3()
     QCOMPARE(cargadas.size(), 1);
     QCOMPARE(cargadas.first().name, QStringLiteral("Isla"));
     QCOMPARE(cargadas.first().style.labelOffsetPx, QPointF(0.0, 0.0));
+    QCOMPARE(cargadas.first().style.labelAnchorVertex, -1);   // no 0 por defecto
 }
 
 void TstVectorRepository::removesAndClearsFeatures()
