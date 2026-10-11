@@ -4278,3 +4278,37 @@ mover spinboxes, recalcular al soltar). Se **sube ese gesto a la librería** com
 Sin cambios de esquema (draggable es una pista de interacción, no se guarda). Compila sin warnings
 (demo incluido), **19 tests** en verde. `arquitectura.html` + PDF y README al día. Con esto el bloque
 de objetivos/áreas queda cerrado también en el lado de interacción.
+
+## 102. Demo más profesional — Fase A: barra de menú + barras por actividad + overlays ocultos
+
+El demo tenía tres barras de herramientas sueltas (`construirBarraMapa`, `construirBarraEntidades`,
+`construirBarraDatos`) con botones ad-hoc, sin barra de menú y con los overlays visibles al arrancar
+(cargaban el sistema). Primera fase de una reorganización por fases para que el demo parezca una app
+real; **solo toca `demo/main.cpp`** (ni la librería ni los tests).
+
+- **Una sola fuente de acciones.** Se centralizan todas las órdenes en `QAction` miembro (helper
+  `accHerr(texto, tool, atajo)` para las de dibujo, que las hace *checkable*, les pone el `MapTool`
+  en `setData` y las mete en el grupo exclusivo `m_grupo`). Las mismas acciones se reparten entre el
+  menú y las barras, así que menú y barra quedan siempre sincronizados (una acción, un estado).
+- **Barra de menú** (`construirMenuYBarra`): **Archivo** (Abrir/Guardar/Guardar como/Salir, con
+  `QKeySequence` estándar), **Ver** (submenú *Capa base* con grupo exclusivo, Ampliar/Reducir/Toda
+  Cuba, Rejilla, Cobertura; se guarda `m_menuVer` porque la **Fase B** colgará ahí los toggles de los
+  paneles), **Dibujo** (Navegar · Punto/Línea/Polígono · Objetivo/Área objetivo · Editar/Borrar ·
+  Deshacer/Rehacer), **Elevación** (Perfil · Visión A→B · Viewshed · Fijar A/B · Limpiar análisis),
+  **Datos** (Cargar .geo · Simular objetivos) y **Ayuda** (Acerca de).
+- **Dos barras agrupadas por actividad**, en vez de tres mezcladas:
+  - *Principal* (`barraPrincipal`): selector de capa base + navegación (Navegar/Medir/Zoom área) +
+    dibujo (Punto/Línea/Polígono/Objetivo/Área/Editar/Borrar) + Deshacer/Rehacer + Guardar.
+  - *Terreno y datos* (`barraDatos`): Rejilla/Cobertura + z, botón DEM (carpeta .hgt o .sqlitedb),
+    Cargar .geo, y el bloque de simulación (nº objetivos, Simular, Traza).
+- **Overlays ocultos al iniciar** (`ocultarOverlaysAlIniciar`, llamada tras `reconstruirPanel`): recorre
+  `featureLayers()` y apaga las no editables (= overlays) con `setFeatureLayerVisible(id,false)`. Así
+  al abrir solo se ve el mapa base; cada overlay se enciende a mano (no cargan el sistema de entrada),
+  tal como pidió el usuario.
+- **`limpiarAnalisis()`** pasa de lambda del botón «Limpiar» a *slot* reutilizable (lo usan el menú
+  Elevación y la pestaña). La pestaña «Elevación» conserva sus botones propios (sin duplicar lógica).
+
+Compila sin warnings (`demo` recompilado en limpio), **19 tests** siguen en verde (la librería no
+cambia; es prueba de no-regresión). Validación visual en el PC del usuario. Siguientes fases: Panel de
+Capas (B), diálogo de nueva entidad (C), propiedades con coordenadas editables (D), guardado explícito
+(E) y pulido (F).

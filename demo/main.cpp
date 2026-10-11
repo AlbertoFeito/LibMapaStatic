@@ -49,6 +49,7 @@
 #include <QProgressDialog>
 #include <QMainWindow>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QCursor>
 #include <QPainter>
@@ -207,14 +208,13 @@ public:
         m_reconstruir->setInterval(0);
         connect(m_reconstruir, &QTimer::timeout, this, &Ventana::reconstruirPanel);
 
-        construirBarraMapa();
-        construirBarraEntidades();
-        construirBarraDatos();
+        construirMenuYBarra();
         construirPanel();
         conectarSenales();
         aplicarEstiloAlTrazo();
         prepararSeguimiento();
         reconstruirPanel();
+        ocultarOverlaysAlIniciar();   // los overlays arrancan ocultos (no cargan)
 
         // Asi deberia hacerlo una app real: el mapa arranca con lo que funcione
         // y avisa de lo que no (fichero que falta, imagenes sin plugin...).
@@ -227,138 +227,11 @@ public:
 
 private:
     // ==================================================== barras ==========
-    void construirBarraMapa()
+    //! Crea una acción de herramienta (grupo exclusivo de dibujo/navegación).
+    QAction *accHerr(const QString &texto, MapTool tool,
+                     const QString &atajo = QString())
     {
-        auto *barra = addToolBar(tr("Mapa"));
-        barra->setObjectName(QStringLiteral("barraMapa"));
-        barra->setMovable(false);
-
-        barra->addWidget(new QLabel(tr("  Base: ")));
-        m_capasBase = new QComboBox(this);
-        for (const BaseLayerInfo &c : m_mapa->availableBaseLayers())
-            m_capasBase->addItem(c.displayName, c.id);
-        m_capasBase->setCurrentIndex(m_capasBase->findData(m_mapa->baseLayerId()));
-        barra->addWidget(m_capasBase);
-
-        barra->addSeparator();
-        auto *masZoom = barra->addAction(tr("Ampliar"));
-        auto *menosZoom = barra->addAction(tr("Reducir"));
-        connect(masZoom, &QAction::triggered, m_mapa, &MapWidget::zoomIn);
-        connect(menosZoom, &QAction::triggered, m_mapa, &MapWidget::zoomOut);
-        auto *cuba = barra->addAction(tr("Toda Cuba"));
-        connect(cuba, &QAction::triggered, this, [this] {
-            m_mapa->fitBounds(QGeoCoordinate(23.3, -85.0),
-                              QGeoCoordinate(19.7, -74.0));
-        });
-
-        barra->addSeparator();
-        auto *rejilla = barra->addAction(tr("Rejilla"));
-        rejilla->setCheckable(true);
-        connect(rejilla, &QAction::toggled, m_mapa, &MapWidget::setDebugGridVisible);
-
-        // Mancha de COBERTURA por zoom (como en fill_map, pero sin descarga):
-        // muestra que zonas del zoom elegido ya estan en la BD, visible aunque
-        // mires a otro zoom. Verde = llena, ambar = a medias.
-        auto *cobertura = barra->addAction(tr("Cobertura"));
-        cobertura->setCheckable(true);
-        cobertura->setToolTip(tr("Mancha fija de las zonas que ya tienen teselas\n"
-                                 "del zoom elegido al lado (verde: llena; ambar: a medias)."));
-        barra->addWidget(new QLabel(tr(" z:")));
-        m_zCobertura = new QSpinBox(this);
-        m_zCobertura->setRange(0, 22);
-        m_zCobertura->setValue(14);
-        m_zCobertura->setToolTip(tr("Zoom cuya cobertura se dibuja en la mancha."));
-        barra->addWidget(m_zCobertura);
-        connect(cobertura, &QAction::toggled, this, [this](bool on) {
-            m_mapa->setCoverageZoom(m_zCobertura->value());
-            m_mapa->setCoverageVisible(on);
-        });
-        connect(m_zCobertura, QOverload<int>::of(&QSpinBox::valueChanged),
-                this, [this, cobertura](int v) {
-            if (cobertura->isChecked())
-                m_mapa->setCoverageZoom(v);
-        });
-
-        // Elevacion del terreno: elige una CARPETA de `.hgt` o una BASE DE DATOS
-        // `.sqlitedb`; la cota aparece bajo el cursor en la barra de estado.
-        m_btnDem = new QPushButton(tr("DEM..."), this);
-        m_btnDem->setToolTip(tr("Origen de elevacion: carpeta de .hgt o base de "
-                                "datos .sqlitedb. Muestra la cota bajo el cursor."));
-        QMenu *menuDem = new QMenu(m_btnDem);
-        connect(menuDem->addAction(tr("Carpeta de .hgt...")),
-                &QAction::triggered, this, &Ventana::alElegirDemCarpeta);
-        connect(menuDem->addAction(tr("Base de datos .sqlitedb...")),
-                &QAction::triggered, this, &Ventana::alElegirDemDb);
-        m_btnDem->setMenu(menuDem);
-        barra->addWidget(m_btnDem);
-
-        barra->addSeparator();
-        // Persistencia: guardar y abrir un fichero SQLite de entidades.
-        auto *guardar = barra->addAction(tr("Guardar"));
-        guardar->setShortcut(QKeySequence::Save);
-        auto *guardarComo = barra->addAction(tr("Guardar como..."));
-        auto *abrir = barra->addAction(tr("Abrir..."));
-        abrir->setShortcut(QKeySequence::Open);
-        connect(guardar, &QAction::triggered, this, &Ventana::guardar);
-        connect(guardarComo, &QAction::triggered, this, &Ventana::guardarComo);
-        connect(abrir, &QAction::triggered, this, &Ventana::abrir);
-    }
-
-    void construirBarraEntidades()
-    {
-        auto *barra = addToolBar(tr("Entidades"));
-        barra->setObjectName(QStringLiteral("barraEntidades"));
-        barra->setMovable(false);
-
-        // Todas las herramientas en UN grupo exclusivo: elegir una desmarca la
-        // anterior, tambien entre navegacion y dibujo (en el demo anterior
-        // "Medir" no se desmarcaba al empezar a dibujar).
-        m_grupo = new QActionGroup(this);
-        m_grupo->setExclusive(true);
-
-        m_accNavegar = nuevaHerramienta(barra, tr("Navegar"),   MapTool::None);
-        nuevaHerramienta(barra, tr("Medir"),     MapTool::Measure);
-        nuevaHerramienta(barra, tr("Zoom area"), MapTool::AreaZoom);
-        barra->addSeparator();
-        // Las herramientas de dibujo genericas reponen el borrador por defecto
-        // (sin tipo, sin tope), para no heredar la configuracion de "objetivo".
-        QAction *p = nuevaHerramienta(barra, tr("Punto"),     MapTool::DrawPoint,    QStringLiteral("1"));
-        QAction *l = nuevaHerramienta(barra, tr("Linea"),     MapTool::DrawPolyline, QStringLiteral("2"));
-        QAction *g = nuevaHerramienta(barra, tr("Poligono"),  MapTool::DrawPolygon,  QStringLiteral("3"));
-        nuevaHerramienta(barra, tr("Editar"),    MapTool::EditFeature,  QStringLiteral("4"));
-        for (QAction *a : {p, l, g})
-            connect(a, &QAction::triggered, this, &Ventana::reponerBorrador);
-
-        barra->addSeparator();
-        // Objetivo: un PUNTO con etiqueta (hasta 3 líneas) que se arrastra solo o
-        // junto a su punto. Área objetivo: un POLÍGONO de <=10 puntos con la
-        // etiqueta colgada de su PRIMER vértice. Se diferencian por su 'type'.
-        QAction *obj = nuevaHerramienta(barra, tr("Objetivo"), MapTool::DrawPoint);
-        connect(obj, &QAction::triggered, this, &Ventana::modoObjetivo);
-        QAction *area = nuevaHerramienta(barra, tr("Área objetivo"), MapTool::DrawPolygon);
-        connect(area, &QAction::triggered, this, &Ventana::modoAreaObjetivo);
-
-        m_accNavegar->setChecked(true);
-
-        barra->addSeparator();
-        m_accDeshacer = barra->addAction(tr("Deshacer"));
-        m_accDeshacer->setShortcut(QKeySequence::Undo);
-        m_accRehacer = barra->addAction(tr("Rehacer"));
-        m_accRehacer->setShortcut(QKeySequence::Redo);
-        connect(m_accDeshacer, &QAction::triggered, m_mapa, [this] { m_mapa->undo(); });
-        connect(m_accRehacer,  &QAction::triggered, m_mapa, [this] { m_mapa->redo(); });
-
-        barra->addSeparator();
-        m_accBorrar = barra->addAction(tr("Borrar entidad"));
-        m_accBorrar->setToolTip(tr("Borra la entidad seleccionada. Tambien Supr "
-                                   "con el panel enfocado."));
-        connect(m_accBorrar, &QAction::triggered, this, &Ventana::borrarSeleccion);
-    }
-
-    QAction *nuevaHerramienta(QToolBar *barra, const QString &texto, MapTool tool,
-                              const QString &atajo = QString())
-    {
-        QAction *a = barra->addAction(texto);
+        auto *a = new QAction(texto, this);
         a->setCheckable(true);
         a->setData(static_cast<int>(tool));
         if (!atajo.isEmpty())
@@ -366,6 +239,276 @@ private:
         m_grupo->addAction(a);
         return a;
     }
+
+    //! Barra de menú + una barra de herramientas principal + una secundaria de
+    //! datos/terreno. Todo a partir de acciones compartidas (un solo origen).
+    void construirMenuYBarra()
+    {
+        m_grupo = new QActionGroup(this);
+        m_grupo->setExclusive(true);
+
+        // --- Acciones de navegación y dibujo (grupo exclusivo) ---------------
+        m_accNavegar  = accHerr(tr("Navegar"), MapTool::None);
+        m_accNavegar->setChecked(true);
+        m_accMedir    = accHerr(tr("Medir"), MapTool::Measure);
+        m_accZoomArea = accHerr(tr("Zoom área"), MapTool::AreaZoom);
+        m_accPunto    = accHerr(tr("Punto"), MapTool::DrawPoint, QStringLiteral("1"));
+        m_accLinea    = accHerr(tr("Línea"), MapTool::DrawPolyline, QStringLiteral("2"));
+        m_accPoligono = accHerr(tr("Polígono"), MapTool::DrawPolygon, QStringLiteral("3"));
+        m_accEditar   = accHerr(tr("Editar"), MapTool::EditFeature, QStringLiteral("4"));
+        m_accObjetivo = accHerr(tr("Objetivo"), MapTool::DrawPoint);
+        m_accArea     = accHerr(tr("Área objetivo"), MapTool::DrawPolygon);
+        for (QAction *a : {m_accPunto, m_accLinea, m_accPoligono})
+            connect(a, &QAction::triggered, this, &Ventana::reponerBorrador);
+        connect(m_accObjetivo, &QAction::triggered, this, &Ventana::modoObjetivo);
+        connect(m_accArea, &QAction::triggered, this, &Ventana::modoAreaObjetivo);
+
+        // --- Acciones de archivo / edición -----------------------------------
+        m_accGuardar = new QAction(tr("Guardar entidades"), this);
+        m_accGuardar->setShortcut(QKeySequence::Save);
+        connect(m_accGuardar, &QAction::triggered, this, &Ventana::guardar);
+        m_accGuardarComo = new QAction(tr("Guardar entidades como..."), this);
+        connect(m_accGuardarComo, &QAction::triggered, this, &Ventana::guardarComo);
+        m_accAbrir = new QAction(tr("Abrir entidades..."), this);
+        m_accAbrir->setShortcut(QKeySequence::Open);
+        connect(m_accAbrir, &QAction::triggered, this, &Ventana::abrir);
+        auto *accSalir = new QAction(tr("Salir"), this);
+        accSalir->setShortcut(QKeySequence::Quit);
+        connect(accSalir, &QAction::triggered, this, &QWidget::close);
+
+        m_accDeshacer = new QAction(tr("Deshacer"), this);
+        m_accDeshacer->setShortcut(QKeySequence::Undo);
+        connect(m_accDeshacer, &QAction::triggered, this, [this] { m_mapa->undo(); });
+        m_accRehacer = new QAction(tr("Rehacer"), this);
+        m_accRehacer->setShortcut(QKeySequence::Redo);
+        connect(m_accRehacer, &QAction::triggered, this, [this] { m_mapa->redo(); });
+        m_accBorrar = new QAction(tr("Borrar entidad"), this);
+        m_accBorrar->setShortcut(QKeySequence::Delete);
+        connect(m_accBorrar, &QAction::triggered, this, &Ventana::borrarSeleccion);
+
+        // --- Acciones de vista -----------------------------------------------
+        auto *accAmpliar = new QAction(tr("Ampliar"), this);
+        connect(accAmpliar, &QAction::triggered, m_mapa, &MapWidget::zoomIn);
+        auto *accReducir = new QAction(tr("Reducir"), this);
+        connect(accReducir, &QAction::triggered, m_mapa, &MapWidget::zoomOut);
+        auto *accCuba = new QAction(tr("Toda Cuba"), this);
+        connect(accCuba, &QAction::triggered, this, [this] {
+            m_mapa->fitBounds(QGeoCoordinate(23.3, -85.0), QGeoCoordinate(19.7, -74.0));
+        });
+        m_accRejilla = new QAction(tr("Rejilla"), this);
+        m_accRejilla->setCheckable(true);
+        connect(m_accRejilla, &QAction::toggled, m_mapa, &MapWidget::setDebugGridVisible);
+        m_accCobertura = new QAction(tr("Cobertura"), this);
+        m_accCobertura->setCheckable(true);
+        m_accCobertura->setToolTip(tr("Mancha de zonas con teselas del zoom elegido."));
+        connect(m_accCobertura, &QAction::toggled, this, [this](bool on) {
+            m_mapa->setCoverageZoom(m_zCobertura->value());
+            m_mapa->setCoverageVisible(on);
+        });
+
+        // --- Widgets de apoyo (viven en las barras) --------------------------
+        m_capasBase = new QComboBox(this);
+        for (const BaseLayerInfo &c : m_mapa->availableBaseLayers())
+            m_capasBase->addItem(c.displayName, c.id);
+        m_capasBase->setCurrentIndex(m_capasBase->findData(m_mapa->baseLayerId()));
+
+        m_zCobertura = new QSpinBox(this);
+        m_zCobertura->setRange(0, 22);
+        m_zCobertura->setValue(14);
+        connect(m_zCobertura, QOverload<int>::of(&QSpinBox::valueChanged),
+                this, [this](int v) {
+            if (m_accCobertura->isChecked()) m_mapa->setCoverageZoom(v);
+        });
+
+        m_btnDem = new QPushButton(tr("DEM..."), this);
+        {
+            QMenu *md = new QMenu(m_btnDem);
+            connect(md->addAction(tr("Carpeta de .hgt...")), &QAction::triggered,
+                    this, &Ventana::alElegirDemCarpeta);
+            connect(md->addAction(tr("Base de datos .sqlitedb...")), &QAction::triggered,
+                    this, &Ventana::alElegirDemDb);
+            m_btnDem->setMenu(md);
+        }
+
+        auto *accGeo = new QAction(tr("Cargar .geo..."), this);
+        connect(accGeo, &QAction::triggered, this, &Ventana::cargarGeo);
+
+        m_numObjetivos = new QSpinBox(this);
+        m_numObjetivos->setRange(1, 5000);
+        m_numObjetivos->setValue(250);
+        m_accSimular = new QAction(tr("Simular objetivos"), this);
+        m_accSimular->setCheckable(true);
+        connect(m_accSimular, &QAction::toggled, this, &Ventana::alternarSimulacion);
+        m_traza = new QComboBox(this);
+        m_traza->addItem(tr("Sin traza"), 0);
+        m_traza->addItem(tr("10"), 10);
+        m_traza->addItem(tr("100"), 100);
+        m_traza->addItem(tr("500"), 500);
+        m_traza->addItem(tr("Toda"), -1);
+        m_traza->setCurrentIndex(2);
+        m_mapa->setTargetTrailLength(100);
+        connect(m_traza, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this](int i) {
+            m_mapa->setTargetTrailLength(m_traza->itemData(i).toInt());
+        });
+        m_simReloj = new QTimer(this);
+        m_simReloj->setInterval(100);
+        connect(m_simReloj, &QTimer::timeout, this, &Ventana::pasoSimulacion);
+
+        // --- Acciones de elevación (reutilizan los slots de la pestaña) ------
+        auto *accPerfil = new QAction(tr("Perfil de ruta"), this);
+        connect(accPerfil, &QAction::triggered, this, &Ventana::analizarPerfil);
+        auto *accVision = new QAction(tr("Visión A→B"), this);
+        connect(accVision, &QAction::triggered, this, &Ventana::analizarVision);
+        auto *accViewshed = new QAction(tr("Viewshed (ZVD)"), this);
+        connect(accViewshed, &QAction::triggered, this, &Ventana::analizarViewshed);
+        auto *accFijarA = new QAction(tr("Fijar punto A en el mapa"), this);
+        connect(accFijarA, &QAction::triggered, this, [this] { iniciarPick(Pick::A); });
+        auto *accFijarB = new QAction(tr("Fijar punto B en el mapa"), this);
+        connect(accFijarB, &QAction::triggered, this, [this] { iniciarPick(Pick::B); });
+        auto *accLimpiar = new QAction(tr("Limpiar análisis"), this);
+        connect(accLimpiar, &QAction::triggered, this, &Ventana::limpiarAnalisis);
+
+        // --- Barra de menú ---------------------------------------------------
+        QMenuBar *mb = menuBar();
+        QMenu *mArchivo = mb->addMenu(tr("&Archivo"));
+        mArchivo->addAction(m_accAbrir);
+        mArchivo->addAction(m_accGuardar);
+        mArchivo->addAction(m_accGuardarComo);
+        mArchivo->addSeparator();
+        mArchivo->addAction(accSalir);
+
+        QMenu *mVer = mb->addMenu(tr("&Ver"));
+        QMenu *mBase = mVer->addMenu(tr("Capa base"));
+        auto *gBase = new QActionGroup(this);
+        gBase->setExclusive(true);
+        for (const BaseLayerInfo &c : m_mapa->availableBaseLayers()) {
+            QAction *a = mBase->addAction(c.displayName);
+            a->setCheckable(true);
+            a->setData(c.id);
+            a->setChecked(c.id == m_mapa->baseLayerId());
+            gBase->addAction(a);
+            connect(a, &QAction::triggered, this, [this, a] {
+                const QString id = a->data().toString();
+                m_mapa->setBaseLayerId(id);
+                if (m_capasBase) m_capasBase->setCurrentIndex(m_capasBase->findData(id));
+            });
+        }
+        mVer->addSeparator();
+        mVer->addAction(accAmpliar);
+        mVer->addAction(accReducir);
+        mVer->addAction(accCuba);
+        mVer->addSeparator();
+        mVer->addAction(m_accRejilla);
+        mVer->addAction(m_accCobertura);
+        m_menuVer = mVer;   // la Fase B añade aquí los toggles de paneles
+
+        QMenu *mDibujo = mb->addMenu(tr("&Dibujo"));
+        mDibujo->addAction(m_accNavegar);
+        mDibujo->addSeparator();
+        mDibujo->addAction(m_accPunto);
+        mDibujo->addAction(m_accLinea);
+        mDibujo->addAction(m_accPoligono);
+        mDibujo->addSeparator();
+        mDibujo->addAction(m_accObjetivo);
+        mDibujo->addAction(m_accArea);
+        mDibujo->addSeparator();
+        mDibujo->addAction(m_accEditar);
+        mDibujo->addAction(m_accBorrar);
+        mDibujo->addSeparator();
+        mDibujo->addAction(m_accDeshacer);
+        mDibujo->addAction(m_accRehacer);
+
+        QMenu *mElev = mb->addMenu(tr("&Elevación"));
+        mElev->addAction(accPerfil);
+        mElev->addAction(accVision);
+        mElev->addAction(accViewshed);
+        mElev->addSeparator();
+        mElev->addAction(accFijarA);
+        mElev->addAction(accFijarB);
+        mElev->addSeparator();
+        mElev->addAction(accLimpiar);
+
+        QMenu *mDatos = mb->addMenu(tr("&Datos"));
+        mDatos->addAction(accGeo);
+        mDatos->addSeparator();
+        mDatos->addAction(m_accSimular);
+
+        QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
+        connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
+            QMessageBox::about(this, tr("LibMapaStatic"),
+                tr("Demostración de LibMapaStatic: librería de mapas por teselas "
+                   "para Qt, con entidades, elevación y seguimiento."));
+        });
+
+        // --- Barra de herramientas principal (navegación · dibujo · archivo) -
+        QToolBar *tb = addToolBar(tr("Principal"));
+        tb->setObjectName(QStringLiteral("barraPrincipal"));
+        tb->setMovable(false);
+        tb->addWidget(new QLabel(tr(" Base: ")));
+        tb->addWidget(m_capasBase);
+        tb->addSeparator();
+        tb->addAction(m_accNavegar);
+        tb->addAction(m_accMedir);
+        tb->addAction(m_accZoomArea);
+        tb->addSeparator();
+        tb->addAction(m_accPunto);
+        tb->addAction(m_accLinea);
+        tb->addAction(m_accPoligono);
+        tb->addAction(m_accObjetivo);
+        tb->addAction(m_accArea);
+        tb->addAction(m_accEditar);
+        tb->addAction(m_accBorrar);
+        tb->addSeparator();
+        tb->addAction(m_accDeshacer);
+        tb->addAction(m_accRehacer);
+        tb->addSeparator();
+        tb->addAction(m_accGuardar);
+
+        // --- Barra secundaria: terreno y datos (actividad aparte) ------------
+        QToolBar *tb2 = addToolBar(tr("Terreno y datos"));
+        tb2->setObjectName(QStringLiteral("barraDatos"));
+        tb2->setMovable(false);
+        tb2->addAction(m_accRejilla);
+        tb2->addAction(m_accCobertura);
+        tb2->addWidget(new QLabel(tr(" z:")));
+        tb2->addWidget(m_zCobertura);
+        tb2->addSeparator();
+        tb2->addWidget(m_btnDem);
+        tb2->addSeparator();
+        tb2->addAction(accGeo);
+        tb2->addWidget(new QLabel(tr("  Objetivos:")));
+        tb2->addWidget(m_numObjetivos);
+        tb2->addAction(m_accSimular);
+        tb2->addWidget(new QLabel(tr(" Traza:")));
+        tb2->addWidget(m_traza);
+    }
+
+    //! Borra las capas de resultados de elevación y restablece los pines A/B.
+    //! (Era una lambda del botón «Limpiar»; ahora es un slot reutilizable.)
+    void limpiarAnalisis()
+    {
+        m_mapa->removeFeatureLayer(kCapaVision);
+        m_mapa->removeFeatureLayer(kCapaViewshed);
+        m_mapa->removeFeatureLayer(kCapaPicos);
+        m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
+        if (m_resultado) m_resultado->clear();
+        m_ultimo = Analisis::Ninguno;
+        marcarPuntosActivos();
+        statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
+    }
+
+    //! Al iniciar, los overlays del paquete arrancan OCULTOS (no cargan el
+    //! sistema). El operador los enciende desde el panel de capas.
+    void ocultarOverlaysAlIniciar()
+    {
+        // Los overlays del paquete se cargan como capas NO editables; las capas
+        // de usuario sí lo son. Ocultamos las no editables (los overlays).
+        for (const LayerInfo &capa : m_mapa->featureLayers())
+            if (!capa.editable)
+                m_mapa->setFeatureLayerVisible(capa.id, false);
+    }
+
 
     //! Repone el borrador por defecto (herramientas de dibujo genericas): sin
     //! tipo de dominio, sin tope de vertices y con el estilo por defecto.
@@ -424,52 +567,6 @@ private:
         statusBar()->showMessage(
             tr("Área (%1 pts): %2").arg(f->geometry.size()).arg(pts.join(QStringLiteral("  "))),
             8000);
-    }
-
-    //! Barra: cargar ficheros .geo y simular objetivos moviles.
-    void construirBarraDatos()
-    {
-        auto *barra = addToolBar(tr("Datos"));
-        barra->setObjectName(QStringLiteral("barraDatos"));
-        barra->setMovable(false);
-
-        auto *geo = barra->addAction(tr("Cargar .geo..."));
-        geo->setToolTip(tr("Carga un contorno .geo como una capa nueva"));
-        connect(geo, &QAction::triggered, this, &Ventana::cargarGeo);
-
-        barra->addSeparator();
-        barra->addWidget(new QLabel(tr("  Objetivos: ")));
-        m_numObjetivos = new QSpinBox(this);
-        m_numObjetivos->setRange(1, 5000);
-        m_numObjetivos->setValue(250);
-        barra->addWidget(m_numObjetivos);
-
-        m_accSimular = barra->addAction(tr("Simular"));
-        m_accSimular->setCheckable(true);
-        m_accSimular->setToolTip(tr("Crea objetivos moviles con traza y los "
-                                    "actualiza en tiempo real"));
-        connect(m_accSimular, &QAction::toggled, this, &Ventana::alternarSimulacion);
-
-        // Opciones de traza: sin traza / N puntos / toda.
-        barra->addWidget(new QLabel(tr("  Traza: ")));
-        m_traza = new QComboBox(this);
-        m_traza->addItem(tr("Sin traza"), 0);
-        m_traza->addItem(tr("10"), 10);
-        m_traza->addItem(tr("100"), 100);
-        m_traza->addItem(tr("500"), 500);
-        m_traza->addItem(tr("Toda"), -1);
-        m_traza->setCurrentIndex(2);            // 100 por defecto
-        barra->addWidget(m_traza);
-        m_mapa->setTargetTrailLength(100);
-        connect(m_traza, QOverload<int>::of(&QComboBox::currentIndexChanged),
-                this, [this](int i) {
-                    m_mapa->setTargetTrailLength(m_traza->itemData(i).toInt());
-                });
-
-        // Reloj de la simulacion: ~10 pasos por segundo.
-        m_simReloj = new QTimer(this);
-        m_simReloj->setInterval(100);
-        connect(m_simReloj, &QTimer::timeout, this, &Ventana::pasoSimulacion);
     }
 
     // ==================================================== panel ===========
@@ -2572,6 +2669,20 @@ private:
     QAction *m_accDeshacer = nullptr;
     QAction *m_accRehacer = nullptr;
     QAction *m_accBorrar = nullptr;
+    QAction *m_accMedir = nullptr;
+    QAction *m_accZoomArea = nullptr;
+    QAction *m_accPunto = nullptr;
+    QAction *m_accLinea = nullptr;
+    QAction *m_accPoligono = nullptr;
+    QAction *m_accObjetivo = nullptr;
+    QAction *m_accArea = nullptr;
+    QAction *m_accEditar = nullptr;
+    QAction *m_accGuardar = nullptr;
+    QAction *m_accGuardarComo = nullptr;
+    QAction *m_accAbrir = nullptr;
+    QAction *m_accRejilla = nullptr;
+    QAction *m_accCobertura = nullptr;
+    QMenu *m_menuVer = nullptr;
 
     QTreeWidget *m_arbol = nullptr;
     QLineEdit *m_campoNombre = nullptr;
