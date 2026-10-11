@@ -31,6 +31,9 @@ private slots:
     void refusesToDegenerateGeometry();
     void movesWholeFeature();
     void refusesMovesOutsideTheWorld();
+    //! setLabelOffset guarda el desplazamiento del rotulo y avisa (lo usa el
+    //! arrastre de la etiqueta).
+    void setsLabelOffsetAndNotifies();
 
     // --- Seleccion y senales ---------------------------------------------
     void tracksSelection();
@@ -398,6 +401,24 @@ void TstOverlayModel::emitsChangedOnEveryMutation()
 
     // Una sola senal para todo: al que dibuja no le importa que cambio.
     QCOMPARE(cambios.count(), esperados);
+}
+
+void TstOverlayModel::setsLabelOffsetAndNotifies()
+{
+    OverlayModel m;
+    const qint64 id = m.addFeature(punto(QStringLiteral("Obj"), 23.0, -82.0));
+    QVERIFY(id > 0);
+
+    QSignalSpy upd(&m, &OverlayModel::featureUpdated);
+    QVERIFY(m.setLabelOffset(id, QPointF(30.0, -12.0)));
+    QCOMPARE(upd.count(), 1);
+
+    const auto f = m.feature(id);
+    QVERIFY(f.has_value());
+    QCOMPARE(f->style.labelOffsetPx, QPointF(30.0, -12.0));
+
+    // Id inexistente: no hace nada y lo dice.
+    QVERIFY(!m.setLabelOffset(99999, QPointF(1.0, 1.0)));
 }
 
 QTEST_MAIN(TstOverlayModel)

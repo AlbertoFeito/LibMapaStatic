@@ -4187,3 +4187,25 @@ Falta (fases siguientes): el **arrastre con ratón** en vivo (enrutado en `MapVi
 `.cpp` nuevos → CMake/qmake intactos. Compila sin warnings, **19 tests** en verde (nuevos:
 `savesAndLoadsLabelOffset`, `migratesV2DatabaseToV3`, `movableLabelHitTestAndOffset`). README y
 `arquitectura.html` + PDF al día.
+
+## 98. Objetivos/áreas Fase 1: arrastre de la etiqueta con el ratón
+
+Sobre la base de la Fase 0, se **engancha el arrastre** del rótulo en la propia librería (en
+`MapView`, no en el demo), para que cualquier app lo tenga.
+
+- Con la herramienta **None**, un clic sobre la **caja de etiqueta** (de entidad u objetivo) inicia su
+  arrastre; tiene **prioridad** sobre seleccionar un objetivo o desplazar el mapa. El nuevo
+  desplazamiento es `offset_inicial + (cursor − inicio)`, así que la etiqueta sigue al cursor y, al ser
+  relativo, cuando el punto se mueve la etiqueta lo acompaña.
+- `MapView` recuerda de quién es el rótulo (`m_dragLabelFeature` / `m_dragLabelTarget`), el píxel de
+  inicio y el offset inicial; en `mouseMove` aplica el nuevo offset y en `mouseRelease` cierra el gesto
+  (cursor `SizeAllCursor` durante el arrastre).
+- Escritura en vivo: `OverlayModel::setLabelOffset` (nuevo; mismo camino que mover un vértice: apila
+  deshacer, avisa con `featureUpdated`/`changed` y se persiste con antirebote) y
+  `TargetModel::setLabelOffset` (de la Fase 0). El arrastre de una entidad va envuelto en un grupo de
+  deshacer para deshacerse de una vez.
+
+Sin cambios en la API pública ni en CMake/qmake. Compila sin warnings, **19 tests** en verde (nuevo:
+`setsLabelOffsetAndNotifies` en `tst_overlaymodel`). El gesto en vivo se valida en el demo (Fase 3);
+la lógica de modelo/capa queda cubierta por tests. Falta: el polígono «área objetivo» (Fase 2) y el
+demo (Fase 3).

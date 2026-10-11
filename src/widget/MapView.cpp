@@ -680,7 +680,33 @@ void MapView::mousePressEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton) {
         switch (m_tool) {
         case MapTool::None: {
-            // Sin herramienta, un clic sobre un objetivo lo SELECCIONA (no inicia
+            // Prioridad 1: un clic sobre la CAJA DE ETIQUETA empieza a arrastrarla
+            // (de entidad o de objetivo). El rotulo se mueve aparte de su punto;
+            // como el offset es relativo, al mover el punto la etiqueta lo sigue.
+            const qint64 flab = m_featureLayer->labelAt(event->pos());
+            if (flab >= 0) {
+                m_dragLabelFeature = flab;
+                m_dragLabelStartPx = event->pos();
+                const auto f = m_model->feature(flab);
+                m_dragLabelStartOffset = f ? f->style.labelOffsetPx : QPointF();
+                m_model->setSelected(flab);
+                m_model->beginUndoGroup();     // todo el arrastre, un solo deshacer
+                setCursor(Qt::SizeAllCursor);
+                break;
+            }
+            const qint64 tlab = m_targetLayer ? m_targetLayer->labelAt(event->pos())
+                                              : -1;
+            if (tlab >= 0) {
+                m_dragLabelTarget = tlab;
+                m_dragLabelStartPx = event->pos();
+                const auto t = m_targetModel->target(tlab);
+                m_dragLabelStartOffset = t ? t->labelOffsetPx : QPointF();
+                setSelectedTarget(tlab);
+                setCursor(Qt::SizeAllCursor);
+                break;
+            }
+
+            // Prioridad 2: un clic sobre un objetivo lo SELECCIONA (no inicia
             // arrastre); sobre el mapa vacio, arrastra para desplazar.
             const qint64 tid = targetAt(event->pos());
             if (tid >= 0) {
@@ -817,6 +843,21 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
     const QGeoCoordinate bajo = coordinateAt(event->pos());
     emit mouseMovedTo(bajo);
 
+    // Arrastre de una etiqueta: nuevo offset = inicial + (cursor - inicio). Tiene
+    // prioridad y no toca la geometria ni el mapa.
+    if (m_dragLabelFeature >= 0) {
+        m_model->setLabelOffset(m_dragLabelFeature,
+            m_dragLabelStartOffset + QPointF(event->pos() - m_dragLabelStartPx));
+        event->accept();
+        return;
+    }
+    if (m_dragLabelTarget >= 0) {
+        m_targetModel->setLabelOffset(m_dragLabelTarget,
+            m_dragLabelStartOffset + QPointF(event->pos() - m_dragLabelStartPx));
+        event->accept();
+        return;
+    }
+
     // Edicion en curso: tiene prioridad sobre el desplazamiento del mapa.
     if (m_tool == MapTool::EditFeature
         && (m_editVertex >= 0 || m_movingFeature)) {
@@ -889,6 +930,21 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
 void MapView::mouseReleaseEvent(QMouseEvent *event)
 {
     const QGeoCoordinate donde = coordinateAt(event->pos());
+
+    // Fin del arrastre de una etiqueta.
+    if (m_dragLabelFeature >= 0) {
+        m_model->endUndoGroup();
+        m_dragLabelFeature = -1;
+        unsetCursor();
+        event->accept();
+        return;
+    }
+    if (m_dragLabelTarget >= 0) {
+        m_dragLabelTarget = -1;
+        unsetCursor();
+        event->accept();
+        return;
+    }
 
     if (m_editVertex >= 0 || m_movingFeature) {
         m_model->endUndoGroup();

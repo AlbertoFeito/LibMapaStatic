@@ -339,7 +339,9 @@ la API que usa la aplicación:</p>
 
 <h3><span class="cls">MapView</span> <span class="tag">widget/MapView.h · QCustomPlot</span></h3>
 <p>El lienzo real: hereda de QCustomPlot, gestiona el ratón (arrastrar, rueda,
-herramientas), traduce píxeles↔coordenadas y coordina las capas.
+herramientas), traduce píxeles↔coordenadas y coordina las capas. Sin herramienta,
+un clic sobre la <b>caja de una etiqueta</b> (de entidad u objetivo) la <b>arrastra</b>
+—cambiando su desplazamiento relativo— con prioridad sobre seleccionar o desplazar.
 <code>requestVisibleTiles()</code> pide teselas del viewport; <code>refreshPlan()</code>
 rehace el plan y repinta. Aquí vive el rectángulo de <code>SelectArea</code> que se
 añadió para la descarga.</p>

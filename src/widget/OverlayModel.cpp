@@ -501,6 +501,20 @@ bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
     return true;
 }
 
+// Fija el desplazamiento de la etiqueta (px) de una entidad. Mismo camino que
+// mover un vertice: apila deshacer, avisa y deja que se persista.
+bool OverlayModel::setLabelOffset(qint64 id, const QPointF &offsetPx)
+{
+    auto it = m_features.find(id);
+    if (it == m_features.end())
+        return false;
+    pushUndo();
+    it->style.labelOffsetPx = offsetPx;
+    emit featureUpdated(id);
+    emit changed();
+    return true;
+}
+
 // Inserta un vertice nuevo en la posicion 'index' de una entidad (para prolongar
 // o subdividir una linea/poligono). No aplica a puntos ni a multi-parte. false si
 // algo no cuadra.

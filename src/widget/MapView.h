@@ -209,6 +209,14 @@ private:
     QPoint m_dragStartPx;
     QGeoCoordinate m_dragStartGeo;
 
+    // Arrastre de la ETIQUETA (entidad u objetivo) con la herramienta None: se
+    // recuerda de quien es el rotulo, el pixel de inicio y su offset inicial; el
+    // nuevo offset = inicial + (cursor - inicio). -1 = no se arrastra ninguno.
+    qint64 m_dragLabelFeature = -1;
+    qint64 m_dragLabelTarget = -1;
+    QPoint m_dragLabelStartPx;
+    QPointF m_dragLabelStartOffset;
+
     // Estado de las herramientas de dos clics.
     bool m_toolFirstPointSet = false;
     QGeoCoordinate m_toolFirstPoint;

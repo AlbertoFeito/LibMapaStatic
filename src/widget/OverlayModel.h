@@ -69,6 +69,9 @@ public:
     bool insertVertex(qint64 id, int index, const QGeoCoordinate &at);
     bool removeVertex(qint64 id, int index);
     bool moveFeature(qint64 id, double deltaLat, double deltaLon);
+    //! Fija el desplazamiento de la ETIQUETA (px) de una entidad. false si no
+    //! existe. Lo usa el arrastre del rotulo; persiste como cualquier cambio.
+    bool setLabelOffset(qint64 id, const QPointF &offsetPx);
 
     // --- Deshacer y rehacer ----------------------------------------------
     /*!
