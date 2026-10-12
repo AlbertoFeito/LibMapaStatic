@@ -4470,3 +4470,26 @@ pulsara «Descartar» al cerrar, lo dibujado ya se había guardado solo en el fi
   existente), en verde.
 
 Cambia el API (campo nuevo de `MapConfig`) → `arquitectura.html` y el PDF al día. Compila sin warnings.
+
+## 109. Demo: panel lateral contextual + temas claro/oscuro
+
+El panel lateral metía en una sola columna con scroll el árbol, las propiedades, los atributos, las
+coordenadas y el estilo: recargado y poco «de producto». Rediseño **solo del `demo`** (`demo/main.cpp`),
+con el enfoque elegido por el usuario: **contextual** y con **dos temas** elegibles.
+
+- **Panel contextual.** Por defecto se ve **solo el árbol de capas** (limpio). Al seleccionar una
+  entidad aparece debajo su **ficha**: título «nombre · tipo», campos Nombre/Tipo/Descripción, la **capa**
+  (solo lectura) y tres **secciones plegables** — *Atributos*, *Coordenadas*, *Estilo* — colapsadas por
+  defecto. Al deseleccionar, la ficha se oculta (`m_ficha->setVisible(hay)` en `mostrarPropiedades`). El
+  contenido va en un `QScrollArea` para que nunca se corte.
+- **`SeccionPlegable`** (nueva clase auxiliar, sin `Q_OBJECT`): cabecera `QToolButton` con flecha que
+  muestra/oculta su contenido. Reutilizable.
+- **Temas claro y oscuro**, elegibles por el usuario en **Ver → Tema** (grupo exclusivo) y **recordados**
+  entre sesiones con `QSettings` (`tema/oscuro`; se fija `OrganizationName`/`ApplicationName` en `main`).
+  Son hojas de estilo (QSS) propias: tipografía, cabeceras de sección, separadores sutiles y color de
+  acento (azul). `aplicarTema()` repinta los botones de color (llevan estilo inline propio). Claro por
+  defecto.
+
+Sin cambios de API ni de arquitectura (todo en el demo) → no se regenera el PDF. Compila sin warnings,
+**19 tests** en verde (no-regresión). Validación visual en el PC del usuario (alternar tema en Ver →
+Tema; seleccionar una entidad para ver su ficha).

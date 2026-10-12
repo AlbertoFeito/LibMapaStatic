@@ -65,7 +65,10 @@
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTimer>
+#include <QScrollArea>
+#include <QSettings>
 #include <QToolBar>
+#include <QToolButton>
 #include <QToolTip>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -157,6 +160,49 @@ QPixmap iconoUav(const QColor &c)
 }
 
 
+// Sección plegable: una cabecera con flecha (QToolButton) que muestra/oculta su
+// contenido. No necesita Q_OBJECT (no define señales propias; connect es estático).
+// Se usa en la ficha contextual de la entidad para Atributos/Coordenadas/Estilo.
+class SeccionPlegable : public QWidget
+{
+public:
+    explicit SeccionPlegable(const QString &titulo, QWidget *parent = nullptr,
+                             bool abierta = false)
+        : QWidget(parent)
+    {
+        auto *v = new QVBoxLayout(this);
+        v->setContentsMargins(0, 0, 0, 0);
+        v->setSpacing(2);
+
+        m_boton = new QToolButton(this);
+        m_boton->setText(titulo);
+        m_boton->setCheckable(true);
+        m_boton->setChecked(abierta);
+        m_boton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        m_boton->setArrowType(abierta ? Qt::DownArrow : Qt::RightArrow);
+        m_boton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_boton->setObjectName(QStringLiteral("seccionHeader"));
+        v->addWidget(m_boton);
+
+        m_cont = new QWidget(this);
+        m_cont->setVisible(abierta);
+        v->addWidget(m_cont);
+
+        QObject::connect(m_boton, &QToolButton::toggled, m_cont,
+                         [this](bool on) {
+                             m_cont->setVisible(on);
+                             m_boton->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
+                         });
+    }
+
+    //! Widget donde colocar el contenido (se le pone un layout desde fuera).
+    QWidget *contenido() const { return m_cont; }
+
+private:
+    QToolButton *m_boton;
+    QWidget *m_cont;
+};
+
 } // namespace
 
 class Ventana : public QMainWindow
@@ -236,6 +282,9 @@ public:
 
         reconstruirPanel();
         ocultarOverlaysAlIniciar();   // los overlays arrancan ocultos (no cargan)
+
+        // Tema elegido por el usuario (recordado en QSettings; claro por defecto).
+        aplicarTema(QSettings().value(QStringLiteral("tema/oscuro"), false).toBool());
 
         // Asi deberia hacerlo una app real: el mapa arranca con lo que funcione
         // y avisa de lo que no (fichero que falta, imagenes sin plugin...).
@@ -440,6 +489,20 @@ private:
         mVer->addSeparator();
         mVer->addAction(m_accRejilla);
         mVer->addAction(m_accCobertura);
+
+        // Submenú «Tema»: claro / oscuro, elegible por el usuario y recordado.
+        QMenu *mTema = mVer->addMenu(tr("Tema"));
+        auto *gTema = new QActionGroup(this);
+        gTema->setExclusive(true);
+        m_accTemaClaro = mTema->addAction(tr("Claro"));
+        m_accTemaOscuro = mTema->addAction(tr("Oscuro"));
+        for (QAction *a : {m_accTemaClaro, m_accTemaOscuro}) {
+            a->setCheckable(true);
+            gTema->addAction(a);
+        }
+        connect(m_accTemaClaro,  &QAction::triggered, this, [this] { aplicarTema(false); });
+        connect(m_accTemaOscuro, &QAction::triggered, this, [this] { aplicarTema(true); });
+
         m_menuVer = mVer;   // la Fase B añade aquí los toggles de paneles
 
         QMenu *mDibujo = mb->addMenu(tr("&Dibujo"));
@@ -521,6 +584,106 @@ private:
         tb2->addAction(m_accSimular);
         tb2->addWidget(new QLabel(tr(" Traza:")));
         tb2->addWidget(m_traza);
+    }
+
+    // ==================================================== temas ===========
+    //! Aplica el tema (claro u oscuro) a toda la app, marca el menú y lo recuerda
+    //! en QSettings para la próxima vez. Es una hoja de estilo (QSS) global.
+    void aplicarTema(bool oscuro)
+    {
+        m_temaOscuro = oscuro;
+        if (auto *app = qobject_cast<QApplication *>(QApplication::instance()))
+            app->setStyleSheet(oscuro ? qssOscuro() : qssClaro());
+        if (m_accTemaOscuro) m_accTemaOscuro->setChecked(oscuro);
+        if (m_accTemaClaro)  m_accTemaClaro->setChecked(!oscuro);
+        QSettings().setValue(QStringLiteral("tema/oscuro"), oscuro);
+        // Los botones de color llevan su propio estilo inline: se repintan para
+        // que no queden con el estilo del tema anterior.
+        if (m_btnColorLinea)   pintarBotonColor(m_btnColorLinea, m_colorLinea);
+        if (m_btnColorRelleno) pintarBotonColor(m_btnColorRelleno, m_colorRelleno);
+    }
+
+    //! Hoja de estilo del tema CLARO: fondo claro, acento azul, cabeceras y
+    //! separadores sutiles. Pensada para lucir de producto sin recargar.
+    static QString qssClaro()
+    {
+        return QStringLiteral(R"(
+            QMainWindow, QDialog { background:#f4f6f8; }
+            QWidget { color:#1f2a36; font-size:11px; }
+            QToolBar { background:#ffffff; border:0; border-bottom:1px solid #d9e0e6;
+                       spacing:4px; padding:3px; }
+            QToolButton { background:transparent; border:1px solid transparent;
+                          border-radius:4px; padding:4px 8px; }
+            QToolButton:hover { background:#e9eef3; }
+            QToolButton:checked { background:#1565c0; color:#ffffff; }
+            QMenuBar { background:#ffffff; border-bottom:1px solid #d9e0e6; }
+            QMenuBar::item:selected { background:#e9eef3; }
+            QMenu { background:#ffffff; border:1px solid #d9e0e6; }
+            QMenu::item:selected { background:#1565c0; color:#ffffff; }
+            QDockWidget { titlebar-close-icon:none; }
+            QDockWidget::title { background:#eef2f5; padding:6px; font-weight:bold; }
+            QTabWidget::pane { border:1px solid #d9e0e6; }
+            QTabBar::tab { background:#eef2f5; padding:6px 12px; border:1px solid #d9e0e6;
+                           border-bottom:0; }
+            QTabBar::tab:selected { background:#ffffff; color:#1565c0; font-weight:bold; }
+            QTreeWidget, QTableWidget, QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox,
+            QTextEdit, QPlainTextEdit {
+                background:#ffffff; border:1px solid #cdd6de; border-radius:4px; }
+            QHeaderView::section { background:#eef2f5; border:0;
+                                   border-bottom:1px solid #d9e0e6; padding:4px; }
+            QPushButton { background:#ffffff; border:1px solid #cdd6de; border-radius:4px;
+                          padding:5px 10px; }
+            QPushButton:hover { border-color:#1565c0; }
+            QPushButton:pressed { background:#e9eef3; }
+            QLabel#fichaTitulo { font-size:13px; font-weight:bold; color:#1565c0;
+                                 padding:2px 0; }
+            QLabel#fichaCapa { color:#5b6b7b; }
+            QToolButton#seccionHeader { font-weight:bold; color:#2a3b4c;
+                                        border-top:1px solid #e2e8ee; padding:5px 2px; }
+            QStatusBar { background:#ffffff; border-top:1px solid #d9e0e6; }
+        )");
+    }
+
+    //! Hoja de estilo del tema OSCURO: fondo gris/negro, acento azul claro.
+    //! Luce muy «técnico» en demos de sala.
+    static QString qssOscuro()
+    {
+        return QStringLiteral(R"(
+            QMainWindow, QDialog { background:#1e242b; }
+            QWidget { color:#e6edf3; font-size:11px; }
+            QToolBar { background:#262d35; border:0; border-bottom:1px solid #12161b;
+                       spacing:4px; padding:3px; }
+            QToolButton { background:transparent; border:1px solid transparent;
+                          border-radius:4px; padding:4px 8px; }
+            QToolButton:hover { background:#333c46; }
+            QToolButton:checked { background:#2f81f7; color:#0d1117; }
+            QMenuBar { background:#262d35; border-bottom:1px solid #12161b; }
+            QMenuBar::item:selected { background:#333c46; }
+            QMenu { background:#262d35; border:1px solid #12161b; }
+            QMenu::item:selected { background:#2f81f7; color:#0d1117; }
+            QDockWidget::title { background:#20262d; padding:6px; font-weight:bold; }
+            QTabWidget::pane { border:1px solid #12161b; }
+            QTabBar::tab { background:#20262d; padding:6px 12px; border:1px solid #12161b;
+                           border-bottom:0; color:#9aa7b4; }
+            QTabBar::tab:selected { background:#1e242b; color:#58a6ff; font-weight:bold; }
+            QTreeWidget, QTableWidget, QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox,
+            QTextEdit, QPlainTextEdit {
+                background:#161b22; border:1px solid #30363d; border-radius:4px;
+                color:#e6edf3; selection-background-color:#2f81f7; }
+            QHeaderView::section { background:#20262d; border:0;
+                                   border-bottom:1px solid #12161b; padding:4px;
+                                   color:#9aa7b4; }
+            QPushButton { background:#262d35; border:1px solid #30363d; border-radius:4px;
+                          padding:5px 10px; color:#e6edf3; }
+            QPushButton:hover { border-color:#2f81f7; }
+            QPushButton:pressed { background:#1b2128; }
+            QLabel#fichaTitulo { font-size:13px; font-weight:bold; color:#58a6ff;
+                                 padding:2px 0; }
+            QLabel#fichaCapa { color:#9aa7b4; }
+            QToolButton#seccionHeader { font-weight:bold; color:#c9d4df;
+                                        border-top:1px solid #30363d; padding:5px 2px; }
+            QStatusBar { background:#262d35; border-top:1px solid #12161b; }
+        )");
     }
 
     //! Borra las capas de resultados de elevación y restablece los pines A/B.
@@ -799,31 +962,47 @@ private:
         connect(accSupr, &QAction::triggered, this, &Ventana::borrarSeleccion);
         m_arbol->addAction(accSupr);
 
-        // --- Propiedades de la entidad seleccionada ---------------------
-        caja->addWidget(new QLabel(tr("<b>Entidad seleccionada</b>")));
+        // === FICHA CONTEXTUAL de la entidad seleccionada =====================
+        // Oculta mientras no hay nada seleccionado (panel limpio, solo el árbol).
+        // Aparece al seleccionar con: título + Nombre/Tipo/Descripción + Capa, y
+        // tres secciones plegables (Atributos, Coordenadas, Estilo).
+        m_ficha = new QWidget(cont);
+        auto *fichaCaja = new QVBoxLayout(m_ficha);
+        fichaCaja->setContentsMargins(0, 6, 0, 0);
+        fichaCaja->setSpacing(6);
+
+        m_lblFicha = new QLabel(tr("Entidad"), m_ficha);
+        m_lblFicha->setObjectName(QStringLiteral("fichaTitulo"));
+        fichaCaja->addWidget(m_lblFicha);
+
         auto *form = new QFormLayout;
-        m_campoNombre = new QLineEdit(cont);
-        m_campoTipo = new QLineEdit(cont);
-        m_campoDescripcion = new QLineEdit(cont);
+        m_campoNombre = new QLineEdit(m_ficha);
+        m_campoTipo = new QLineEdit(m_ficha);
+        m_campoDescripcion = new QLineEdit(m_ficha);
+        m_lblCapaEntidad = new QLabel(m_ficha);
+        m_lblCapaEntidad->setObjectName(QStringLiteral("fichaCapa"));
         m_campoTipo->setPlaceholderText(tr("zona_prohibida, punto_interes..."));
         form->addRow(tr("Nombre:"), m_campoNombre);
         form->addRow(tr("Tipo:"), m_campoTipo);
-        form->addRow(tr("Descripcion:"), m_campoDescripcion);
-        caja->addLayout(form);
+        form->addRow(tr("Descripción:"), m_campoDescripcion);
+        form->addRow(tr("Capa:"), m_lblCapaEntidad);
+        fichaCaja->addLayout(form);
 
-        caja->addWidget(new QLabel(tr("Atributos (la libreria no los interpreta):")));
-        m_tablaAtributos = new QTableWidget(0, 2, cont);
+        // --- Sección plegable: Atributos ---
+        auto *secAtr = new SeccionPlegable(tr("Atributos"), m_ficha);
+        auto *vAtr = new QVBoxLayout(secAtr->contenido());
+        vAtr->setContentsMargins(0, 0, 0, 0);
+        m_tablaAtributos = new QTableWidget(0, 2, secAtr);
         m_tablaAtributos->setHorizontalHeaderLabels({tr("Clave"), tr("Valor")});
         m_tablaAtributos->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
         m_tablaAtributos->setMaximumHeight(110);
-        caja->addWidget(m_tablaAtributos);
-
+        vAtr->addWidget(m_tablaAtributos);
         auto *filaAtr = new QHBoxLayout;
-        auto *btnAddAtr = new QPushButton(tr("+ Atributo"), cont);
-        auto *btnDelAtr = new QPushButton(tr("- Atributo"), cont);
-        filaAtr->addWidget(btnAddAtr);
-        filaAtr->addWidget(btnDelAtr);
-        caja->addLayout(filaAtr);
+        auto *btnAddAtr = new QPushButton(tr("+ Atributo"), secAtr);
+        auto *btnDelAtr = new QPushButton(tr("− Atributo"), secAtr);
+        filaAtr->addWidget(btnAddAtr); filaAtr->addWidget(btnDelAtr);
+        vAtr->addLayout(filaAtr);
+        fichaCaja->addWidget(secAtr);
 
         connect(btnAddAtr, &QPushButton::clicked, this, [this] {
             m_tablaAtributos->insertRow(m_tablaAtributos->rowCount());
@@ -836,65 +1015,76 @@ private:
             }
         });
 
-        // --- Coordenadas (lat/lon editables) -----------------------------
+        // --- Sección plegable: Coordenadas (lat/lon editables) ---
         // Solo para entidades de usuario (capa editable); datasets y overlays no
         // se tocan. Editar una celda = moveVertex; +/- = insert/removeVertex.
-        caja->addWidget(new QLabel(tr("<b>Coordenadas</b> (grados decimales)")));
-        m_tablaCoords = new QTableWidget(0, 2, cont);
+        auto *secCoord = new SeccionPlegable(tr("Coordenadas"), m_ficha);
+        auto *vCoord = new QVBoxLayout(secCoord->contenido());
+        vCoord->setContentsMargins(0, 0, 0, 0);
+        m_tablaCoords = new QTableWidget(0, 2, secCoord);
         m_tablaCoords->setHorizontalHeaderLabels({tr("Latitud"), tr("Longitud")});
         m_tablaCoords->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
         m_tablaCoords->setMaximumHeight(140);
-        caja->addWidget(m_tablaCoords);
-
+        vCoord->addWidget(m_tablaCoords);
         auto *filaVert = new QHBoxLayout;
-        m_btnAddVert = new QPushButton(tr("+ Vértice"), cont);
-        m_btnDelVert = new QPushButton(tr("- Vértice"), cont);
-        filaVert->addWidget(m_btnAddVert);
-        filaVert->addWidget(m_btnDelVert);
-        caja->addLayout(filaVert);
+        m_btnAddVert = new QPushButton(tr("+ Vértice"), secCoord);
+        m_btnDelVert = new QPushButton(tr("− Vértice"), secCoord);
+        filaVert->addWidget(m_btnAddVert); filaVert->addWidget(m_btnDelVert);
+        vCoord->addLayout(filaVert);
+        fichaCaja->addWidget(secCoord);
 
         connect(m_tablaCoords, &QTableWidget::cellChanged, this, &Ventana::coordEditada);
         connect(m_btnAddVert, &QPushButton::clicked, this, &Ventana::anadirVertice);
         connect(m_btnDelVert, &QPushButton::clicked, this, &Ventana::quitarVertice);
 
-        // --- Estilo ------------------------------------------------------
-        caja->addWidget(new QLabel(tr("<b>Estilo</b>")));
-        auto *formEstilo = new QFormLayout;
-        m_btnColorLinea = new QPushButton(cont);
-        m_btnColorRelleno = new QPushButton(cont);
-        formEstilo->addRow(tr("Color de linea:"), m_btnColorLinea);
+        // --- Sección plegable: Estilo ---
+        auto *secEstilo = new SeccionPlegable(tr("Estilo"), m_ficha);
+        auto *formEstilo = new QFormLayout(secEstilo->contenido());
+        formEstilo->setContentsMargins(0, 0, 0, 0);
+        m_btnColorLinea = new QPushButton(secEstilo);
+        m_btnColorRelleno = new QPushButton(secEstilo);
+        formEstilo->addRow(tr("Color de línea:"), m_btnColorLinea);
         formEstilo->addRow(tr("Color de relleno:"), m_btnColorRelleno);
 
-        m_anchoLinea = new QDoubleSpinBox(cont);
+        m_anchoLinea = new QDoubleSpinBox(secEstilo);
         m_anchoLinea->setRange(0.5, 12.0);
         m_anchoLinea->setSingleStep(0.5);
         formEstilo->addRow(tr("Ancho:"), m_anchoLinea);
 
-        m_estiloLinea = new QComboBox(cont);
+        m_estiloLinea = new QComboBox(secEstilo);
         m_estiloLinea->addItem(tr("Continua"),   static_cast<int>(Qt::SolidLine));
         m_estiloLinea->addItem(tr("Discontinua"),static_cast<int>(Qt::DashLine));
         m_estiloLinea->addItem(tr("Punteada"),   static_cast<int>(Qt::DotLine));
         m_estiloLinea->addItem(tr("Raya-punto"), static_cast<int>(Qt::DashDotLine));
         formEstilo->addRow(tr("Trazo:"), m_estiloLinea);
 
-        m_radioPunto = new QDoubleSpinBox(cont);
+        m_radioPunto = new QDoubleSpinBox(secEstilo);
         m_radioPunto->setRange(2.0, 30.0);
         formEstilo->addRow(tr("Radio del punto:"), m_radioPunto);
 
-        m_verEtiqueta = new QCheckBox(tr("Mostrar etiqueta"), cont);
+        m_verEtiqueta = new QCheckBox(tr("Mostrar etiqueta"), secEstilo);
         formEstilo->addRow(QString(), m_verEtiqueta);
-        m_verVertices = new QCheckBox(tr("Mostrar vertices"), cont);
+        m_verVertices = new QCheckBox(tr("Mostrar vértices"), secEstilo);
         formEstilo->addRow(QString(), m_verVertices);
-        caja->addLayout(formEstilo);
-
-        m_aplicarAlTrazo = new QCheckBox(tr("Usar este estilo para lo que dibuje"), cont);
+        m_aplicarAlTrazo = new QCheckBox(tr("Usar este estilo al dibujar"), secEstilo);
         m_aplicarAlTrazo->setChecked(true);
-        caja->addWidget(m_aplicarAlTrazo);
+        formEstilo->addRow(QString(), m_aplicarAlTrazo);
+        fichaCaja->addWidget(secEstilo);
+
+        m_ficha->setVisible(false);     // contextual: oculta hasta seleccionar
+        caja->addWidget(m_ficha);
         caja->addStretch(1);
+
+        // El panel hace scroll si la ficha crece (ventana baja): se envuelve en
+        // un QScrollArea para que nunca se corte el contenido.
+        auto *scroll = new QScrollArea(dock);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidget(cont);
 
         // Dos pestañas en el panel lateral: «Capas» (lo de arriba) y «Elevación».
         m_tabs = new QTabWidget(dock);
-        m_tabs->addTab(cont, tr("Capas"));
+        m_tabs->addTab(scroll, tr("Capas"));
         m_tabs->addTab(construirTabElevacion(), tr("Elevación"));
         dock->setWidget(m_tabs);
         addDockWidget(Qt::RightDockWidgetArea, dock);
@@ -2628,6 +2818,18 @@ private:
         m_actualizandoPropiedades = true;
 
         const bool hay = f.has_value();
+        // Panel contextual: la ficha solo se ve cuando hay algo seleccionado.
+        if (m_ficha)
+            m_ficha->setVisible(hay);
+        if (hay && m_lblFicha) {
+            const QString nombre = f->name.isEmpty()
+                ? tr("(sin nombre) #%1").arg(f->id) : f->name;
+            m_lblFicha->setText(f->type.isEmpty()
+                ? nombre : QStringLiteral("%1  ·  %2").arg(nombre, f->type));
+        }
+        if (hay && m_lblCapaEntidad)
+            m_lblCapaEntidad->setText(f->layerId);
+
         m_campoNombre->setEnabled(hay);
         m_campoTipo->setEnabled(hay);
         m_campoDescripcion->setEnabled(hay);
@@ -3169,8 +3371,14 @@ private:
     QAction *m_accRejilla = nullptr;
     QAction *m_accCobertura = nullptr;
     QMenu *m_menuVer = nullptr;
+    QAction *m_accTemaClaro = nullptr;
+    QAction *m_accTemaOscuro = nullptr;
+    bool m_temaOscuro = false;
 
     QDockWidget *m_dock = nullptr;   //!< panel lateral «Capas y entidades»
+    QWidget *m_ficha = nullptr;      //!< ficha contextual (oculta sin selección)
+    QLabel *m_lblFicha = nullptr;    //!< título de la ficha (nombre · tipo)
+    QLabel *m_lblCapaEntidad = nullptr; //!< capa de la entidad (solo lectura)
     QTreeWidget *m_arbol = nullptr;
     QLineEdit *m_campoNombre = nullptr;
     QLineEdit *m_campoTipo = nullptr;
@@ -3271,6 +3479,9 @@ int main(int argc, char *argv[])
 #endif
 
     QApplication app(argc, argv);
+    // Para QSettings (recordar el tema elegido entre sesiones).
+    QCoreApplication::setOrganizationName(QStringLiteral("LibMapaStatic"));
+    QCoreApplication::setApplicationName(QStringLiteral("demo"));
 
     // Primer positional: la carpeta de un paquete de datos (o su mapa.json), o un
     // datasets.json. Opcionales: --dem <carpeta> / --dem-db <fichero>
