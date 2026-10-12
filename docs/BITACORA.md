@@ -4312,3 +4312,32 @@ Compila sin warnings (`demo` recompilado en limpio), **19 tests** siguen en verd
 cambia; es prueba de no-regresión). Validación visual en el PC del usuario. Siguientes fases: Panel de
 Capas (B), diálogo de nueva entidad (C), propiedades con coordenadas editables (D), guardado explícito
 (E) y pulido (F).
+
+## 103. Demo más profesional — Fase B: Panel de Capas con tres grupos (Base/Overlays/Entidades)
+
+El árbol del panel listaba todas las capas vectoriales en un mismo nivel, mezclando overlays (solo
+lectura) y capas de usuario, y las bases solo estaban en el combo de la barra. Se reorganiza el árbol
+en **tres grupos fijos** que reflejan los cuatro tipos de capa (ver también la explicación al usuario):
+sigue siendo **solo `demo/main.cpp`** (ni librería ni tests).
+
+- **Grupo «Base (mapa)».** Los datasets de teselas (`availableBaseLayers`) con casillas de
+  **comportamiento de radio**: marcar una fija la capa base (`setBaseLayerId`) y desmarca las demás;
+  intentar apagar la activa se ignora (siempre hay un mapa de fondo). No editables. Se mantiene en
+  sincronía con el combo de la barra y el submenú *Ver → Capa base* vía la señal `baseLayerChanged`
+  (`sincronizarBaseEnArbol`), porque cambiar la base no reconstruye el panel.
+- **Grupo «Overlays (solo lectura)».** Las capas vectoriales cargadas del paquete, que la librería marca
+  `editable=false` (`MapWidget::loadOverlays → setLayerEditable(id,false)`). Casilla = visibilidad de la
+  capa; **arrancan ocultas** (Fase A) para no cargar el sistema. **No se despliegan sus entidades**: un
+  overlay puede tener miles de polígonos (la costa, las provincias), así que solo se muestra el recuento.
+- **Grupo «Entidades (editables)».** Las capas de usuario (`editable=true`): se despliegan hoja a hoja
+  como antes (nombre, tipo, nº de vértices, color), con selección sincronizada con el mapa. Es el único
+  grupo modificable.
+- **Cabeceras de grupo** (`nuevoGrupo`): ítems no seleccionables ni con casilla, en negrita y a ancho
+  completo; solo organizan. El recorrido del árbol pasa a `QTreeWidgetItemIterator` (las hojas de
+  entidad cuelgan ahora de grupo→capa→entidad) en `seleccionEnMapa` y `resaltarCapaActiva`.
+- **Menú «Ver».** Se cuelgan del `m_menuVer` (que dejó preparado la Fase A) el toggle del panel
+  (`QDockWidget::toggleViewAction`) y accesos directos a las pestañas «Capas» y «Elevación».
+
+Rol nuevo en el árbol `RolBase` (id de capa base). Compila sin warnings, **19 tests** en verde
+(no-regresión; la librería no cambia). Validación visual en el PC del usuario. Siguiente: Fase C
+(diálogo de nueva entidad + flujo dibuja→Navegar).

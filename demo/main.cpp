@@ -67,6 +67,7 @@
 #include <QToolBar>
 #include <QToolTip>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QWidget>
@@ -81,6 +82,7 @@ namespace {
 //! Roles para distinguir capas de entidades en el arbol.
 constexpr int RolCapa = Qt::UserRole;        //!< id de capa (en ambos)
 constexpr int RolEntidad = Qt::UserRole + 1; //!< id de entidad (solo hojas)
+constexpr int RolBase = Qt::UserRole + 2;    //!< id de capa base (grupo «Base»)
 
 // --- Iconos de objetivos, dibujados en codigo -----------------------------
 // La libreria es agnostica del dominio: el JUEGO de iconos lo pone la app. Aqui
@@ -573,6 +575,7 @@ private:
     void construirPanel()
     {
         auto *dock = new QDockWidget(tr("Capas y entidades"), this);
+        m_dock = dock;
         dock->setObjectName(QStringLiteral("panel"));
         dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
         dock->setMinimumWidth(330);
@@ -582,7 +585,10 @@ private:
         caja->setContentsMargins(6, 6, 6, 6);
 
         // --- Arbol de capas y entidades ---------------------------------
-        caja->addWidget(new QLabel(tr("<b>Capas y entidades</b>")));
+        // Tres grupos fijos: «Base» (datasets de teselas, selección exclusiva),
+        // «Overlays» (vectores de solo lectura, ocultos al iniciar) y
+        // «Entidades» (puntos/líneas/polígonos del usuario, editables).
+        caja->addWidget(new QLabel(tr("<b>Capas</b> — marca para mostrar/ocultar")));
         m_arbol = new QTreeWidget(cont);
         m_arbol->setColumnCount(3);
         m_arbol->setHeaderLabels({tr("Nombre"), tr("Tipo"), tr("Vert.")});
@@ -694,6 +700,26 @@ private:
         dock->setWidget(m_tabs);
         addDockWidget(Qt::RightDockWidgetArea, dock);
 
+        // --- Toggles del panel en el menú «Ver» (m_menuVer lo dejó la Fase A) -
+        if (m_menuVer) {
+            m_menuVer->addSeparator();
+            QAction *accPanel = dock->toggleViewAction();
+            accPanel->setText(tr("Panel de capas"));
+            m_menuVer->addAction(accPanel);
+            auto *accCapas = new QAction(tr("Ir a pestaña Capas"), this);
+            connect(accCapas, &QAction::triggered, this, [this] {
+                m_dock->show(); m_dock->raise();
+                m_tabs->setCurrentIndex(0);
+            });
+            auto *accElev = new QAction(tr("Ir a pestaña Elevación"), this);
+            connect(accElev, &QAction::triggered, this, [this] {
+                m_dock->show(); m_dock->raise();
+                m_tabs->setCurrentIndex(1);
+            });
+            m_menuVer->addAction(accCapas);
+            m_menuVer->addAction(accElev);
+        }
+
         // Propiedades -> modelo.
         connect(m_campoNombre, &QLineEdit::editingFinished, this, &Ventana::aplicarPropiedades);
         connect(m_campoTipo, &QLineEdit::editingFinished, this, &Ventana::aplicarPropiedades);
@@ -776,6 +802,8 @@ private:
 
         connect(m_mapa, &MapWidget::zoomChanged, this, &Ventana::actualizarEstado);
         connect(m_mapa, &MapWidget::baseLayerChanged, this, &Ventana::actualizarEstado);
+        // Si la base cambia desde la barra o el menú, refleja la marca en el árbol.
+        connect(m_mapa, &MapWidget::baseLayerChanged, this, &Ventana::sincronizarBaseEnArbol);
         connect(m_mapa, &MapWidget::centerChanged, this, &Ventana::actualizarEstado);
 
         connect(m_mapa, &MapWidget::measurementFinished, this,
@@ -2059,13 +2087,31 @@ private:
         QSignalBlocker sinSenales(m_arbol);
         m_arbol->clear();
 
+        // --- Grupo «Base»: los datasets de teselas (uno visible a la vez) -----
+        // Casillas con comportamiento de radio: marcar una fija la capa base y
+        // desmarca las demás (lo resuelve visibilidadCambiada). No son editables.
+        QTreeWidgetItem *gBase = nuevoGrupo(tr("Base (mapa)"));
+        const QString baseActual = m_mapa->baseLayerId();
+        for (const BaseLayerInfo &b : m_mapa->availableBaseLayers()) {
+            auto *it = new QTreeWidgetItem(gBase);
+            it->setText(0, b.displayName.isEmpty() ? b.id : b.displayName);
+            it->setData(0, RolBase, b.id);
+            it->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable
+                         | Qt::ItemIsUserCheckable);
+            it->setCheckState(0, b.id == baseActual ? Qt::Checked : Qt::Unchecked);
+        }
+
+        // --- Capas vectoriales: overlays (no editables) vs entidades ----------
         // featureLayers() viene por zOrder ascendente; se invierte para que
         // arriba en el panel sea arriba en el mapa.
+        QTreeWidgetItem *gOver = nuevoGrupo(tr("Overlays (solo lectura)"));
+        QTreeWidgetItem *gEnt  = nuevoGrupo(tr("Entidades (editables)"));
         auto capas = m_mapa->featureLayers();
         std::reverse(capas.begin(), capas.end());
 
         for (const LayerInfo &c : capas) {
-            auto *nodo = new QTreeWidgetItem(m_arbol);
+            QTreeWidgetItem *grupo = c.editable ? gEnt : gOver;
+            auto *nodo = new QTreeWidgetItem(grupo);
             nodo->setText(0, QStringLiteral("%1  (%2)")
                 .arg(c.displayName.isEmpty() ? c.id : c.displayName)
                 .arg(c.featureCount));
@@ -2078,28 +2124,49 @@ private:
             f.setBold(c.id == activa);
             nodo->setFont(0, f);
 
-            for (const MapFeature &ent : m_mapa->featuresInLayer(c.id)) {
-                auto *hoja = new QTreeWidgetItem(nodo);
-                hoja->setText(0, ent.name.isEmpty()
-                    ? tr("(sin nombre) #%1").arg(ent.id) : ent.name);
-                hoja->setText(1, ent.type);
-                hoja->setText(2, QString::number(ent.geometry.size()));
-                hoja->setData(0, RolCapa, c.id);
-                hoja->setData(0, RolEntidad, ent.id);
+            // Las entidades del usuario se despliegan hoja a hoja; los overlays
+            // NO (pueden ser miles de polígonos: solo se muestra el recuento).
+            if (c.editable) {
+                for (const MapFeature &ent : m_mapa->featuresInLayer(c.id)) {
+                    auto *hoja = new QTreeWidgetItem(nodo);
+                    hoja->setText(0, ent.name.isEmpty()
+                        ? tr("(sin nombre) #%1").arg(ent.id) : ent.name);
+                    hoja->setText(1, ent.type);
+                    hoja->setText(2, QString::number(ent.geometry.size()));
+                    hoja->setData(0, RolCapa, c.id);
+                    hoja->setData(0, RolEntidad, ent.id);
 
-                QPixmap muestra(12, 12);
-                muestra.fill(ent.style.lineColor);
-                hoja->setIcon(0, QIcon(muestra));
+                    QPixmap muestra(12, 12);
+                    muestra.fill(ent.style.lineColor);
+                    hoja->setIcon(0, QIcon(muestra));
 
-                if (ent.id == sel) {
-                    hoja->setSelected(true);
-                    m_arbol->setCurrentItem(hoja);
+                    if (ent.id == sel) {
+                        hoja->setSelected(true);
+                        m_arbol->setCurrentItem(hoja);
+                    }
                 }
+                nodo->setExpanded(true);
             }
-            nodo->setExpanded(true);
         }
 
+        gBase->setExpanded(true);
+        gOver->setExpanded(true);
+        gEnt->setExpanded(true);
         actualizarEstado();
+    }
+
+    //! Crea una cabecera de grupo del árbol de capas (no seleccionable ni con
+    //! casilla; solo organiza visualmente las tres categorías).
+    QTreeWidgetItem *nuevoGrupo(const QString &titulo)
+    {
+        auto *g = new QTreeWidgetItem(m_arbol);
+        g->setText(0, titulo);
+        g->setFlags(Qt::ItemIsEnabled);           // ni casilla ni selección
+        g->setFirstColumnSpanned(true);
+        QFont f = g->font(0);
+        f.setBold(true);
+        g->setFont(0, f);
+        return g;
     }
 
     // Item marcado en el arbol, o nullptr.
@@ -2137,15 +2204,12 @@ private:
             m_arbol->setCurrentItem(nullptr);
             return;
         }
-        for (int i = 0; i < m_arbol->topLevelItemCount(); ++i) {
-            QTreeWidgetItem *capa = m_arbol->topLevelItem(i);
-            for (int j = 0; j < capa->childCount(); ++j) {
-                QTreeWidgetItem *hoja = capa->child(j);
-                if (hoja->data(0, RolEntidad).toLongLong() == id) {
-                    m_arbol->setCurrentItem(hoja);
-                    m_arbol->scrollToItem(hoja);
-                    return;
-                }
+        // Las hojas de entidad cuelgan de grupo→capa→entidad: se recorre todo.
+        for (QTreeWidgetItemIterator it(m_arbol); *it; ++it) {
+            if ((*it)->data(0, RolEntidad).toLongLong() == id) {
+                m_arbol->setCurrentItem(*it);
+                m_arbol->scrollToItem(*it);
+                return;
             }
         }
     }
@@ -2154,19 +2218,60 @@ private:
     {
         if (col != 0)
             return;
+
+        // Grupo «Base»: casillas con comportamiento de radio. Marcar una fija la
+        // capa base; desmarcar la activa no hace nada (siempre hay un mapa), así
+        // que se vuelve a marcar.
+        const QString base = item->data(0, RolBase).toString();
+        if (!base.isEmpty()) {
+            QSignalBlocker sinSenales(m_arbol);
+            if (item->checkState(0) != Qt::Checked) {
+                item->setCheckState(0, Qt::Checked);   // no se puede apagar el mapa
+                return;
+            }
+            m_mapa->setBaseLayerId(base);
+            if (m_capasBase)
+                m_capasBase->setCurrentIndex(m_capasBase->findData(base));
+            // Desmarcar las demás bases del mismo grupo.
+            if (QTreeWidgetItem *g = item->parent())
+                for (int i = 0; i < g->childCount(); ++i)
+                    if (QTreeWidgetItem *h = g->child(i); h != item)
+                        h->setCheckState(0, Qt::Unchecked);
+            return;
+        }
+
+        // Capas de overlays/entidades: casilla = visibilidad de la capa.
         const QString capa = item->data(0, RolCapa).toString();
         if (!capa.isEmpty() && item->data(0, RolEntidad).toLongLong() == 0)
             m_mapa->setFeatureLayerVisible(capa, item->checkState(0) == Qt::Checked);
     }
 
+    //! Marca en el árbol la base activa (cuando cambia desde la barra o el menú,
+    //! que no reconstruyen el panel). Solo toca las casillas del grupo «Base».
+    void sincronizarBaseEnArbol(const QString &id)
+    {
+        if (!m_arbol)
+            return;
+        QSignalBlocker sinSenales(m_arbol);
+        for (QTreeWidgetItemIterator it(m_arbol); *it; ++it) {
+            const QString base = (*it)->data(0, RolBase).toString();
+            if (!base.isEmpty())
+                (*it)->setCheckState(0, base == id ? Qt::Checked : Qt::Unchecked);
+        }
+    }
+
     void resaltarCapaActiva()
     {
         const QString activa = m_mapa->activeFeatureLayer();
-        for (int i = 0; i < m_arbol->topLevelItemCount(); ++i) {
-            QTreeWidgetItem *c = m_arbol->topLevelItem(i);
-            QFont f = c->font(0);
-            f.setBold(c->data(0, RolCapa).toString() == activa);
-            c->setFont(0, f);
+        // Las capas cuelgan de las cabeceras de grupo: se recorre el árbol y se
+        // pone en negrita la capa activa (sin tocar las cabeceras, sin RolCapa).
+        for (QTreeWidgetItemIterator it(m_arbol); *it; ++it) {
+            const QString capa = (*it)->data(0, RolCapa).toString();
+            if (capa.isEmpty() || (*it)->data(0, RolEntidad).toLongLong() != 0)
+                continue;
+            QFont f = (*it)->font(0);
+            f.setBold(capa == activa);
+            (*it)->setFont(0, f);
         }
     }
 
@@ -2684,6 +2789,7 @@ private:
     QAction *m_accCobertura = nullptr;
     QMenu *m_menuVer = nullptr;
 
+    QDockWidget *m_dock = nullptr;   //!< panel lateral «Capas y entidades»
     QTreeWidget *m_arbol = nullptr;
     QLineEdit *m_campoNombre = nullptr;
     QLineEdit *m_campoTipo = nullptr;
