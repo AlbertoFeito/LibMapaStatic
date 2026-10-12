@@ -6,6 +6,7 @@
 
 #include <QBuffer>
 #include <QFileInfo>
+#include <QHash>
 #include <QImageReader>
 // Qt5 solo DECLARA QVariant en qsqlquery.h (Qt6 si lo incluye), asi que
 // hay que pedirlo explicitamente: sin esto, bindValue() no compila en
@@ -31,6 +32,54 @@ double overlap(double a1, double a2, double b1, double b2)
     if (a1 > a2) std::swap(a1, a2);
     if (b1 > b2) std::swap(b1, b2);
     return std::max(0.0, std::min(a2, b2) - std::max(a1, b1));
+}
+
+//! Nombres de todas las tablas Y VISTAS de usuario (sin las internas sqlite_).
+//! Hay que incluir las vistas porque un MBTiles normalizado expone 'tiles' como
+//! una VISTA sobre las tablas 'map' e 'images', no como tabla.
+QStringList tablesAndViews(QSqlDatabase &db)
+{
+    QStringList names;
+    QSqlQuery q(db);
+    if (q.exec(QStringLiteral("SELECT name FROM sqlite_master "
+                              "WHERE type IN ('table','view')"))) {
+        while (q.next()) {
+            const QString n = q.value(0).toString();
+            if (!n.startsWith(QLatin1String("sqlite_")))
+                names << n;
+        }
+    }
+    return names;
+}
+
+//! Lee la tabla 'metadata' de un MBTiles (pares name/value) a un diccionario.
+//! Vacio si no existe o no se puede leer. Ahi viven minzoom/maxzoom/bounds/format.
+QHash<QString, QString> readMetadata(QSqlDatabase &db)
+{
+    QHash<QString, QString> meta;
+    QSqlQuery q(db);
+    if (q.exec(QStringLiteral("SELECT name, value FROM metadata"))) {
+        while (q.next())
+            meta.insert(q.value(0).toString().toLower(), q.value(1).toString());
+    }
+    return meta;
+}
+
+//! Convierte el 'bounds' de un MBTiles ("minLon,minLat,maxLon,maxLat") en un
+//! QGeoRectangle. Deja *ok en false si no son cuatro numeros validos.
+QGeoRectangle boundsToRect(const QString &csv, bool *ok)
+{
+    *ok = false;
+    const QStringList p = csv.split(QLatin1Char(','));
+    if (p.size() != 4)
+        return {};
+    bool a = false, b = false, c = false, d = false;
+    const double loW = p[0].toDouble(&a), laS = p[1].toDouble(&b);
+    const double loE = p[2].toDouble(&c), laN = p[3].toDouble(&d);
+    if (!a || !b || !c || !d)
+        return {};
+    *ok = true;
+    return QGeoRectangle(QGeoCoordinate(laN, loW), QGeoCoordinate(laS, loE));
 }
 
 } // namespace
@@ -100,7 +149,8 @@ int bitsNeededFor(int maxIndex)
 // de referencia, afinando por solape en longitud. Es la parte mas delicada.
 bool TileDatasetProbe::detectZMapping(QSqlDatabase &db, TileDataset &ds,
                                       ProbeResult &result,
-                                      const QGeoRectangle &reference)
+                                      const QGeoRectangle &reference,
+                                      bool mbtiles)
 {
     QSqlQuery q(db);
 
@@ -134,11 +184,20 @@ bool TileDatasetProbe::detectZMapping(QSqlDatabase &db, TileDataset &ds,
     const int zMin = raw.first().storedZ;
     const int zMax = raw.last().storedZ;
 
+    // MBTiles trae el zoom estandar (storedZ = logicalZ) y el eje Y en TMS por
+    // especificacion: no hay nada que INFERIR, se fija directo. Para el resto de
+    // BD se deduce la inversion y el offset de z a partir de los datos.
+    bool inverted = false;
+    int bestOffset = 0;
+    const bool haveRef = reference.isValid();
+    if (mbtiles) {
+        result.zMappingReason = QStringLiteral(
+            "MBTiles: storedZ = logicalZ (zFactor 1, offset 0).");
+    } else {
     // Criterio de inversion: la anchura del mundo en teselas es 2^z, asi que
     // en un esquema DIRECTO el nivel de z mayor tiene mas teselas que el de z
     // menor. Si ocurre lo contrario, z esta invertido (es un "nivel de
     // reduccion", como el "18 - Zoom_Level" del codigo satelital original).
-    bool inverted = false;
     if (raw.size() >= 2) {
         const qint64 atLow  = raw.first().tileCount;
         const qint64 atHigh = raw.last().tileCount;
@@ -215,9 +274,8 @@ bool TileDatasetProbe::detectZMapping(QSqlDatabase &db, TileDataset &ds,
         else          offsetLo = offsetHi - 12;
     }
 
-    int bestOffset = INT_MIN;
+    bestOffset = INT_MIN;
     double bestScore = -1.0;
-    const bool haveRef = reference.isValid();
 
     for (int c = offsetLo; c <= offsetHi; ++c) {
         if (!fitsWorld(inverted, c))
@@ -261,6 +319,7 @@ bool TileDatasetProbe::detectZMapping(QSqlDatabase &db, TileDataset &ds,
             "No se encontro un offset de zoom coherente; se usa %1.")
             .arg(bestOffset);
     }
+    }   // fin de la inferencia para BD que no son MBTiles
 
     ds.zFactor = inverted ? -1 : 1;
     ds.zOffset = bestOffset;
@@ -280,7 +339,7 @@ bool TileDatasetProbe::detectZMapping(QSqlDatabase &db, TileDataset &ds,
         .arg(haveRef ? QStringLiteral("offset elegido por solape en longitud")
                      : QStringLiteral("offset por cota geometrica, SIN verificar"));
 
-    if (!haveRef) {
+    if (!haveRef && !mbtiles) {
         result.warnings << QStringLiteral(
             "Offset de zoom no verificado con datos. Pasar --ref-bbox.");
     }
@@ -394,12 +453,21 @@ bool TileDatasetProbe::detectZMapping(QSqlDatabase &db, TileDataset &ds,
 // la referencia geografica: si TMS encaja mejor que XYZ, se marca TMS.
 void TileDatasetProbe::detectScheme(QSqlDatabase &db, TileDataset &ds,
                                     ProbeResult &result,
-                                    const QGeoRectangle &reference)
+                                    const QGeoRectangle &reference,
+                                    bool mbtiles)
 {
     Q_UNUSED(db)
 
     if (result.levels.isEmpty())
         return;
+
+    // MBTiles define el eje Y en TMS (origen abajo) por especificacion: no se
+    // vota, se fija. Esto permite reconocerlo sin --ref-bbox.
+    if (mbtiles) {
+        ds.scheme = TileScheme::TMS;
+        result.schemeReason = QStringLiteral(
+            "MBTiles: eje Y en TMS por especificacion.");
+    } else
 
     // -------------------------------------------------------------------
     // 1. Esquema del eje Y: VOTACION PONDERADA entre todos los niveles.
@@ -639,18 +707,12 @@ std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
     if (q.exec(QStringLiteral("PRAGMA page_size")) && q.next())
         result.pageSize = q.value(0).toInt();
 
-    // Localizar la tabla de teselas.
-    QStringList tables;
-    if (q.exec(QStringLiteral("SELECT name FROM sqlite_master "
-                              "WHERE type='table'"))) {
-        while (q.next())
-            tables << q.value(0).toString();
-    }
+    // Localizar la tabla de teselas, incluyendo VISTAS: un MBTiles normalizado
+    // expone 'tiles' como vista sobre 'map' + 'images'.
+    const QStringList tables = tablesAndViews(db);
     if (!tables.contains(QStringLiteral("tiles"), Qt::CaseInsensitive)) {
         bool found = false;
         for (const QString &t : tables) {
-            if (t.startsWith(QLatin1String("sqlite_")))
-                continue;
             result.dataset.tableName = t;
             found = true;
             break;
@@ -665,10 +727,46 @@ std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
 
     if (!detectColumns(db, result.dataset, result.warnings))
         return std::nullopt;
-    if (!detectZMapping(db, result.dataset, result, reference))
+
+    // ¿Es un MBTiles? Lo delata la tabla 'metadata' + la columna 'tile_data'.
+    // En ese caso el esquema es conocido (TMS, storedZ=logicalZ) y los limites
+    // vienen en 'metadata', asi que se reconoce SIN --ref-bbox.
+    const bool mbtiles =
+        tables.contains(QStringLiteral("metadata"), Qt::CaseInsensitive)
+        && result.dataset.colImage.compare(QLatin1String("tile_data"),
+                                           Qt::CaseInsensitive) == 0;
+
+    QGeoRectangle effRef = reference;   // referencia efectiva para la sonda
+    if (mbtiles) {
+        const QHash<QString, QString> meta = readMetadata(db);
+        const QString formato = meta.value(QStringLiteral("format")).toLower();
+        if (formato == QLatin1String("pbf") || formato == QLatin1String("mvt")) {
+            result.warnings << QStringLiteral(
+                "MBTiles VECTORIAL (format=%1): la libreria dibuja teselas de "
+                "imagen (PNG/JPG/WebP), no vectoriales; esta BD no se mostrara.")
+                .arg(formato);
+        }
+        // Si no se paso --ref-bbox, se toma la extension de 'metadata.bounds'
+        // (minLon,minLat,maxLon,maxLat), con lo que la sonda se autoajusta.
+        if (!effRef.isValid() && meta.contains(QStringLiteral("bounds"))) {
+            bool okB = false;
+            const QGeoRectangle b =
+                boundsToRect(meta.value(QStringLiteral("bounds")), &okB);
+            if (okB)
+                effRef = b;
+        }
+        result.warnings << QStringLiteral(
+            "MBTiles detectado: eje Y TMS y zoom estandar fijados por "
+            "especificacion%1.")
+            .arg(effRef.isValid() && !reference.isValid()
+                     ? QStringLiteral(" (extension tomada de metadata.bounds)")
+                     : QString());
+    }
+
+    if (!detectZMapping(db, result.dataset, result, effRef, mbtiles))
         return std::nullopt;
 
-    detectScheme(db, result.dataset, result, reference);
+    detectScheme(db, result.dataset, result, effRef, mbtiles);
     detectTileSize(db, result.dataset, result);
 
     return result;

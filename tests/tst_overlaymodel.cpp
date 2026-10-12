@@ -31,6 +31,11 @@ private slots:
     void refusesToDegenerateGeometry();
     void movesWholeFeature();
     void refusesMovesOutsideTheWorld();
+    //! setLabelOffset guarda el desplazamiento del rotulo y avisa (lo usa el
+    //! arrastre de la etiqueta).
+    void setsLabelOffsetAndNotifies();
+    //! insertVertex respeta el tope 'max_vertices' (área objetivo de ≤N puntos).
+    void insertVertexRespectsMaxVerticesCap();
 
     // --- Seleccion y senales ---------------------------------------------
     void tracksSelection();
@@ -398,6 +403,44 @@ void TstOverlayModel::emitsChangedOnEveryMutation()
 
     // Una sola senal para todo: al que dibuja no le importa que cambio.
     QCOMPARE(cambios.count(), esperados);
+}
+
+void TstOverlayModel::setsLabelOffsetAndNotifies()
+{
+    OverlayModel m;
+    const qint64 id = m.addFeature(punto(QStringLiteral("Obj"), 23.0, -82.0));
+    QVERIFY(id > 0);
+
+    QSignalSpy upd(&m, &OverlayModel::featureUpdated);
+    QVERIFY(m.setLabelOffset(id, QPointF(30.0, -12.0)));
+    QCOMPARE(upd.count(), 1);
+
+    const auto f = m.feature(id);
+    QVERIFY(f.has_value());
+    QCOMPARE(f->style.labelOffsetPx, QPointF(30.0, -12.0));
+
+    // Id inexistente: no hace nada y lo dice.
+    QVERIFY(!m.setLabelOffset(99999, QPointF(1.0, 1.0)));
+}
+
+void TstOverlayModel::insertVertexRespectsMaxVerticesCap()
+{
+    OverlayModel m;
+    MapFeature area = poligono(QStringLiteral("Area"), 10);  // ya tiene 10 vertices
+    area.type = QStringLiteral("objetivo_area");
+    area.attributes.insert(QStringLiteral("max_vertices"), 10);
+    const qint64 id = m.addFeature(area);
+    QVERIFY(id > 0);
+
+    // En el tope (10/10): no se puede insertar un vertice mas.
+    QVERIFY(!m.insertVertex(id, 10, QGeoCoordinate(24.0, -83.0)));
+    QCOMPARE(m.feature(id)->geometry.size(), 10);
+
+    // Sin tope, un poligono equivalente sí admite el vertice 11.
+    MapFeature libre = poligono(QStringLiteral("Libre"), 10);
+    const qint64 id2 = m.addFeature(libre);
+    QVERIFY(m.insertVertex(id2, 10, QGeoCoordinate(24.0, -83.0)));
+    QCOMPARE(m.feature(id2)->geometry.size(), 11);
 }
 
 QTEST_MAIN(TstOverlayModel)

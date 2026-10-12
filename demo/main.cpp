@@ -22,6 +22,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
@@ -49,6 +50,7 @@
 #include <QProgressDialog>
 #include <QMainWindow>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QCursor>
 #include <QPainter>
@@ -63,9 +65,14 @@
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTimer>
+#include <QPalette>
+#include <QScrollArea>
+#include <QSettings>
 #include <QToolBar>
+#include <QToolButton>
 #include <QToolTip>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QWidget>
@@ -80,6 +87,7 @@ namespace {
 //! Roles para distinguir capas de entidades en el arbol.
 constexpr int RolCapa = Qt::UserRole;        //!< id de capa (en ambos)
 constexpr int RolEntidad = Qt::UserRole + 1; //!< id de entidad (solo hojas)
+constexpr int RolBase = Qt::UserRole + 2;    //!< id de capa base (grupo «Base»)
 
 // --- Iconos de objetivos, dibujados en codigo -----------------------------
 // La libreria es agnostica del dominio: el JUEGO de iconos lo pone la app. Aqui
@@ -153,6 +161,159 @@ QPixmap iconoUav(const QColor &c)
 }
 
 
+// Sección plegable: una cabecera con flecha (QToolButton) que muestra/oculta su
+// contenido. No necesita Q_OBJECT (no define señales propias; connect es estático).
+// Se usa en la ficha contextual de la entidad para Atributos/Coordenadas/Estilo.
+class SeccionPlegable : public QWidget
+{
+public:
+    explicit SeccionPlegable(const QString &titulo, QWidget *parent = nullptr,
+                             bool abierta = false)
+        : QWidget(parent)
+    {
+        auto *v = new QVBoxLayout(this);
+        v->setContentsMargins(0, 0, 0, 0);
+        v->setSpacing(2);
+
+        m_boton = new QToolButton(this);
+        m_boton->setText(titulo);
+        m_boton->setCheckable(true);
+        m_boton->setChecked(abierta);
+        m_boton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        m_boton->setArrowType(abierta ? Qt::DownArrow : Qt::RightArrow);
+        m_boton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_boton->setObjectName(QStringLiteral("seccionHeader"));
+        v->addWidget(m_boton);
+
+        m_cont = new QWidget(this);
+        m_cont->setVisible(abierta);
+        v->addWidget(m_cont);
+
+        QObject::connect(m_boton, &QToolButton::toggled, m_cont,
+                         [this](bool on) {
+                             m_cont->setVisible(on);
+                             m_boton->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
+                         });
+    }
+
+    //! Widget donde colocar el contenido (se le pone un layout desde fuera).
+    QWidget *contenido() const { return m_cont; }
+
+private:
+    QToolButton *m_boton;
+    QWidget *m_cont;
+};
+
+// Dibuja en código un icono de herramienta (glifo lineal) del color \a c, para
+// que se recoloree según el tema (claro/oscuro). Estilo coherente: trazo fino,
+// 20×20, sin relleno salvo donde ayuda a leerlo. \a k es la clave de la acción.
+inline QIcon glifo(const QString &k, const QColor &c)
+{
+    QPixmap pm(20, 20);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPen pen(c, 1.7);
+    pen.setJoinStyle(Qt::RoundJoin);
+    pen.setCapStyle(Qt::RoundCap);
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+
+    if (k == QLatin1String("navegar")) {               // flecha de cursor
+        QPolygonF f({{5, 3}, {5, 16}, {8.5, 12.5}, {11, 17}, {13, 16}, {10.5, 11.5}, {15, 11}});
+        p.setBrush(c); p.drawPolygon(f);
+    } else if (k == QLatin1String("medir")) {          // regla con marcas
+        p.drawRect(QRectF(3, 7, 14, 6));
+        for (double x = 5; x < 17; x += 3)
+            p.drawLine(QPointF(x, 7), QPointF(x, 10));
+    } else if (k == QLatin1String("zoom")) {           // lupa con +
+        p.drawEllipse(QPointF(8.5, 8.5), 5, 5);
+        p.drawLine(QPointF(12.5, 12.5), QPointF(17, 17));
+        p.drawLine(QPointF(8.5, 6), QPointF(8.5, 11));
+        p.drawLine(QPointF(6, 8.5), QPointF(11, 8.5));
+    } else if (k == QLatin1String("punto")) {          // punto con anillo
+        p.drawEllipse(QPointF(10, 10), 5.5, 5.5);
+        p.setBrush(c); p.drawEllipse(QPointF(10, 10), 2.2, 2.2);
+    } else if (k == QLatin1String("linea")) {          // polilínea + vértices
+        p.drawPolyline(QPolygonF({{3.5, 15}, {9, 6}, {16.5, 13}}));
+        p.setBrush(c);
+        for (const QPointF &v : {QPointF(3.5, 15), QPointF(9, 6), QPointF(16.5, 13)})
+            p.drawEllipse(v, 1.7, 1.7);
+    } else if (k == QLatin1String("poligono")) {       // pentágono + vértices
+        QPolygonF pg({{10, 3}, {17, 8.5}, {14, 17}, {6, 17}, {3, 8.5}});
+        p.drawPolygon(pg);
+        p.setBrush(c);
+        for (const QPointF &v : pg) p.drawEllipse(v, 1.5, 1.5);
+    } else if (k == QLatin1String("objetivo")) {       // cruz de mira
+        p.drawEllipse(QPointF(10, 10), 5.5, 5.5);
+        p.drawLine(QPointF(10, 1.5), QPointF(10, 5));
+        p.drawLine(QPointF(10, 15), QPointF(10, 18.5));
+        p.drawLine(QPointF(1.5, 10), QPointF(5, 10));
+        p.drawLine(QPointF(15, 10), QPointF(18.5, 10));
+        p.setBrush(c); p.drawEllipse(QPointF(10, 10), 1.3, 1.3);
+    } else if (k == QLatin1String("area")) {           // pentágono relleno suave
+        QPolygonF pg({{10, 3}, {17, 8.5}, {14, 17}, {6, 17}, {3, 8.5}});
+        QColor relleno = c; relleno.setAlpha(45);
+        p.setBrush(relleno); p.drawPolygon(pg);
+        p.setBrush(c); p.drawEllipse(QPointF(10, 3), 2.2, 2.2);   // 1er vértice
+    } else if (k == QLatin1String("editar")) {         // lápiz
+        QPolygonF cuerpo({{12.5, 3.5}, {16.5, 7.5}, {7.5, 16.5}, {3.5, 12.5}});
+        p.drawPolygon(cuerpo);
+        p.drawLine(QPointF(11, 5), QPointF(15, 9));     // virola
+        p.setBrush(c);                                  // punta de grafito
+        p.drawPolygon(QPolygonF({{3.5, 12.5}, {7.5, 16.5}, {2.8, 17.2}}));
+    } else if (k == QLatin1String("deshacer") || k == QLatin1String("rehacer")) {
+        const bool re = (k == QLatin1String("rehacer"));
+        QPainterPath path;                              // flecha curva de retorno
+        if (re) { path.moveTo(5, 8); path.cubicTo(7, 4.5, 13, 4.5, 15, 8.5); }
+        else    { path.moveTo(15, 8); path.cubicTo(13, 4.5, 7, 4.5, 5, 8.5); }
+        p.drawPath(path);
+        p.setBrush(c);
+        if (re) p.drawPolygon(QPolygonF({{15, 8.5}, {11.5, 9}, {14, 12}}));
+        else    p.drawPolygon(QPolygonF({{5, 8.5}, {8.5, 9}, {6, 12}}));
+    } else if (k == QLatin1String("borrar")) {         // papelera
+        p.drawLine(QPointF(4, 6), QPointF(16, 6));
+        p.drawRect(QRectF(5.5, 6, 9, 11));
+        p.drawRect(QRectF(8, 3.5, 4, 2.5));
+        for (double x = 8; x <= 12; x += 2) p.drawLine(QPointF(x, 8.5), QPointF(x, 14.5));
+    } else if (k == QLatin1String("deshacer") || k == QLatin1String("rehacer")) {
+        const bool re = (k == QLatin1String("rehacer"));
+        QRectF arc(4, 5, 12, 10);
+        p.drawArc(arc, 30 * 16, (re ? -200 : 200) * 16);
+        const QPointF tip = re ? QPointF(15.5, 7.5) : QPointF(4.5, 7.5);
+        const double dx = re ? -1.0 : 1.0;
+        p.setBrush(c);
+        p.drawPolygon(QPolygonF({tip, {tip.x() + 3.5 * dx, tip.y() - 1},
+                                 {tip.x() + 1.5 * dx, tip.y() + 3}}));
+    } else if (k == QLatin1String("guardar")) {        // disquete
+        QPolygonF cuerpo({{3.5, 3.5}, {14, 3.5}, {16.5, 6}, {16.5, 16.5}, {3.5, 16.5}});
+        p.drawPolygon(cuerpo);
+        p.drawRect(QRectF(6.5, 3.5, 5, 3.5));
+        p.drawRect(QRectF(6, 10.5, 8, 6));
+    } else if (k == QLatin1String("abrir")) {          // carpeta
+        p.drawPolyline(QPolygonF({{3, 15.5}, {3, 6}, {8, 6}, {9.5, 8}, {17, 8}, {17, 15.5}, {3, 15.5}}));
+    } else if (k == QLatin1String("rejilla")) {        // cuadrícula
+        p.drawRect(QRectF(4, 4, 12, 12));
+        p.drawLine(QPointF(10, 4), QPointF(10, 16));
+        p.drawLine(QPointF(4, 10), QPointF(16, 10));
+    } else if (k == QLatin1String("cobertura")) {      // mancha / tablero
+        QColor relleno = c; relleno.setAlpha(55);
+        p.setBrush(relleno);
+        p.drawRoundedRect(QRectF(4, 5, 12, 10), 3, 3);
+    } else if (k == QLatin1String("geo")) {            // capas apiladas
+        p.drawPolygon(QPolygonF({{10, 3.5}, {17, 7}, {10, 10.5}, {3, 7}}));
+        p.drawPolyline(QPolygonF({{3, 11}, {10, 14.5}, {17, 11}}));
+    } else if (k == QLatin1String("simular")) {        // play
+        p.setBrush(c); p.drawPolygon(QPolygonF({{6, 4}, {16, 10}, {6, 16}}));
+    } else if (k == QLatin1String("dem")) {            // montaña
+        p.drawPolyline(QPolygonF({{3, 16}, {8, 7}, {11, 12}, {13.5, 8.5}, {17, 16}}));
+    } else {
+        p.drawEllipse(QPointF(10, 10), 5, 5);          // genérico
+    }
+    p.end();
+    return QIcon(pm);
+}
+
 } // namespace
 
 class Ventana : public QMainWindow
@@ -182,7 +343,12 @@ public:
         }
         cfg.elevationDir = demDir;          // carpeta .hgt para la cota (opcional)
         cfg.elevationDbFile = demDb;        // BD de elevacion (prioritaria si viene)
-        cfg.featuresDbFile = featuresDb;    // persistencia automatica (opcional)
+        // GUARDADO EXPLÍCITO: se apaga el autoguardado. Esto es CLAVE con un
+        // paquete: si no, al dejar featuresDbFile vacío la librería usaría el
+        // fichero de entidades del propio paquete y guardaría/ recargaría solo.
+        // Con autosaveFeatures=false no se toca ese fichero; --features (abajo)
+        // se carga a mano y «Guardar» escribe solo cuando el usuario lo pide.
+        cfg.autosaveFeatures = false;
         cfg.cacheMiB = 192;
 
         m_demActivo = esPaquete || !demDir.isEmpty() || !demDb.isEmpty();
@@ -207,14 +373,29 @@ public:
         m_reconstruir->setInterval(0);
         connect(m_reconstruir, &QTimer::timeout, this, &Ventana::reconstruirPanel);
 
-        construirBarraMapa();
-        construirBarraEntidades();
-        construirBarraDatos();
+        construirMenuYBarra();
         construirPanel();
         conectarSenales();
         aplicarEstiloAlTrazo();
         prepararSeguimiento();
+
+        // Guardado explícito: si viene --features, se CARGA (si existe) y se
+        // recuerda como fichero de trabajo; a partir de ahí «Guardar» escribe
+        // ahí, pero nada se guarda solo. loadFeaturesFrom reinyecta los overlays
+        // del paquete (los deja visibles), así que la carga va ANTES de ocultar.
+        if (!featuresDb.isEmpty()) {
+            if (QFileInfo::exists(featuresDb))
+                m_mapa->loadFeaturesFrom(featuresDb);
+            m_archivoActual = featuresDb;
+            m_sucio = false;
+            actualizarTitulo();
+        }
+
         reconstruirPanel();
+        ocultarOverlaysAlIniciar();   // los overlays arrancan ocultos (no cargan)
+
+        // Tema elegido por el usuario (recordado en QSettings; claro por defecto).
+        aplicarTema(QSettings().value(QStringLiteral("tema/oscuro"), false).toBool());
 
         // Asi deberia hacerlo una app real: el mapa arranca con lo que funcione
         // y avisa de lo que no (fichero que falta, imagenes sin plugin...).
@@ -227,192 +408,752 @@ public:
 
 private:
     // ==================================================== barras ==========
-    void construirBarraMapa()
+    //! Crea una acción de herramienta (grupo exclusivo de dibujo/navegación).
+    QAction *accHerr(const QString &texto, MapTool tool,
+                     const QString &atajo = QString(),
+                     const QString &claveIcono = QString())
     {
-        auto *barra = addToolBar(tr("Mapa"));
-        barra->setObjectName(QStringLiteral("barraMapa"));
-        barra->setMovable(false);
-
-        barra->addWidget(new QLabel(tr("  Base: ")));
-        m_capasBase = new QComboBox(this);
-        for (const BaseLayerInfo &c : m_mapa->availableBaseLayers())
-            m_capasBase->addItem(c.displayName, c.id);
-        m_capasBase->setCurrentIndex(m_capasBase->findData(m_mapa->baseLayerId()));
-        barra->addWidget(m_capasBase);
-
-        barra->addSeparator();
-        auto *masZoom = barra->addAction(tr("Ampliar"));
-        auto *menosZoom = barra->addAction(tr("Reducir"));
-        connect(masZoom, &QAction::triggered, m_mapa, &MapWidget::zoomIn);
-        connect(menosZoom, &QAction::triggered, m_mapa, &MapWidget::zoomOut);
-        auto *cuba = barra->addAction(tr("Toda Cuba"));
-        connect(cuba, &QAction::triggered, this, [this] {
-            m_mapa->fitBounds(QGeoCoordinate(23.3, -85.0),
-                              QGeoCoordinate(19.7, -74.0));
-        });
-
-        barra->addSeparator();
-        auto *rejilla = barra->addAction(tr("Rejilla"));
-        rejilla->setCheckable(true);
-        connect(rejilla, &QAction::toggled, m_mapa, &MapWidget::setDebugGridVisible);
-
-        // Mancha de COBERTURA por zoom (como en fill_map, pero sin descarga):
-        // muestra que zonas del zoom elegido ya estan en la BD, visible aunque
-        // mires a otro zoom. Verde = llena, ambar = a medias.
-        auto *cobertura = barra->addAction(tr("Cobertura"));
-        cobertura->setCheckable(true);
-        cobertura->setToolTip(tr("Mancha fija de las zonas que ya tienen teselas\n"
-                                 "del zoom elegido al lado (verde: llena; ambar: a medias)."));
-        barra->addWidget(new QLabel(tr(" z:")));
-        m_zCobertura = new QSpinBox(this);
-        m_zCobertura->setRange(0, 22);
-        m_zCobertura->setValue(14);
-        m_zCobertura->setToolTip(tr("Zoom cuya cobertura se dibuja en la mancha."));
-        barra->addWidget(m_zCobertura);
-        connect(cobertura, &QAction::toggled, this, [this](bool on) {
-            m_mapa->setCoverageZoom(m_zCobertura->value());
-            m_mapa->setCoverageVisible(on);
-        });
-        connect(m_zCobertura, QOverload<int>::of(&QSpinBox::valueChanged),
-                this, [this, cobertura](int v) {
-            if (cobertura->isChecked())
-                m_mapa->setCoverageZoom(v);
-        });
-
-        // Elevacion del terreno: elige una CARPETA de `.hgt` o una BASE DE DATOS
-        // `.sqlitedb`; la cota aparece bajo el cursor en la barra de estado.
-        m_btnDem = new QPushButton(tr("DEM..."), this);
-        m_btnDem->setToolTip(tr("Origen de elevacion: carpeta de .hgt o base de "
-                                "datos .sqlitedb. Muestra la cota bajo el cursor."));
-        QMenu *menuDem = new QMenu(m_btnDem);
-        connect(menuDem->addAction(tr("Carpeta de .hgt...")),
-                &QAction::triggered, this, &Ventana::alElegirDemCarpeta);
-        connect(menuDem->addAction(tr("Base de datos .sqlitedb...")),
-                &QAction::triggered, this, &Ventana::alElegirDemDb);
-        m_btnDem->setMenu(menuDem);
-        barra->addWidget(m_btnDem);
-
-        barra->addSeparator();
-        // Persistencia: guardar y abrir un fichero SQLite de entidades.
-        auto *guardar = barra->addAction(tr("Guardar"));
-        guardar->setShortcut(QKeySequence::Save);
-        auto *guardarComo = barra->addAction(tr("Guardar como..."));
-        auto *abrir = barra->addAction(tr("Abrir..."));
-        abrir->setShortcut(QKeySequence::Open);
-        connect(guardar, &QAction::triggered, this, &Ventana::guardar);
-        connect(guardarComo, &QAction::triggered, this, &Ventana::guardarComo);
-        connect(abrir, &QAction::triggered, this, &Ventana::abrir);
-    }
-
-    void construirBarraEntidades()
-    {
-        auto *barra = addToolBar(tr("Entidades"));
-        barra->setObjectName(QStringLiteral("barraEntidades"));
-        barra->setMovable(false);
-
-        // Todas las herramientas en UN grupo exclusivo: elegir una desmarca la
-        // anterior, tambien entre navegacion y dibujo (en el demo anterior
-        // "Medir" no se desmarcaba al empezar a dibujar).
-        m_grupo = new QActionGroup(this);
-        m_grupo->setExclusive(true);
-
-        m_accNavegar = nuevaHerramienta(barra, tr("Navegar"),   MapTool::None);
-        nuevaHerramienta(barra, tr("Medir"),     MapTool::Measure);
-        nuevaHerramienta(barra, tr("Zoom area"), MapTool::AreaZoom);
-        barra->addSeparator();
-        nuevaHerramienta(barra, tr("Punto"),     MapTool::DrawPoint,    QStringLiteral("1"));
-        nuevaHerramienta(barra, tr("Linea"),     MapTool::DrawPolyline, QStringLiteral("2"));
-        nuevaHerramienta(barra, tr("Poligono"),  MapTool::DrawPolygon,  QStringLiteral("3"));
-        nuevaHerramienta(barra, tr("Editar"),    MapTool::EditFeature,  QStringLiteral("4"));
-        m_accNavegar->setChecked(true);
-
-        barra->addSeparator();
-        m_accDeshacer = barra->addAction(tr("Deshacer"));
-        m_accDeshacer->setShortcut(QKeySequence::Undo);
-        m_accRehacer = barra->addAction(tr("Rehacer"));
-        m_accRehacer->setShortcut(QKeySequence::Redo);
-        connect(m_accDeshacer, &QAction::triggered, m_mapa, [this] { m_mapa->undo(); });
-        connect(m_accRehacer,  &QAction::triggered, m_mapa, [this] { m_mapa->redo(); });
-
-        barra->addSeparator();
-        m_accBorrar = barra->addAction(tr("Borrar entidad"));
-        m_accBorrar->setToolTip(tr("Borra la entidad seleccionada. Tambien Supr "
-                                   "con el panel enfocado."));
-        connect(m_accBorrar, &QAction::triggered, this, &Ventana::borrarSeleccion);
-    }
-
-    QAction *nuevaHerramienta(QToolBar *barra, const QString &texto, MapTool tool,
-                              const QString &atajo = QString())
-    {
-        QAction *a = barra->addAction(texto);
+        auto *a = new QAction(texto, this);
         a->setCheckable(true);
         a->setData(static_cast<int>(tool));
         if (!atajo.isEmpty())
             a->setShortcut(QKeySequence(atajo));
+        if (!claveIcono.isEmpty())
+            a->setProperty("glifo", claveIcono);   // lo recolorea aplicarIconos
         m_grupo->addAction(a);
         return a;
     }
 
-    //! Barra: cargar ficheros .geo y simular objetivos moviles.
-    void construirBarraDatos()
+    //! Barra de menú + una barra de herramientas principal + una secundaria de
+    //! datos/terreno. Todo a partir de acciones compartidas (un solo origen).
+    void construirMenuYBarra()
     {
-        auto *barra = addToolBar(tr("Datos"));
-        barra->setObjectName(QStringLiteral("barraDatos"));
-        barra->setMovable(false);
+        m_grupo = new QActionGroup(this);
+        m_grupo->setExclusive(true);
 
-        auto *geo = barra->addAction(tr("Cargar .geo..."));
-        geo->setToolTip(tr("Carga un contorno .geo como una capa nueva"));
-        connect(geo, &QAction::triggered, this, &Ventana::cargarGeo);
+        // --- Acciones de navegación y dibujo (grupo exclusivo) ---------------
+        m_accNavegar  = accHerr(tr("Navegar"), MapTool::None, QString(), QStringLiteral("navegar"));
+        m_accNavegar->setChecked(true);
+        m_accMedir    = accHerr(tr("Medir"), MapTool::Measure, QString(), QStringLiteral("medir"));
+        m_accZoomArea = accHerr(tr("Zoom área"), MapTool::AreaZoom, QString(), QStringLiteral("zoom"));
+        m_accPunto    = accHerr(tr("Punto"), MapTool::DrawPoint, QStringLiteral("1"), QStringLiteral("punto"));
+        m_accLinea    = accHerr(tr("Línea"), MapTool::DrawPolyline, QStringLiteral("2"), QStringLiteral("linea"));
+        m_accPoligono = accHerr(tr("Polígono"), MapTool::DrawPolygon, QStringLiteral("3"), QStringLiteral("poligono"));
+        m_accEditar   = accHerr(tr("Editar"), MapTool::EditFeature, QStringLiteral("4"), QStringLiteral("editar"));
+        m_accObjetivo = accHerr(tr("Objetivo"), MapTool::DrawPoint, QString(), QStringLiteral("objetivo"));
+        m_accArea     = accHerr(tr("Área objetivo"), MapTool::DrawPolygon, QString(), QStringLiteral("area"));
+        for (QAction *a : {m_accPunto, m_accLinea, m_accPoligono})
+            connect(a, &QAction::triggered, this, &Ventana::nuevaEntidadGenerica);
+        connect(m_accObjetivo, &QAction::triggered, this, &Ventana::modoObjetivo);
+        connect(m_accArea, &QAction::triggered, this, &Ventana::modoAreaObjetivo);
 
-        barra->addSeparator();
-        barra->addWidget(new QLabel(tr("  Objetivos: ")));
+        // Ayudas en barra/menú: qué hace cada herramienta (y la diferencia entre
+        // Polígono genérico y Área objetivo, que no es obvia).
+        m_accNavegar->setStatusTip(tr("Mover el mapa; arrastrar etiquetas y pines."));
+        m_accMedir->setStatusTip(tr("Medir distancia y marcación entre dos puntos."));
+        m_accZoomArea->setStatusTip(tr("Ampliar arrastrando un rectángulo."));
+        m_accPunto->setStatusTip(tr("Dibujar un punto (pide nombre, capa y colores)."));
+        m_accLinea->setStatusTip(tr("Dibujar una línea; doble clic para cerrar."));
+        m_accPoligono->setStatusTip(tr("Polígono genérico sin límite de vértices."));
+        m_accObjetivo->setStatusTip(tr("Punto «objetivo»: etiqueta movible unida por "
+                                       "una línea guía."));
+        m_accArea->setStatusTip(tr("Polígono «objetivo»: hasta 10 vértices, etiqueta "
+                                   "y selección en el primer punto."));
+        m_accEditar->setStatusTip(tr("Seleccionar y editar: mover vértices, insertar "
+                                     "(doble clic en un lado) o borrar (Supr)."));
+        for (QAction *a : {m_accNavegar, m_accMedir, m_accZoomArea, m_accPunto, m_accLinea,
+                           m_accPoligono, m_accObjetivo, m_accArea, m_accEditar})
+            a->setToolTip(a->statusTip());
+
+        // --- Acciones de archivo / edición -----------------------------------
+        m_accGuardar = new QAction(tr("Guardar entidades"), this);
+        m_accGuardar->setShortcut(QKeySequence::Save);
+        connect(m_accGuardar, &QAction::triggered, this, &Ventana::guardar);
+        m_accGuardarComo = new QAction(tr("Guardar entidades como..."), this);
+        connect(m_accGuardarComo, &QAction::triggered, this, &Ventana::guardarComo);
+        m_accAbrir = new QAction(tr("Abrir entidades..."), this);
+        m_accAbrir->setShortcut(QKeySequence::Open);
+        connect(m_accAbrir, &QAction::triggered, this, &Ventana::abrir);
+        auto *accSalir = new QAction(tr("Salir"), this);
+        accSalir->setShortcut(QKeySequence::Quit);
+        connect(accSalir, &QAction::triggered, this, &QWidget::close);
+
+        m_accDeshacer = new QAction(tr("Deshacer"), this);
+        m_accDeshacer->setShortcut(QKeySequence::Undo);
+        connect(m_accDeshacer, &QAction::triggered, this, [this] { m_mapa->undo(); });
+        m_accRehacer = new QAction(tr("Rehacer"), this);
+        m_accRehacer->setShortcut(QKeySequence::Redo);
+        connect(m_accRehacer, &QAction::triggered, this, [this] { m_mapa->redo(); });
+        m_accBorrar = new QAction(tr("Borrar entidad"), this);
+        m_accBorrar->setShortcut(QKeySequence::Delete);
+        connect(m_accBorrar, &QAction::triggered, this, &Ventana::borrarSeleccion);
+
+        // --- Acciones de vista -----------------------------------------------
+        auto *accAmpliar = new QAction(tr("Ampliar"), this);
+        connect(accAmpliar, &QAction::triggered, m_mapa, &MapWidget::zoomIn);
+        auto *accReducir = new QAction(tr("Reducir"), this);
+        connect(accReducir, &QAction::triggered, m_mapa, &MapWidget::zoomOut);
+        auto *accCuba = new QAction(tr("Toda Cuba"), this);
+        connect(accCuba, &QAction::triggered, this, [this] {
+            m_mapa->fitBounds(QGeoCoordinate(23.3, -85.0), QGeoCoordinate(19.7, -74.0));
+        });
+        m_accRejilla = new QAction(tr("Rejilla"), this);
+        m_accRejilla->setCheckable(true);
+        connect(m_accRejilla, &QAction::toggled, m_mapa, &MapWidget::setDebugGridVisible);
+        m_accCobertura = new QAction(tr("Cobertura"), this);
+        m_accCobertura->setCheckable(true);
+        m_accCobertura->setToolTip(tr("Mancha de zonas con teselas del zoom elegido."));
+        connect(m_accCobertura, &QAction::toggled, this, [this](bool on) {
+            m_mapa->setCoverageZoom(m_zCobertura->value());
+            m_mapa->setCoverageVisible(on);
+        });
+
+        // --- Widgets de apoyo (viven en las barras) --------------------------
+        m_capasBase = new QComboBox(this);
+        for (const BaseLayerInfo &c : m_mapa->availableBaseLayers())
+            m_capasBase->addItem(c.displayName, c.id);
+        m_capasBase->setCurrentIndex(m_capasBase->findData(m_mapa->baseLayerId()));
+
+        m_zCobertura = new QSpinBox(this);
+        m_zCobertura->setRange(0, 22);
+        m_zCobertura->setValue(14);
+        connect(m_zCobertura, QOverload<int>::of(&QSpinBox::valueChanged),
+                this, [this](int v) {
+            if (m_accCobertura->isChecked()) m_mapa->setCoverageZoom(v);
+        });
+
+        m_btnDem = new QPushButton(tr("DEM..."), this);
+        {
+            QMenu *md = new QMenu(m_btnDem);
+            connect(md->addAction(tr("Carpeta de .hgt...")), &QAction::triggered,
+                    this, &Ventana::alElegirDemCarpeta);
+            connect(md->addAction(tr("Base de datos .sqlitedb...")), &QAction::triggered,
+                    this, &Ventana::alElegirDemDb);
+            m_btnDem->setMenu(md);
+        }
+
+        auto *accGeo = new QAction(tr("Cargar .geo..."), this);
+        connect(accGeo, &QAction::triggered, this, &Ventana::cargarGeo);
+
         m_numObjetivos = new QSpinBox(this);
         m_numObjetivos->setRange(1, 5000);
         m_numObjetivos->setValue(250);
-        barra->addWidget(m_numObjetivos);
-
-        m_accSimular = barra->addAction(tr("Simular"));
+        m_accSimular = new QAction(tr("Simular objetivos"), this);
         m_accSimular->setCheckable(true);
-        m_accSimular->setToolTip(tr("Crea objetivos moviles con traza y los "
-                                    "actualiza en tiempo real"));
         connect(m_accSimular, &QAction::toggled, this, &Ventana::alternarSimulacion);
-
-        // Opciones de traza: sin traza / N puntos / toda.
-        barra->addWidget(new QLabel(tr("  Traza: ")));
         m_traza = new QComboBox(this);
         m_traza->addItem(tr("Sin traza"), 0);
         m_traza->addItem(tr("10"), 10);
         m_traza->addItem(tr("100"), 100);
         m_traza->addItem(tr("500"), 500);
         m_traza->addItem(tr("Toda"), -1);
-        m_traza->setCurrentIndex(2);            // 100 por defecto
-        barra->addWidget(m_traza);
+        m_traza->setCurrentIndex(2);
         m_mapa->setTargetTrailLength(100);
         connect(m_traza, QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [this](int i) {
-                    m_mapa->setTargetTrailLength(m_traza->itemData(i).toInt());
-                });
-
-        // Reloj de la simulacion: ~10 pasos por segundo.
+            m_mapa->setTargetTrailLength(m_traza->itemData(i).toInt());
+        });
         m_simReloj = new QTimer(this);
         m_simReloj->setInterval(100);
         connect(m_simReloj, &QTimer::timeout, this, &Ventana::pasoSimulacion);
+
+        // --- Acciones de elevación (reutilizan los slots de la pestaña) ------
+        auto *accPerfil = new QAction(tr("Perfil de ruta"), this);
+        connect(accPerfil, &QAction::triggered, this, &Ventana::analizarPerfil);
+        auto *accVision = new QAction(tr("Visión A→B"), this);
+        connect(accVision, &QAction::triggered, this, &Ventana::analizarVision);
+        auto *accViewshed = new QAction(tr("Viewshed (ZVD)"), this);
+        connect(accViewshed, &QAction::triggered, this, &Ventana::analizarViewshed);
+        auto *accFijarA = new QAction(tr("Fijar punto A en el mapa"), this);
+        connect(accFijarA, &QAction::triggered, this, [this] { iniciarPick(Pick::A); });
+        auto *accFijarB = new QAction(tr("Fijar punto B en el mapa"), this);
+        connect(accFijarB, &QAction::triggered, this, [this] { iniciarPick(Pick::B); });
+        auto *accLimpiar = new QAction(tr("Limpiar análisis"), this);
+        connect(accLimpiar, &QAction::triggered, this, &Ventana::limpiarAnalisis);
+
+        // --- Selección de zona (bbox o polígono) SIN zoom -------------------
+        // Marca un área o un polígono y la librería emite areaSelected /
+        // polygonSelected (lo que usa fill_map para elegir qué teselas bajar);
+        // aquí se informa de la zona en la barra de estado.
+        m_accSelArea = accHerr(tr("Seleccionar área"), MapTool::SelectArea);
+        m_accSelPoli = accHerr(tr("Seleccionar polígono (zona)"), MapTool::SelectPolygon);
+        m_accSelArea->setStatusTip(tr("Arrastra un rectángulo: informa de su bbox."));
+        m_accSelPoli->setStatusTip(tr("Marca un polígono clic a clic (doble clic cierra)."));
+
+        // Mostrar/ocultar los objetivos simulados (capacidad setTargetsVisible).
+        m_accVerObjetivos = new QAction(tr("Mostrar objetivos"), this);
+        m_accVerObjetivos->setCheckable(true);
+        m_accVerObjetivos->setChecked(true);
+        connect(m_accVerObjetivos, &QAction::toggled, this,
+                [this](bool on) { m_mapa->setTargetsVisible(on); });
+
+        // Glifos del resto de acciones de barra (los de dibujo ya los puso
+        // accHerr). aplicarIconos() los pinta con el color del tema.
+        m_accGuardar->setProperty("glifo", QStringLiteral("guardar"));
+        m_accAbrir->setProperty("glifo", QStringLiteral("abrir"));
+        m_accDeshacer->setProperty("glifo", QStringLiteral("deshacer"));
+        m_accRehacer->setProperty("glifo", QStringLiteral("rehacer"));
+        m_accBorrar->setProperty("glifo", QStringLiteral("borrar"));
+        m_accRejilla->setProperty("glifo", QStringLiteral("rejilla"));
+        m_accCobertura->setProperty("glifo", QStringLiteral("cobertura"));
+        accGeo->setProperty("glifo", QStringLiteral("geo"));
+        m_accSimular->setProperty("glifo", QStringLiteral("simular"));
+
+        // --- Barra de menú ---------------------------------------------------
+        QMenuBar *mb = menuBar();
+        QMenu *mArchivo = mb->addMenu(tr("&Archivo"));
+        mArchivo->addAction(m_accAbrir);
+        mArchivo->addAction(m_accGuardar);
+        mArchivo->addAction(m_accGuardarComo);
+        mArchivo->addSeparator();
+        mArchivo->addAction(accSalir);
+
+        QMenu *mVer = mb->addMenu(tr("&Ver"));
+        QMenu *mBase = mVer->addMenu(tr("Capa base"));
+        auto *gBase = new QActionGroup(this);
+        gBase->setExclusive(true);
+        for (const BaseLayerInfo &c : m_mapa->availableBaseLayers()) {
+            QAction *a = mBase->addAction(c.displayName);
+            a->setCheckable(true);
+            a->setData(c.id);
+            a->setChecked(c.id == m_mapa->baseLayerId());
+            gBase->addAction(a);
+            connect(a, &QAction::triggered, this, [this, a] {
+                const QString id = a->data().toString();
+                m_mapa->setBaseLayerId(id);
+                if (m_capasBase) m_capasBase->setCurrentIndex(m_capasBase->findData(id));
+            });
+        }
+        mVer->addSeparator();
+        mVer->addAction(accAmpliar);
+        mVer->addAction(accReducir);
+        mVer->addAction(accCuba);
+        mVer->addSeparator();
+        mVer->addAction(m_accRejilla);
+        mVer->addAction(m_accCobertura);
+
+        // Submenú «Tema»: claro / oscuro, elegible por el usuario y recordado.
+        QMenu *mTema = mVer->addMenu(tr("Tema"));
+        auto *gTema = new QActionGroup(this);
+        gTema->setExclusive(true);
+        m_accTemaClaro = mTema->addAction(tr("Claro"));
+        m_accTemaOscuro = mTema->addAction(tr("Oscuro"));
+        for (QAction *a : {m_accTemaClaro, m_accTemaOscuro}) {
+            a->setCheckable(true);
+            gTema->addAction(a);
+        }
+        connect(m_accTemaClaro,  &QAction::triggered, this, [this] { aplicarTema(false); });
+        connect(m_accTemaOscuro, &QAction::triggered, this, [this] { aplicarTema(true); });
+
+        m_menuVer = mVer;   // la Fase B añade aquí los toggles de paneles
+
+        QMenu *mDibujo = mb->addMenu(tr("&Dibujo"));
+        mDibujo->addAction(m_accNavegar);
+        mDibujo->addSeparator();
+        mDibujo->addAction(m_accPunto);
+        mDibujo->addAction(m_accLinea);
+        mDibujo->addAction(m_accPoligono);
+        mDibujo->addSeparator();
+        mDibujo->addAction(m_accObjetivo);
+        mDibujo->addAction(m_accArea);
+        mDibujo->addSeparator();
+        mDibujo->addAction(m_accEditar);
+        mDibujo->addAction(m_accBorrar);
+        mDibujo->addSeparator();
+        mDibujo->addAction(m_accDeshacer);
+        mDibujo->addAction(m_accRehacer);
+
+        QMenu *mElev = mb->addMenu(tr("&Elevación"));
+        mElev->addAction(accPerfil);
+        mElev->addAction(accVision);
+        mElev->addAction(accViewshed);
+        mElev->addSeparator();
+        mElev->addAction(accFijarA);
+        mElev->addAction(accFijarB);
+        mElev->addSeparator();
+        mElev->addAction(accLimpiar);
+
+        QMenu *mDatos = mb->addMenu(tr("&Datos"));
+        mDatos->addAction(accGeo);
+        mDatos->addSeparator();
+        mDatos->addAction(m_accSelArea);
+        mDatos->addAction(m_accSelPoli);
+        mDatos->addSeparator();
+        mDatos->addAction(m_accSimular);
+        mDatos->addAction(m_accVerObjetivos);
+
+        QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
+        connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
+            QMessageBox::about(this, tr("LibMapaStatic"),
+                tr("Demostración de LibMapaStatic: librería de mapas por teselas "
+                   "para Qt, con entidades, elevación y seguimiento."));
+        });
+
+        // --- Barra de herramientas principal (navegación · dibujo · archivo) -
+        // Solo iconos (con tooltip): compacta y de aspecto profesional.
+        QToolBar *tb = addToolBar(tr("Principal"));
+        tb->setObjectName(QStringLiteral("barraPrincipal"));
+        tb->setMovable(false);
+        tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        tb->setIconSize(QSize(20, 20));
+        tb->addWidget(new QLabel(tr(" Base: ")));
+        tb->addWidget(m_capasBase);
+        tb->addSeparator();
+        tb->addAction(m_accNavegar);
+        tb->addAction(m_accMedir);
+        tb->addAction(m_accZoomArea);
+        tb->addSeparator();
+        tb->addAction(m_accPunto);
+        tb->addAction(m_accLinea);
+        tb->addAction(m_accPoligono);
+        tb->addAction(m_accObjetivo);
+        tb->addAction(m_accArea);
+        tb->addAction(m_accEditar);
+        tb->addAction(m_accBorrar);
+        tb->addSeparator();
+        tb->addAction(m_accDeshacer);
+        tb->addAction(m_accRehacer);
+        tb->addSeparator();
+        tb->addAction(m_accAbrir);
+        tb->addAction(m_accGuardar);
+
+        // --- Barra secundaria: terreno y datos (actividad aparte, 2ª fila) ---
+        addToolBarBreak();   // fuerza una fila nueva: no se amontona con la de arriba
+        QToolBar *tb2 = addToolBar(tr("Terreno y datos"));
+        tb2->setObjectName(QStringLiteral("barraDatos"));
+        tb2->setMovable(false);
+        tb2->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        tb2->setIconSize(QSize(20, 20));
+        tb2->addAction(m_accRejilla);
+        tb2->addAction(m_accCobertura);
+        tb2->addWidget(new QLabel(tr(" z:")));
+        tb2->addWidget(m_zCobertura);
+        tb2->addSeparator();
+        tb2->addWidget(m_btnDem);
+        tb2->addSeparator();
+        tb2->addAction(accGeo);
+        tb2->addWidget(new QLabel(tr("  Objetivos:")));
+        tb2->addWidget(m_numObjetivos);
+        tb2->addAction(m_accSimular);
+        tb2->addWidget(new QLabel(tr(" Traza:")));
+        tb2->addWidget(m_traza);
+    }
+
+    // ==================================================== temas ===========
+    //! Aplica el tema (claro u oscuro) a toda la app, marca el menú y lo recuerda
+    //! en QSettings para la próxima vez. Es una hoja de estilo (QSS) global.
+    void aplicarTema(bool oscuro)
+    {
+        m_temaOscuro = oscuro;
+        if (auto *app = qobject_cast<QApplication *>(QApplication::instance())) {
+            // La PALETA cubre los contenedores planos (páginas de pestaña, scroll,
+            // ficha) que la hoja de estilo no alcanza — por eso ya no queda blanco.
+            app->setPalette(oscuro ? paletaOscura() : paletaClara());
+            app->setStyleSheet(oscuro ? qssOscuro() : qssClaro());
+        }
+        if (m_accTemaOscuro) m_accTemaOscuro->setChecked(oscuro);
+        if (m_accTemaClaro)  m_accTemaClaro->setChecked(!oscuro);
+        QSettings().setValue(QStringLiteral("tema/oscuro"), oscuro);
+        // Iconos de la barra: se recolorean con el primer plano del tema.
+        aplicarIconos(oscuro ? QColor(0xc9, 0xd4, 0xdf) : QColor(0x2a, 0x3b, 0x4c));
+        // Los botones de color llevan su propio estilo inline: se repintan para
+        // que no queden con el estilo del tema anterior.
+        if (m_btnColorLinea)   pintarBotonColor(m_btnColorLinea, m_colorLinea);
+        if (m_btnColorRelleno) pintarBotonColor(m_btnColorRelleno, m_colorRelleno);
+        // Refresca el árbol para que los fondos de grupo tomen el color del tema.
+        if (m_arbol) reconstruirPanel();
+    }
+
+    //! Paleta base del tema CLARO (cubre los widgets planos que la QSS no toca).
+    static QPalette paletaClara()
+    {
+        QPalette p;
+        p.setColor(QPalette::Window, QColor(0xf4, 0xf6, 0xf8));
+        p.setColor(QPalette::WindowText, QColor(0x1f, 0x2a, 0x36));
+        p.setColor(QPalette::Base, QColor(0xff, 0xff, 0xff));
+        p.setColor(QPalette::AlternateBase, QColor(0xee, 0xf2, 0xf5));
+        p.setColor(QPalette::Text, QColor(0x1f, 0x2a, 0x36));
+        p.setColor(QPalette::Button, QColor(0xff, 0xff, 0xff));
+        p.setColor(QPalette::ButtonText, QColor(0x1f, 0x2a, 0x36));
+        p.setColor(QPalette::ToolTipBase, QColor(0xff, 0xff, 0xff));
+        p.setColor(QPalette::ToolTipText, QColor(0x1f, 0x2a, 0x36));
+        p.setColor(QPalette::Highlight, QColor(0x15, 0x65, 0xc0));
+        p.setColor(QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
+        return p;
+    }
+
+    //! Paleta base del tema OSCURO.
+    static QPalette paletaOscura()
+    {
+        QPalette p;
+        p.setColor(QPalette::Window, QColor(0x1e, 0x24, 0x2b));
+        p.setColor(QPalette::WindowText, QColor(0xe6, 0xed, 0xf3));
+        p.setColor(QPalette::Base, QColor(0x16, 0x1b, 0x22));
+        p.setColor(QPalette::AlternateBase, QColor(0x20, 0x26, 0x2d));
+        p.setColor(QPalette::Text, QColor(0xe6, 0xed, 0xf3));
+        p.setColor(QPalette::Button, QColor(0x26, 0x2d, 0x35));
+        p.setColor(QPalette::ButtonText, QColor(0xe6, 0xed, 0xf3));
+        p.setColor(QPalette::ToolTipBase, QColor(0x26, 0x2d, 0x35));
+        p.setColor(QPalette::ToolTipText, QColor(0xe6, 0xed, 0xf3));
+        p.setColor(QPalette::Highlight, QColor(0x2f, 0x81, 0xf7));
+        p.setColor(QPalette::HighlightedText, QColor(0x0d, 0x11, 0x17));
+        const QColor gris(0x7a, 0x86, 0x92);
+        p.setColor(QPalette::Disabled, QPalette::Text, gris);
+        p.setColor(QPalette::Disabled, QPalette::WindowText, gris);
+        p.setColor(QPalette::Disabled, QPalette::ButtonText, gris);
+        return p;
+    }
+
+    //! Pinta el icono de cada acción con la propiedad «glifo» en el color \a fg,
+    //! y el del botón DEM. Se llama al cambiar de tema para que casen.
+    void aplicarIconos(const QColor &fg)
+    {
+        for (QAction *a : findChildren<QAction *>()) {
+            const QString k = a->property("glifo").toString();
+            if (!k.isEmpty())
+                a->setIcon(glifo(k, fg));
+        }
+        if (m_btnDem) {
+            m_btnDem->setIcon(glifo(QStringLiteral("dem"), fg));
+            m_btnDem->setText(tr(" DEM"));
+        }
+    }
+
+    //! Hoja de estilo del tema CLARO: fondo claro, acento azul, cabeceras y
+    //! separadores sutiles. Pensada para lucir de producto sin recargar.
+    static QString qssClaro()
+    {
+        return QStringLiteral(R"(
+            QMainWindow, QDialog { background:#f4f6f8; }
+            QWidget { color:#1f2a36; font-size:11px; }
+            QToolTip { color:#1f2a36; background-color:#ffffff;
+                       border:1px solid #cdd6de; padding:3px 6px; }
+            QToolBar { background:#ffffff; border:0; border-bottom:1px solid #d9e0e6;
+                       spacing:4px; padding:3px; }
+            QToolButton { background:transparent; border:1px solid transparent;
+                          border-radius:4px; padding:4px 8px; }
+            QToolButton:hover { background:#e9eef3; }
+            QToolButton:checked { background:#1565c0; color:#ffffff; }
+            QMenuBar { background-color:#ffffff; color:#1f2a36;
+                       border-bottom:1px solid #d9e0e6; }
+            QMenuBar::item { background:transparent; padding:4px 10px; }
+            QMenuBar::item:selected { background:#e9eef3; }
+            QMenu { background:#ffffff; border:1px solid #d9e0e6; }
+            QMenu::item:selected { background:#1565c0; color:#ffffff; }
+            QDockWidget { titlebar-close-icon:none; }
+            QDockWidget::title { background:#eef2f5; padding:6px; font-weight:bold; }
+            QTabWidget::pane { border:1px solid #d9e0e6; }
+            QTabBar::tab { background:#eef2f5; padding:6px 12px; border:1px solid #d9e0e6;
+                           border-bottom:0; }
+            QTabBar::tab:selected { background:#ffffff; color:#1565c0; font-weight:bold; }
+            QTreeWidget, QTableWidget, QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox,
+            QTextEdit, QPlainTextEdit {
+                background:#ffffff; border:1px solid #cdd6de; border-radius:4px; }
+            QHeaderView::section { background:#eef2f5; border:0;
+                                   border-bottom:1px solid #d9e0e6; padding:4px; }
+            QPushButton { background:#ffffff; border:1px solid #cdd6de; border-radius:4px;
+                          padding:5px 10px; }
+            QPushButton:hover { border-color:#1565c0; }
+            QPushButton:pressed { background:#e9eef3; }
+            QLabel#fichaTitulo { font-size:13px; font-weight:bold; color:#1565c0;
+                                 padding:2px 0; }
+            QLabel#fichaCapa { color:#5b6b7b; }
+            QToolButton#seccionHeader { font-weight:bold; color:#2a3b4c;
+                                        border-top:1px solid #e2e8ee; padding:5px 2px; }
+            QStatusBar { background:#ffffff; border-top:1px solid #d9e0e6; }
+        )");
+    }
+
+    //! Hoja de estilo del tema OSCURO: fondo gris/negro, acento azul claro.
+    //! Luce muy «técnico» en demos de sala.
+    static QString qssOscuro()
+    {
+        return QStringLiteral(R"(
+            QMainWindow, QDialog { background:#1e242b; }
+            QWidget { color:#e6edf3; font-size:11px; }
+            QToolTip { color:#e6edf3; background-color:#262d35;
+                       border:1px solid #12161b; padding:3px 6px; }
+            QToolBar { background:#262d35; border:0; border-bottom:1px solid #12161b;
+                       spacing:4px; padding:3px; }
+            QToolButton { background:transparent; border:1px solid transparent;
+                          border-radius:4px; padding:4px 8px; }
+            QToolButton:hover { background:#333c46; }
+            QToolButton:checked { background:#2f81f7; color:#0d1117; }
+            QMenuBar { background-color:#262d35; color:#e6edf3;
+                       border-bottom:1px solid #12161b; }
+            QMenuBar::item { background:transparent; padding:4px 10px; }
+            QMenuBar::item:selected { background:#333c46; }
+            QMenu { background:#262d35; border:1px solid #12161b; }
+            QMenu::item:selected { background:#2f81f7; color:#0d1117; }
+            QDockWidget::title { background:#20262d; padding:6px; font-weight:bold; }
+            QTabWidget::pane { border:1px solid #12161b; }
+            QTabBar::tab { background:#20262d; padding:6px 12px; border:1px solid #12161b;
+                           border-bottom:0; color:#9aa7b4; }
+            QTabBar::tab:selected { background:#1e242b; color:#58a6ff; font-weight:bold; }
+            QTreeWidget, QTableWidget, QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox,
+            QTextEdit, QPlainTextEdit {
+                background:#161b22; border:1px solid #30363d; border-radius:4px;
+                color:#e6edf3; selection-background-color:#2f81f7; }
+            QHeaderView::section { background:#20262d; border:0;
+                                   border-bottom:1px solid #12161b; padding:4px;
+                                   color:#9aa7b4; }
+            QPushButton { background:#262d35; border:1px solid #30363d; border-radius:4px;
+                          padding:5px 10px; color:#e6edf3; }
+            QPushButton:hover { border-color:#2f81f7; }
+            QPushButton:pressed { background:#1b2128; }
+            QLabel#fichaTitulo { font-size:13px; font-weight:bold; color:#58a6ff;
+                                 padding:2px 0; }
+            QLabel#fichaCapa { color:#9aa7b4; }
+            QToolButton#seccionHeader { font-weight:bold; color:#c9d4df;
+                                        border-top:1px solid #30363d; padding:5px 2px; }
+            QStatusBar { background:#262d35; border-top:1px solid #12161b; }
+        )");
+    }
+
+    //! Borra las capas de resultados de elevación y restablece los pines A/B.
+    //! (Era una lambda del botón «Limpiar»; ahora es un slot reutilizable.)
+    void limpiarAnalisis()
+    {
+        m_mapa->removeFeatureLayer(kCapaVision);
+        m_mapa->removeFeatureLayer(kCapaViewshed);
+        m_mapa->removeFeatureLayer(kCapaPicos);
+        m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
+        if (m_resultado) m_resultado->clear();
+        m_ultimo = Analisis::Ninguno;
+        marcarPuntosActivos();
+        statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
+    }
+
+    //! Al iniciar, los overlays del paquete arrancan OCULTOS (no cargan el
+    //! sistema). El operador los enciende desde el panel de capas.
+    void ocultarOverlaysAlIniciar()
+    {
+        // Los overlays del paquete se cargan como capas NO editables; las capas
+        // de usuario sí lo son. Ocultamos las no editables (los overlays).
+        for (const LayerInfo &capa : m_mapa->featureLayers())
+            if (!capa.editable)
+                m_mapa->setFeatureLayerVisible(capa.id, false);
+    }
+
+
+    //! Repone el borrador por defecto (sin tipo de dominio, sin tope de
+    //! vértices, estilo por defecto). Lo usa volverANavegar al desarmar el alta.
+    void reponerBorrador()
+    {
+        m_mapa->setDraftType(QString());
+        m_mapa->setDraftMaxVertices(-1);
+        m_mapa->setDraftStyle(FeatureStyle());
+    }
+
+    //! Herramientas genéricas (Punto/Línea/Polígono): abre el diálogo de alta
+    //! con el estilo que haya configurado el usuario en el panel.
+    void nuevaEntidadGenerica()
+    {
+        configurarNuevaEntidad(QString(), estiloActual(), -1, tr("Entidad"));
+    }
+
+    //! Modo "Objetivo": punto con type "objetivo" y etiqueta visible; su rótulo
+    //! (y el punto) se arrastran. Pasa por el diálogo de alta.
+    void modoObjetivo()
+    {
+        FeatureStyle s;
+        s.labelVisible = true;
+        s.pointRadiusPx = 7.0;
+        s.lineColor = QColor(0xff, 0x8f, 0x00);
+        s.fillColor = QColor(0xff, 0x8f, 0x00, 160);
+        configurarNuevaEntidad(QStringLiteral("objetivo"), s, -1, tr("Objetivo"));
+    }
+
+    //! Modo "Área objetivo": polígono de <=10 vértices (type "objetivo_area")
+    //! con la etiqueta colgada de su PRIMER punto (labelAnchorVertex=0).
+    void modoAreaObjetivo()
+    {
+        FeatureStyle s;
+        s.labelVisible = true;
+        s.labelAnchorVertex = 0;
+        s.lineColor = QColor(0xc6, 0x28, 0x28);
+        s.fillColor = QColor(0xc6, 0x28, 0x28, 40);
+        s.lineWidth = 2.0;
+        configurarNuevaEntidad(QStringLiteral("objetivo_area"), s, 10, tr("Área"));
+    }
+
+    //! Vuelve a la herramienta Navegar y desarma el alta de entidad en curso.
+    void volverANavegar()
+    {
+        m_esperandoDibujo = false;
+        m_nombrePendiente.clear();
+        reponerBorrador();
+        if (m_accNavegar)
+            m_accNavegar->setChecked(true);
+        m_mapa->setActiveTool(MapTool::None);
+    }
+
+    //! Flujo de alta de una entidad: pregunta nombre/capa/colores y, al aceptar,
+    //! configura el borrador y deja que el usuario dibuje; al terminar el trazo
+    //! (señal featureAdded → alEntidadCreada) se le pone el nombre y se vuelve a
+    //! Navegar. Se DIFIERE con un singleShot(0) para que el diálogo salga después
+    //! de que el grupo de acciones fije la herramienta de dibujo; así, al
+    //! cancelar, volverANavegar no queda pisado por esa activación automática.
+    void configurarNuevaEntidad(const QString &tipo, FeatureStyle base,
+                                int maxVert, const QString &nombreSug)
+    {
+        QTimer::singleShot(0, this, [this, tipo, base, maxVert, nombreSug]() mutable {
+            QString nombre, capa;
+            QColor cl = base.lineColor, cr = base.fillColor;
+            double ancho = base.lineWidth > 0 ? base.lineWidth : 1.5;
+            if (!dialogoNuevaEntidad(nombreSug, &nombre, &capa, &cl, &cr, &ancho)) {
+                volverANavegar();
+                return;
+            }
+            if (capa.isEmpty())
+                capa = m_mapa->activeFeatureLayer();
+            // addFeatureLayer no-op si la capa ya existe; la crea si es nueva.
+            m_mapa->addFeatureLayer(capa, capa,
+                static_cast<int>(m_mapa->featureLayers().size()) * 10);
+            m_mapa->setActiveFeatureLayer(capa);
+
+            base.lineColor = cl;
+            base.fillColor = cr;
+            base.lineWidth = ancho;
+            m_mapa->setDraftType(tipo);
+            m_mapa->setDraftStyle(base);
+            m_mapa->setDraftMaxVertices(maxVert);
+
+            m_nombrePendiente = nombre;
+            m_esperandoDibujo = true;
+            statusBar()->showMessage(
+                tr("Dibuja la entidad en el mapa; al terminar vuelve a Navegar."),
+                6000);
+        });
+    }
+
+    //! Diálogo modal de alta: nombre, capa (editable: se puede teclear una
+    //! nueva) y colores de borde/relleno + ancho. Devuelve true si se aceptó.
+    bool dialogoNuevaEntidad(const QString &nombreSug, QString *nombre,
+                             QString *capa, QColor *linea, QColor *relleno,
+                             double *ancho)
+    {
+        QDialog d(this);
+        d.setWindowTitle(tr("Nueva entidad"));
+        auto *form = new QFormLayout(&d);
+
+        auto *edNombre = new QLineEdit(nombreSug, &d);
+        form->addRow(tr("Nombre:"), edNombre);
+
+        auto *cbCapa = new QComboBox(&d);
+        cbCapa->setEditable(true);           // permite teclear una capa nueva
+        for (const LayerInfo &c : m_mapa->featureLayers())
+            if (c.editable)
+                cbCapa->addItem(c.displayName.isEmpty() ? c.id : c.displayName, c.id);
+        const QString activa = m_mapa->activeFeatureLayer();
+        if (const int i = cbCapa->findData(activa); i >= 0)
+            cbCapa->setCurrentIndex(i);
+        else if (!activa.isEmpty())
+            cbCapa->setCurrentText(activa);
+        form->addRow(tr("Capa:"), cbCapa);
+
+        QColor cl = *linea, cr = *relleno;
+        auto *btnL = new QPushButton(&d);
+        auto *btnR = new QPushButton(&d);
+        pintarBotonColor(btnL, cl);
+        pintarBotonColor(btnR, cr);
+        connect(btnL, &QPushButton::clicked, &d, [this, &d, &cl, btnL] {
+            const QColor c = QColorDialog::getColor(cl, &d, tr("Color de borde"),
+                                                    QColorDialog::ShowAlphaChannel);
+            if (c.isValid()) { cl = c; pintarBotonColor(btnL, c); }
+        });
+        connect(btnR, &QPushButton::clicked, &d, [this, &d, &cr, btnR] {
+            const QColor c = QColorDialog::getColor(cr, &d, tr("Color de relleno"),
+                                                    QColorDialog::ShowAlphaChannel);
+            if (c.isValid()) { cr = c; pintarBotonColor(btnR, c); }
+        });
+        form->addRow(tr("Color de borde:"), btnL);
+        form->addRow(tr("Color de relleno:"), btnR);
+
+        auto *spAncho = new QDoubleSpinBox(&d);
+        spAncho->setRange(0.5, 12.0);
+        spAncho->setSingleStep(0.5);
+        spAncho->setValue(*ancho);
+        form->addRow(tr("Ancho de línea:"), spAncho);
+
+        auto *bb = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+        form->addRow(bb);
+        connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+
+        if (d.exec() != QDialog::Accepted)
+            return false;
+
+        *nombre = edNombre->text().trimmed();
+        // Si el texto de la capa coincide con un ítem, usa su id (data); si el
+        // usuario tecleó algo nuevo, ese texto ES el id de la capa nueva.
+        // OJO: en un combo editable currentData()/currentIndex() NO cambian al
+        // teclear texto nuevo (siguen en la capa preseleccionada), así que se
+        // resuelve por TEXTO: si coincide con un ítem, se usa su id (data); si
+        // el usuario tecleó algo nuevo, ese texto ES el id de la capa nueva.
+        const QString texto = cbCapa->currentText().trimmed();
+        const int i = cbCapa->findText(texto);
+        *capa = (i >= 0) ? cbCapa->itemData(i).toString() : texto;
+        *linea = cl;
+        *relleno = cr;
+        *ancho = spAncho->value();
+        return true;
+    }
+
+    //! Llega por featureAdded: si hay un alta en curso, pone el nombre elegido a
+    //! la entidad recién dibujada, la deja seleccionada y vuelve a Navegar.
+    void alEntidadCreada(qint64 id)
+    {
+        if (!m_esperandoDibujo)
+            return;
+        m_esperandoDibujo = false;
+        if (!m_nombrePendiente.isEmpty()) {
+            if (auto f = m_mapa->feature(id)) {
+                f->name = m_nombrePendiente;
+                m_mapa->updateFeature(*f);
+            }
+        }
+        m_nombrePendiente.clear();
+        marcarSucio();               // entidad nueva: hay algo que guardar
+        volverANavegar();
+        m_mapa->selectFeature(id);   // deja ver sus datos en el panel
+    }
+
+    //! Si la entidad seleccionada es un área objetivo, lista sus coordenadas en
+    //! la barra de estado (demuestra el acceso a los puntos vía feature()).
+    void mostrarCoordsArea(qint64 id)
+    {
+        const auto f = m_mapa->feature(id);
+        if (!f || f->type != QLatin1String("objetivo_area"))
+            return;
+        QStringList pts;
+        for (const QGeoCoordinate &c : f->geometry)
+            pts << QStringLiteral("%1,%2")
+                       .arg(c.latitude(), 0, 'f', 5).arg(c.longitude(), 0, 'f', 5);
+        statusBar()->showMessage(
+            tr("Área (%1 pts): %2").arg(f->geometry.size()).arg(pts.join(QStringLiteral("  "))),
+            8000);
     }
 
     // ==================================================== panel ===========
     void construirPanel()
     {
         auto *dock = new QDockWidget(tr("Capas y entidades"), this);
+        m_dock = dock;
         dock->setObjectName(QStringLiteral("panel"));
         dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-        dock->setMinimumWidth(330);
+        dock->setMinimumWidth(340);
 
         auto *cont = new QWidget(dock);
         auto *caja = new QVBoxLayout(cont);
         caja->setContentsMargins(6, 6, 6, 6);
 
         // --- Arbol de capas y entidades ---------------------------------
-        caja->addWidget(new QLabel(tr("<b>Capas y entidades</b>")));
+        // Tres grupos fijos: «Base» (datasets de teselas, selección exclusiva),
+        // «Overlays» (vectores de solo lectura, ocultos al iniciar) y
+        // «Entidades» (puntos/líneas/polígonos del usuario, editables).
+        caja->addWidget(new QLabel(tr("<b>Capas</b> — marca para mostrar/ocultar")));
         m_arbol = new QTreeWidget(cont);
         m_arbol->setColumnCount(3);
         m_arbol->setHeaderLabels({tr("Nombre"), tr("Tipo"), tr("Vert.")});
@@ -445,31 +1186,47 @@ private:
         connect(accSupr, &QAction::triggered, this, &Ventana::borrarSeleccion);
         m_arbol->addAction(accSupr);
 
-        // --- Propiedades de la entidad seleccionada ---------------------
-        caja->addWidget(new QLabel(tr("<b>Entidad seleccionada</b>")));
+        // === FICHA CONTEXTUAL de la entidad seleccionada =====================
+        // Oculta mientras no hay nada seleccionado (panel limpio, solo el árbol).
+        // Aparece al seleccionar con: título + Nombre/Tipo/Descripción + Capa, y
+        // tres secciones plegables (Atributos, Coordenadas, Estilo).
+        m_ficha = new QWidget(cont);
+        auto *fichaCaja = new QVBoxLayout(m_ficha);
+        fichaCaja->setContentsMargins(0, 6, 0, 0);
+        fichaCaja->setSpacing(6);
+
+        m_lblFicha = new QLabel(tr("Entidad"), m_ficha);
+        m_lblFicha->setObjectName(QStringLiteral("fichaTitulo"));
+        fichaCaja->addWidget(m_lblFicha);
+
         auto *form = new QFormLayout;
-        m_campoNombre = new QLineEdit(cont);
-        m_campoTipo = new QLineEdit(cont);
-        m_campoDescripcion = new QLineEdit(cont);
+        m_campoNombre = new QLineEdit(m_ficha);
+        m_campoTipo = new QLineEdit(m_ficha);
+        m_campoDescripcion = new QLineEdit(m_ficha);
+        m_lblCapaEntidad = new QLabel(m_ficha);
+        m_lblCapaEntidad->setObjectName(QStringLiteral("fichaCapa"));
         m_campoTipo->setPlaceholderText(tr("zona_prohibida, punto_interes..."));
         form->addRow(tr("Nombre:"), m_campoNombre);
         form->addRow(tr("Tipo:"), m_campoTipo);
-        form->addRow(tr("Descripcion:"), m_campoDescripcion);
-        caja->addLayout(form);
+        form->addRow(tr("Descripción:"), m_campoDescripcion);
+        form->addRow(tr("Capa:"), m_lblCapaEntidad);
+        fichaCaja->addLayout(form);
 
-        caja->addWidget(new QLabel(tr("Atributos (la libreria no los interpreta):")));
-        m_tablaAtributos = new QTableWidget(0, 2, cont);
+        // --- Sección plegable: Atributos ---
+        auto *secAtr = new SeccionPlegable(tr("Atributos"), m_ficha);
+        auto *vAtr = new QVBoxLayout(secAtr->contenido());
+        vAtr->setContentsMargins(0, 0, 0, 0);
+        m_tablaAtributos = new QTableWidget(0, 2, secAtr);
         m_tablaAtributos->setHorizontalHeaderLabels({tr("Clave"), tr("Valor")});
         m_tablaAtributos->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
         m_tablaAtributos->setMaximumHeight(110);
-        caja->addWidget(m_tablaAtributos);
-
+        vAtr->addWidget(m_tablaAtributos);
         auto *filaAtr = new QHBoxLayout;
-        auto *btnAddAtr = new QPushButton(tr("+ Atributo"), cont);
-        auto *btnDelAtr = new QPushButton(tr("- Atributo"), cont);
-        filaAtr->addWidget(btnAddAtr);
-        filaAtr->addWidget(btnDelAtr);
-        caja->addLayout(filaAtr);
+        auto *btnAddAtr = new QPushButton(tr("+ Atributo"), secAtr);
+        auto *btnDelAtr = new QPushButton(tr("− Atributo"), secAtr);
+        filaAtr->addWidget(btnAddAtr); filaAtr->addWidget(btnDelAtr);
+        vAtr->addLayout(filaAtr);
+        fichaCaja->addWidget(secAtr);
 
         connect(btnAddAtr, &QPushButton::clicked, this, [this] {
             m_tablaAtributos->insertRow(m_tablaAtributos->rowCount());
@@ -482,47 +1239,99 @@ private:
             }
         });
 
-        // --- Estilo ------------------------------------------------------
-        caja->addWidget(new QLabel(tr("<b>Estilo</b>")));
-        auto *formEstilo = new QFormLayout;
-        m_btnColorLinea = new QPushButton(cont);
-        m_btnColorRelleno = new QPushButton(cont);
-        formEstilo->addRow(tr("Color de linea:"), m_btnColorLinea);
+        // --- Sección plegable: Coordenadas (lat/lon editables) ---
+        // Solo para entidades de usuario (capa editable); datasets y overlays no
+        // se tocan. Editar una celda = moveVertex; +/- = insert/removeVertex.
+        auto *secCoord = new SeccionPlegable(tr("Coordenadas"), m_ficha);
+        auto *vCoord = new QVBoxLayout(secCoord->contenido());
+        vCoord->setContentsMargins(0, 0, 0, 0);
+        m_tablaCoords = new QTableWidget(0, 2, secCoord);
+        m_tablaCoords->setHorizontalHeaderLabels({tr("Latitud"), tr("Longitud")});
+        m_tablaCoords->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        m_tablaCoords->setMaximumHeight(140);
+        vCoord->addWidget(m_tablaCoords);
+        auto *filaVert = new QHBoxLayout;
+        m_btnAddVert = new QPushButton(tr("+ Vértice"), secCoord);
+        m_btnDelVert = new QPushButton(tr("− Vértice"), secCoord);
+        filaVert->addWidget(m_btnAddVert); filaVert->addWidget(m_btnDelVert);
+        vCoord->addLayout(filaVert);
+        fichaCaja->addWidget(secCoord);
+
+        connect(m_tablaCoords, &QTableWidget::cellChanged, this, &Ventana::coordEditada);
+        connect(m_btnAddVert, &QPushButton::clicked, this, &Ventana::anadirVertice);
+        connect(m_btnDelVert, &QPushButton::clicked, this, &Ventana::quitarVertice);
+
+        // --- Sección plegable: Estilo ---
+        auto *secEstilo = new SeccionPlegable(tr("Estilo"), m_ficha);
+        auto *formEstilo = new QFormLayout(secEstilo->contenido());
+        formEstilo->setContentsMargins(0, 0, 0, 0);
+        m_btnColorLinea = new QPushButton(secEstilo);
+        m_btnColorRelleno = new QPushButton(secEstilo);
+        formEstilo->addRow(tr("Color de línea:"), m_btnColorLinea);
         formEstilo->addRow(tr("Color de relleno:"), m_btnColorRelleno);
 
-        m_anchoLinea = new QDoubleSpinBox(cont);
+        m_anchoLinea = new QDoubleSpinBox(secEstilo);
         m_anchoLinea->setRange(0.5, 12.0);
         m_anchoLinea->setSingleStep(0.5);
         formEstilo->addRow(tr("Ancho:"), m_anchoLinea);
 
-        m_estiloLinea = new QComboBox(cont);
+        m_estiloLinea = new QComboBox(secEstilo);
         m_estiloLinea->addItem(tr("Continua"),   static_cast<int>(Qt::SolidLine));
         m_estiloLinea->addItem(tr("Discontinua"),static_cast<int>(Qt::DashLine));
         m_estiloLinea->addItem(tr("Punteada"),   static_cast<int>(Qt::DotLine));
         m_estiloLinea->addItem(tr("Raya-punto"), static_cast<int>(Qt::DashDotLine));
         formEstilo->addRow(tr("Trazo:"), m_estiloLinea);
 
-        m_radioPunto = new QDoubleSpinBox(cont);
+        m_radioPunto = new QDoubleSpinBox(secEstilo);
         m_radioPunto->setRange(2.0, 30.0);
         formEstilo->addRow(tr("Radio del punto:"), m_radioPunto);
 
-        m_verEtiqueta = new QCheckBox(tr("Mostrar etiqueta"), cont);
+        m_verEtiqueta = new QCheckBox(tr("Mostrar etiqueta"), secEstilo);
         formEstilo->addRow(QString(), m_verEtiqueta);
-        m_verVertices = new QCheckBox(tr("Mostrar vertices"), cont);
+        m_verVertices = new QCheckBox(tr("Mostrar vértices"), secEstilo);
         formEstilo->addRow(QString(), m_verVertices);
-        caja->addLayout(formEstilo);
-
-        m_aplicarAlTrazo = new QCheckBox(tr("Usar este estilo para lo que dibuje"), cont);
+        m_aplicarAlTrazo = new QCheckBox(tr("Usar este estilo al dibujar"), secEstilo);
         m_aplicarAlTrazo->setChecked(true);
-        caja->addWidget(m_aplicarAlTrazo);
+        formEstilo->addRow(QString(), m_aplicarAlTrazo);
+        fichaCaja->addWidget(secEstilo);
+
+        m_ficha->setVisible(false);     // contextual: oculta hasta seleccionar
+        caja->addWidget(m_ficha);
         caja->addStretch(1);
+
+        // El panel hace scroll si la ficha crece (ventana baja): se envuelve en
+        // un QScrollArea para que nunca se corte el contenido.
+        auto *scroll = new QScrollArea(dock);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidget(cont);
 
         // Dos pestañas en el panel lateral: «Capas» (lo de arriba) y «Elevación».
         m_tabs = new QTabWidget(dock);
-        m_tabs->addTab(cont, tr("Capas"));
+        m_tabs->addTab(scroll, tr("Capas"));
         m_tabs->addTab(construirTabElevacion(), tr("Elevación"));
         dock->setWidget(m_tabs);
         addDockWidget(Qt::RightDockWidgetArea, dock);
+
+        // --- Toggles del panel en el menú «Ver» (m_menuVer lo dejó la Fase A) -
+        if (m_menuVer) {
+            m_menuVer->addSeparator();
+            QAction *accPanel = dock->toggleViewAction();
+            accPanel->setText(tr("Panel de capas"));
+            m_menuVer->addAction(accPanel);
+            auto *accCapas = new QAction(tr("Ir a pestaña Capas"), this);
+            connect(accCapas, &QAction::triggered, this, [this] {
+                m_dock->show(); m_dock->raise();
+                m_tabs->setCurrentIndex(0);
+            });
+            auto *accElev = new QAction(tr("Ir a pestaña Elevación"), this);
+            connect(accElev, &QAction::triggered, this, [this] {
+                m_dock->show(); m_dock->raise();
+                m_tabs->setCurrentIndex(1);
+            });
+            m_menuVer->addAction(accCapas);
+            m_menuVer->addAction(accElev);
+        }
 
         // Propiedades -> modelo.
         connect(m_campoNombre, &QLineEdit::editingFinished, this, &Ventana::aplicarPropiedades);
@@ -606,6 +1415,8 @@ private:
 
         connect(m_mapa, &MapWidget::zoomChanged, this, &Ventana::actualizarEstado);
         connect(m_mapa, &MapWidget::baseLayerChanged, this, &Ventana::actualizarEstado);
+        // Si la base cambia desde la barra o el menú, refleja la marca en el árbol.
+        connect(m_mapa, &MapWidget::baseLayerChanged, this, &Ventana::sincronizarBaseEnArbol);
         connect(m_mapa, &MapWidget::centerChanged, this, &Ventana::actualizarEstado);
 
         connect(m_mapa, &MapWidget::measurementFinished, this,
@@ -623,11 +1434,40 @@ private:
                     statusBar()->showMessage(tr("Error: %1").arg(e), 8000);
                 });
 
+        // Selección de zona: la librería deja el recuadro/contorno visible y
+        // emite la geometría; aquí se informa (fill_map la usaría para descargar).
+        connect(m_mapa, &MapWidget::areaSelected, this,
+                [this](const QGeoCoordinate &nw, const QGeoCoordinate &se) {
+                    statusBar()->showMessage(
+                        tr("Área: NO %1,%2  →  SE %3,%4")
+                            .arg(nw.latitude(), 0, 'f', 4).arg(nw.longitude(), 0, 'f', 4)
+                            .arg(se.latitude(), 0, 'f', 4).arg(se.longitude(), 0, 'f', 4),
+                        10000);
+                    m_accNavegar->setChecked(true);
+                    m_mapa->setActiveTool(MapTool::None);
+                });
+        connect(m_mapa, &MapWidget::polygonSelected, this,
+                [this](const QVector<QGeoCoordinate> &pol) {
+                    statusBar()->showMessage(
+                        tr("Polígono de zona: %1 vértices").arg(pol.size()), 10000);
+                    m_accNavegar->setChecked(true);
+                    m_mapa->setActiveTool(MapTool::None);
+                });
+
         connect(m_grupo, &QActionGroup::triggered, this, [this](QAction *a) {
-            m_mapa->setActiveTool(static_cast<MapTool>(a->data().toInt()));
+            const auto tool = static_cast<MapTool>(a->data().toInt());
+            m_mapa->setActiveTool(tool);
+            // Si se cambia a una herramienta que no dibuja, se desarma el alta
+            // en curso (p. ej. el usuario pulsa Navegar sin llegar a dibujar).
+            if (tool != MapTool::DrawPoint && tool != MapTool::DrawPolyline
+                && tool != MapTool::DrawPolygon) {
+                m_esperandoDibujo = false;
+                m_nombrePendiente.clear();
+            }
         });
 
         // --- El panel se reconstruye SOLO desde las senales del modelo. ---
+        connect(m_mapa, &MapWidget::featureAdded, this, &Ventana::alEntidadCreada);
         connect(m_mapa, &MapWidget::featureAdded, this, &Ventana::pedirReconstruir);
         connect(m_mapa, &MapWidget::featureRemoved, this, &Ventana::pedirReconstruir);
         connect(m_mapa, &MapWidget::featureUpdated, this, &Ventana::pedirReconstruir);
@@ -636,8 +1476,19 @@ private:
         connect(m_mapa, &MapWidget::featureSelected, this, &Ventana::seleccionEnMapa);
 
         connect(m_mapa, &MapWidget::featureCreated, this, [this](qint64 id) {
+            auto f = m_mapa->feature(id);
+            // A un objetivo/área recién creado se le pone un nombre por defecto
+            // (3 líneas en el objetivo) para que su etiqueta se vea al momento.
+            if (f && f->name.isEmpty()) {
+                if (f->type == QLatin1String("objetivo")) {
+                    f->name = tr("Objetivo %1\nrumbo —\nestado —").arg(id);
+                    m_mapa->updateFeature(*f);
+                } else if (f->type == QLatin1String("objetivo_area")) {
+                    f->name = tr("Área %1").arg(id);
+                    m_mapa->updateFeature(*f);
+                }
+            }
             m_mapa->selectFeature(id);
-            const auto f = m_mapa->feature(id);
             statusBar()->showMessage(
                 tr("Creada entidad %1 con %2 vertices en la capa '%3'")
                     .arg(id).arg(f ? f->geometry.size() : 0)
@@ -646,6 +1497,26 @@ private:
 
         connect(m_mapa, &MapWidget::drawingCancelled, this,
                 [this] { statusBar()->showMessage(tr("Trazado cancelado"), 3000); });
+
+        // Arrastre de los pines A/B por la LIBRERÍA: al empezar se resuelve si es
+        // A o B; en cada movimiento se vuelca la coordenada en los campos; al
+        // soltar se recalcula el análisis. (Antes esto lo hacía un eventFilter.)
+        connect(m_mapa, &MapWidget::featureDragStarted, this, [this](qint64 id) {
+            const auto f = m_mapa->feature(id);
+            if (f && f->type == QStringLiteral("punto_ab"))
+                m_dragPick = (f->name == tr("B")) ? Pick::B : Pick::A;
+        });
+        connect(m_mapa, &MapWidget::featureDragMovedTo, this,
+                [this](qint64, const QGeoCoordinate &g) {
+                    if (m_dragPick != Pick::Ninguno)
+                        moverPinCoord(m_dragPick, g);
+                });
+        connect(m_mapa, &MapWidget::featureDragFinished, this, [this](qint64) {
+            if (m_dragPick != Pick::Ninguno) {
+                m_dragPick = Pick::Ninguno;
+                reejecutar();            // recalcula el análisis con el punto movido
+            }
+        });
 
         m_coords = new QLabel(this);
         m_cota = new QLabel(this);
@@ -827,16 +1698,8 @@ private:
             case 3: analizarPicosAltos(); break;
             }
         });
-        connect(bLimpiar, &QPushButton::clicked, this, [this] {
-            m_mapa->removeFeatureLayer(kCapaVision);
-            m_mapa->removeFeatureLayer(kCapaViewshed);
-            m_mapa->removeFeatureLayer(kCapaPicos);
-            m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
-            if (m_resultado) m_resultado->clear();
-            m_ultimo = Analisis::Ninguno;
-            marcarPuntosActivos();      // deja los pines de los puntos de entrada
-            statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
-        });
+        // Mismo slot que el menú «Elevación → Limpiar análisis» (sin duplicar).
+        connect(bLimpiar, &QPushButton::clicked, this, &Ventana::limpiarAnalisis);
         // Los checks re-aplican al instante el último análisis.
         connect(m_marComo0, &QCheckBox::toggled, this, [this] { reejecutar(); });
         connect(m_curvatura, &QCheckBox::toggled, this, [this] { reejecutar(); });
@@ -1244,28 +2107,8 @@ private:
 
         const QEvent::Type t = ev->type();
 
-        // --- arrastre de un pin A/B ---
-        if (t == QEvent::MouseButtonPress) {
-            auto *me = static_cast<QMouseEvent *>(ev);
-            if (me->button() == Qt::LeftButton && m_picking == Pick::Ninguno) {
-                const qint64 id = m_mapa->featureAt(me->pos(), 8.0);
-                if (id >= 0) {
-                    if (const auto f = m_mapa->feature(id);
-                        f && f->type == QStringLiteral("punto_ab")) {
-                        m_dragPick = (f->name == tr("B")) ? Pick::B : Pick::A;
-                        return true;            // no desplazar el mapa: arrastramos
-                    }
-                }
-            }
-        } else if (t == QEvent::MouseMove && m_dragPick != Pick::Ninguno) {
-            auto *me = static_cast<QMouseEvent *>(ev);
-            moverPinA(m_dragPick, me->pos());
-            return true;
-        } else if (t == QEvent::MouseButtonRelease && m_dragPick != Pick::Ninguno) {
-            m_dragPick = Pick::Ninguno;
-            reejecutar();                        // recalcula el análisis con el punto movido
-            return true;
-        }
+        // El arrastre de los pines A/B ya NO se hace aquí: lo gestiona la librería
+        // (entidad marcada draggable + señales featureDrag*, ver construirPanel).
 
         // --- hover: resalte de picos + tooltip de cualquier entidad ---
         if (t == QEvent::MouseMove) {
@@ -1285,15 +2128,11 @@ private:
         return QMainWindow::eventFilter(obj, ev);
     }
 
-    // Mueve el pin A o B a la coordenada bajo el píxel dado (arrastre): vuelca la
-    // posición en sus campos lat/lon, que redibujan el pin y la lectura al vuelo.
-    void moverPinA(Pick cual, const QPoint &pixel)
+    // Vuelca una coordenada (arrastre de un pin A/B) en sus campos lat/lon, que
+    // redibujan el pin y la lectura al vuelo. La coordenada la da la librería por
+    // la señal featureDragMovedTo.
+    void moverPinCoord(Pick cual, const QGeoCoordinate &g)
     {
-        auto *v = m_mapa ? qobject_cast<QCustomPlot *>(m_mapa->customPlot()) : nullptr;
-        if (!v) return;
-        const QPointF axis(v->xAxis->pixelToCoord(pixel.x()),
-                           v->yAxis->pixelToCoord(pixel.y()));
-        const QGeoCoordinate g = m_mapa->fromAxisCoords(axis);
         if (!g.isValid()) return;
         QDoubleSpinBox *lat = (cual == Pick::A) ? m_latA : m_latB;
         QDoubleSpinBox *lon = (cual == Pick::A) ? m_lonA : m_lonB;
@@ -1404,7 +2243,8 @@ private:
             f.style.iconAnchor = QPointF(0.5, 31.0 / 32.0);  // la PUNTA marca el punto
             f.style.labelVisible = true;
             f.style.labelColor = c;
-            f.selectable = true;        // arrastrable (ver eventFilter de arrastre)
+            f.selectable = true;
+            f.draggable = true;         // la librería lo arrastra con «Navegar»
             m_mapa->addFeature(f);
         };
         pin(puntoA(), m_colorA, tr("A"));
@@ -1881,13 +2721,31 @@ private:
         QSignalBlocker sinSenales(m_arbol);
         m_arbol->clear();
 
+        // --- Grupo «Base»: los datasets de teselas (uno visible a la vez) -----
+        // Casillas con comportamiento de radio: marcar una fija la capa base y
+        // desmarca las demás (lo resuelve visibilidadCambiada). No son editables.
+        QTreeWidgetItem *gBase = nuevoGrupo(tr("Base (mapa)"));
+        const QString baseActual = m_mapa->baseLayerId();
+        for (const BaseLayerInfo &b : m_mapa->availableBaseLayers()) {
+            auto *it = new QTreeWidgetItem(gBase);
+            it->setText(0, b.displayName.isEmpty() ? b.id : b.displayName);
+            it->setData(0, RolBase, b.id);
+            it->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable
+                         | Qt::ItemIsUserCheckable);
+            it->setCheckState(0, b.id == baseActual ? Qt::Checked : Qt::Unchecked);
+        }
+
+        // --- Capas vectoriales: overlays (no editables) vs entidades ----------
         // featureLayers() viene por zOrder ascendente; se invierte para que
         // arriba en el panel sea arriba en el mapa.
+        QTreeWidgetItem *gOver = nuevoGrupo(tr("Overlays (solo lectura)"));
+        QTreeWidgetItem *gEnt  = nuevoGrupo(tr("Entidades (editables)"));
         auto capas = m_mapa->featureLayers();
         std::reverse(capas.begin(), capas.end());
 
         for (const LayerInfo &c : capas) {
-            auto *nodo = new QTreeWidgetItem(m_arbol);
+            QTreeWidgetItem *grupo = c.editable ? gEnt : gOver;
+            auto *nodo = new QTreeWidgetItem(grupo);
             nodo->setText(0, QStringLiteral("%1  (%2)")
                 .arg(c.displayName.isEmpty() ? c.id : c.displayName)
                 .arg(c.featureCount));
@@ -1900,28 +2758,54 @@ private:
             f.setBold(c.id == activa);
             nodo->setFont(0, f);
 
-            for (const MapFeature &ent : m_mapa->featuresInLayer(c.id)) {
-                auto *hoja = new QTreeWidgetItem(nodo);
-                hoja->setText(0, ent.name.isEmpty()
-                    ? tr("(sin nombre) #%1").arg(ent.id) : ent.name);
-                hoja->setText(1, ent.type);
-                hoja->setText(2, QString::number(ent.geometry.size()));
-                hoja->setData(0, RolCapa, c.id);
-                hoja->setData(0, RolEntidad, ent.id);
+            // Las entidades del usuario se despliegan hoja a hoja; los overlays
+            // NO (pueden ser miles de polígonos: solo se muestra el recuento).
+            if (c.editable) {
+                for (const MapFeature &ent : m_mapa->featuresInLayer(c.id)) {
+                    auto *hoja = new QTreeWidgetItem(nodo);
+                    hoja->setText(0, ent.name.isEmpty()
+                        ? tr("(sin nombre) #%1").arg(ent.id) : ent.name);
+                    hoja->setText(1, ent.type);
+                    hoja->setText(2, QString::number(ent.geometry.size()));
+                    hoja->setData(0, RolCapa, c.id);
+                    hoja->setData(0, RolEntidad, ent.id);
 
-                QPixmap muestra(12, 12);
-                muestra.fill(ent.style.lineColor);
-                hoja->setIcon(0, QIcon(muestra));
+                    QPixmap muestra(12, 12);
+                    muestra.fill(ent.style.lineColor);
+                    hoja->setIcon(0, QIcon(muestra));
 
-                if (ent.id == sel) {
-                    hoja->setSelected(true);
-                    m_arbol->setCurrentItem(hoja);
+                    if (ent.id == sel) {
+                        hoja->setSelected(true);
+                        m_arbol->setCurrentItem(hoja);
+                    }
                 }
+                nodo->setExpanded(true);
             }
-            nodo->setExpanded(true);
         }
 
+        gBase->setExpanded(true);
+        gOver->setExpanded(true);
+        gEnt->setExpanded(true);
         actualizarEstado();
+    }
+
+    //! Crea una cabecera de grupo del árbol de capas (no seleccionable ni con
+    //! casilla; solo organiza visualmente las tres categorías).
+    QTreeWidgetItem *nuevoGrupo(const QString &titulo)
+    {
+        auto *g = new QTreeWidgetItem(m_arbol);
+        g->setText(0, titulo);
+        g->setFlags(Qt::ItemIsEnabled);           // ni casilla ni selección
+        g->setFirstColumnSpanned(true);
+        QFont f = g->font(0);
+        f.setBold(true);
+        g->setFont(0, f);
+        // Leve banda de fondo por grupo (color derivado del tema), para separar
+        // visualmente Base / Overlays / Entidades.
+        const QColor banda = palette().color(QPalette::AlternateBase);
+        for (int col = 0; col < m_arbol->columnCount(); ++col)
+            g->setBackground(col, banda);
+        return g;
     }
 
     // Item marcado en el arbol, o nullptr.
@@ -1949,6 +2833,7 @@ private:
     void seleccionEnMapa(qint64 id)
     {
         mostrarPropiedades(id);
+        mostrarCoordsArea(id);
         actualizarEstado();
         if (!m_arbol)
             return;
@@ -1958,15 +2843,12 @@ private:
             m_arbol->setCurrentItem(nullptr);
             return;
         }
-        for (int i = 0; i < m_arbol->topLevelItemCount(); ++i) {
-            QTreeWidgetItem *capa = m_arbol->topLevelItem(i);
-            for (int j = 0; j < capa->childCount(); ++j) {
-                QTreeWidgetItem *hoja = capa->child(j);
-                if (hoja->data(0, RolEntidad).toLongLong() == id) {
-                    m_arbol->setCurrentItem(hoja);
-                    m_arbol->scrollToItem(hoja);
-                    return;
-                }
+        // Las hojas de entidad cuelgan de grupo→capa→entidad: se recorre todo.
+        for (QTreeWidgetItemIterator it(m_arbol); *it; ++it) {
+            if ((*it)->data(0, RolEntidad).toLongLong() == id) {
+                m_arbol->setCurrentItem(*it);
+                m_arbol->scrollToItem(*it);
+                return;
             }
         }
     }
@@ -1975,19 +2857,60 @@ private:
     {
         if (col != 0)
             return;
+
+        // Grupo «Base»: casillas con comportamiento de radio. Marcar una fija la
+        // capa base; desmarcar la activa no hace nada (siempre hay un mapa), así
+        // que se vuelve a marcar.
+        const QString base = item->data(0, RolBase).toString();
+        if (!base.isEmpty()) {
+            QSignalBlocker sinSenales(m_arbol);
+            if (item->checkState(0) != Qt::Checked) {
+                item->setCheckState(0, Qt::Checked);   // no se puede apagar el mapa
+                return;
+            }
+            m_mapa->setBaseLayerId(base);
+            if (m_capasBase)
+                m_capasBase->setCurrentIndex(m_capasBase->findData(base));
+            // Desmarcar las demás bases del mismo grupo.
+            if (QTreeWidgetItem *g = item->parent())
+                for (int i = 0; i < g->childCount(); ++i)
+                    if (QTreeWidgetItem *h = g->child(i); h != item)
+                        h->setCheckState(0, Qt::Unchecked);
+            return;
+        }
+
+        // Capas de overlays/entidades: casilla = visibilidad de la capa.
         const QString capa = item->data(0, RolCapa).toString();
         if (!capa.isEmpty() && item->data(0, RolEntidad).toLongLong() == 0)
             m_mapa->setFeatureLayerVisible(capa, item->checkState(0) == Qt::Checked);
     }
 
+    //! Marca en el árbol la base activa (cuando cambia desde la barra o el menú,
+    //! que no reconstruyen el panel). Solo toca las casillas del grupo «Base».
+    void sincronizarBaseEnArbol(const QString &id)
+    {
+        if (!m_arbol)
+            return;
+        QSignalBlocker sinSenales(m_arbol);
+        for (QTreeWidgetItemIterator it(m_arbol); *it; ++it) {
+            const QString base = (*it)->data(0, RolBase).toString();
+            if (!base.isEmpty())
+                (*it)->setCheckState(0, base == id ? Qt::Checked : Qt::Unchecked);
+        }
+    }
+
     void resaltarCapaActiva()
     {
         const QString activa = m_mapa->activeFeatureLayer();
-        for (int i = 0; i < m_arbol->topLevelItemCount(); ++i) {
-            QTreeWidgetItem *c = m_arbol->topLevelItem(i);
-            QFont f = c->font(0);
-            f.setBold(c->data(0, RolCapa).toString() == activa);
-            c->setFont(0, f);
+        // Las capas cuelgan de las cabeceras de grupo: se recorre el árbol y se
+        // pone en negrita la capa activa (sin tocar las cabeceras, sin RolCapa).
+        for (QTreeWidgetItemIterator it(m_arbol); *it; ++it) {
+            const QString capa = (*it)->data(0, RolCapa).toString();
+            if (capa.isEmpty() || (*it)->data(0, RolEntidad).toLongLong() != 0)
+                continue;
+            QFont f = (*it)->font(0);
+            f.setBold(capa == activa);
+            (*it)->setFont(0, f);
         }
     }
 
@@ -2000,6 +2923,7 @@ private:
             return;
         }
         m_mapa->removeFeature(id);           // el panel se refresca por senal
+        marcarSucio();
         statusBar()->showMessage(tr("Entidad %1 borrada").arg(id), 3000);
     }
 
@@ -2017,6 +2941,7 @@ private:
                 != QMessageBox::Yes)
             return;
         m_mapa->clearFeatureLayer(capa);
+        marcarSucio();
         statusBar()->showMessage(tr("Capa '%1' vaciada").arg(capa), 3000);
     }
 
@@ -2032,6 +2957,7 @@ private:
             return;
         m_mapa->addFeatureLayer(nombre, nombre, nCapas * 10);
         m_mapa->setActiveFeatureLayer(nombre);
+        marcarSucio();
         resaltarCapaActiva();
     }
 
@@ -2050,6 +2976,7 @@ private:
                     .arg(capa).arg(n)) != QMessageBox::Yes)
             return;
         m_mapa->removeFeatureLayer(capa);
+        marcarSucio();
     }
 
     void moverCapa(int direccion)
@@ -2064,6 +2991,7 @@ private:
                 return;
             m_mapa->setFeatureLayerZOrder(capas[i].id, capas[j].zOrder);
             m_mapa->setFeatureLayerZOrder(capas[j].id, capas[i].zOrder);
+            marcarSucio();
             return;
         }
     }
@@ -2099,6 +3027,7 @@ private:
             return;
         f->style = estiloActual();
         m_mapa->updateFeature(*f);
+        marcarSucio();
     }
 
     void aplicarPropiedades()
@@ -2125,6 +3054,7 @@ private:
         }
         f->attributes = atributos;
         m_mapa->updateFeature(*f);
+        marcarSucio();
     }
 
     //! Vuelca la entidad seleccionada a los campos del panel.
@@ -2137,6 +3067,18 @@ private:
         m_actualizandoPropiedades = true;
 
         const bool hay = f.has_value();
+        // Panel contextual: la ficha solo se ve cuando hay algo seleccionado.
+        if (m_ficha)
+            m_ficha->setVisible(hay);
+        if (hay && m_lblFicha) {
+            const QString nombre = f->name.isEmpty()
+                ? tr("(sin nombre) #%1").arg(f->id) : f->name;
+            m_lblFicha->setText(f->type.isEmpty()
+                ? nombre : QStringLiteral("%1  ·  %2").arg(nombre, f->type));
+        }
+        if (hay && m_lblCapaEntidad)
+            m_lblCapaEntidad->setText(f->layerId);
+
         m_campoNombre->setEnabled(hay);
         m_campoTipo->setEnabled(hay);
         m_campoDescripcion->setEnabled(hay);
@@ -2167,7 +3109,138 @@ private:
             m_verEtiqueta->setChecked(f->style.labelVisible);
             m_verVertices->setChecked(f->style.verticesVisible);
         }
+        mostrarCoords(id);
         m_actualizandoPropiedades = false;
+    }
+
+    //! ¿La capa de esta entidad es editable? (Las de usuario sí; las de overlays
+    //! del paquete, no.) Decide si se pueden tocar las coordenadas.
+    bool capaEditable(const QString &layerId) const
+    {
+        for (const LayerInfo &c : m_mapa->featureLayers())
+            if (c.id == layerId)
+                return c.editable;
+        return false;
+    }
+
+    //! Vuelca los vértices de la entidad seleccionada a la tabla de coordenadas.
+    //! Reutiliza el guardia m_actualizandoPropiedades para no reescribir al
+    //! rellenar. Si la entidad no es editable, la tabla queda de solo lectura.
+    void mostrarCoords(qint64 id)
+    {
+        const bool prev = m_actualizandoPropiedades;
+        m_actualizandoPropiedades = true;
+
+        m_tablaCoords->setRowCount(0);
+        const auto f = id >= 0 ? m_mapa->feature(id) : std::nullopt;
+        // Solo geometría de una sola parte (punto/línea/polígono de usuario). Las
+        // multiparte (p. ej. .geo) no se editan vértice a vértice aquí.
+        const bool editable = f && !f->isMultiPart() && capaEditable(f->layerId);
+
+        if (f && !f->isMultiPart()) {
+            for (int i = 0; i < f->geometry.size(); ++i) {
+                const QGeoCoordinate &c = f->geometry[i];
+                m_tablaCoords->insertRow(i);
+                m_tablaCoords->setItem(i, 0, celdaCoord(c.latitude()));
+                m_tablaCoords->setItem(i, 1, celdaCoord(c.longitude()));
+            }
+        }
+        m_tablaCoords->setEnabled(editable);
+        // En un punto no hay vértices que añadir/quitar; en línea/polígono sí.
+        const bool esMulti = f && (f->kind == GeometryKind::Polyline
+                                   || f->kind == GeometryKind::Polygon);
+        m_btnAddVert->setEnabled(editable && esMulti);
+        m_btnDelVert->setEnabled(editable && esMulti);
+
+        m_actualizandoPropiedades = prev;
+    }
+
+    //! Crea una celda con una coordenada formateada a 6 decimales.
+    static QTableWidgetItem *celdaCoord(double v)
+    {
+        return new QTableWidgetItem(QString::number(v, 'f', 6));
+    }
+
+    //! Una celda de lat/lon cambió: mueve ese vértice (moveVertex).
+    void coordEditada(int fila, int /*col*/)
+    {
+        if (m_actualizandoPropiedades)
+            return;
+        const qint64 id = m_mapa->selectedFeature();
+        if (id < 0)
+            return;
+        auto *itLat = m_tablaCoords->item(fila, 0);
+        auto *itLon = m_tablaCoords->item(fila, 1);
+        if (!itLat || !itLon)
+            return;
+        bool okLa = false, okLo = false;
+        const double la = itLat->text().toDouble(&okLa);
+        const double lo = itLon->text().toDouble(&okLo);
+        if (!okLa || !okLo || la < -90 || la > 90 || lo < -180 || lo > 180) {
+            statusBar()->showMessage(
+                tr("Coordenada inválida (lat -90..90, lon -180..180)."), 4000);
+            mostrarCoords(id);   // restaura el valor bueno
+            return;
+        }
+        if (m_mapa->moveVertex(id, fila, QGeoCoordinate(la, lo)))
+            marcarSucio();
+        else
+            statusBar()->showMessage(tr("No se pudo mover el vértice."), 4000);
+    }
+
+    //! Inserta un vértice tras el seleccionado, en el punto medio hacia el
+    //! siguiente (en polígono cierra el anillo; en línea usa el vecino que haya).
+    void anadirVertice()
+    {
+        const qint64 id = m_mapa->selectedFeature();
+        if (id < 0)
+            return;
+        const auto f = m_mapa->feature(id);
+        if (!f || f->isMultiPart() || f->geometry.isEmpty())
+            return;
+        const int n = static_cast<int>(f->geometry.size());
+        int fila = m_tablaCoords->currentRow();
+        if (fila < 0)
+            fila = n - 1;                      // sin selección: tras el último
+        int vecino;
+        if (f->kind == GeometryKind::Polygon)
+            vecino = (fila + 1) % n;           // cierra el anillo
+        else
+            vecino = (fila + 1 < n) ? fila + 1 : fila - 1;
+        if (vecino < 0)
+            vecino = fila;                     // geometría de un solo punto
+        const QGeoCoordinate &a = f->geometry[fila];
+        const QGeoCoordinate &b = f->geometry[vecino];
+        const QGeoCoordinate medio((a.latitude() + b.latitude()) / 2.0,
+                                   (a.longitude() + b.longitude()) / 2.0);
+        if (m_mapa->insertVertex(id, fila + 1, medio)) {
+            marcarSucio();
+            mostrarCoords(id);                 // cambió el nº de filas
+        } else {
+            statusBar()->showMessage(tr("No se pudo insertar el vértice."), 4000);
+        }
+    }
+
+    //! Quita el vértice seleccionado (la librería rechaza bajar del mínimo:
+    //! 2 en línea, 3 en polígono).
+    void quitarVertice()
+    {
+        const qint64 id = m_mapa->selectedFeature();
+        if (id < 0)
+            return;
+        const int fila = m_tablaCoords->currentRow();
+        if (fila < 0) {
+            statusBar()->showMessage(tr("Elige primero un vértice en la tabla."), 4000);
+            return;
+        }
+        if (m_mapa->removeVertex(id, fila)) {
+            marcarSucio();
+            mostrarCoords(id);
+        } else {
+            statusBar()->showMessage(
+                tr("No se puede quitar: la geometría quedaría por debajo del "
+                   "mínimo de vértices."), 4000);
+        }
     }
 
     void pintarBotonColor(QPushButton *boton, const QColor &c)
@@ -2196,12 +3269,15 @@ private:
             guardarComo();
             return;
         }
-        if (m_mapa->saveFeaturesTo(m_archivoActual))
+        if (m_mapa->saveFeaturesTo(m_archivoActual)) {
+            m_sucio = false;
+            actualizarTitulo();
             statusBar()->showMessage(tr("Guardadas %1 entidades en %2")
                 .arg(m_mapa->featureCount()).arg(m_archivoActual), 6000);
-        else
+        } else {
             QMessageBox::warning(this, tr("Guardar"),
                 tr("No se pudo guardar en:\n%1").arg(m_archivoActual));
+        }
     }
 
     void guardarComo()
@@ -2215,6 +3291,7 @@ private:
         if (m_mapa->saveFeaturesTo(ruta)) {
             m_archivoActual = ruta;
             m_ultimoDir = QFileInfo(ruta).absolutePath();
+            m_sucio = false;
             actualizarTitulo();
             statusBar()->showMessage(tr("Guardadas %1 entidades en %2")
                 .arg(m_mapa->featureCount()).arg(ruta), 6000);
@@ -2226,13 +3303,9 @@ private:
 
     void abrir()
     {
-        // Cargar sustituye TODO. Se avisa si hay trabajo sin guardar; de todos
-        // modos es deshacible (queda en la pila de deshacer).
-        if (m_mapa->featureCount() > 0 &&
-            QMessageBox::question(this, tr("Abrir"),
-                tr("Se reemplazaran las %1 entidad(es) actuales.\n"
-                   "La carga se puede deshacer. Continuar?")
-                    .arg(m_mapa->featureCount())) != QMessageBox::Yes)
+        // Cargar sustituye TODO. Con guardado explícito, primero se ofrece
+        // guardar lo pendiente (y se puede cancelar la apertura).
+        if (!confirmarDescartar())
             return;
 
         const QString ruta = QFileDialog::getOpenFileName(this,
@@ -2244,6 +3317,7 @@ private:
         if (m_mapa->loadFeaturesFrom(ruta)) {
             m_archivoActual = ruta;
             m_ultimoDir = QFileInfo(ruta).absolutePath();
+            m_sucio = false;
             actualizarTitulo();
             // El panel se refresca solo: loadFeaturesFrom -> setContents emite
             // layersChanged. No hace falta reconstruir a mano.
@@ -2265,10 +3339,51 @@ private:
     {
         const QString f = m_archivoActual.isEmpty()
             ? tr("(sin guardar)") : QFileInfo(m_archivoActual).fileName();
+        // Un asterisco delante marca que hay cambios sin guardar (explícito).
+        const QString marca = m_sucio ? QStringLiteral("*") : QString();
         const DataPackageInfo paquete = m_mapa ? m_mapa->packageInfo() : DataPackageInfo();
         const QString datos = paquete.isValid()
             ? tr("  -  datos: %1 %2").arg(paquete.name, paquete.dataVersion) : QString();
-        setWindowTitle(tr("libmapa - demostracion  -  %1%2").arg(f, datos));
+        setWindowTitle(tr("libmapa - demostracion  -  %1%2%3").arg(marca, f, datos));
+    }
+
+    //! Marca el documento como modificado (guardado explícito): refresca el
+    //! título con el asterisco. Lo llaman las ediciones de entidades de usuario;
+    //! las capas temporales (análisis, A/B) NO lo llaman, por eso no ensucian.
+    void marcarSucio()
+    {
+        if (m_sucio)
+            return;
+        m_sucio = true;
+        actualizarTitulo();
+    }
+
+    //! Pregunta si guardar los cambios pendientes. Devuelve false solo si el
+    //! usuario cancela (para abortar el cierre o la apertura de otro fichero).
+    bool confirmarDescartar()
+    {
+        if (!m_sucio)
+            return true;
+        const auto r = QMessageBox::question(this, tr("Cambios sin guardar"),
+            tr("Hay entidades sin guardar. ¿Quieres guardarlas?"),
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+            QMessageBox::Save);
+        if (r == QMessageBox::Cancel)
+            return false;
+        if (r == QMessageBox::Save) {
+            guardar();
+            return !m_sucio;      // si el guardado se canceló/falló, no sigas
+        }
+        return true;              // Descartar
+    }
+
+    //! Al cerrar la ventana, ofrece guardar lo pendiente (guardado explícito).
+    void closeEvent(QCloseEvent *e) override
+    {
+        if (confirmarDescartar())
+            e->accept();
+        else
+            e->ignore();
     }
 
     // ============================================ datos / simulacion ======
@@ -2295,6 +3410,7 @@ private:
         }
         m_ultimoDir = QFileInfo(ruta).absolutePath();
         m_mapa->setActiveFeatureLayer(id);
+        marcarSucio();               // el .geo entra como entidad guardable
         statusBar()->showMessage(tr("Cargado %1 como una entidad en la capa '%2'")
             .arg(QFileInfo(ruta).fileName(), id), 5000);
     }
@@ -2490,12 +3606,36 @@ private:
     QAction *m_accDeshacer = nullptr;
     QAction *m_accRehacer = nullptr;
     QAction *m_accBorrar = nullptr;
+    QAction *m_accMedir = nullptr;
+    QAction *m_accZoomArea = nullptr;
+    QAction *m_accPunto = nullptr;
+    QAction *m_accLinea = nullptr;
+    QAction *m_accPoligono = nullptr;
+    QAction *m_accObjetivo = nullptr;
+    QAction *m_accArea = nullptr;
+    QAction *m_accEditar = nullptr;
+    QAction *m_accGuardar = nullptr;
+    QAction *m_accGuardarComo = nullptr;
+    QAction *m_accAbrir = nullptr;
+    QAction *m_accRejilla = nullptr;
+    QAction *m_accCobertura = nullptr;
+    QMenu *m_menuVer = nullptr;
+    QAction *m_accTemaClaro = nullptr;
+    QAction *m_accTemaOscuro = nullptr;
+    bool m_temaOscuro = false;
 
+    QDockWidget *m_dock = nullptr;   //!< panel lateral «Capas y entidades»
+    QWidget *m_ficha = nullptr;      //!< ficha contextual (oculta sin selección)
+    QLabel *m_lblFicha = nullptr;    //!< título de la ficha (nombre · tipo)
+    QLabel *m_lblCapaEntidad = nullptr; //!< capa de la entidad (solo lectura)
     QTreeWidget *m_arbol = nullptr;
     QLineEdit *m_campoNombre = nullptr;
     QLineEdit *m_campoTipo = nullptr;
     QLineEdit *m_campoDescripcion = nullptr;
     QTableWidget *m_tablaAtributos = nullptr;
+    QTableWidget *m_tablaCoords = nullptr;   //!< lat/lon editables de la entidad
+    QPushButton *m_btnAddVert = nullptr;
+    QPushButton *m_btnDelVert = nullptr;
     QPushButton *m_btnColorLinea = nullptr;
     QPushButton *m_btnColorRelleno = nullptr;
     QDoubleSpinBox *m_anchoLinea = nullptr;
@@ -2556,12 +3696,21 @@ private:
     QColor m_colorLinea = QColor(0xd3, 0x2f, 0x2f);
     QColor m_colorRelleno = QColor(0xd3, 0x2f, 0x2f, 70);
     QString m_archivoActual;
+    bool m_sucio = false;        //!< hay entidades sin guardar (guardado explícito)
     QString m_ultimoDir;
+
+    // Alta de entidad en curso (diálogo → dibuja → Navegar): nombre a aplicar a
+    // la siguiente entidad dibujada y si hay un alta armada.
+    QString m_nombrePendiente;
+    bool m_esperandoDibujo = false;
 
     // Simulacion de objetivos moviles.
     QSpinBox *m_numObjetivos = nullptr;
     QComboBox *m_traza = nullptr;
     QAction *m_accSimular = nullptr;
+    QAction *m_accVerObjetivos = nullptr;   //!< mostrar/ocultar objetivos
+    QAction *m_accSelArea = nullptr;        //!< seleccionar área (bbox)
+    QAction *m_accSelPoli = nullptr;        //!< seleccionar polígono (zona)
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.
@@ -2582,11 +3731,14 @@ int main(int argc, char *argv[])
 #endif
 
     QApplication app(argc, argv);
+    // Para QSettings (recordar el tema elegido entre sesiones).
+    QCoreApplication::setOrganizationName(QStringLiteral("LibMapaStatic"));
+    QCoreApplication::setApplicationName(QStringLiteral("demo"));
 
     // Primer positional: la carpeta de un paquete de datos (o su mapa.json), o un
     // datasets.json. Opcionales: --dem <carpeta> / --dem-db <fichero>
-    // (elevacion) y --features <fichero> (persistencia automatica de entidades:
-    // lo que dibujes se guarda y recarga solo); con paquete, mandan sobre el suyo.
+    // (elevacion) y --features <fichero> (entidades: se CARGA al arrancar y es el
+    // fichero de trabajo para «Guardar»; el guardado es EXPLÍCITO, no automático).
     QString datasets;
     QString demDir, demDb, featuresDb;
     for (int i = 1; i < argc; ++i) {

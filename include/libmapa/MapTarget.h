@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QGeoCoordinate>
 #include <QMetaType>
+#include <QPointF>
 #include <QString>
 #include <QVariant>
 
@@ -44,6 +45,12 @@ struct MapTarget
     QColor color = QColor(0xff, 0x8f, 0x00);   //!< Simbolo y traza.
     bool labelVisible = true;
     bool trailVisible = true;
+
+    //! Desplazamiento de la ETIQUETA respecto al objetivo, en PIXELES. Relativo
+    //! al punto: al moverse el objetivo, la etiqueta lo sigue; arrastrar la
+    //! etiqueta solo cambia esto. (0,0) = pegada al simbolo. Cuando no es nula
+    //! se traza una LINEA GUIA del objetivo a la caja de texto.
+    QPointF labelOffsetPx = QPointF(0.0, 0.0);
 
     bool isValid() const { return position.isValid(); }
 };

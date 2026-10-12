@@ -55,6 +55,18 @@ struct FeatureStyle
     bool labelVisible = true;
     QColor labelColor = Qt::black;
 
+    //! Desplazamiento de la ETIQUETA respecto a su anclaje, en PIXELES. Como es
+    //! relativo al punto, al mover la entidad la etiqueta la sigue (se mueven al
+    //! unisono); al arrastrar la etiqueta solo cambia esto. (0,0) = pegada al
+    //! anclaje (comportamiento clasico). Cuando no es nula se dibuja una LINEA
+    //! GUIA del anclaje a la caja de texto.
+    QPointF labelOffsetPx = QPointF(0.0, 0.0);
+
+    //! Vertice al que se ancla la etiqueta: -1 = automatico (el punto, o el
+    //! centro de la geometria en lineas/poligonos); >=0 = ese vertice (p. ej. 0
+    //! para colgar el rotulo del PRIMER punto de un area).
+    int labelAnchorVertex = -1;
+
     //! Se dibujan los vertices como tiradores. Lo activa el editor.
     bool verticesVisible = false;
 };
@@ -108,6 +120,13 @@ struct MapFeature
 
     bool visible = true;
     bool selectable = true;
+
+    //! Si es true y es un PUNTO, la herramienta «Navegar» (None) lo arrastra:
+    //! al pulsar sobre él empieza el arrastre (en vez de desplazar el mapa) y la
+    //! librería emite las señales de arrastre. Pensado para marcadores que el
+    //! operador reposiciona (p. ej. los puntos A/B de un análisis). No se
+    //! persiste: es una pista de interacción que la app vuelve a poner.
+    bool draggable = false;
 
     bool isMultiPart() const { return !parts.isEmpty(); }
 

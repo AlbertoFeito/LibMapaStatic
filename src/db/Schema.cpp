@@ -67,6 +67,21 @@ QStringList migrations(int from)
             ")");
     }
 
+    if (from < 3) {
+        // v3: desplazamiento de la ETIQUETA respecto a su anclaje, en pixeles.
+        // Permite arrastrar el rotulo y que, al ser relativo, siga a la entidad.
+        // ALTER ADD COLUMN con DEFAULT 0 es seguro y no reescribe las filas: una
+        // BD v2 (p. ej. una mascara generada por script) se abre y se migra sola.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN label_dx REAL NOT NULL DEFAULT 0");
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN label_dy REAL NOT NULL DEFAULT 0");
+        // Vertice al que se ancla la etiqueta (−1 = automatico; 0 = primer punto,
+        // para un area objetivo). Asi el anclaje sobrevive guardar/cargar.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN label_anchor INTEGER NOT NULL DEFAULT -1");
+    }
+
     return sql;
 }
 

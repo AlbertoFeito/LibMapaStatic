@@ -30,6 +30,10 @@ private slots:
     void detectsXyzScheme();
     void detectsTmsScheme();
 
+    /*! Un MBTiles (vista 'tiles', eje Y en TMS, bounds en 'metadata') se
+     *  reconoce SIN --ref-bbox: TMS, storedZ=logicalZ y lectura real. */
+    void detectsMbtilesWithoutReference();
+
     void detectsTileSize();
     void detectsSValue();
     void detectsMissingSColumn();
@@ -50,7 +54,7 @@ private slots:
 private:
     QTemporaryDir m_dir;
     QGeoRectangle m_cuba;
-    QString m_direct, m_inverted, m_tms, m_noS, m_big;
+    QString m_direct, m_inverted, m_tms, m_noS, m_big, m_mbtiles;
 };
 
 void TstProbe::initTestCase()
@@ -99,6 +103,10 @@ void TstProbe::initTestCase()
     big.sValue = 3;
     m_big = big.path;
     QVERIFY(buildSyntheticDb(big) > 0);
+
+    m_mbtiles = m_dir.filePath(QStringLiteral("prueba.mbtiles"));
+    QVERIFY(buildSyntheticMbtiles(m_mbtiles, QGeoCoordinate(23.3, -85.0),
+                                  QGeoCoordinate(19.7, -74.0), 5, 9) > 0);
 }
 
 void TstProbe::cleanupTestCase()
@@ -165,6 +173,43 @@ void TstProbe::detectsTmsScheme()
     QVERIFY(r.has_value());
     QCOMPARE(r->dataset.scheme, TileScheme::TMS);
     QVERIFY(r->schemeReason.contains(QStringLiteral("TMS")));
+}
+
+void TstProbe::detectsMbtilesWithoutReference()
+{
+    // Clave: SIN pasar referencia. El MBTiles se reconoce por su esquema y la
+    // extension sale de metadata.bounds.
+    auto r = TileDatasetProbe::probe(m_mbtiles, QStringLiteral("mbt"));
+    QVERIFY(r.has_value());
+
+    // La tabla de teselas es una VISTA, y aun asi se localiza.
+    QCOMPARE(r->dataset.tableName, QStringLiteral("tiles"));
+    QCOMPARE(r->dataset.colZ, QStringLiteral("zoom_level"));
+    QCOMPARE(r->dataset.colX, QStringLiteral("tile_column"));
+    QCOMPARE(r->dataset.colY, QStringLiteral("tile_row"));
+    QCOMPARE(r->dataset.colImage, QStringLiteral("tile_data"));
+
+    // Esquema y mapeo fijados por especificacion MBTiles, sin referencia.
+    QCOMPARE(r->dataset.scheme, TileScheme::TMS);
+    QCOMPARE(r->dataset.zFactor, 1);
+    QCOMPARE(r->dataset.zOffset, 0);
+    QCOMPARE(r->dataset.minZoom, 5);
+    QCOMPARE(r->dataset.maxZoom, 9);
+    QVERIFY(r->schemeReason.contains(QStringLiteral("MBTiles")));
+
+    // La extension cubierta, tomada de metadata.bounds, cae sobre Cuba.
+    QVERIFY(r->coverage.isValid());
+    QVERIFY(r->coverage.contains(QGeoCoordinate(22.0, -80.0)));
+
+    // Y se lee de verdad a traves de la vista.
+    RMapsTileSource src(r->dataset);
+    QVERIFY(src.open());
+    const int z = 7;
+    const auto range = TileMatrix::rangeFor(QGeoCoordinate(23.3, -85.0),
+                                            QGeoCoordinate(19.7, -74.0), z);
+    const auto tiles = src.fetchRange(z, range.xMin, range.xMax,
+                                      range.yMin, range.yMax);
+    QVERIFY(!tiles.isEmpty());
 }
 
 void TstProbe::detectsTileSize()

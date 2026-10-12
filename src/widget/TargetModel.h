@@ -54,6 +54,8 @@ public:
                 double headingDeg = std::numeric_limits<double>::quiet_NaN());
 
     bool setLabel(qint64 id, const QString &text);
+    //! Desplazamiento de la etiqueta respecto al simbolo (px). false si no existe.
+    bool setLabelOffset(qint64 id, const QPointF &offsetPx);
     bool setColor(qint64 id, const QColor &color);
 
     //! Fija (o reemplaza) un atributo libre del objetivo. Via para colgar datos

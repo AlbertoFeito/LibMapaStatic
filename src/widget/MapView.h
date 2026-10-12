@@ -102,6 +102,13 @@ public:
     MapTool activeTool() const { return m_tool; }
     void setActiveTool(MapTool tool);
 
+    //! Tope de vertices del trazado punto a punto (polilinea/poligono). −1 = sin
+    //! limite. Al llegar al tope se ignoran los clics siguientes; el límite se
+    //! guarda en la entidad (atributo \c max_vertices) para que la edicion
+    //! posterior tambien lo respete. Sirve para un «area objetivo» de ≤10 puntos.
+    void setDraftMaxVertices(int n) { m_draftMaxVertices = n; }
+    int draftMaxVertices() const { return m_draftMaxVertices; }
+
     /*!
      * \brief Pone al dia el viewport y la disposicion sin esperar eventos.
      *
@@ -143,6 +150,11 @@ signals:
     void featureCreated(qint64 id);
     void featureClicked(qint64 id, const QGeoCoordinate &position);
     void targetClicked(qint64 id, const QGeoCoordinate &position);
+    //! Arrastre (herramienta Navegar) de una entidad marcada \c draggable: al
+    //! empezar, en cada movimiento (con la coordenada bajo el cursor) y al soltar.
+    void featureDragStarted(qint64 id);
+    void featureDragMovedTo(qint64 id, const QGeoCoordinate &position);
+    void featureDragFinished(qint64 id);
     void drawingCancelled();
     void centerChanged(const QGeoCoordinate &center);
     void mouseMovedTo(const QGeoCoordinate &position);
@@ -208,6 +220,19 @@ private:
     bool m_dragging = false;
     QPoint m_dragStartPx;
     QGeoCoordinate m_dragStartGeo;
+
+    // Arrastre de la ETIQUETA (entidad u objetivo) con la herramienta None: se
+    // recuerda de quien es el rotulo, el pixel de inicio y su offset inicial; el
+    // nuevo offset = inicial + (cursor - inicio). -1 = no se arrastra ninguno.
+    qint64 m_dragLabelFeature = -1;
+    qint64 m_dragLabelTarget = -1;
+    QPoint m_dragLabelStartPx;
+    QPointF m_dragLabelStartOffset;
+
+    //! Entidad (punto) marcada draggable que se arrastra con la herramienta None.
+    qint64 m_dragFeature = -1;
+
+    int m_draftMaxVertices = -1;     //!< Tope de vertices del trazado (−1 = sin).
 
     // Estado de las herramientas de dos clics.
     bool m_toolFirstPointSet = false;

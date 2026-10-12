@@ -214,7 +214,10 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             cfg.elevationDbFile = paquete->elevationFile;
             cfg.elevationDir = paquete->elevationDir;
         }
-        if (cfg.featuresDbFile.isEmpty()) {
+        // Solo si la app quiere autoguardado (por defecto): si no fijo un
+        // featuresDbFile propio, se usa el del paquete. Con autosaveFeatures=false
+        // (guardado explicito) NO se toca el fichero del paquete.
+        if (cfg.autosaveFeatures && cfg.featuresDbFile.isEmpty()) {
             QString motivo;
             cfg.featuresDbFile = paquete->prepareFeaturesFile(&motivo);
             if (!motivo.isEmpty())
@@ -316,6 +319,9 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
     connect(d->view, &MapView::targetClicked, this, &MapWidget::targetClicked);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
+    connect(d->view, &MapView::featureDragStarted, this, &MapWidget::featureDragStarted);
+    connect(d->view, &MapView::featureDragMovedTo, this, &MapWidget::featureDragMovedTo);
+    connect(d->view, &MapView::featureDragFinished, this, &MapWidget::featureDragFinished);
     connect(d->view, &MapView::drawingCancelled, this, &MapWidget::drawingCancelled);
 
     // Persistencia automatica: el timer de antirebote agrupa las rafagas de
@@ -337,7 +343,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             [programarGuardado](qint64) { programarGuardado(); });
     connect(modelo, &OverlayModel::layersChanged, this,
             [programarGuardado] { programarGuardado(); });
-    if (!cfg.featuresDbFile.isEmpty())
+    if (cfg.autosaveFeatures && !cfg.featuresDbFile.isEmpty())
         setFeaturesDbFile(cfg.featuresDbFile);
 
     // Capas fijas del paquete, DESPUES de las entidades del usuario (cargarlas
@@ -900,6 +906,13 @@ bool MapWidget::setTargetLabel(qint64 id, const QString &text)
     return d->view && d->view->targetModel()->setLabel(id, text);
 }
 
+// Desplazamiento de la etiqueta del objetivo (px). Reenvio al modelo, que avisa
+// para repintar. La etiqueta queda unida al simbolo por una linea guia.
+bool MapWidget::setTargetLabelOffset(qint64 id, const QPointF &offsetPx)
+{
+    return d->view && d->view->targetModel()->setLabelOffset(id, offsetPx);
+}
+
 // Cuelga un dato de dominio (AIS, ADS-B, telemetria...) en un objetivo. La
 // libreria no lo interpreta; solo lo guarda y lo devuelve tal cual.
 bool MapWidget::setTargetAttribute(qint64 id, const QString &key, const QVariant &value)
@@ -1022,6 +1035,32 @@ qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx) const
     return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx) : -1;
 }
 
+// Entidad cuyo rotulo cae bajo el pixel (hit-test de la caja de etiqueta).
+qint64 MapWidget::featureLabelAt(const QPoint &pixel) const
+{
+    d->syncGeometry();
+    return d->view ? d->view->featureLayer()->labelAt(pixel) : -1;
+}
+
+// Objetivo cuyo rotulo dibujado cae bajo el pixel.
+qint64 MapWidget::targetLabelAt(const QPoint &pixel) const
+{
+    return (d->view && d->view->targetLayer())
+               ? d->view->targetLayer()->labelAt(pixel) : -1;
+}
+
+// Fija el desplazamiento de la etiqueta de una entidad y lo PERSISTE: lee la
+// entidad, le cambia el offset del estilo y la actualiza por el camino normal
+// (que repinta y guarda con antirebote).
+bool MapWidget::setFeatureLabelOffset(qint64 id, const QPointF &offsetPx)
+{
+    std::optional<MapFeature> f = feature(id);
+    if (!f)
+        return false;
+    f->style.labelOffsetPx = offsetPx;
+    return updateFeature(*f);
+}
+
 // Cota del terreno (m) en una coordenada. Reenvio fino al origen de elevacion
 // configurado; NaN si no hay origen o no hay dato (el llamador lo comprueba).
 double MapWidget::elevationAt(const QGeoCoordinate &position) const
@@ -1131,6 +1170,13 @@ void MapWidget::setDraftType(const QString &type)
 {
     if (d->view)
         d->view->setDraftType(type);
+}
+
+// Tope de vertices del trazado punto a punto (p. ej. 10 para un area objetivo).
+void MapWidget::setDraftMaxVertices(int n)
+{
+    if (d->view)
+        d->view->setDraftMaxVertices(n);
 }
 
 // ¿Hay un trazado en curso?

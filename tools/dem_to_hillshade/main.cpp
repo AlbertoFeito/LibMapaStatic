@@ -20,6 +20,11 @@
  *                    [--water-level 0] (con --colored: cota <= ese valor -> agua azul;
  *                                       sube a ~15 para que bahías/lagunas que el DEM
  *                                       rellena con cota baja positiva salgan con agua)
+ *                    [--water-mask <vector.sqlitedb> [--land-layer <capa>]]
+ *                                      (máscara de TIERRA vectorial: solo se sombrea
+ *                                       dentro de los polígonos de tierra; el agua -mar,
+ *                                       bahías, lagos- queda transparente con el borde
+ *                                       EXACTO del vector, no por umbral de cota)
  *                    [--id relieve --name "Relieve"] [--overwrite]
  *
  * En un servidor sin pantalla: QT_QPA_PLATFORM=offscreen (QImage necesita Gui).
@@ -28,6 +33,8 @@
 #include "dem/HgtElevation.h"
 #include "dem/IElevationSource.h"
 #include "dem/SqliteElevation.h"
+#include "db/VectorRepository.h"
+#include "libmapa/MapFeature.h"
 #include "geo/TileMatrix.h"
 
 #include <QBuffer>
@@ -35,6 +42,9 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPolygonF>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -42,6 +52,7 @@
 #include <QtMath>
 
 #include <cmath>
+#include <vector>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -128,6 +139,7 @@ int main(int argc, char *argv[])
     double seaLevel = std::numeric_limits<double>::quiet_NaN();  // NaN = no enmascarar mar
     double waterLevel = 0.0;   // cota <= este valor se pinta como agua (solo --colored)
     double latN = 90.0, lonW = 180.0, latS = -90.0, lonE = -180.0;
+    QString waterMask, landLayer;   // máscara de tierra: BD vectorial y capa opcional
     bool haveBbox = false, overwrite = false, colored = false;
 
     const QStringList args = app.arguments();
@@ -147,6 +159,8 @@ int main(int argc, char *argv[])
         else if (k == QLatin1String("--sea-level")) seaLevel = val().toDouble();
         else if (k == QLatin1String("--colored")) colored = true;
         else if (k == QLatin1String("--water-level")) waterLevel = val().toDouble();
+        else if (k == QLatin1String("--water-mask")) waterMask = val();
+        else if (k == QLatin1String("--land-layer")) landLayer = val();
         else if (k == QLatin1String("--overwrite")) overwrite = true;
         else if (k == QLatin1String("--cuba")) {
             latN = 23.3; lonW = -85.0; latS = 19.7; lonE = -74.0; haveBbox = true;
@@ -167,6 +181,7 @@ int main(int argc, char *argv[])
                 "                      [--minzoom 6 --maxzoom 13]\n"
                 "                      [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]\n"
                 "                      [--sea-level 0] [--colored] [--water-level 0]\n"
+                "                      [--water-mask <vector.sqlitedb> [--land-layer <capa>]]\n"
                 "                      [--id relieve --name \"Relieve\"] [--overwrite]\n";
         return 2;
     }
@@ -209,6 +224,53 @@ int main(int argc, char *argv[])
     const bool maskSea = !std::isnan(seaLevel);   // hay enmascarado de mar activo
     const int kTile = 256;
     const int G = kTile + 2;            // rejilla con halo de 1 px por lado
+
+    // Máscara de tierra (opcional): polígonos de una BD vectorial de entidades.
+    // Donde NO caiga tierra, la tesela queda transparente: la costa sale con el
+    // borde EXACTO del vector, no con un umbral de cota (útil cuando el DEM no
+    // distingue agua interior —bahías, lagunas— de tierra baja).
+    struct ParteTierra { QVector<QGeoCoordinate> pts; double laMin, laMax, loMin, loMax; };
+    std::vector<ParteTierra> tierra;
+    const bool useMask = !waterMask.isEmpty();
+    if (useMask) {
+        VectorRepository repo;
+        if (!repo.open(waterMask)) {
+            qCritical() << "No se pudo abrir la mascara" << waterMask << ":" << repo.lastError();
+            return 1;
+        }
+        int nPol = 0;
+        for (const MapFeature &f : repo.loadFeatures()) {
+            if (f.kind != GeometryKind::Polygon)
+                continue;
+            if (!landLayer.isEmpty() && f.layerId != landLayer)
+                continue;
+            ++nPol;
+            for (const QVector<QGeoCoordinate> &parte : f.outlines()) {
+                if (parte.size() < 3)
+                    continue;
+                ParteTierra pt;
+                pt.pts = parte;
+                pt.laMin = pt.loMin = 1e9;
+                pt.laMax = pt.loMax = -1e9;
+                for (const QGeoCoordinate &c : parte) {
+                    pt.laMin = qMin(pt.laMin, c.latitude());  pt.laMax = qMax(pt.laMax, c.latitude());
+                    pt.loMin = qMin(pt.loMin, c.longitude()); pt.loMax = qMax(pt.loMax, c.longitude());
+                }
+                tierra.push_back(std::move(pt));
+            }
+        }
+        repo.close();
+        if (tierra.empty()) {
+            qCritical().noquote() << QStringLiteral(
+                "La mascara \"%1\"%2 no tiene poligonos: se esperaba una BD de "
+                "entidades (entidad/entidad_vertice) con geometria de poligono de tierra.")
+                .arg(waterMask, landLayer.isEmpty() ? QString()
+                                                    : QStringLiteral(" (capa %1)").arg(landLayer));
+            return 1;
+        }
+        qInfo().noquote() << QStringLiteral("Mascara de tierra: %1 poligono(s), %2 parte(s).")
+                                 .arg(nPol).arg(int(tierra.size()));
+    }
 
     qint64 total = 0;
     {
@@ -268,6 +330,58 @@ int main(int argc, char *argv[])
                         }
                     }
 
+                    // Máscara de tierra de ESTA tesela (rasteriza los polígonos
+                    // cuyo bbox la toca, en coordenadas de píxel de tesela).
+                    std::vector<unsigned char> land;
+                    if (useMask) {
+                        const double tLonW = TileMatrix::tileXToLongitude(double(tx_), z);
+                        const double tLonE = TileMatrix::tileXToLongitude(double(tx_ + 1), z);
+                        const double tLatN = TileMatrix::tileYToLatitude(double(ty), z);
+                        const double tLatS = TileMatrix::tileYToLatitude(double(ty + 1), z);
+                        QImage m(kTile, kTile, QImage::Format_Grayscale8);
+                        m.fill(0);
+                        QPainterPath path;
+                        path.setFillRule(Qt::OddEvenFill);   // los huecos (lagunas) restan
+                        bool algo = false;
+                        for (const ParteTierra &pt : tierra) {
+                            if (pt.loMax < tLonW || pt.loMin > tLonE
+                                || pt.laMax < tLatS || pt.laMin > tLatN)
+                                continue;                    // parte fuera de la tesela
+                            QPolygonF poly;
+                            poly.reserve(pt.pts.size());
+                            for (const QGeoCoordinate &c : pt.pts) {
+                                const double px = (TileMatrix::longitudeToTileX(c.longitude(), z)
+                                                   - double(tx_)) * double(kTile);
+                                const double py = (TileMatrix::latitudeToTileY(c.latitude(), z)
+                                                   - double(ty)) * double(kTile);
+                                poly << QPointF(px, py);
+                            }
+                            path.addPolygon(poly);
+                            algo = true;
+                        }
+                        if (algo) {
+                            QPainter mp(&m);
+                            mp.setRenderHint(QPainter::Antialiasing, false);
+                            mp.setPen(Qt::NoPen);
+                            mp.setBrush(Qt::white);
+                            mp.drawPath(path);
+                        }
+                        land.assign(std::size_t(kTile) * std::size_t(kTile), 0);
+                        for (int j = 0; j < kTile; ++j) {
+                            const uchar *sl = m.constScanLine(j);
+                            for (int i = 0; i < kTile; ++i)
+                                land[std::size_t(j) * std::size_t(kTile) + std::size_t(i)] =
+                                    sl[i] > 127 ? 1 : 0;
+                        }
+                    }
+                    auto esTierra = [&](int i, int j) -> bool {
+                        if (!useMask)
+                            return true;
+                        if (i < 0 || i >= kTile || j < 0 || j >= kTile)
+                            return true;                     // halo: no cortar en bordes
+                        return land[std::size_t(j) * std::size_t(kTile) + std::size_t(i)] != 0;
+                    };
+
                     QImage img(kTile, kTile, QImage::Format_ARGB32_Premultiplied);
                     img.fill(Qt::transparent);
                     bool any = false;
@@ -277,6 +391,7 @@ int main(int argc, char *argv[])
                     for (int j = 0; j < kTile; ++j) {
                         QRgb *fila = reinterpret_cast<QRgb *>(img.scanLine(j));
                         for (int i = 0; i < kTile; ++i) {
+                            if (useMask && !esTierra(i, j)) continue;  // mar por mascara -> transparente
                             const double zc = eg(i, j);
                             if (std::isnan(zc)) continue;          // sin dato -> transparente
                             // Mar: con --sea-level, toda cota <= ese valor se deja
@@ -291,7 +406,8 @@ int main(int argc, char *argv[])
                             // su propia pendiente suave de tierra.
                             auto nz = [&](int ii, int jj) {
                                 const double v = eg(ii, jj);
-                                return (std::isnan(v) || (maskSea && v <= seaLevel)) ? zc : v;
+                                return (std::isnan(v) || (maskSea && v <= seaLevel)
+                                        || !esTierra(ii, jj)) ? zc : v;
                             };
                             const double dzdx = (nz(i + 1, j) - nz(i - 1, j)) / (2.0 * paso) * exag;
                             const double dzdy = (nz(i, j - 1) - nz(i, j + 1)) / (2.0 * paso) * exag;  // j-1 = norte

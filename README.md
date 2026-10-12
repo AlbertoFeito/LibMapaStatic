@@ -15,7 +15,8 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - 19 tests (16 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
-- Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir
+- Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
+- **Etiquetas ancladas y movibles**: el rótulo de una entidad o de un objetivo puede desplazarse (`setFeatureLabelOffset` / `setTargetLabelOffset`), queda unido a su punto por una línea guía y, al ser relativo, lo sigue cuando se mueve; se localiza aparte con `featureLabelAt` / `targetLabelAt` (hasta 3 líneas, por `\n`)
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
 
 ## Uso
@@ -250,6 +251,37 @@ Detecta el mapeo de zoom, el esquema del eje Y (XYZ o TMS), el nivel de fondo
 garantizado, el relleno típico y la extensión cubierta. Copia
 `datasets.example.json` como plantilla si prefieres escribirlo a mano.
 
+**MBTiles:** la librería lee también ficheros **`.mbtiles`** (SQLite de teselas
+ráster PNG/JPG/WebP) sin tocar código, y `probe_db` los **detecta solos** —sin
+necesidad de `--ref-bbox`—: reconoce la tabla/vista `tiles` (`zoom_level`,
+`tile_column`, `tile_row`, `tile_data`), fija el eje Y en **TMS** y el zoom
+estándar (`storedZ = logicalZ`) por especificación, y toma la extensión de la
+tabla `metadata`. Los MBTiles **vectoriales** (MVT/PBF) no se dibujan: la
+librería pinta teselas de imagen, no vectoriales (`probe_db` lo avisa).
+
+```bash
+probe_db --id mundo --file mapa.mbtiles --out datasets.json
+```
+
+escribe el bloque ya correcto para pegar en `datasets`/`mapa.json` (`tableName`,
+`scheme`, nombres de columna y zoom salen de la propia BD):
+
+```json
+{
+  "id": "mundo", "displayName": "Mundo (MBTiles)",
+  "filePath": "mapa.mbtiles",
+  "tableName": "tiles", "scheme": "TMS",
+  "zFactor": 1, "zOffset": 0,
+  "colZ": "zoom_level", "colX": "tile_column", "colY": "tile_row", "colImage": "tile_data",
+  "hasSColumn": false, "tileSize": 256,
+  "minZoom": 0, "maxZoom": 1, "recommendedMaxZoom": 1, "baseZoom": 0,
+  "typicalFill": 1.0
+}
+```
+
+Un buen generador local de MBTiles **ráster** es QGIS (*Processing → Generate XYZ
+tiles (MBTiles)*), que la librería consume tal cual.
+
 ## Herramientas
 
 | | |
@@ -263,7 +295,7 @@ garantizado, el relleno típico y la extensión cubierta. Copia
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
 | `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura. Permite **sobre-zoom** del mapa de vista previa (hasta z19) para navegar y enmarcar niveles altos (z15/16…) aunque la base recomiende un máximo menor; el rango de descarga llega a z22 |
-| `demo` | Aplicación de ejemplo: capas, dibujo/edición, cobertura por zoom, cota del terreno, **análisis de elevación** (perfil, visión A→B, viewshed) y persistencia automática |
+| `demo` | Aplicación de ejemplo con **barra de menú** (Archivo/Ver/Dibujo/Elevación/Datos/Ayuda), **barras de herramientas con iconos** en dos filas por actividad (navegación+dibujo+archivo / terreno+datos) **panel lateral contextual** (solo el árbol de capas al iniciar; la ficha de la entidad —Propiedades/Coordenadas/Estilo plegables— aparece al seleccionar), **temas claro/oscuro** elegibles (Ver → Tema, recordado), y **panel de capas en tres grupos** (Base = datasets, selección exclusiva; Overlays = vectores de solo lectura; Entidades = puntos/líneas/polígonos editables): dibujo/edición con **diálogo de alta** (nombre/capa/colores al crear una entidad, y vuelta automática a Navegar al terminar el trazo), **coordenadas lat/lon editables** de la entidad seleccionada (mover/añadir/quitar vértices; solo entidades de usuario), cobertura por zoom, cota del terreno, **análisis de elevación** (perfil, visión A→B, viewshed; **temporal**, no se guarda), **Objetivo** (punto con etiqueta movible de 3 líneas) y **Área objetivo** (polígono ≤10 con etiqueta en el 1er punto) y **guardado explícito** (asterisco en el título si hay cambios; pregunta al cerrar/abrir; `--features` carga y fija el fichero de trabajo, sin autoguardado). Los **overlays arrancan ocultos** (solo mapa al iniciar) |
 
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
 tesela propia, rojo si viene de un nivel superior escalado.
@@ -481,7 +513,9 @@ dem_to_db    <carpeta_hgt> --out <dem.sqlitedb> [--overwrite]
 dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
              (--cuba | --bbox latN,lonO,latS,lonE) [--minzoom 6 --maxzoom 13]
              [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2] [--sea-level 0]
-             [--colored] [--water-level 0] [--id relieve --name "…"] [--overwrite]
+             [--colored] [--water-level 0]
+             [--water-mask <vector.sqlitedb> [--land-layer <capa>]]
+             [--id relieve --name "…"] [--overwrite]
              (hornea un relieve sombreado a teselas PNG; añádelo al mapa.json.
               --contrast realza el gris lavado: ancla el llano claro y abre el rango.
               --sea-level m: cotas <= m se dejan transparentes -> costa limpia con
@@ -489,7 +523,12 @@ dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
               --colored: "mapa físico" = tinte por altura (verde->marrón->cumbres)
               x sombreado + azul batimétrico en cotas <0, en vez de gris.
               --water-level m: con --colored, cota <= m se pinta como agua; sube a
-              ~8-12 para que bahías/lagunas rellenas con cota baja salgan con agua)
+              ~8-12 para que bahías/lagunas rellenas con cota baja salgan con agua.
+              --water-mask: BD vectorial de entidades con POLÍGONOS de tierra; solo
+              se sombrea dentro de ellos (mar/bahías/lagos transparentes, con el
+              borde EXACTO del vector). Es la forma precisa de recortar el agua
+              cuando el DEM no la distingue de la tierra baja. Para generar esa BD
+              desde la costa de OSM, usa herramientas/osm_costa_a_sqlitedb.py)
 
 dem_to_contours --in <carpeta_hgt | dem.sqlitedb> --out <curvas.sqlitedb>
              (--cuba | --bbox latN,lonO,latS,lonE)
@@ -530,7 +569,8 @@ examples/app_minima/ plantilla de producto que usa la librería instalada (CMake
 cmake/               libmapaConfig.cmake.in (para find_package)
 qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri)
 qmake/*.pro          herramientas sueltas con qmake
-herramientas/        desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete
+herramientas/        desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete;
+                     osm_costa_a_sqlitedb.py: costa de OSM -> máscara de tierra (--water-mask)
 docs/DESPLIEGUE.md   guía paso a paso: integrar la librería y llevar la app a otro PC
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
 docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, flujos)

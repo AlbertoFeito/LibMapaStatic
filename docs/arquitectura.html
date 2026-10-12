@@ -92,7 +92,7 @@ se pueda probar sin ventanas.</p>
   <li><b>Teselas base:</b> abre una o varias BD de teselas (OSM, satélite…), las cachea y las pinta fluido según navegas.</li>
   <li><b>Entidades:</b> dibuja y edita puntos/líneas/polígonos en capas, con guardado/carga en SQLite y carga de ficheros <code>.geo</code>.</li>
   <li><b>Objetivos móviles:</b> móviles con traza y etiqueta, actualizables varias veces por segundo, en una capa que se repinta sola. <b>Agnósticos del dominio</b>: cada objetivo lleva un <code>kind</code> y un juego de <code>attributes</code> libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta, así el mismo modelo sirve a seguimiento naval, aéreo o de UAVs. La <b>simbología va por hooks</b>: la app registra un proveedor (<code>setTargetSymbolProvider</code>) que elige el icono de cada objetivo según su <code>kind</code>/estado; la librería lo coloca y lo gira por el rumbo, y sin proveedor usa un galón por defecto. <b>Escala a miles</b> (ADS-B regional): culling por vista, <b>nivel de detalle</b> (por encima de un presupuesto se apagan etiquetas y trazas, que a esa densidad son ilegibles), <b>declutter</b> de etiquetas (una por celda) y decimación de la traza.</li>
-  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa), elevación (<code>fill_hgt</code> descarga SRTM, <code>dem_to_db</code> lo empaqueta), <b>hornear relieve sombreado</b> del DEM a teselas (<code>dem_to_hillshade</code>, gris o <code>--colored</code> con batimetría, offline) y <b>generar curvas de nivel</b> del DEM como capa vectorial (<code>dem_to_contours</code>).</li>
+  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa), elevación (<code>fill_hgt</code> descarga SRTM, <code>dem_to_db</code> lo empaqueta), <b>hornear relieve sombreado</b> del DEM a teselas (<code>dem_to_hillshade</code>, gris o <code>--colored</code> con batimetría, offline) y <b>generar curvas de nivel</b> del DEM como capa vectorial (<code>dem_to_contours</code>). Scripts aparte convierten datos de <b>OpenStreetMap</b> a capas de entidades: la <b>costa</b> (<code>osm_costa_a_sqlitedb.py</code>, máscara de tierra para <code>--water-mask</code> y overlay de costa) y las <b>divisiones administrativas</b> (<code>osm_divisiones_a_sqlitedb.py</code>, una entidad con nombre por provincia/municipio). La librería lee también <b>MBTiles</b> ráster (<code>probe_db</code> los detecta solos).</li>
 </ul>
 </div>
 
@@ -165,7 +165,7 @@ por un entero cuando hace falta.</p>
 <tr><th>Tipo</th><th>Rol</th></tr>
 <tr><td>TileKey</td><td>Identidad de una tesela: <code>{z, x, y}</code> lógicos. Se usa como clave del caché (con <code>qHash</code>).</td></tr>
 <tr><td>TileDataset</td><td>Todo lo que se sabe de una BD de teselas: ruta, tabla, mapeo de zoom (<code>zFactor/zOffset</code>), esquema (XYZ/TMS), columnas, <code>hasSColumn/sValue</code>, min/max/recommended zoom, relleno típico. Se lee de <code>datasets.json</code>.</td></tr>
-<tr><td>MapFeature</td><td>Entidad vectorial: geometría multi-parte (puntos/líneas/polígonos), estilo (<code>FeatureStyle</code>), etiqueta y «tipo de dominio». Identidad = <code>qint64</code>.</td></tr>
+<tr><td>MapFeature</td><td>Entidad vectorial: geometría multi-parte (puntos/líneas/polígonos), estilo (<code>FeatureStyle</code>), etiqueta y «tipo de dominio». Identidad = <code>qint64</code>. La etiqueta puede <b>desplazarse</b> (<code>FeatureStyle::labelOffsetPx</code>, con línea guía) y anclarse a un vértice concreto (<code>labelAnchorVertex</code>); igual en <code>MapTarget::labelOffsetPx</code>.</td></tr>
 <tr><td>MapTarget</td><td>Objetivo móvil: posición, rumbo, velocidad, color, etiqueta, visibilidad de traza, más <code>kind</code> y un <code>QVariantMap attributes</code> libre para datos de dominio (AIS/ADS-B/telemetría) que la librería no interpreta. Pensado para tiempo real y agnóstico del dominio.</td></tr>
 <tr><td>LayerInfo / BaseLayerInfo</td><td>Descriptor de una capa (de entidades / base) para poblar menús.</td></tr>
 <tr><td>GeoPath</td><td>Un trazado leído de un fichero <code>.geo</code> (lista de coordenadas + si cierra).</td></tr>
@@ -222,7 +222,10 @@ objeto muere sin confirmar, hace <i>rollback</i>. Evita transacciones a medias.<
 
 <h3><span class="cls">Schema</span> <span class="tag">db/Schema.h</span></h3>
 <p>Crea/verifica el esquema de la BD de <b>entidades</b> (capas, geometrías, estilos)
-que usa <code>VectorRepository</code>.</p>
+que usa <code>VectorRepository</code>. Versionado y migrado por pasos acumulativos
+(<code>kCurrentVersion</code>): <b>v2</b> esquema base; <b>v3</b> añade el desplazamiento de
+la etiqueta (<code>label_dx/label_dy</code>) con <code>ALTER TABLE</code>, de modo que una BD
+anterior (incluida una máscara generada por script) se abre y se migra sola.</p>
 
 <h3><span class="cls">VectorRepository</span> <span class="tag">db/VectorRepository.h · QObject</span></h3>
 <p>Persiste entidades vectoriales y capas en SQLite: guardar/cargar todo el mapa de
@@ -231,7 +234,12 @@ entidades. Emite <code>errorOccurred</code>. Lo usa <code>MapWidget</code> en
 (o <code>setFeaturesDbFile()</code>) el widget hace <b>persistencia automática</b>:
 carga al abrir y guarda solo lo dibujado/editado/borrado con un <b>antirebote</b>
 (~500 ms) que agrupa las ráfagas — volcado completo, reutilizando
-<code>saveFeaturesTo</code>. Los objetivos móviles no se persisten.</p>
+<code>saveFeaturesTo</code>. Los objetivos móviles no se persisten.
+Con un <b>paquete</b> y <code>featuresDbFile</code> vacío, se usa por defecto el
+fichero de entidades del propio paquete. Para un <b>guardado explícito</b> (cargar
+y guardar solo a mano), pon <code>MapConfig.autosaveFeatures = false</code>: entonces
+no se toca el fichero del paquete ni se autoguarda nada aunque se abra un paquete
+(lo usa así la app <code>demo</code>).</p>
 
 <!-- ===================== 6. TILES ===================== -->
 <h2 class="sec">6 · Módulo <span class="mono">tiles</span> — motor de teselas</h2>
@@ -303,6 +311,11 @@ Es lo que usa el widget.</p>
 <p>Sonda: abre una BD «a ciegas» y <b>deduce</b> su configuración (mapeo de zoom,
 esquema, relleno, bbox) analizando qué hay en la tabla. Es el cerebro de
 <code>probe_db</code>. Devuelve <code>ProbeResult</code> con <code>ZoomLevelStats</code> por nivel.</p>
+<p>Reconoce además los <b>MBTiles</b> (ráster PNG/JPG/WebP): localiza la tabla
+<i>o vista</i> <code>tiles</code>, y al detectar la tabla <code>metadata</code> fija por
+especificación el eje Y en <b>TMS</b> y el zoom estándar (<code>storedZ = logicalZ</code>),
+tomando la extensión de <code>metadata.bounds</code> — así se sondan <b>sin</b>
+<code>--ref-bbox</code>. Los MBTiles vectoriales (MVT/PBF) no se dibujan y se avisa.</p>
 
 <!-- ===================== 7. WIDGET ===================== -->
 <h2 class="sec">7 · Módulo <span class="mono">widget</span> — el mapa en pantalla</h2>
@@ -331,7 +344,15 @@ la API que usa la aplicación:</p>
 
 <h3><span class="cls">MapView</span> <span class="tag">widget/MapView.h · QCustomPlot</span></h3>
 <p>El lienzo real: hereda de QCustomPlot, gestiona el ratón (arrastrar, rueda,
-herramientas), traduce píxeles↔coordenadas y coordina las capas.
+herramientas), traduce píxeles↔coordenadas y coordina las capas. Sin herramienta,
+un clic sobre la <b>caja de una etiqueta</b> (de entidad u objetivo) la <b>arrastra</b>
+—cambiando su desplazamiento relativo— con prioridad sobre seleccionar o desplazar. Un
+<b>punto marcado <code>draggable</code></b> (p. ej. un pin A/B) se arrastra igual, moviéndose
+en el modelo y avisando con las señales <code>featureDrag*</code>.
+El trazado punto a punto admite un <b>tope de vértices</b> (<code>setDraftMaxVertices</code>,
+que persiste como atributo <code>max_vertices</code>): un «área objetivo» de ≤10 puntos
+es un polígono con <code>type="objetivo_area"</code> y la etiqueta anclada a su primer vértice
+(<code>labelAnchorVertex=0</code>), sin un tipo de geometría nuevo.
 <code>requestVisibleTiles()</code> pide teselas del viewport; <code>refreshPlan()</code>
 rehace el plan y repinta. Aquí vive el rectángulo de <code>SelectArea</code> que se
 añadió para la descarga.</p>

@@ -102,6 +102,12 @@ private slots:
     void viewportCullKeepsCrossingFeatures();
     void persistSkipsTransientLayers();
     void iconAnchorHitTestCoversPin();
+    //! La etiqueta desplazada se puede localizar por su caja (featureLabelAt) y
+    //! el offset se fija y persiste a traves de la fachada.
+    void movableLabelHitTestAndOffset();
+    //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
+    //! del PRIMER vértice, no del centro.
+    void areaLabelHangsFromFirstVertex();
 
     // --- Fase 7: .geo y objetivos moviles --------------------------------
     void loadsGeoFileAsPolygonLayer();
@@ -155,6 +161,7 @@ private slots:
     //! Solo con dataDir: capas base, arranque, capa fija bloqueada y entidades;
     //! la capa fija no se guarda ni se duplica al reabrir.
     void opensDataPackageWithOneSetting();
+    void autosaveFeaturesFalseSkipsPackagePersistence();
     //! Lo rellenado a mano en MapConfig gana sobre el paquete.
     void explicitConfigWinsOverPackage();
     //! Paquete inexistente: no arranca y el error dice que falta mapa.json.
@@ -2077,6 +2084,37 @@ void TstMapWidget::opensDataPackageWithOneSetting()
     QCOMPARE(w2.featureCount(), 2);           // la propia + la fija, sin duplicar
 }
 
+// Con autosaveFeatures=false (guardado explicito) y un paquete: NO se usa el
+// fichero de entidades del paquete. Lo dibujado NO se autoguarda (el fichero no
+// llega a existir) y al reabrir no reaparece; la capa fija del paquete si carga.
+void TstMapWidget::autosaveFeaturesFalseSkipsPackagePersistence()
+{
+    const QString entidades = m_dir.filePath(QStringLiteral("paquete_noauto.db"));
+    QFile::remove(entidades);
+    MapConfig cfg;
+    cfg.dataDir = makePackage(QStringLiteral("paquete_noauto"), entidades);
+    cfg.cacheMiB = 32;
+    cfg.debounceMs = 0;
+    cfg.autosaveFeatures = false;          // guardado explicito
+
+    {
+        MapWidget w(cfg);
+        QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+        // La capa fija (overlay) del paquete SI se carga (es independiente).
+        QCOMPARE(w.featuresInLayer(QStringLiteral("corredores")).size(), 1);
+        QVERIFY(w.addFeature(puntoDe(QStringLiteral("Propia"), 22.0, -80.0)) > 0);
+        w.saveFeaturesNow();               // aunque se fuerce, no hay destino
+    }
+    // No se autoguardo nada: el fichero del paquete ni siquiera se creo.
+    QVERIFY(!QFileInfo::exists(entidades));
+
+    // Al reabrir, la entidad propia NO reaparece; solo la fija del paquete.
+    MapWidget w2(cfg);
+    QVERIFY(w2.isReady());
+    QCOMPARE(w2.featuresInLayer(QStringLiteral("corredores")).size(), 1);
+    QCOMPARE(w2.featureCount(), qint64(1));
+}
+
 // La regla de prioridad: lo que la aplicacion pone a mano gana al paquete.
 void TstMapWidget::explicitConfigWinsOverPackage()
 {
@@ -2318,6 +2356,64 @@ void TstMapWidget::iconAnchorHitTestCoversPin()
     QCOMPARE(w.featureAt(QPoint(400, 300), 4.0), id);        // la punta
     QCOMPARE(w.featureAt(QPoint(400, 280), 4.0), id);        // cuerpo del pin (arriba)
     QCOMPARE(w.featureAt(QPoint(400, 320), 4.0), qint64(-1)); // por debajo: nada
+}
+
+void TstMapWidget::movableLabelHitTestAndOffset()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("obj"), QStringLiteral("Objetivos"), 60);
+    MapFeature p;
+    p.kind = GeometryKind::Point;
+    p.layerId = QStringLiteral("obj");
+    p.geometry = {centro};               // cae en el centro de la vista (400,300)
+    p.name = QStringLiteral("OBJ");
+    const qint64 id = w.addFeature(p);
+    QVERIFY(id > 0);
+
+    // Fijar el offset de la etiqueta (y comprobar que persiste en el estilo).
+    QVERIFY(w.setFeatureLabelOffset(id, QPointF(50.0, -30.0)));
+    const auto f = w.feature(id);
+    QVERIFY(f.has_value());
+    QCOMPARE(f->style.labelOffsetPx, QPointF(50.0, -30.0));
+
+    // El rotulo ya no esta sobre el punto, sino desplazado: su caja arranca en
+    // punto + hueco(10,-8) + offset(50,-30). Un pixel dentro de la caja lo acierta.
+    QCOMPARE(w.featureLabelAt(QPoint(465, 266)), id);
+    // Sobre el propio punto ya no hay etiqueta (se movio).
+    QCOMPARE(w.featureLabelAt(QPoint(400, 300)), qint64(-1));
+}
+
+void TstMapWidget::areaLabelHangsFromFirstVertex()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("areas"), QStringLiteral("Areas"), 60);
+    MapFeature area;
+    area.kind = GeometryKind::Polygon;
+    area.layerId = QStringLiteral("areas");
+    area.type = QStringLiteral("objetivo_area");
+    area.name = QStringLiteral("Area 1");
+    // El PRIMER vertice cae en el centro de la vista (400,300); los demas quedan
+    // lejos (al sur/este), asi que el centroide esta muy desplazado.
+    area.geometry = {centro, QGeoCoordinate(20.5, -79.5),
+                     QGeoCoordinate(20.5, -78.5)};
+    area.style.labelAnchorVertex = 0;             // cuelga del primer punto
+    const qint64 id = w.addFeature(area);
+    QVERIFY(id > 0);
+
+    // La caja de la etiqueta arranca junto al primer vertice (400,300)+hueco.
+    QCOMPARE(w.featureLabelAt(QPoint(414, 296)), id);
 }
 
 QTEST_MAIN(TstMapWidget)

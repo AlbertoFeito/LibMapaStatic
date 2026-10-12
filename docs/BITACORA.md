@@ -4040,3 +4040,524 @@ Bloque de usabilidad pedido antes de cerrar la fase. Toca la librería (aditivo)
 
 Compila sin warnings, **19 tests** en verde (dos nuevos en `tst_mapwidget`). README, BITÁCORA,
 `arquitectura.html` y PDF al día. API pública ampliada (`iconAnchor`, `setFeatureLayerTransient`).
+
+## 93. dem_to_hillshade: `--water-mask` (máscara de agua vectorial, costa exacta)
+
+El umbral de cota (`--sea-level`/`--water-level`) no basta cuando el DEM no distingue agua de
+tierra baja (bahías/lagunas que el SRTM rellena con cota positiva). La solución exacta es una
+**máscara vectorial**: sombrear solo dentro de los polígonos de tierra.
+
+- **`--water-mask <vector.sqlitedb>` (+ `--land-layer <capa>`).** Lee los **polígonos** (geometría
+  = polígono) de una BD de entidades (`VectorRepository`, esquema `entidad`/`entidad_vertice`),
+  opcionalmente de una capa. Guarda cada parte con su bbox.
+- **Por tesela**, rasteriza con `QPainter` (fill-rule par-impar, así los **huecos** = lagunas
+  interiores restan) los polígonos cuyo bbox la toca, en coordenadas de píxel de tesela → una
+  máscara de 256×256. El bucle de píxeles **solo sombrea donde hay tierra**; el resto queda
+  transparente, con la **costa en el borde exacto del vector**. La pendiente en la orilla usa
+  vecinos de tierra (como con `--sea-level`), sin acantilado artificial.
+- Si la BD no trae polígonos (p. ej. es una base de **teselas**, no de entidades), aborta con un
+  mensaje claro.
+
+Validado con un DEM sintético (relieve en todo el tile) + una BD de entidades con un polígono
+«isla» y un hueco «laguna»: se sombrea solo la isla, el mar y la laguna quedan transparentes.
+Solo cambia la herramienta; librería y API intactos. Compila sin warnings, **19 tests** en verde.
+README y BITÁCORA al día.
+
+## 94. `herramientas/osm_costa_a_sqlitedb.py`: costa de OSM → máscara de tierra
+
+La `--water-mask` necesita una BD de **polígonos de tierra**; la fuente natural y gratuita es la
+línea de costa de OpenStreetMap (`natural=coastline`). Pero OSM la publica como **líneas dirigidas
+partidas en muchos tramos** (no polígonos), así que hace falta un conversor.
+
+- **Entrada:** el GeoJSON que exporta overpass-turbo de
+  `way["natural"="coastline"](19.6,-85.5,23.7,-73.5); out geom;` (los cayos pequeños ya vienen como
+  `Polygon` cerrados; la costa principal, como muchos `LineString`).
+- **Cosido:** une los tramos por sus **extremos comunes** (tolerancia ~1 cm) hasta **cerrar cada
+  anillo** de tierra; los pocos tramos sueltos (recortados por el bbox) se cierran uniendo sus
+  extremos. En Cuba: 5512 tramos → 3779 anillos + 1238 cayos ya cerrados = **5020 polígonos**
+  (el continente = un anillo de 103 153 vértices), solo **3** cadenas quedaban abiertas.
+- **Salida:** **una** entidad polígono multi-parte (una parte por anillo) en el esquema exacto
+  (`schema_version`=2, `entidad` geometría=2, `entidad_vertice` WITHOUT ROWID, `capa`), que
+  `VectorRepository` lee sin migrar. No hace falta orientar los anillos: el **par-impar** del
+  rasterizador convierte los interiores (lagunas, bahías) en huecos de agua.
+
+Verificado de punta a punta: `dem_to_hillshade … --water-mask cuba_tierra.sqlitedb --land-layer
+tierra` sobre SRTM real de La Habana lee `1 polígono, 5020 partes` y recorta la costa (bahía de La
+Habana y su canal salen como agua) con mucho más detalle que Natural Earth. Es un script de
+reproducibilidad en `herramientas/` (Python estándar, sin dependencias); no toca la librería ni los
+tests.
+
+La misma BD sirve además como **capa de costa vectorial**: cargada como overlay `.sqlitedb` (igual
+que `curvas`) dibuja la costa OSM exacta, escalable a cualquier zoom y en un solo fichero (12 MB) que
+también es la máscara —una fuente de verdad en vez del ráster `Cuba_Vector` (64 MB, hecho con
+`geo_to_tiles`). Como los overlays `.sqlitedb` usan el estilo guardado en cada entidad (no el bloque
+`style` del manifiesto, que es solo para `.geo`), el conversor acepta `--line-color` / `--fill-color`
+/ `--line-width` (por defecto línea azul `#1565c0` fina, relleno transparente) y los escribe en las
+columnas `color_linea`/`color_relleno`/`ancho_linea` como ARGB (QRgb) sin signo. El estilo no afecta
+a `--water-mask`, que solo lee geometría.
+
+Probado el overlay vectorial en el demo: se ve **más fino y detallado** que el ráster `Cuba_Vector`
+(hecho de un `.geo` más basto), pero **dibujar 384.895 vértices como vector arrastra** a zoom medio.
+La solución sin perder la silueta fina: regenerar el ráster **desde la misma costa OSM**. El conversor
+gana `--geo FICHERO.geo`, que vuelca los anillos en formato `.geo` (`lon,lat`, `0.0,0.0` separa
+trazados); `geo_to_tiles` lo rasteriza con decimado sub-píxel por zoom (detalle íntegro en cada nivel,
+solo se pintan los 256×256 visibles, cacheados). Cuba a z4–13 = 3.688 teselas, 21 MB; a z4–15, 100 MB.
+Flujo recomendado: ráster OSM como capa base rápida y, si se quiere nitidez a zoom extremo, el overlay
+`cuba_tierra` **solo desde z14** (`minZoom`), donde entran pocos anillos en pantalla. Una sola fuente
+(la costa OSM) alimenta máscara, overlay y ráster.
+
+## 95. `herramientas/osm_divisiones_a_sqlitedb.py`: divisiones de OSM → capa vectorial
+
+Mismo patrón que la costa, aplicado a **divisiones administrativas** (provincias, municipios…). La
+diferencia esencial: la costa se funde en **una** máscara de tierra, pero cada división es **una
+entidad CON NOMBRE**, así que se escribe **una `entidad` por relación** (para rotularla y
+seleccionarla), no una fundida.
+
+- **Entrada:** el GeoJSON de overpass-turbo de
+  `{{geocodeArea:Cuba}}->.cu; relation["boundary"="administrative"]["admin_level"="4"](area.cu); out geom;`
+  Overpass-turbo (osmtogeojson) **ya ensambla** las relaciones boundary en `Polygon`/`MultiPolygon`
+  con sus propiedades (`name`, `admin_level`…); los `Point` de etiqueta del export se ignoran. Cuba
+  admin_level=4 = **16 provincias**, 36 479 vértices.
+- **Salida:** una `entidad` polígono por división (multi-parte si tiene varias islas/anillos), con
+  `nombre` = `name` (clave configurable con `--name-key`), en la capa `--capa` (por defecto
+  `provincias`), estilo `--line-color`/`--fill-color`/`--line-width` (defecto frontera roja `#c62828`
+  fina, relleno transparente) y `etiqueta_visible=1` (quitable con `--no-labels`). Mismo esquema v2
+  que el resto; se carga como **overlay `.sqlitedb`** (como `curvas`/`costa_osm`).
+- **Respaldo:** si el export trajera `LineString` en vez de polígonos, se cosen (como la costa) en
+  una capa sin nombres, con aviso.
+- Opcional `--geo` para rasterizar las fronteras con `geo_to_tiles` (pierde los nombres).
+
+Verificado con `render_map`: las 16 provincias salen como contorno rojo sobre el relieve, con su
+etiqueta, y maneja `Polygon` y `MultiPolygon`. Nota: las fronteras OSM admin_level=4 **incluyen el
+mar territorial**, así que se extienden mar adentro y la etiqueta (centroide) puede caer sobre agua;
+es correcto para límites administrativos. Script de reproducibilidad, Python estándar sin
+dependencias; no toca la librería ni los tests.
+
+## 96. `probe_db`: detección automática de MBTiles
+
+El lector de teselas ya era configurable (tabla, columnas `colZ/colX/colY/colImage`, esquema
+XYZ/TMS), así que un **MBTiles** —SQLite de teselas ráster, estándar de Mapbox— se podía usar
+describiéndolo a mano. Pero MBTiles tiene particularidades que hacían fallar la sonda genérica:
+
+1. La tabla de teselas suele ser una **VISTA** `tiles` sobre `map`+`images` (esquema normalizado);
+   `probe_db` solo buscaba `type='table'` y no la encontraba. Ahora lista `type IN ('table','view')`.
+2. MBTiles usa **TMS** y **zoom estándar** (`storedZ = logicalZ`) por especificación, pero sin
+   `--ref-bbox` la sonda no podía decidir XYZ/TMS ni el offset. Ahora **reconoce el MBTiles** (tabla
+   `metadata` + columna `tile_data`) y **fija** TMS y `zFactor=1/zOffset=0` por especificación, y toma
+   la extensión de `metadata.bounds` — así se sonda **sin `--ref-bbox`**.
+3. Si `metadata.format` es `pbf`/`mvt` (**MBTiles vectorial**), avisa claramente: la librería dibuja
+   teselas de imagen, no vectoriales.
+
+`detectColumns` ya reconocía `zoom_level/tile_column/tile_row/tile_data`, así que no hubo que
+tocarlo. Cambios acotados a `TileDatasetProbe` (`detectZMapping`/`detectScheme` reciben un flag
+`mbtiles` que corta la inferencia y fija lo conocido). Nuevo caso en `tst_probe`
+(`buildSyntheticMbtiles`: vista `tiles`, TMS, `bounds`): se sonda sin referencia y se verifica
+TMS, `storedZ=logicalZ`, columnas, extensión sobre Cuba y lectura real a través de la vista. **19
+tests** en verde. README con el ejemplo de uso. No cambia la API pública, pero sí se actualizó
+`docs/arquitectura.html` (sonda MBTiles + los scripts OSM de costa y divisiones) y se **regeneró el
+PDF** `docs/LibMapaStatic_Documentacion.pdf`.
+
+## 97. Etiquetas ancladas, movibles y seleccionables con línea guía (Fase 0)
+
+Primera fase del bloque de **objetivos y áreas**. La pieza base, que comparten objetivos y entidades:
+una **etiqueta de texto** (multilínea por `\n`) que cuelga de un punto por una **línea guía**, con un
+**desplazamiento en píxeles** relativo al anclaje. Como el desplazamiento es relativo, **al mover el
+elemento la etiqueta lo sigue** (se mueven al unísono); al arrastrar la etiqueta solo cambia el
+offset.
+
+- **Datos (API pública, aditivos):** `FeatureStyle.labelOffsetPx` y `FeatureStyle.labelAnchorVertex`
+  (−1 = automático: el punto o el centro de la geometría; ≥0 = ese vértice, p. ej. 0 para colgar el
+  rótulo del primer punto de un área); `MapTarget.labelOffsetPx`. Todos con valor por defecto neutro:
+  el comportamiento actual no cambia.
+- **Dibujo (dentro de las capas QCustomPlot):** `FeatureLayer` y `TargetLayer` colocan el rótulo en
+  `anclaje + hueco + offset`, lo parten por `\n` y trazan la línea guía cuando está desplazado. El
+  cálculo de la caja se comparte con el hit-test para que coincidan al píxel.
+- **Hit-test:** `FeatureLayer::labelAt` / `TargetLayer::labelAt`, expuestos por la fachada como
+  `MapWidget::featureLabelAt` / `targetLabelAt` (permiten seleccionar/arrastrar el rótulo aparte de la
+  geometría). `TargetLayer` guarda las cajas realmente dibujadas (respeta nivel de detalle y
+  declutter).
+- **Setters:** `MapWidget::setFeatureLabelOffset` (persiste vía `updateFeature`) y
+  `setTargetLabelOffset` (`TargetModel::setLabelOffset`).
+- **Persistencia:** esquema **v3** (`kCurrentVersion=3`): `ALTER TABLE entidad ADD COLUMN label_dx/dy
+  REAL DEFAULT 0`. Migración acumulativa y segura: una BD v2 (p. ej. una máscara generada por script)
+  se abre y se migra sola; la lectura es tolerante (si faltan las columnas, offset 0).
+
+Falta (fases siguientes): el **arrastre con ratón** en vivo (enrutado en `MapView`), el polígono
+«área objetivo» (≤10 vértices, selección por el 1er punto, tipo propio) y el demo que lo muestre. Sin
+`.cpp` nuevos → CMake/qmake intactos. Compila sin warnings, **19 tests** en verde (nuevos:
+`savesAndLoadsLabelOffset`, `migratesV2DatabaseToV3`, `movableLabelHitTestAndOffset`). README y
+`arquitectura.html` + PDF al día.
+
+## 98. Objetivos/áreas Fase 1: arrastre de la etiqueta con el ratón
+
+Sobre la base de la Fase 0, se **engancha el arrastre** del rótulo en la propia librería (en
+`MapView`, no en el demo), para que cualquier app lo tenga.
+
+- Con la herramienta **None**, un clic sobre la **caja de etiqueta** (de entidad u objetivo) inicia su
+  arrastre; tiene **prioridad** sobre seleccionar un objetivo o desplazar el mapa. El nuevo
+  desplazamiento es `offset_inicial + (cursor − inicio)`, así que la etiqueta sigue al cursor y, al ser
+  relativo, cuando el punto se mueve la etiqueta lo acompaña.
+- `MapView` recuerda de quién es el rótulo (`m_dragLabelFeature` / `m_dragLabelTarget`), el píxel de
+  inicio y el offset inicial; en `mouseMove` aplica el nuevo offset y en `mouseRelease` cierra el gesto
+  (cursor `SizeAllCursor` durante el arrastre).
+- Escritura en vivo: `OverlayModel::setLabelOffset` (nuevo; mismo camino que mover un vértice: apila
+  deshacer, avisa con `featureUpdated`/`changed` y se persiste con antirebote) y
+  `TargetModel::setLabelOffset` (de la Fase 0). El arrastre de una entidad va envuelto en un grupo de
+  deshacer para deshacerse de una vez.
+
+Sin cambios en la API pública ni en CMake/qmake. Compila sin warnings, **19 tests** en verde (nuevo:
+`setsLabelOffsetAndNotifies` en `tst_overlaymodel`). El gesto en vivo se valida en el demo (Fase 3);
+la lógica de modelo/capa queda cubierta por tests. Falta: el polígono «área objetivo» (Fase 2) y el
+demo (Fase 3).
+
+## 99. Objetivos/áreas Fase 2: «área objetivo» (≤N vértices, etiqueta en el 1er punto)
+
+El «área objetivo» que pidió el usuario NO es un tipo de geometría nuevo: es un **polígono** con un
+**tipo de dominio** propio (`type = "objetivo_area"`), un **tope de vértices** y la **etiqueta
+anclada a su primer punto**. Todo con piezas ya existentes + un único añadido (el tope).
+
+- **Tope de vértices (nuevo):** `MapView::setDraftMaxVertices(n)` (−1 = sin límite), expuesto por
+  `MapWidget::setDraftMaxVertices`. Al trazar punto a punto, pasado el tope se **ignoran los clics**;
+  el límite se guarda en la entidad (atributo `max_vertices`) y `OverlayModel::insertVertex` lo
+  **respeta también al editar**. Así un «área objetivo» se limita a ≤10 puntos de principio a fin.
+- **Etiqueta en el primer punto:** `FeatureStyle::labelAnchorVertex = 0` (de la Fase 0) hace que el
+  rótulo cuelgue del vértice 0 (y se arrastre/seleccione como el de un objetivo, Fases 0–1).
+- **Selección y coordenadas:** ya estaban: clic dentro del polígono lo selecciona (acierto directo por
+  área, aunque el relleno sea transparente), los tiradores de vértice salen al seleccionar, y
+  `feature(id)->geometry` da sus ≤10 coordenadas.
+- **Tipo propio:** `type`/`featuresOfType` (ya existentes) distinguen el «área objetivo» de un
+  polígono normal, sin tocar la librería.
+
+La app arma el área con lo que ya hay: `setActiveFeatureLayer`, `setDraftType("objetivo_area")`,
+`setDraftStyle(...labelAnchorVertex=0...)`, `setDraftMaxVertices(10)`, `setActiveTool(DrawPolygon)`.
+Sin `.cpp` nuevos (CMake/qmake intactos). Compila sin warnings, **19 tests** en verde (nuevos:
+`insertVertexRespectsMaxVerticesCap`, `areaLabelHangsFromFirstVertex`). El trazado por clics con tope
+se valida en el demo (Fase 3). README, `arquitectura.html` + PDF al día.
+
+## 100. Objetivos/áreas Fase 3: demo (Objetivo, Área objetivo) + anclaje persistente
+
+Cierre del bloque: el **demo** demuestra las capacidades, y se completa la persistencia.
+
+- **Demo (`demo/main.cpp`):** dos herramientas nuevas en la barra de entidades.
+  **Objetivo** configura el borrador (`type="objetivo"`, estilo con etiqueta) y crea un punto; al
+  crearse se le pone un nombre de **3 líneas** por defecto para que su etiqueta se vea al momento. Se
+  arrastra el rótulo con **Navegar** (Fase 1) y el punto con **Editar**; al mover el punto la etiqueta
+  lo sigue. **Área objetivo** configura `type="objetivo_area"`, `labelAnchorVertex=0` y
+  `setDraftMaxVertices(10)`: polígono de ≤10 puntos con la etiqueta en el **primer vértice**. Las
+  herramientas de dibujo genéricas reponen el borrador por defecto (`reponerBorrador`), para no
+  heredar la configuración de objetivo. Al seleccionar un área, la barra de estado **lista sus
+  coordenadas** (`mostrarCoordsArea`, usando `feature()->geometry`).
+- **Persistencia del anclaje:** el esquema v3 gana además `label_anchor` (−1 = automático), para que
+  `labelAnchorVertex` sobreviva guardar/cargar (si no, un área recargada perdería la etiqueta del 1er
+  punto). Lectura tolerante: en una BD anterior la columna no existe → se queda en −1, no en 0.
+
+Verificado con `render_map` sobre un `.sqlitedb` v3 real: el objetivo sale con su etiqueta de 3 líneas
+desplazada y su línea guía, y el área con la etiqueta colgando del primer vértice. Compila sin
+warnings (demo incluido), **19 tests** en verde (el de offset ahora cubre `label_anchor`). No se añade
+ningún `.cpp` (solo el demo y columnas de esquema) → CMake/qmake intactos. README, `arquitectura.html`
++ PDF al día. Pendiente opcional: migrar el arrastre de los pines A/B del demo (hoy por `eventFilter`)
+al mecanismo de la librería.
+
+## 101. Arrastre de marcadores en la librería (pines A/B del demo migrados)
+
+El demo arrastraba sus pines A/B con un `eventFilter` propio sobre el `QCustomPlot` (hit-test manual,
+mover spinboxes, recalcular al soltar). Se **sube ese gesto a la librería** como un mecanismo general.
+
+- **`MapFeature::draggable`** (nuevo, por defecto false, no se persiste): si un **punto** lo lleva, la
+  herramienta **Navegar** (None) lo **arrastra** al pulsar sobre él (en vez de desplazar el mapa),
+  con prioridad por debajo del arrastre de etiquetas y por encima de seleccionar objetivo / mover el
+  mapa.
+- **Señales** (`MapView` → fachada): `featureDragStarted(id)`, `featureDragMovedTo(id, coord)` y
+  `featureDragFinished(id)`. La librería además **mueve el punto en el modelo** (`moveVertex`), así el
+  marcador se mueve por defecto; la app decide la semántica con las señales.
+- **Demo:** los pines A/B se marcan `draggable`; se borra el bloque de arrastre del `eventFilter` (el
+  hover/tooltip se queda) y se conectan las señales: al empezar se resuelve A o B, en cada movimiento
+  se vuelca la coordenada en los campos lat/lon (que redibujan el pin) y al soltar se recalcula el
+  análisis. Comportamiento idéntico al anterior, pero el gesto lo provee la librería.
+
+Sin cambios de esquema (draggable es una pista de interacción, no se guarda). Compila sin warnings
+(demo incluido), **19 tests** en verde. `arquitectura.html` + PDF y README al día. Con esto el bloque
+de objetivos/áreas queda cerrado también en el lado de interacción.
+
+## 102. Demo más profesional — Fase A: barra de menú + barras por actividad + overlays ocultos
+
+El demo tenía tres barras de herramientas sueltas (`construirBarraMapa`, `construirBarraEntidades`,
+`construirBarraDatos`) con botones ad-hoc, sin barra de menú y con los overlays visibles al arrancar
+(cargaban el sistema). Primera fase de una reorganización por fases para que el demo parezca una app
+real; **solo toca `demo/main.cpp`** (ni la librería ni los tests).
+
+- **Una sola fuente de acciones.** Se centralizan todas las órdenes en `QAction` miembro (helper
+  `accHerr(texto, tool, atajo)` para las de dibujo, que las hace *checkable*, les pone el `MapTool`
+  en `setData` y las mete en el grupo exclusivo `m_grupo`). Las mismas acciones se reparten entre el
+  menú y las barras, así que menú y barra quedan siempre sincronizados (una acción, un estado).
+- **Barra de menú** (`construirMenuYBarra`): **Archivo** (Abrir/Guardar/Guardar como/Salir, con
+  `QKeySequence` estándar), **Ver** (submenú *Capa base* con grupo exclusivo, Ampliar/Reducir/Toda
+  Cuba, Rejilla, Cobertura; se guarda `m_menuVer` porque la **Fase B** colgará ahí los toggles de los
+  paneles), **Dibujo** (Navegar · Punto/Línea/Polígono · Objetivo/Área objetivo · Editar/Borrar ·
+  Deshacer/Rehacer), **Elevación** (Perfil · Visión A→B · Viewshed · Fijar A/B · Limpiar análisis),
+  **Datos** (Cargar .geo · Simular objetivos) y **Ayuda** (Acerca de).
+- **Dos barras agrupadas por actividad**, en vez de tres mezcladas:
+  - *Principal* (`barraPrincipal`): selector de capa base + navegación (Navegar/Medir/Zoom área) +
+    dibujo (Punto/Línea/Polígono/Objetivo/Área/Editar/Borrar) + Deshacer/Rehacer + Guardar.
+  - *Terreno y datos* (`barraDatos`): Rejilla/Cobertura + z, botón DEM (carpeta .hgt o .sqlitedb),
+    Cargar .geo, y el bloque de simulación (nº objetivos, Simular, Traza).
+- **Overlays ocultos al iniciar** (`ocultarOverlaysAlIniciar`, llamada tras `reconstruirPanel`): recorre
+  `featureLayers()` y apaga las no editables (= overlays) con `setFeatureLayerVisible(id,false)`. Así
+  al abrir solo se ve el mapa base; cada overlay se enciende a mano (no cargan el sistema de entrada),
+  tal como pidió el usuario.
+- **`limpiarAnalisis()`** pasa de lambda del botón «Limpiar» a *slot* reutilizable (lo usan el menú
+  Elevación y la pestaña). La pestaña «Elevación» conserva sus botones propios (sin duplicar lógica).
+
+Compila sin warnings (`demo` recompilado en limpio), **19 tests** siguen en verde (la librería no
+cambia; es prueba de no-regresión). Validación visual en el PC del usuario. Siguientes fases: Panel de
+Capas (B), diálogo de nueva entidad (C), propiedades con coordenadas editables (D), guardado explícito
+(E) y pulido (F).
+
+## 103. Demo más profesional — Fase B: Panel de Capas con tres grupos (Base/Overlays/Entidades)
+
+El árbol del panel listaba todas las capas vectoriales en un mismo nivel, mezclando overlays (solo
+lectura) y capas de usuario, y las bases solo estaban en el combo de la barra. Se reorganiza el árbol
+en **tres grupos fijos** que reflejan los cuatro tipos de capa (ver también la explicación al usuario):
+sigue siendo **solo `demo/main.cpp`** (ni librería ni tests).
+
+- **Grupo «Base (mapa)».** Los datasets de teselas (`availableBaseLayers`) con casillas de
+  **comportamiento de radio**: marcar una fija la capa base (`setBaseLayerId`) y desmarca las demás;
+  intentar apagar la activa se ignora (siempre hay un mapa de fondo). No editables. Se mantiene en
+  sincronía con el combo de la barra y el submenú *Ver → Capa base* vía la señal `baseLayerChanged`
+  (`sincronizarBaseEnArbol`), porque cambiar la base no reconstruye el panel.
+- **Grupo «Overlays (solo lectura)».** Las capas vectoriales cargadas del paquete, que la librería marca
+  `editable=false` (`MapWidget::loadOverlays → setLayerEditable(id,false)`). Casilla = visibilidad de la
+  capa; **arrancan ocultas** (Fase A) para no cargar el sistema. **No se despliegan sus entidades**: un
+  overlay puede tener miles de polígonos (la costa, las provincias), así que solo se muestra el recuento.
+- **Grupo «Entidades (editables)».** Las capas de usuario (`editable=true`): se despliegan hoja a hoja
+  como antes (nombre, tipo, nº de vértices, color), con selección sincronizada con el mapa. Es el único
+  grupo modificable.
+- **Cabeceras de grupo** (`nuevoGrupo`): ítems no seleccionables ni con casilla, en negrita y a ancho
+  completo; solo organizan. El recorrido del árbol pasa a `QTreeWidgetItemIterator` (las hojas de
+  entidad cuelgan ahora de grupo→capa→entidad) en `seleccionEnMapa` y `resaltarCapaActiva`.
+- **Menú «Ver».** Se cuelgan del `m_menuVer` (que dejó preparado la Fase A) el toggle del panel
+  (`QDockWidget::toggleViewAction`) y accesos directos a las pestañas «Capas» y «Elevación».
+
+Rol nuevo en el árbol `RolBase` (id de capa base). Compila sin warnings, **19 tests** en verde
+(no-regresión; la librería no cambia). Validación visual en el PC del usuario. Siguiente: Fase C
+(diálogo de nueva entidad + flujo dibuja→Navegar).
+
+## 104. Demo más profesional — Fase C: diálogo de alta de entidad + flujo dibuja→Navegar
+
+Antes, al elegir Punto/Línea/Polígono (u Objetivo/Área) se entraba directamente en modo dibujo con el
+estilo que hubiera en el panel, y la entidad nacía sin nombre, en la capa activa, y había que volver a
+Navegar a mano. Ahora, al elegir una herramienta de creación **sale un diálogo** para fijar el
+**nombre**, la **capa** y los **colores de borde y relleno** (+ ancho); al aceptar se dibuja y, al
+cerrar el trazo, **se vuelve solo a Navegar**. Sigue siendo **solo `demo/main.cpp`**.
+
+- **`dialogoNuevaEntidad`** (modal): *Nombre* (sugerido según la herramienta), *Capa* en un combo
+  **editable** (se elige una existente o se teclea una nueva), y botones de color de borde/relleno
+  (reutilizan `pintarBotonColor`/`QColorDialog` con canal alfa) más el ancho de línea.
+- **`configurarNuevaEntidad(tipo, estiloBase, maxVert, nombreSug)`**: punto común de los cinco modos.
+  Se **difiere con `QTimer::singleShot(0)`** para que el diálogo salga *después* de que el
+  `QActionGroup` fije la herramienta de dibujo; así, al **Cancelar**, `volverANavegar` no queda pisado
+  por esa activación automática (era el único punto delicado del flujo). Al **Aceptar**: crea la capa si
+  es nueva (`addFeatureLayer`, no-op si existe), la pone activa, fija el borrador
+  (`setDraftType`/`setDraftStyle`/`setDraftMaxVertices`) con los colores elegidos y **arma** el alta
+  (`m_nombrePendiente`, `m_esperandoDibujo`).
+- **`alEntidadCreada(id)`** (señal `featureAdded`): si hay un alta armada, pone el nombre a la entidad
+  recién dibujada (`feature`+`updateFeature`), **vuelve a Navegar** y la deja **seleccionada** (se ven
+  sus datos en el panel). El alta se desarma también si el usuario cambia a una herramienta que no
+  dibuja (en el handler del grupo) o al cancelar.
+- Las herramientas genéricas parten del **estilo actual del panel** (`estiloActual`); Objetivo y Área
+  conservan sus rasgos propios (etiqueta visible, ancla en el 1er punto, tope de 10 vértices) y solo
+  dejan elegir nombre/capa/colores encima.
+
+Compila sin warnings, **19 tests** en verde (no-regresión; la librería no cambia). Validación visual en
+el PC del usuario. Siguiente: Fase D (panel de propiedades con coordenadas editables).
+
+## 105. Demo más profesional — Fase D: coordenadas editables en el panel de propiedades
+
+El panel mostraba nombre, tipo, atributos y estilo de la entidad seleccionada, pero no sus
+**coordenadas**. Se añade una tabla **lat/lon editable** que usa el API de edición de vértices de la
+librería. Sigue siendo **solo `demo/main.cpp`** (la librería ya tenía `moveVertex`/`insertVertex`/
+`removeVertex`).
+
+- **Tabla «Coordenadas»** (`m_tablaCoords`, 2 columnas): se rellena con los vértices de la entidad
+  seleccionada (`feature(id)->geometry`) en `mostrarCoords`, llamada desde `mostrarPropiedades`. Grados
+  decimales a 6 cifras.
+- **Editar una celda → `moveVertex`** (`coordEditada`): valida el rango (lat −90..90, lon −180..180) y,
+  si es inválido, restaura el valor bueno; reutiliza el guardia `m_actualizandoPropiedades` para no
+  reescribir al rellenar la tabla.
+- **`+ Vértice` → `insertVertex`** (`anadirVertice`): inserta tras el vértice seleccionado en el **punto
+  medio** hacia el siguiente (en polígono cierra el anillo; en línea usa el vecino que haya). **`-
+  Vértice` → `removeVertex`** (`quitarVertice`): la librería rechaza bajar del mínimo (2 línea / 3
+  polígono) y se avisa en la barra de estado.
+- **Solo entidades de usuario.** `capaEditable(layerId)` consulta `LayerInfo::editable`: si la capa no
+  es editable (overlays del paquete) o la geometría es **multiparte** (p. ej. un `.geo`), la tabla queda
+  de **solo lectura** y los botones +/− deshabilitados. En un **punto** (un solo vértice) la celda es
+  editable pero no hay +/−. Datasets (teselas) no son entidades: no entran aquí.
+
+Tras insertar/quitar se repuebla la tabla (cambia el nº de filas); al mover, el mapa redibuja el vértice
+sin perder el foco de edición. Compila sin warnings, **19 tests** en verde (no-regresión). Validación
+visual en el PC del usuario. Siguiente: Fase E (guardado explícito; elevación y A/B siguen siendo
+temporales).
+
+## 106. Demo más profesional — Fase E: guardado explícito (fuera el autoguardado)
+
+El demo activaba el **autoguardado** de la librería (`MapConfig::featuresDbFile`): cada dibujo/edición se
+escribía solo en el fichero `--features`. El usuario pidió **guardado explícito**: los cambios viven en
+memoria hasta que se pulsa Guardar. Sigue siendo **solo `demo/main.cpp`** (la librería ya ofrecía las dos
+vías: automática con `featuresDbFile`, manual con `saveFeaturesTo`/`loadFeaturesFrom`).
+
+- **Sin autoguardado.** Ya no se fija `cfg.featuresDbFile`. Si se pasa `--features <fichero>`, se
+  **carga** al arrancar (si existe) y se recuerda como **fichero de trabajo** (`m_archivoActual`) para
+  «Guardar»; nada se guarda solo. `loadFeaturesFrom` reinyecta los overlays del paquete, así que la carga
+  va **antes** de `ocultarOverlaysAlIniciar` para que los overlays sigan arrancando ocultos.
+- **Estado «sucio».** `m_sucio` + `marcarSucio()`: un **asterisco** en el título marca que hay cambios
+  sin guardar. Lo llaman solo las ediciones de **entidades de usuario** (alta, propiedades, estilo,
+  vértices, borrar/vaciar/crear/mover capa, cargar `.geo`); las capas **temporales** (análisis de
+  elevación, pines A/B — ya marcadas `setFeatureLayerTransient`) **no** lo llaman, así que trabajar con
+  el terreno no ensucia el documento. Guardar/Guardar como/Abrir lo limpian.
+- **Confirmación al cerrar/abrir.** `closeEvent` y `abrir()` pasan por `confirmarDescartar()`
+  (Guardar / Descartar / Cancelar); si el guardado falla o se cancela, no se cierra ni se reemplaza.
+- **Elevación y A/B siguen temporales** (ya lo eran): nunca se guardan como entidades, ni con el
+  guardado explícito, porque sus capas son `transient`. Confirmado.
+
+Compila sin warnings, **19 tests** en verde (no-regresión; la librería no cambia). Validación visual en
+el PC del usuario. Siguiente: Fase F (pulido + documentación final).
+
+## 107. Demo más profesional — Fase F: pulido + cierre del bloque
+
+Últimos retoques tras las fases A–E y cierre del bloque de profesionalización del demo. **Solo
+`demo/main.cpp`** (la librería no cambia en todo el bloque).
+
+- **Sin lógica duplicada.** El botón «Limpiar» de la pestaña Elevación tenía una lambda que repetía
+  punto por punto `limpiarAnalisis()` (el slot del menú). Ahora **reutiliza el slot**: una sola fuente de
+  verdad para limpiar el análisis.
+- **Ayudas en herramientas** (`setStatusTip`/`setToolTip`): cada herramienta de dibujo/navegación explica
+  qué hace al pasar el ratón y en la barra de estado. En particular se aclara la diferencia que no es
+  obvia: **Polígono** (genérico, sin tope de vértices) frente a **Área objetivo** (≤10 vértices, etiqueta
+  y selección en el primer punto).
+- **Sin cambios de API ni de arquitectura** en A–F: la librería es la misma, por eso no se regenera el
+  PDF (regla de `CLAUDE.md`). README y BITÁCORA quedan al día.
+
+**Resumen del bloque (A–F), todo en el demo:** barra de menú + barras por actividad y overlays ocultos
+al iniciar (A); panel de capas en tres grupos Base/Overlays/Entidades (B); diálogo de alta con
+nombre/capa/colores y vuelta automática a Navegar (C, con la corrección de la capa nueva tecleada);
+coordenadas lat/lon editables de la entidad seleccionada (D); guardado explícito con aviso de cambios
+sin guardar, dejando elevación y pines A/B como temporales (E); y este pulido (F). Compila sin warnings,
+**19 tests** en verde. Validación visual en el PC del usuario.
+
+## 108. Fix del guardado explícito: `MapConfig::autosaveFeatures` (el autoguardado seguía activo con paquete)
+
+La Fase E apagó el autoguardado quitando `cfg.featuresDbFile`, pero **con un paquete abierto eso no
+bastaba**: al dejar `featuresDbFile` vacío, `MapWidget` caía al **fichero de entidades del propio
+paquete** (`DataPackage::prepareFeaturesFile`) y activaba el autoguardado ahí. Resultado: aunque se
+pulsara «Descartar» al cerrar, lo dibujado ya se había guardado solo en el fichero del paquete y
+**reaparecía** al reabrir. Reportado por el usuario.
+
+- **Librería (cambio aditivo del API):** nuevo campo **`MapConfig::autosaveFeatures`** (por defecto
+  `true`, sin cambiar el comportamiento de otras apps). En `MapWidget`, el relleno desde el paquete y la
+  llamada a `setFeaturesDbFile` quedan **condicionados** a `autosaveFeatures`. Con `false`, **ni se usa
+  el fichero del paquete ni se autoguarda nada**, aunque se abra un paquete; la persistencia pasa a ser
+  totalmente explícita (`loadFeaturesFrom`/`saveFeaturesTo`).
+- **Demo:** fija `cfg.autosaveFeatures = false`. Con esto, dibujar → Descartar → reabrir ya **no**
+  recarga lo descartado. `--features` sigue cargándose a mano al arrancar (Fase E) y «Guardar» escribe
+  solo cuando el usuario lo pide.
+- **Nota para el usuario:** las entidades que se autoguardaron en sesiones anteriores (con el bug) siguen
+  en el fichero del paquete en disco (`<AppDataLocation>/<id_paquete>/<fichero_de_entidades>`); ya **no
+  se cargan**, pero se pueden borrar a mano si se quiere partir de cero, o abrir con «Abrir» si se
+  quieren recuperar.
+- **Test:** `tst_mapwidget::autosaveFeaturesFalseSkipsPackagePersistence`: con paquete y
+  `autosaveFeatures=false`, lo dibujado no crea el fichero de entidades y no reaparece al reabrir; la capa
+  fija (overlay) del paquete sí sigue cargando. Siguen **19 tests** (un slot nuevo del ejecutable
+  existente), en verde.
+
+Cambia el API (campo nuevo de `MapConfig`) → `arquitectura.html` y el PDF al día. Compila sin warnings.
+
+## 109. Demo: panel lateral contextual + temas claro/oscuro
+
+El panel lateral metía en una sola columna con scroll el árbol, las propiedades, los atributos, las
+coordenadas y el estilo: recargado y poco «de producto». Rediseño **solo del `demo`** (`demo/main.cpp`),
+con el enfoque elegido por el usuario: **contextual** y con **dos temas** elegibles.
+
+- **Panel contextual.** Por defecto se ve **solo el árbol de capas** (limpio). Al seleccionar una
+  entidad aparece debajo su **ficha**: título «nombre · tipo», campos Nombre/Tipo/Descripción, la **capa**
+  (solo lectura) y tres **secciones plegables** — *Atributos*, *Coordenadas*, *Estilo* — colapsadas por
+  defecto. Al deseleccionar, la ficha se oculta (`m_ficha->setVisible(hay)` en `mostrarPropiedades`). El
+  contenido va en un `QScrollArea` para que nunca se corte.
+- **`SeccionPlegable`** (nueva clase auxiliar, sin `Q_OBJECT`): cabecera `QToolButton` con flecha que
+  muestra/oculta su contenido. Reutilizable.
+- **Temas claro y oscuro**, elegibles por el usuario en **Ver → Tema** (grupo exclusivo) y **recordados**
+  entre sesiones con `QSettings` (`tema/oscuro`; se fija `OrganizationName`/`ApplicationName` en `main`).
+  Son hojas de estilo (QSS) propias: tipografía, cabeceras de sección, separadores sutiles y color de
+  acento (azul). `aplicarTema()` repinta los botones de color (llevan estilo inline propio). Claro por
+  defecto.
+
+Sin cambios de API ni de arquitectura (todo en el demo) → no se regenera el PDF. Compila sin warnings,
+**19 tests** en verde (no-regresión). Validación visual en el PC del usuario (alternar tema en Ver →
+Tema; seleccionar una entidad para ver su ficha).
+
+## 110. Demo: barras con iconos, dos filas y arreglo del menú en tema oscuro
+
+Tras ver la app real, la barra era **una sola fila larguísima de botones de texto** (las dos barras
+quedaban en la misma línea): parecía prototipo. Se le da aspecto de producto. **Solo `demo/main.cpp`**.
+
+- **Iconos dibujados en código** (`glifo(clave, color)`): un set coherente de glifos lineales 20×20
+  (navegar, medir, zoom, punto, línea, polígono, objetivo, área, editar, borrar, deshacer/rehacer,
+  guardar, abrir, rejilla, cobertura, geo, simular, DEM). Se **recolorean con el tema**
+  (`aplicarIconos` desde `aplicarTema`, con el primer plano claro u oscuro), así casan en ambos.
+- **Barras de solo iconos con tooltip** (`Qt::ToolButtonIconOnly`, 20 px): compactas y legibles (el
+  nombre sale al pasar el ratón y en la barra de estado). Cada acción lleva su clave de glifo en una
+  propiedad (`accHerr` la pone para las de dibujo; un bloque la pone para el resto).
+- **Dos filas de verdad:** `addToolBarBreak()` fuerza que «Terreno y datos» baje a su propia fila en
+  vez de amontonarse con la principal. Se añade también **Abrir** a la barra principal.
+- **Arreglo del tema oscuro:** el menú superior se quedaba claro; se fija `background-color` y `color`
+  explícitos en `QMenuBar`/`QMenuBar::item` (en claro y oscuro) para que el menú siga al tema.
+
+Verificado con capturas offscreen en claro y oscuro (coherentes). Compila sin warnings, **19 tests** en
+verde (no-regresión). Sin cambios de API → sin PDF.
+
+## 111. Demo: paleta por tema (fin del fondo blanco), fondos de grupo e iconos pulidos
+
+Retoques finales de diseño sobre el tema, a partir del feedback del usuario. **Solo `demo/main.cpp`**.
+
+- **Paleta (QPalette) por tema.** La hoja de estilo no alcanzaba a los contenedores «planos» (páginas de
+  las pestañas, el `QScrollArea`, la ficha), que se quedaban **blancos** en el tema oscuro. Se aplica
+  ahora también una `QPalette` propia (`paletaClara`/`paletaOscura`: Window/Base/Text/Button/Highlight…)
+  junto a la QSS; así todos los widgets planos toman el fondo del tema y desaparece el blanco.
+- **Fondos de grupo en el árbol.** Las cabeceras Base/Overlays/Entidades reciben una **banda sutil**
+  (`QPalette::AlternateBase`) para separarlas visualmente. Al cambiar de tema se **reconstruye el panel**
+  para que el color de banda se actualice.
+- **Iconos pulidos.** Se redibujan `editar` (lápiz limpio, sin la línea que se salía del lienzo ni la
+  variable sin usar) y `deshacer`/`rehacer` (flecha curva de retorno con `QPainterPath`, cabeza sólida).
+- Acento **azul** (elegido por el usuario) sin cambios. Panel un poco más ancho (min. 340 px).
+
+Verificado con capturas offscreen en claro y oscuro: sin blanco, bandas de grupo visibles e iconos
+limpios. Compila sin warnings, **19 tests** en verde (no-regresión). Sin cambios de API → sin PDF.
+
+## 112. Demo: tooltips legibles (estilo de `QToolTip` por tema)
+
+Los tooltips de la barra salían **texto casi blanco sobre fondo casi blanco** (ilegibles): la paleta no
+basta para `QToolTip` en Windows. Se añade una regla **`QToolTip`** a las dos hojas de estilo (claro:
+texto oscuro sobre blanco con borde; oscuro: texto claro sobre gris oscuro), así el nombre de cada
+herramienta se lee bien al pasar el ratón. **Solo `demo/main.cpp`**; sin cambios de API. Compila sin
+warnings, **19 tests** en verde.
+
+## 113. Demo: cobertura completa del API (selección de zona + visibilidad de objetivos)
+
+Auditoría de la superficie pública de `MapWidget` frente a lo que el `demo` ejercita, antes del PR. El
+demo ya cubría casi todo; faltaban dos capacidades de cara al usuario, que se añaden (**solo
+`demo/main.cpp`**):
+
+- **Selección de zona sin zoom:** herramientas **«Seleccionar área»** (`MapTool::SelectArea`) y
+  **«Seleccionar polígono (zona)»** (`MapTool::SelectPolygon`) en el menú *Datos*. La librería deja el
+  recuadro/contorno visible y emite `areaSelected`/`polygonSelected`; el demo informa de la zona en la
+  barra de estado (es lo que usa `fill_map` para elegir qué teselas descargar).
+- **Mostrar/ocultar objetivos:** acción *«Mostrar objetivos»* en *Datos* (`setTargetsVisible`).
+
+El resto de la API queda cubierto por el demo: navegación (zoom/centro/ajuste a Cuba), capas base
+(exclusivas) y overlays, **entidades** (alta/edición/estilo/atributos/coordenadas, mover/insertar/quitar
+vértices, deshacer/rehacer, guardar/cargar explícito, `.geo`), **objetivos** (simulación con `kind` +
+atributos, proveedor de símbolos, presupuesto de detalle, traza, clic→datos), **elevación** (perfil,
+visión A→B, viewshed, picos, hillshade en vivo, cota bajo el cursor) y herramientas (medir, zoom-área,
+rejilla, cobertura por zoom). Quedan sin UI dedicada solo *getters* y variantes redundantes (p. ej.
+`visibleNorthWest`, `featuresOfType`, `clearUndoHistory`) o deliberadamente no usadas por el guardado
+explícito (`setFeaturesDbFile`/`saveFeaturesNow`); el rango de zoom por capa se demuestra con los
+overlays del paquete (curvas de nivel con `z` limitado). Compila sin warnings, **19 tests** en verde.

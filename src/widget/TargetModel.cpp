@@ -89,6 +89,17 @@ bool TargetModel::setLabel(qint64 id, const QString &text)
     return true;
 }
 
+// Cambia el desplazamiento de la etiqueta de un objetivo. false si el id no existe.
+bool TargetModel::setLabelOffset(qint64 id, const QPointF &offsetPx)
+{
+    auto it = m_targets.find(id);
+    if (it == m_targets.end())
+        return false;
+    it->target.labelOffsetPx = offsetPx;
+    emit changed();
+    return true;
+}
+
 // Cambia el color de un objetivo. false si el id no existe.
 bool TargetModel::setColor(qint64 id, const QColor &color)
 {

@@ -60,6 +60,14 @@ struct MapConfig
     //! (con antirebote). Vacia = sin persistencia automatica. Opcional.
     QString featuresDbFile;
 
+    //! Guardado AUTOMATICO de entidades. Por defecto true (compatibilidad): si
+    //! \a featuresDbFile viene vacio y se abre un paquete, se usa el fichero de
+    //! entidades del paquete y se autoguarda ahi. Ponlo en \c false para que la
+    //! app lleve un GUARDADO EXPLICITO (cargar/guardar a mano con
+    //! loadFeaturesFrom/saveFeaturesTo): entonces NO se usa el fichero del
+    //! paquete ni se autoguarda nada, aunque se abra un paquete.
+    bool autosaveFeatures = true;
+
     QString initialLayerId;                    //!< Vacio = el del paquete o el primero del JSON.
     //! Invalido = el del paquete ("start.center"), o La Habana si no hay paquete.
     QGeoCoordinate initialCenter;
@@ -308,6 +316,11 @@ public:
 
     bool setTargetLabel(qint64 id, const QString &text);
 
+    //! Desplazamiento de la ETIQUETA del objetivo respecto a su simbolo, en
+    //! pixeles. Relativo: al moverse el objetivo la etiqueta lo sigue. Cuando no
+    //! es nulo se traza una linea guia. false si el id no existe.
+    bool setTargetLabelOffset(qint64 id, const QPointF &offsetPx);
+
     //! Cuelga (o reemplaza) un dato de dominio en un objetivo: AIS (mmsi, imo),
     //! ADS-B (callsign, squawk), telemetria de un UAV... La libreria los guarda
     //! y los devuelve tal cual, sin interpretarlos. false si el id no existe.
@@ -357,6 +370,16 @@ public:
 
     //! Entidad bajo un punto de la pantalla, o -1.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+
+    //! Entidad cuyo ROTULO cae bajo el pixel, o -1. Permite seleccionar/arrastrar
+    //! la etiqueta por separado de la geometria.
+    qint64 featureLabelAt(const QPoint &pixel) const;
+    //! Objetivo cuyo ROTULO dibujado cae bajo el pixel, o -1.
+    qint64 targetLabelAt(const QPoint &pixel) const;
+
+    //! Fija el desplazamiento de la etiqueta de una entidad (px) y lo persiste.
+    //! false si el id no existe.
+    bool setFeatureLabelOffset(qint64 id, const QPointF &offsetPx);
 
     // --- Elevacion -------------------------------------------------------
     //! Cota del terreno (metros) en \a position leida del origen de elevacion
@@ -411,6 +434,12 @@ public:
     //! Estilo y tipo de dominio de las entidades que se creen a partir de ahora.
     void setDraftStyle(const FeatureStyle &style);
     void setDraftType(const QString &type);
+
+    //! Tope de vertices del trazado punto a punto (−1 = sin límite). Al llegar al
+    //! tope se ignoran los clics; el límite queda en la entidad (atributo
+    //! \c max_vertices) para que la edicion posterior también lo respete. Para un
+    //! «area objetivo» de ≤10 puntos: setDraftMaxVertices(10).
+    void setDraftMaxVertices(int n);
 
     //! true mientras hay una geometria a medio trazar.
     bool isDrawing() const;
@@ -499,6 +528,12 @@ signals:
     void featureLayersChanged();
     //! Emitida al crear una entidad con el raton.
     void featureCreated(qint64 id);
+    //! Arrastre (herramienta Navegar) de una entidad marcada \c draggable: al
+    //! empezar, en cada movimiento (coordenada bajo el cursor) y al soltar. Para
+    //! marcadores que el operador reposiciona (p. ej. los puntos A/B).
+    void featureDragStarted(qint64 id);
+    void featureDragMovedTo(qint64 id, const QGeoCoordinate &position);
+    void featureDragFinished(qint64 id);
     void drawingCancelled();
     void zoomChanged(int zoom);
     void centerChanged(const QGeoCoordinate &center);

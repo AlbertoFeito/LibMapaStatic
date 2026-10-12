@@ -8,6 +8,7 @@
 #include <QBuffer>
 #include <QDateTime>
 #include <QFileInfo>
+#include <QPointF>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QSqlRecord>
@@ -278,9 +279,10 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     q.prepare(QStringLiteral(
         "INSERT INTO entidad (capa, tipo, geometria, nombre, descripcion,"
         " color_linea, color_relleno, ancho_linea, estilo_linea, radio_px,"
-        " etiqueta_visible, visible, simbolo, atributos, creado_utc)"
-        " VALUES (:capa,:tipo,:geo,:nom,:desc,:cl,:cr,:anc,:el,:rp,:ev,:vi,"
-        " :sim,:atr,:cu)"));
+        " etiqueta_visible, label_dx, label_dy, label_anchor, visible, simbolo,"
+        " atributos, creado_utc)"
+        " VALUES (:capa,:tipo,:geo,:nom,:desc,:cl,:cr,:anc,:el,:rp,:ev,"
+        " :ldx,:ldy,:lan,:vi,:sim,:atr,:cu)"));
     q.bindValue(QStringLiteral(":capa"), text(f.layerId));
     q.bindValue(QStringLiteral(":tipo"), text(f.type));
     q.bindValue(QStringLiteral(":geo"), static_cast<int>(f.kind));
@@ -292,6 +294,9 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     q.bindValue(QStringLiteral(":el"), static_cast<int>(f.style.lineStyle));
     q.bindValue(QStringLiteral(":rp"), f.style.pointRadiusPx);
     q.bindValue(QStringLiteral(":ev"), f.style.labelVisible ? 1 : 0);
+    q.bindValue(QStringLiteral(":ldx"), f.style.labelOffsetPx.x());
+    q.bindValue(QStringLiteral(":ldy"), f.style.labelOffsetPx.y());
+    q.bindValue(QStringLiteral(":lan"), f.style.labelAnchorVertex);
     q.bindValue(QStringLiteral(":vi"), f.visible ? 1 : 0);
     q.bindValue(QStringLiteral(":sim"), pixmapToPng(f.style.icon));
     q.bindValue(QStringLiteral(":atr"), atributos);
@@ -406,6 +411,15 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
             field(q, "estilo_linea").toInt());
         f.style.pointRadiusPx = field(q, "radio_px").toDouble();
         f.style.labelVisible = field(q, "etiqueta_visible").toInt() != 0;
+        // Desplazamiento de la etiqueta (esquema v3). En una BD anterior las
+        // columnas no existen y field() devuelve 0 -> etiqueta pegada al punto.
+        f.style.labelOffsetPx = QPointF(field(q, "label_dx").toDouble(),
+                                        field(q, "label_dy").toDouble());
+        // Anclaje de la etiqueta: por defecto −1 (automatico). En una BD anterior
+        // la columna no existe (field() invalido) -> se queda en −1, no en 0.
+        const QVariant lan = field(q, "label_anchor");
+        if (lan.isValid())
+            f.style.labelAnchorVertex = lan.toInt();
         f.style.icon = pngToPixmap(field(q, "simbolo").toByteArray());
         f.visible = field(q, "visible").toInt() != 0;
 
