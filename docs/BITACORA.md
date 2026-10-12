@@ -4493,3 +4493,23 @@ con el enfoque elegido por el usuario: **contextual** y con **dos temas** elegib
 Sin cambios de API ni de arquitectura (todo en el demo) → no se regenera el PDF. Compila sin warnings,
 **19 tests** en verde (no-regresión). Validación visual en el PC del usuario (alternar tema en Ver →
 Tema; seleccionar una entidad para ver su ficha).
+
+## 110. Demo: barras con iconos, dos filas y arreglo del menú en tema oscuro
+
+Tras ver la app real, la barra era **una sola fila larguísima de botones de texto** (las dos barras
+quedaban en la misma línea): parecía prototipo. Se le da aspecto de producto. **Solo `demo/main.cpp`**.
+
+- **Iconos dibujados en código** (`glifo(clave, color)`): un set coherente de glifos lineales 20×20
+  (navegar, medir, zoom, punto, línea, polígono, objetivo, área, editar, borrar, deshacer/rehacer,
+  guardar, abrir, rejilla, cobertura, geo, simular, DEM). Se **recolorean con el tema**
+  (`aplicarIconos` desde `aplicarTema`, con el primer plano claro u oscuro), así casan en ambos.
+- **Barras de solo iconos con tooltip** (`Qt::ToolButtonIconOnly`, 20 px): compactas y legibles (el
+  nombre sale al pasar el ratón y en la barra de estado). Cada acción lleva su clave de glifo en una
+  propiedad (`accHerr` la pone para las de dibujo; un bloque la pone para el resto).
+- **Dos filas de verdad:** `addToolBarBreak()` fuerza que «Terreno y datos» baje a su propia fila en
+  vez de amontonarse con la principal. Se añade también **Abrir** a la barra principal.
+- **Arreglo del tema oscuro:** el menú superior se quedaba claro; se fija `background-color` y `color`
+  explícitos en `QMenuBar`/`QMenuBar::item` (en claro y oscuro) para que el menú siga al tema.
+
+Verificado con capturas offscreen en claro y oscuro (coherentes). Compila sin warnings, **19 tests** en
+verde (no-regresión). Sin cambios de API → sin PDF.
