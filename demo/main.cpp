@@ -806,6 +806,8 @@ private:
         return QStringLiteral(R"(
             QMainWindow, QDialog { background:#f4f6f8; }
             QWidget { color:#1f2a36; font-size:11px; }
+            QToolTip { color:#1f2a36; background-color:#ffffff;
+                       border:1px solid #cdd6de; padding:3px 6px; }
             QToolBar { background:#ffffff; border:0; border-bottom:1px solid #d9e0e6;
                        spacing:4px; padding:3px; }
             QToolButton { background:transparent; border:1px solid transparent;
@@ -849,6 +851,8 @@ private:
         return QStringLiteral(R"(
             QMainWindow, QDialog { background:#1e242b; }
             QWidget { color:#e6edf3; font-size:11px; }
+            QToolTip { color:#e6edf3; background-color:#262d35;
+                       border:1px solid #12161b; padding:3px 6px; }
             QToolBar { background:#262d35; border:0; border-bottom:1px solid #12161b;
                        spacing:4px; padding:3px; }
             QToolButton { background:transparent; border:1px solid transparent;

@@ -4531,3 +4531,11 @@ Retoques finales de diseño sobre el tema, a partir del feedback del usuario. **
 
 Verificado con capturas offscreen en claro y oscuro: sin blanco, bandas de grupo visibles e iconos
 limpios. Compila sin warnings, **19 tests** en verde (no-regresión). Sin cambios de API → sin PDF.
+
+## 112. Demo: tooltips legibles (estilo de `QToolTip` por tema)
+
+Los tooltips de la barra salían **texto casi blanco sobre fondo casi blanco** (ilegibles): la paleta no
+basta para `QToolTip` en Windows. Se añade una regla **`QToolTip`** a las dos hojas de estilo (claro:
+texto oscuro sobre blanco con borde; oscuro: texto claro sobre gris oscuro), así el nombre de cada
+herramienta se lee bien al pasar el ratón. **Solo `demo/main.cpp`**; sin cambios de API. Compila sin
+warnings, **19 tests** en verde.
