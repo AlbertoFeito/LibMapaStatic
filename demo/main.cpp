@@ -664,8 +664,13 @@ private:
         *nombre = edNombre->text().trimmed();
         // Si el texto de la capa coincide con un ítem, usa su id (data); si el
         // usuario tecleó algo nuevo, ese texto ES el id de la capa nueva.
-        const QVariant dCapa = cbCapa->currentData();
-        *capa = dCapa.isValid() ? dCapa.toString() : cbCapa->currentText().trimmed();
+        // OJO: en un combo editable currentData()/currentIndex() NO cambian al
+        // teclear texto nuevo (siguen en la capa preseleccionada), así que se
+        // resuelve por TEXTO: si coincide con un ítem, se usa su id (data); si
+        // el usuario tecleó algo nuevo, ese texto ES el id de la capa nueva.
+        const QString texto = cbCapa->currentText().trimmed();
+        const int i = cbCapa->findText(texto);
+        *capa = (i >= 0) ? cbCapa->itemData(i).toString() : texto;
         *linea = cl;
         *relleno = cr;
         *ancho = spAncho->value();
