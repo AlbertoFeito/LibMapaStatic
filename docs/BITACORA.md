@@ -4341,3 +4341,32 @@ sigue siendo **solo `demo/main.cpp`** (ni librería ni tests).
 Rol nuevo en el árbol `RolBase` (id de capa base). Compila sin warnings, **19 tests** en verde
 (no-regresión; la librería no cambia). Validación visual en el PC del usuario. Siguiente: Fase C
 (diálogo de nueva entidad + flujo dibuja→Navegar).
+
+## 104. Demo más profesional — Fase C: diálogo de alta de entidad + flujo dibuja→Navegar
+
+Antes, al elegir Punto/Línea/Polígono (u Objetivo/Área) se entraba directamente en modo dibujo con el
+estilo que hubiera en el panel, y la entidad nacía sin nombre, en la capa activa, y había que volver a
+Navegar a mano. Ahora, al elegir una herramienta de creación **sale un diálogo** para fijar el
+**nombre**, la **capa** y los **colores de borde y relleno** (+ ancho); al aceptar se dibuja y, al
+cerrar el trazo, **se vuelve solo a Navegar**. Sigue siendo **solo `demo/main.cpp`**.
+
+- **`dialogoNuevaEntidad`** (modal): *Nombre* (sugerido según la herramienta), *Capa* en un combo
+  **editable** (se elige una existente o se teclea una nueva), y botones de color de borde/relleno
+  (reutilizan `pintarBotonColor`/`QColorDialog` con canal alfa) más el ancho de línea.
+- **`configurarNuevaEntidad(tipo, estiloBase, maxVert, nombreSug)`**: punto común de los cinco modos.
+  Se **difiere con `QTimer::singleShot(0)`** para que el diálogo salga *después* de que el
+  `QActionGroup` fije la herramienta de dibujo; así, al **Cancelar**, `volverANavegar` no queda pisado
+  por esa activación automática (era el único punto delicado del flujo). Al **Aceptar**: crea la capa si
+  es nueva (`addFeatureLayer`, no-op si existe), la pone activa, fija el borrador
+  (`setDraftType`/`setDraftStyle`/`setDraftMaxVertices`) con los colores elegidos y **arma** el alta
+  (`m_nombrePendiente`, `m_esperandoDibujo`).
+- **`alEntidadCreada(id)`** (señal `featureAdded`): si hay un alta armada, pone el nombre a la entidad
+  recién dibujada (`feature`+`updateFeature`), **vuelve a Navegar** y la deja **seleccionada** (se ven
+  sus datos en el panel). El alta se desarma también si el usuario cambia a una herramienta que no
+  dibuja (en el handler del grupo) o al cancelar.
+- Las herramientas genéricas parten del **estilo actual del panel** (`estiloActual`); Objetivo y Área
+  conservan sus rasgos propios (etiqueta visible, ancla en el 1er punto, tope de 10 vértices) y solo
+  dejan elegir nombre/capa/colores encima.
+
+Compila sin warnings, **19 tests** en verde (no-regresión; la librería no cambia). Validación visual en
+el PC del usuario. Siguiente: Fase D (panel de propiedades con coordenadas editables).

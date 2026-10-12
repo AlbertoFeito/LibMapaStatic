@@ -261,7 +261,7 @@ private:
         m_accObjetivo = accHerr(tr("Objetivo"), MapTool::DrawPoint);
         m_accArea     = accHerr(tr("Área objetivo"), MapTool::DrawPolygon);
         for (QAction *a : {m_accPunto, m_accLinea, m_accPoligono})
-            connect(a, &QAction::triggered, this, &Ventana::reponerBorrador);
+            connect(a, &QAction::triggered, this, &Ventana::nuevaEntidadGenerica);
         connect(m_accObjetivo, &QAction::triggered, this, &Ventana::modoObjetivo);
         connect(m_accArea, &QAction::triggered, this, &Ventana::modoAreaObjetivo);
 
@@ -512,8 +512,8 @@ private:
     }
 
 
-    //! Repone el borrador por defecto (herramientas de dibujo genericas): sin
-    //! tipo de dominio, sin tope de vertices y con el estilo por defecto.
+    //! Repone el borrador por defecto (sin tipo de dominio, sin tope de
+    //! vértices, estilo por defecto). Lo usa volverANavegar al desarmar el alta.
     void reponerBorrador()
     {
         m_mapa->setDraftType(QString());
@@ -521,8 +521,15 @@ private:
         m_mapa->setDraftStyle(FeatureStyle());
     }
 
-    //! Modo "Objetivo": el siguiente punto se crea como un objetivo (type
-    //! "objetivo") con etiqueta visible; su rotulo (y el punto) se arrastran.
+    //! Herramientas genéricas (Punto/Línea/Polígono): abre el diálogo de alta
+    //! con el estilo que haya configurado el usuario en el panel.
+    void nuevaEntidadGenerica()
+    {
+        configurarNuevaEntidad(QString(), estiloActual(), -1, tr("Entidad"));
+    }
+
+    //! Modo "Objetivo": punto con type "objetivo" y etiqueta visible; su rótulo
+    //! (y el punto) se arrastran. Pasa por el diálogo de alta.
     void modoObjetivo()
     {
         FeatureStyle s;
@@ -530,12 +537,7 @@ private:
         s.pointRadiusPx = 7.0;
         s.lineColor = QColor(0xff, 0x8f, 0x00);
         s.fillColor = QColor(0xff, 0x8f, 0x00, 160);
-        m_mapa->setDraftType(QStringLiteral("objetivo"));
-        m_mapa->setDraftStyle(s);
-        m_mapa->setDraftMaxVertices(-1);
-        statusBar()->showMessage(
-            tr("Objetivo: clic para situarlo. Arrastra su etiqueta (Navegar) "
-               "o el punto (Editar)."), 6000);
+        configurarNuevaEntidad(QStringLiteral("objetivo"), s, -1, tr("Objetivo"));
     }
 
     //! Modo "Área objetivo": polígono de <=10 vértices (type "objetivo_area")
@@ -548,11 +550,144 @@ private:
         s.lineColor = QColor(0xc6, 0x28, 0x28);
         s.fillColor = QColor(0xc6, 0x28, 0x28, 40);
         s.lineWidth = 2.0;
-        m_mapa->setDraftType(QStringLiteral("objetivo_area"));
-        m_mapa->setDraftStyle(s);
-        m_mapa->setDraftMaxVertices(10);
-        statusBar()->showMessage(
-            tr("Área objetivo: hasta 10 puntos. Doble clic para cerrar."), 6000);
+        configurarNuevaEntidad(QStringLiteral("objetivo_area"), s, 10, tr("Área"));
+    }
+
+    //! Vuelve a la herramienta Navegar y desarma el alta de entidad en curso.
+    void volverANavegar()
+    {
+        m_esperandoDibujo = false;
+        m_nombrePendiente.clear();
+        reponerBorrador();
+        if (m_accNavegar)
+            m_accNavegar->setChecked(true);
+        m_mapa->setActiveTool(MapTool::None);
+    }
+
+    //! Flujo de alta de una entidad: pregunta nombre/capa/colores y, al aceptar,
+    //! configura el borrador y deja que el usuario dibuje; al terminar el trazo
+    //! (señal featureAdded → alEntidadCreada) se le pone el nombre y se vuelve a
+    //! Navegar. Se DIFIERE con un singleShot(0) para que el diálogo salga después
+    //! de que el grupo de acciones fije la herramienta de dibujo; así, al
+    //! cancelar, volverANavegar no queda pisado por esa activación automática.
+    void configurarNuevaEntidad(const QString &tipo, FeatureStyle base,
+                                int maxVert, const QString &nombreSug)
+    {
+        QTimer::singleShot(0, this, [this, tipo, base, maxVert, nombreSug]() mutable {
+            QString nombre, capa;
+            QColor cl = base.lineColor, cr = base.fillColor;
+            double ancho = base.lineWidth > 0 ? base.lineWidth : 1.5;
+            if (!dialogoNuevaEntidad(nombreSug, &nombre, &capa, &cl, &cr, &ancho)) {
+                volverANavegar();
+                return;
+            }
+            if (capa.isEmpty())
+                capa = m_mapa->activeFeatureLayer();
+            // addFeatureLayer no-op si la capa ya existe; la crea si es nueva.
+            m_mapa->addFeatureLayer(capa, capa,
+                static_cast<int>(m_mapa->featureLayers().size()) * 10);
+            m_mapa->setActiveFeatureLayer(capa);
+
+            base.lineColor = cl;
+            base.fillColor = cr;
+            base.lineWidth = ancho;
+            m_mapa->setDraftType(tipo);
+            m_mapa->setDraftStyle(base);
+            m_mapa->setDraftMaxVertices(maxVert);
+
+            m_nombrePendiente = nombre;
+            m_esperandoDibujo = true;
+            statusBar()->showMessage(
+                tr("Dibuja la entidad en el mapa; al terminar vuelve a Navegar."),
+                6000);
+        });
+    }
+
+    //! Diálogo modal de alta: nombre, capa (editable: se puede teclear una
+    //! nueva) y colores de borde/relleno + ancho. Devuelve true si se aceptó.
+    bool dialogoNuevaEntidad(const QString &nombreSug, QString *nombre,
+                             QString *capa, QColor *linea, QColor *relleno,
+                             double *ancho)
+    {
+        QDialog d(this);
+        d.setWindowTitle(tr("Nueva entidad"));
+        auto *form = new QFormLayout(&d);
+
+        auto *edNombre = new QLineEdit(nombreSug, &d);
+        form->addRow(tr("Nombre:"), edNombre);
+
+        auto *cbCapa = new QComboBox(&d);
+        cbCapa->setEditable(true);           // permite teclear una capa nueva
+        for (const LayerInfo &c : m_mapa->featureLayers())
+            if (c.editable)
+                cbCapa->addItem(c.displayName.isEmpty() ? c.id : c.displayName, c.id);
+        const QString activa = m_mapa->activeFeatureLayer();
+        if (const int i = cbCapa->findData(activa); i >= 0)
+            cbCapa->setCurrentIndex(i);
+        else if (!activa.isEmpty())
+            cbCapa->setCurrentText(activa);
+        form->addRow(tr("Capa:"), cbCapa);
+
+        QColor cl = *linea, cr = *relleno;
+        auto *btnL = new QPushButton(&d);
+        auto *btnR = new QPushButton(&d);
+        pintarBotonColor(btnL, cl);
+        pintarBotonColor(btnR, cr);
+        connect(btnL, &QPushButton::clicked, &d, [this, &d, &cl, btnL] {
+            const QColor c = QColorDialog::getColor(cl, &d, tr("Color de borde"),
+                                                    QColorDialog::ShowAlphaChannel);
+            if (c.isValid()) { cl = c; pintarBotonColor(btnL, c); }
+        });
+        connect(btnR, &QPushButton::clicked, &d, [this, &d, &cr, btnR] {
+            const QColor c = QColorDialog::getColor(cr, &d, tr("Color de relleno"),
+                                                    QColorDialog::ShowAlphaChannel);
+            if (c.isValid()) { cr = c; pintarBotonColor(btnR, c); }
+        });
+        form->addRow(tr("Color de borde:"), btnL);
+        form->addRow(tr("Color de relleno:"), btnR);
+
+        auto *spAncho = new QDoubleSpinBox(&d);
+        spAncho->setRange(0.5, 12.0);
+        spAncho->setSingleStep(0.5);
+        spAncho->setValue(*ancho);
+        form->addRow(tr("Ancho de línea:"), spAncho);
+
+        auto *bb = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+        form->addRow(bb);
+        connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+
+        if (d.exec() != QDialog::Accepted)
+            return false;
+
+        *nombre = edNombre->text().trimmed();
+        // Si el texto de la capa coincide con un ítem, usa su id (data); si el
+        // usuario tecleó algo nuevo, ese texto ES el id de la capa nueva.
+        const QVariant dCapa = cbCapa->currentData();
+        *capa = dCapa.isValid() ? dCapa.toString() : cbCapa->currentText().trimmed();
+        *linea = cl;
+        *relleno = cr;
+        *ancho = spAncho->value();
+        return true;
+    }
+
+    //! Llega por featureAdded: si hay un alta en curso, pone el nombre elegido a
+    //! la entidad recién dibujada, la deja seleccionada y vuelve a Navegar.
+    void alEntidadCreada(qint64 id)
+    {
+        if (!m_esperandoDibujo)
+            return;
+        m_esperandoDibujo = false;
+        if (!m_nombrePendiente.isEmpty()) {
+            if (auto f = m_mapa->feature(id)) {
+                f->name = m_nombrePendiente;
+                m_mapa->updateFeature(*f);
+            }
+        }
+        m_nombrePendiente.clear();
+        volverANavegar();
+        m_mapa->selectFeature(id);   // deja ver sus datos en el panel
     }
 
     //! Si la entidad seleccionada es un área objetivo, lista sus coordenadas en
@@ -822,10 +957,19 @@ private:
                 });
 
         connect(m_grupo, &QActionGroup::triggered, this, [this](QAction *a) {
-            m_mapa->setActiveTool(static_cast<MapTool>(a->data().toInt()));
+            const auto tool = static_cast<MapTool>(a->data().toInt());
+            m_mapa->setActiveTool(tool);
+            // Si se cambia a una herramienta que no dibuja, se desarma el alta
+            // en curso (p. ej. el usuario pulsa Navegar sin llegar a dibujar).
+            if (tool != MapTool::DrawPoint && tool != MapTool::DrawPolyline
+                && tool != MapTool::DrawPolygon) {
+                m_esperandoDibujo = false;
+                m_nombrePendiente.clear();
+            }
         });
 
         // --- El panel se reconstruye SOLO desde las senales del modelo. ---
+        connect(m_mapa, &MapWidget::featureAdded, this, &Ventana::alEntidadCreada);
         connect(m_mapa, &MapWidget::featureAdded, this, &Ventana::pedirReconstruir);
         connect(m_mapa, &MapWidget::featureRemoved, this, &Ventana::pedirReconstruir);
         connect(m_mapa, &MapWidget::featureUpdated, this, &Ventana::pedirReconstruir);
@@ -2856,6 +3000,11 @@ private:
     QColor m_colorRelleno = QColor(0xd3, 0x2f, 0x2f, 70);
     QString m_archivoActual;
     QString m_ultimoDir;
+
+    // Alta de entidad en curso (diálogo → dibuja → Navegar): nombre a aplicar a
+    // la siguiente entidad dibujada y si hay un alta armada.
+    QString m_nombrePendiente;
+    bool m_esperandoDibujo = false;
 
     // Simulacion de objetivos moviles.
     QSpinBox *m_numObjetivos = nullptr;
