@@ -234,7 +234,12 @@ entidades. Emite <code>errorOccurred</code>. Lo usa <code>MapWidget</code> en
 (o <code>setFeaturesDbFile()</code>) el widget hace <b>persistencia automática</b>:
 carga al abrir y guarda solo lo dibujado/editado/borrado con un <b>antirebote</b>
 (~500 ms) que agrupa las ráfagas — volcado completo, reutilizando
-<code>saveFeaturesTo</code>. Los objetivos móviles no se persisten.</p>
+<code>saveFeaturesTo</code>. Los objetivos móviles no se persisten.
+Con un <b>paquete</b> y <code>featuresDbFile</code> vacío, se usa por defecto el
+fichero de entidades del propio paquete. Para un <b>guardado explícito</b> (cargar
+y guardar solo a mano), pon <code>MapConfig.autosaveFeatures = false</code>: entonces
+no se toca el fichero del paquete ni se autoguarda nada aunque se abra un paquete
+(lo usa así la app <code>demo</code>).</p>
 
 <!-- ===================== 6. TILES ===================== -->
 <h2 class="sec">6 · Módulo <span class="mono">tiles</span> — motor de teselas</h2>

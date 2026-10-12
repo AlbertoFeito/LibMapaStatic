@@ -214,7 +214,10 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             cfg.elevationDbFile = paquete->elevationFile;
             cfg.elevationDir = paquete->elevationDir;
         }
-        if (cfg.featuresDbFile.isEmpty()) {
+        // Solo si la app quiere autoguardado (por defecto): si no fijo un
+        // featuresDbFile propio, se usa el del paquete. Con autosaveFeatures=false
+        // (guardado explicito) NO se toca el fichero del paquete.
+        if (cfg.autosaveFeatures && cfg.featuresDbFile.isEmpty()) {
             QString motivo;
             cfg.featuresDbFile = paquete->prepareFeaturesFile(&motivo);
             if (!motivo.isEmpty())
@@ -340,7 +343,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             [programarGuardado](qint64) { programarGuardado(); });
     connect(modelo, &OverlayModel::layersChanged, this,
             [programarGuardado] { programarGuardado(); });
-    if (!cfg.featuresDbFile.isEmpty())
+    if (cfg.autosaveFeatures && !cfg.featuresDbFile.isEmpty())
         setFeaturesDbFile(cfg.featuresDbFile);
 
     // Capas fijas del paquete, DESPUES de las entidades del usuario (cargarlas

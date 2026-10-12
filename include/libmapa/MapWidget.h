@@ -60,6 +60,14 @@ struct MapConfig
     //! (con antirebote). Vacia = sin persistencia automatica. Opcional.
     QString featuresDbFile;
 
+    //! Guardado AUTOMATICO de entidades. Por defecto true (compatibilidad): si
+    //! \a featuresDbFile viene vacio y se abre un paquete, se usa el fichero de
+    //! entidades del paquete y se autoguarda ahi. Ponlo en \c false para que la
+    //! app lleve un GUARDADO EXPLICITO (cargar/guardar a mano con
+    //! loadFeaturesFrom/saveFeaturesTo): entonces NO se usa el fichero del
+    //! paquete ni se autoguarda nada, aunque se abra un paquete.
+    bool autosaveFeatures = true;
+
     QString initialLayerId;                    //!< Vacio = el del paquete o el primero del JSON.
     //! Invalido = el del paquete ("start.center"), o La Habana si no hay paquete.
     QGeoCoordinate initialCenter;

@@ -186,9 +186,12 @@ public:
         }
         cfg.elevationDir = demDir;          // carpeta .hgt para la cota (opcional)
         cfg.elevationDbFile = demDb;        // BD de elevacion (prioritaria si viene)
-        // GUARDADO EXPLÍCITO: NO se fija cfg.featuresDbFile (eso activaría el
-        // autoguardado). Si se pasa --features, se carga al arrancar y se recuerda
-        // como fichero de trabajo para «Guardar»; los cambios no se guardan solos.
+        // GUARDADO EXPLÍCITO: se apaga el autoguardado. Esto es CLAVE con un
+        // paquete: si no, al dejar featuresDbFile vacío la librería usaría el
+        // fichero de entidades del propio paquete y guardaría/ recargaría solo.
+        // Con autosaveFeatures=false no se toca ese fichero; --features (abajo)
+        // se carga a mano y «Guardar» escribe solo cuando el usuario lo pide.
+        cfg.autosaveFeatures = false;
         cfg.cacheMiB = 192;
 
         m_demActivo = esPaquete || !demDir.isEmpty() || !demDb.isEmpty();

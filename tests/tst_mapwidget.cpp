@@ -161,6 +161,7 @@ private slots:
     //! Solo con dataDir: capas base, arranque, capa fija bloqueada y entidades;
     //! la capa fija no se guarda ni se duplica al reabrir.
     void opensDataPackageWithOneSetting();
+    void autosaveFeaturesFalseSkipsPackagePersistence();
     //! Lo rellenado a mano en MapConfig gana sobre el paquete.
     void explicitConfigWinsOverPackage();
     //! Paquete inexistente: no arranca y el error dice que falta mapa.json.
@@ -2081,6 +2082,37 @@ void TstMapWidget::opensDataPackageWithOneSetting()
     QVERIFY(w2.isReady());
     QCOMPARE(w2.featuresInLayer(QStringLiteral("corredores")).size(), 1);
     QCOMPARE(w2.featureCount(), 2);           // la propia + la fija, sin duplicar
+}
+
+// Con autosaveFeatures=false (guardado explicito) y un paquete: NO se usa el
+// fichero de entidades del paquete. Lo dibujado NO se autoguarda (el fichero no
+// llega a existir) y al reabrir no reaparece; la capa fija del paquete si carga.
+void TstMapWidget::autosaveFeaturesFalseSkipsPackagePersistence()
+{
+    const QString entidades = m_dir.filePath(QStringLiteral("paquete_noauto.db"));
+    QFile::remove(entidades);
+    MapConfig cfg;
+    cfg.dataDir = makePackage(QStringLiteral("paquete_noauto"), entidades);
+    cfg.cacheMiB = 32;
+    cfg.debounceMs = 0;
+    cfg.autosaveFeatures = false;          // guardado explicito
+
+    {
+        MapWidget w(cfg);
+        QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+        // La capa fija (overlay) del paquete SI se carga (es independiente).
+        QCOMPARE(w.featuresInLayer(QStringLiteral("corredores")).size(), 1);
+        QVERIFY(w.addFeature(puntoDe(QStringLiteral("Propia"), 22.0, -80.0)) > 0);
+        w.saveFeaturesNow();               // aunque se fuerce, no hay destino
+    }
+    // No se autoguardo nada: el fichero del paquete ni siquiera se creo.
+    QVERIFY(!QFileInfo::exists(entidades));
+
+    // Al reabrir, la entidad propia NO reaparece; solo la fija del paquete.
+    MapWidget w2(cfg);
+    QVERIFY(w2.isReady());
+    QCOMPARE(w2.featuresInLayer(QStringLiteral("corredores")).size(), 1);
+    QCOMPARE(w2.featureCount(), qint64(1));
 }
 
 // La regla de prioridad: lo que la aplicacion pone a mano gana al paquete.

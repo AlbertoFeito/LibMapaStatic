@@ -4443,3 +4443,30 @@ nombre/capa/colores y vuelta automática a Navegar (C, con la corrección de la 
 coordenadas lat/lon editables de la entidad seleccionada (D); guardado explícito con aviso de cambios
 sin guardar, dejando elevación y pines A/B como temporales (E); y este pulido (F). Compila sin warnings,
 **19 tests** en verde. Validación visual en el PC del usuario.
+
+## 108. Fix del guardado explícito: `MapConfig::autosaveFeatures` (el autoguardado seguía activo con paquete)
+
+La Fase E apagó el autoguardado quitando `cfg.featuresDbFile`, pero **con un paquete abierto eso no
+bastaba**: al dejar `featuresDbFile` vacío, `MapWidget` caía al **fichero de entidades del propio
+paquete** (`DataPackage::prepareFeaturesFile`) y activaba el autoguardado ahí. Resultado: aunque se
+pulsara «Descartar» al cerrar, lo dibujado ya se había guardado solo en el fichero del paquete y
+**reaparecía** al reabrir. Reportado por el usuario.
+
+- **Librería (cambio aditivo del API):** nuevo campo **`MapConfig::autosaveFeatures`** (por defecto
+  `true`, sin cambiar el comportamiento de otras apps). En `MapWidget`, el relleno desde el paquete y la
+  llamada a `setFeaturesDbFile` quedan **condicionados** a `autosaveFeatures`. Con `false`, **ni se usa
+  el fichero del paquete ni se autoguarda nada**, aunque se abra un paquete; la persistencia pasa a ser
+  totalmente explícita (`loadFeaturesFrom`/`saveFeaturesTo`).
+- **Demo:** fija `cfg.autosaveFeatures = false`. Con esto, dibujar → Descartar → reabrir ya **no**
+  recarga lo descartado. `--features` sigue cargándose a mano al arrancar (Fase E) y «Guardar» escribe
+  solo cuando el usuario lo pide.
+- **Nota para el usuario:** las entidades que se autoguardaron en sesiones anteriores (con el bug) siguen
+  en el fichero del paquete en disco (`<AppDataLocation>/<id_paquete>/<fichero_de_entidades>`); ya **no
+  se cargan**, pero se pueden borrar a mano si se quiere partir de cero, o abrir con «Abrir» si se
+  quieren recuperar.
+- **Test:** `tst_mapwidget::autosaveFeaturesFalseSkipsPackagePersistence`: con paquete y
+  `autosaveFeatures=false`, lo dibujado no crea el fichero de entidades y no reaparece al reabrir; la capa
+  fija (overlay) del paquete sí sigue cargando. Siguen **19 tests** (un slot nuevo del ejecutable
+  existente), en verde.
+
+Cambia el API (campo nuevo de `MapConfig`) → `arquitectura.html` y el PDF al día. Compila sin warnings.
