@@ -4421,3 +4421,25 @@ vías: automática con `featuresDbFile`, manual con `saveFeaturesTo`/`loadFeatur
 
 Compila sin warnings, **19 tests** en verde (no-regresión; la librería no cambia). Validación visual en
 el PC del usuario. Siguiente: Fase F (pulido + documentación final).
+
+## 107. Demo más profesional — Fase F: pulido + cierre del bloque
+
+Últimos retoques tras las fases A–E y cierre del bloque de profesionalización del demo. **Solo
+`demo/main.cpp`** (la librería no cambia en todo el bloque).
+
+- **Sin lógica duplicada.** El botón «Limpiar» de la pestaña Elevación tenía una lambda que repetía
+  punto por punto `limpiarAnalisis()` (el slot del menú). Ahora **reutiliza el slot**: una sola fuente de
+  verdad para limpiar el análisis.
+- **Ayudas en herramientas** (`setStatusTip`/`setToolTip`): cada herramienta de dibujo/navegación explica
+  qué hace al pasar el ratón y en la barra de estado. En particular se aclara la diferencia que no es
+  obvia: **Polígono** (genérico, sin tope de vértices) frente a **Área objetivo** (≤10 vértices, etiqueta
+  y selección en el primer punto).
+- **Sin cambios de API ni de arquitectura** en A–F: la librería es la misma, por eso no se regenera el
+  PDF (regla de `CLAUDE.md`). README y BITÁCORA quedan al día.
+
+**Resumen del bloque (A–F), todo en el demo:** barra de menú + barras por actividad y overlays ocultos
+al iniciar (A); panel de capas en tres grupos Base/Overlays/Entidades (B); diálogo de alta con
+nombre/capa/colores y vuelta automática a Navegar (C, con la corrección de la capa nueva tecleada);
+coordenadas lat/lon editables de la entidad seleccionada (D); guardado explícito con aviso de cambios
+sin guardar, dejando elevación y pines A/B como temporales (E); y este pulido (F). Compila sin warnings,
+**19 tests** en verde. Validación visual en el PC del usuario.

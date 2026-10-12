@@ -281,6 +281,24 @@ private:
         connect(m_accObjetivo, &QAction::triggered, this, &Ventana::modoObjetivo);
         connect(m_accArea, &QAction::triggered, this, &Ventana::modoAreaObjetivo);
 
+        // Ayudas en barra/menú: qué hace cada herramienta (y la diferencia entre
+        // Polígono genérico y Área objetivo, que no es obvia).
+        m_accNavegar->setStatusTip(tr("Mover el mapa; arrastrar etiquetas y pines."));
+        m_accMedir->setStatusTip(tr("Medir distancia y marcación entre dos puntos."));
+        m_accZoomArea->setStatusTip(tr("Ampliar arrastrando un rectángulo."));
+        m_accPunto->setStatusTip(tr("Dibujar un punto (pide nombre, capa y colores)."));
+        m_accLinea->setStatusTip(tr("Dibujar una línea; doble clic para cerrar."));
+        m_accPoligono->setStatusTip(tr("Polígono genérico sin límite de vértices."));
+        m_accObjetivo->setStatusTip(tr("Punto «objetivo»: etiqueta movible unida por "
+                                       "una línea guía."));
+        m_accArea->setStatusTip(tr("Polígono «objetivo»: hasta 10 vértices, etiqueta "
+                                   "y selección en el primer punto."));
+        m_accEditar->setStatusTip(tr("Seleccionar y editar: mover vértices, insertar "
+                                     "(doble clic en un lado) o borrar (Supr)."));
+        for (QAction *a : {m_accNavegar, m_accMedir, m_accZoomArea, m_accPunto, m_accLinea,
+                           m_accPoligono, m_accObjetivo, m_accArea, m_accEditar})
+            a->setToolTip(a->statusTip());
+
         // --- Acciones de archivo / edición -----------------------------------
         m_accGuardar = new QAction(tr("Guardar entidades"), this);
         m_accGuardar->setShortcut(QKeySequence::Save);
@@ -1243,16 +1261,8 @@ private:
             case 3: analizarPicosAltos(); break;
             }
         });
-        connect(bLimpiar, &QPushButton::clicked, this, [this] {
-            m_mapa->removeFeatureLayer(kCapaVision);
-            m_mapa->removeFeatureLayer(kCapaViewshed);
-            m_mapa->removeFeatureLayer(kCapaPicos);
-            m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
-            if (m_resultado) m_resultado->clear();
-            m_ultimo = Analisis::Ninguno;
-            marcarPuntosActivos();      // deja los pines de los puntos de entrada
-            statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
-        });
+        // Mismo slot que el menú «Elevación → Limpiar análisis» (sin duplicar).
+        connect(bLimpiar, &QPushButton::clicked, this, &Ventana::limpiarAnalisis);
         // Los checks re-aplican al instante el último análisis.
         connect(m_marComo0, &QCheckBox::toggled, this, [this] { reejecutar(); });
         connect(m_curvatura, &QCheckBox::toggled, this, [this] { reejecutar(); });
