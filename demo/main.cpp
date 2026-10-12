@@ -798,6 +798,27 @@ private:
             }
         });
 
+        // --- Coordenadas (lat/lon editables) -----------------------------
+        // Solo para entidades de usuario (capa editable); datasets y overlays no
+        // se tocan. Editar una celda = moveVertex; +/- = insert/removeVertex.
+        caja->addWidget(new QLabel(tr("<b>Coordenadas</b> (grados decimales)")));
+        m_tablaCoords = new QTableWidget(0, 2, cont);
+        m_tablaCoords->setHorizontalHeaderLabels({tr("Latitud"), tr("Longitud")});
+        m_tablaCoords->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        m_tablaCoords->setMaximumHeight(140);
+        caja->addWidget(m_tablaCoords);
+
+        auto *filaVert = new QHBoxLayout;
+        m_btnAddVert = new QPushButton(tr("+ Vértice"), cont);
+        m_btnDelVert = new QPushButton(tr("- Vértice"), cont);
+        filaVert->addWidget(m_btnAddVert);
+        filaVert->addWidget(m_btnDelVert);
+        caja->addLayout(filaVert);
+
+        connect(m_tablaCoords, &QTableWidget::cellChanged, this, &Ventana::coordEditada);
+        connect(m_btnAddVert, &QPushButton::clicked, this, &Ventana::anadirVertice);
+        connect(m_btnDelVert, &QPushButton::clicked, this, &Ventana::quitarVertice);
+
         // --- Estilo ------------------------------------------------------
         caja->addWidget(new QLabel(tr("<b>Estilo</b>")));
         auto *formEstilo = new QFormLayout;
@@ -2600,7 +2621,132 @@ private:
             m_verEtiqueta->setChecked(f->style.labelVisible);
             m_verVertices->setChecked(f->style.verticesVisible);
         }
+        mostrarCoords(id);
         m_actualizandoPropiedades = false;
+    }
+
+    //! ¿La capa de esta entidad es editable? (Las de usuario sí; las de overlays
+    //! del paquete, no.) Decide si se pueden tocar las coordenadas.
+    bool capaEditable(const QString &layerId) const
+    {
+        for (const LayerInfo &c : m_mapa->featureLayers())
+            if (c.id == layerId)
+                return c.editable;
+        return false;
+    }
+
+    //! Vuelca los vértices de la entidad seleccionada a la tabla de coordenadas.
+    //! Reutiliza el guardia m_actualizandoPropiedades para no reescribir al
+    //! rellenar. Si la entidad no es editable, la tabla queda de solo lectura.
+    void mostrarCoords(qint64 id)
+    {
+        const bool prev = m_actualizandoPropiedades;
+        m_actualizandoPropiedades = true;
+
+        m_tablaCoords->setRowCount(0);
+        const auto f = id >= 0 ? m_mapa->feature(id) : std::nullopt;
+        // Solo geometría de una sola parte (punto/línea/polígono de usuario). Las
+        // multiparte (p. ej. .geo) no se editan vértice a vértice aquí.
+        const bool editable = f && !f->isMultiPart() && capaEditable(f->layerId);
+
+        if (f && !f->isMultiPart()) {
+            for (int i = 0; i < f->geometry.size(); ++i) {
+                const QGeoCoordinate &c = f->geometry[i];
+                m_tablaCoords->insertRow(i);
+                m_tablaCoords->setItem(i, 0, celdaCoord(c.latitude()));
+                m_tablaCoords->setItem(i, 1, celdaCoord(c.longitude()));
+            }
+        }
+        m_tablaCoords->setEnabled(editable);
+        // En un punto no hay vértices que añadir/quitar; en línea/polígono sí.
+        const bool esMulti = f && (f->kind == GeometryKind::Polyline
+                                   || f->kind == GeometryKind::Polygon);
+        m_btnAddVert->setEnabled(editable && esMulti);
+        m_btnDelVert->setEnabled(editable && esMulti);
+
+        m_actualizandoPropiedades = prev;
+    }
+
+    //! Crea una celda con una coordenada formateada a 6 decimales.
+    static QTableWidgetItem *celdaCoord(double v)
+    {
+        return new QTableWidgetItem(QString::number(v, 'f', 6));
+    }
+
+    //! Una celda de lat/lon cambió: mueve ese vértice (moveVertex).
+    void coordEditada(int fila, int /*col*/)
+    {
+        if (m_actualizandoPropiedades)
+            return;
+        const qint64 id = m_mapa->selectedFeature();
+        if (id < 0)
+            return;
+        auto *itLat = m_tablaCoords->item(fila, 0);
+        auto *itLon = m_tablaCoords->item(fila, 1);
+        if (!itLat || !itLon)
+            return;
+        bool okLa = false, okLo = false;
+        const double la = itLat->text().toDouble(&okLa);
+        const double lo = itLon->text().toDouble(&okLo);
+        if (!okLa || !okLo || la < -90 || la > 90 || lo < -180 || lo > 180) {
+            statusBar()->showMessage(
+                tr("Coordenada inválida (lat -90..90, lon -180..180)."), 4000);
+            mostrarCoords(id);   // restaura el valor bueno
+            return;
+        }
+        if (!m_mapa->moveVertex(id, fila, QGeoCoordinate(la, lo)))
+            statusBar()->showMessage(tr("No se pudo mover el vértice."), 4000);
+    }
+
+    //! Inserta un vértice tras el seleccionado, en el punto medio hacia el
+    //! siguiente (en polígono cierra el anillo; en línea usa el vecino que haya).
+    void anadirVertice()
+    {
+        const qint64 id = m_mapa->selectedFeature();
+        if (id < 0)
+            return;
+        const auto f = m_mapa->feature(id);
+        if (!f || f->isMultiPart() || f->geometry.isEmpty())
+            return;
+        const int n = static_cast<int>(f->geometry.size());
+        int fila = m_tablaCoords->currentRow();
+        if (fila < 0)
+            fila = n - 1;                      // sin selección: tras el último
+        int vecino;
+        if (f->kind == GeometryKind::Polygon)
+            vecino = (fila + 1) % n;           // cierra el anillo
+        else
+            vecino = (fila + 1 < n) ? fila + 1 : fila - 1;
+        if (vecino < 0)
+            vecino = fila;                     // geometría de un solo punto
+        const QGeoCoordinate &a = f->geometry[fila];
+        const QGeoCoordinate &b = f->geometry[vecino];
+        const QGeoCoordinate medio((a.latitude() + b.latitude()) / 2.0,
+                                   (a.longitude() + b.longitude()) / 2.0);
+        if (m_mapa->insertVertex(id, fila + 1, medio))
+            mostrarCoords(id);                 // cambió el nº de filas
+        else
+            statusBar()->showMessage(tr("No se pudo insertar el vértice."), 4000);
+    }
+
+    //! Quita el vértice seleccionado (la librería rechaza bajar del mínimo:
+    //! 2 en línea, 3 en polígono).
+    void quitarVertice()
+    {
+        const qint64 id = m_mapa->selectedFeature();
+        if (id < 0)
+            return;
+        const int fila = m_tablaCoords->currentRow();
+        if (fila < 0) {
+            statusBar()->showMessage(tr("Elige primero un vértice en la tabla."), 4000);
+            return;
+        }
+        if (m_mapa->removeVertex(id, fila))
+            mostrarCoords(id);
+        else
+            statusBar()->showMessage(
+                tr("No se puede quitar: la geometría quedaría por debajo del "
+                   "mínimo de vértices."), 4000);
     }
 
     void pintarBotonColor(QPushButton *boton, const QColor &c)
@@ -2944,6 +3090,9 @@ private:
     QLineEdit *m_campoTipo = nullptr;
     QLineEdit *m_campoDescripcion = nullptr;
     QTableWidget *m_tablaAtributos = nullptr;
+    QTableWidget *m_tablaCoords = nullptr;   //!< lat/lon editables de la entidad
+    QPushButton *m_btnAddVert = nullptr;
+    QPushButton *m_btnDelVert = nullptr;
     QPushButton *m_btnColorLinea = nullptr;
     QPushButton *m_btnColorRelleno = nullptr;
     QDoubleSpinBox *m_anchoLinea = nullptr;

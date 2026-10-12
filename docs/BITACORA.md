@@ -4370,3 +4370,30 @@ cerrar el trazo, **se vuelve solo a Navegar**. Sigue siendo **solo `demo/main.cp
 
 Compila sin warnings, **19 tests** en verde (no-regresión; la librería no cambia). Validación visual en
 el PC del usuario. Siguiente: Fase D (panel de propiedades con coordenadas editables).
+
+## 105. Demo más profesional — Fase D: coordenadas editables en el panel de propiedades
+
+El panel mostraba nombre, tipo, atributos y estilo de la entidad seleccionada, pero no sus
+**coordenadas**. Se añade una tabla **lat/lon editable** que usa el API de edición de vértices de la
+librería. Sigue siendo **solo `demo/main.cpp`** (la librería ya tenía `moveVertex`/`insertVertex`/
+`removeVertex`).
+
+- **Tabla «Coordenadas»** (`m_tablaCoords`, 2 columnas): se rellena con los vértices de la entidad
+  seleccionada (`feature(id)->geometry`) en `mostrarCoords`, llamada desde `mostrarPropiedades`. Grados
+  decimales a 6 cifras.
+- **Editar una celda → `moveVertex`** (`coordEditada`): valida el rango (lat −90..90, lon −180..180) y,
+  si es inválido, restaura el valor bueno; reutiliza el guardia `m_actualizandoPropiedades` para no
+  reescribir al rellenar la tabla.
+- **`+ Vértice` → `insertVertex`** (`anadirVertice`): inserta tras el vértice seleccionado en el **punto
+  medio** hacia el siguiente (en polígono cierra el anillo; en línea usa el vecino que haya). **`-
+  Vértice` → `removeVertex`** (`quitarVertice`): la librería rechaza bajar del mínimo (2 línea / 3
+  polígono) y se avisa en la barra de estado.
+- **Solo entidades de usuario.** `capaEditable(layerId)` consulta `LayerInfo::editable`: si la capa no
+  es editable (overlays del paquete) o la geometría es **multiparte** (p. ej. un `.geo`), la tabla queda
+  de **solo lectura** y los botones +/− deshabilitados. En un **punto** (un solo vértice) la celda es
+  editable pero no hay +/−. Datasets (teselas) no son entidades: no entran aquí.
+
+Tras insertar/quitar se repuebla la tabla (cambia el nº de filas); al mover, el mapa redibuja el vértice
+sin perder el foco de edición. Compila sin warnings, **19 tests** en verde (no-regresión). Validación
+visual en el PC del usuario. Siguiente: Fase E (guardado explícito; elevación y A/B siguen siendo
+temporales).
