@@ -65,6 +65,7 @@
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTimer>
+#include <QPalette>
 #include <QScrollArea>
 #include <QSettings>
 #include <QToolBar>
@@ -256,12 +257,20 @@ inline QIcon glifo(const QString &k, const QColor &c)
         p.setBrush(relleno); p.drawPolygon(pg);
         p.setBrush(c); p.drawEllipse(QPointF(10, 3), 2.2, 2.2);   // 1er vértice
     } else if (k == QLatin1String("editar")) {         // lápiz
-        p.drawLine(QPointF(4, 16), QPointF(13, 7));
-        p.drawLine(QPointF(13, 7), QPointF(16, 10));
-        p.drawLine(QPointF(16, 10), QPointF(7, 19));   // (recortado por el borde)
-        QPolygonF punta({{4, 16}, {6.5, 15.2}, {4.8, 13.5}});
-        p.setBrush(c); p.drawPolygon(QPolygonF({{3.5, 16.5}, {6.5, 15.5}, {4.5, 13.5}}));
-        p.drawLine(QPointF(12, 6), QPointF(15, 9));
+        QPolygonF cuerpo({{12.5, 3.5}, {16.5, 7.5}, {7.5, 16.5}, {3.5, 12.5}});
+        p.drawPolygon(cuerpo);
+        p.drawLine(QPointF(11, 5), QPointF(15, 9));     // virola
+        p.setBrush(c);                                  // punta de grafito
+        p.drawPolygon(QPolygonF({{3.5, 12.5}, {7.5, 16.5}, {2.8, 17.2}}));
+    } else if (k == QLatin1String("deshacer") || k == QLatin1String("rehacer")) {
+        const bool re = (k == QLatin1String("rehacer"));
+        QPainterPath path;                              // flecha curva de retorno
+        if (re) { path.moveTo(5, 8); path.cubicTo(7, 4.5, 13, 4.5, 15, 8.5); }
+        else    { path.moveTo(15, 8); path.cubicTo(13, 4.5, 7, 4.5, 5, 8.5); }
+        p.drawPath(path);
+        p.setBrush(c);
+        if (re) p.drawPolygon(QPolygonF({{15, 8.5}, {11.5, 9}, {14, 12}}));
+        else    p.drawPolygon(QPolygonF({{5, 8.5}, {8.5, 9}, {6, 12}}));
     } else if (k == QLatin1String("borrar")) {         // papelera
         p.drawLine(QPointF(4, 6), QPointF(16, 6));
         p.drawRect(QRectF(5.5, 6, 9, 11));
@@ -716,8 +725,12 @@ private:
     void aplicarTema(bool oscuro)
     {
         m_temaOscuro = oscuro;
-        if (auto *app = qobject_cast<QApplication *>(QApplication::instance()))
+        if (auto *app = qobject_cast<QApplication *>(QApplication::instance())) {
+            // La PALETA cubre los contenedores planos (páginas de pestaña, scroll,
+            // ficha) que la hoja de estilo no alcanza — por eso ya no queda blanco.
+            app->setPalette(oscuro ? paletaOscura() : paletaClara());
             app->setStyleSheet(oscuro ? qssOscuro() : qssClaro());
+        }
         if (m_accTemaOscuro) m_accTemaOscuro->setChecked(oscuro);
         if (m_accTemaClaro)  m_accTemaClaro->setChecked(!oscuro);
         QSettings().setValue(QStringLiteral("tema/oscuro"), oscuro);
@@ -727,6 +740,48 @@ private:
         // que no queden con el estilo del tema anterior.
         if (m_btnColorLinea)   pintarBotonColor(m_btnColorLinea, m_colorLinea);
         if (m_btnColorRelleno) pintarBotonColor(m_btnColorRelleno, m_colorRelleno);
+        // Refresca el árbol para que los fondos de grupo tomen el color del tema.
+        if (m_arbol) reconstruirPanel();
+    }
+
+    //! Paleta base del tema CLARO (cubre los widgets planos que la QSS no toca).
+    static QPalette paletaClara()
+    {
+        QPalette p;
+        p.setColor(QPalette::Window, QColor(0xf4, 0xf6, 0xf8));
+        p.setColor(QPalette::WindowText, QColor(0x1f, 0x2a, 0x36));
+        p.setColor(QPalette::Base, QColor(0xff, 0xff, 0xff));
+        p.setColor(QPalette::AlternateBase, QColor(0xee, 0xf2, 0xf5));
+        p.setColor(QPalette::Text, QColor(0x1f, 0x2a, 0x36));
+        p.setColor(QPalette::Button, QColor(0xff, 0xff, 0xff));
+        p.setColor(QPalette::ButtonText, QColor(0x1f, 0x2a, 0x36));
+        p.setColor(QPalette::ToolTipBase, QColor(0xff, 0xff, 0xff));
+        p.setColor(QPalette::ToolTipText, QColor(0x1f, 0x2a, 0x36));
+        p.setColor(QPalette::Highlight, QColor(0x15, 0x65, 0xc0));
+        p.setColor(QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
+        return p;
+    }
+
+    //! Paleta base del tema OSCURO.
+    static QPalette paletaOscura()
+    {
+        QPalette p;
+        p.setColor(QPalette::Window, QColor(0x1e, 0x24, 0x2b));
+        p.setColor(QPalette::WindowText, QColor(0xe6, 0xed, 0xf3));
+        p.setColor(QPalette::Base, QColor(0x16, 0x1b, 0x22));
+        p.setColor(QPalette::AlternateBase, QColor(0x20, 0x26, 0x2d));
+        p.setColor(QPalette::Text, QColor(0xe6, 0xed, 0xf3));
+        p.setColor(QPalette::Button, QColor(0x26, 0x2d, 0x35));
+        p.setColor(QPalette::ButtonText, QColor(0xe6, 0xed, 0xf3));
+        p.setColor(QPalette::ToolTipBase, QColor(0x26, 0x2d, 0x35));
+        p.setColor(QPalette::ToolTipText, QColor(0xe6, 0xed, 0xf3));
+        p.setColor(QPalette::Highlight, QColor(0x2f, 0x81, 0xf7));
+        p.setColor(QPalette::HighlightedText, QColor(0x0d, 0x11, 0x17));
+        const QColor gris(0x7a, 0x86, 0x92);
+        p.setColor(QPalette::Disabled, QPalette::Text, gris);
+        p.setColor(QPalette::Disabled, QPalette::WindowText, gris);
+        p.setColor(QPalette::Disabled, QPalette::ButtonText, gris);
+        return p;
     }
 
     //! Pinta el icono de cada acción con la propiedad «glifo» en el color \a fg,
@@ -1064,7 +1119,7 @@ private:
         m_dock = dock;
         dock->setObjectName(QStringLiteral("panel"));
         dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-        dock->setMinimumWidth(330);
+        dock->setMinimumWidth(340);
 
         auto *cont = new QWidget(dock);
         auto *caja = new QVBoxLayout(cont);
@@ -2701,6 +2756,11 @@ private:
         QFont f = g->font(0);
         f.setBold(true);
         g->setFont(0, f);
+        // Leve banda de fondo por grupo (color derivado del tema), para separar
+        // visualmente Base / Overlays / Entidades.
+        const QColor banda = palette().color(QPalette::AlternateBase);
+        for (int col = 0; col < m_arbol->columnCount(); ++col)
+            g->setBackground(col, banda);
         return g;
     }
 

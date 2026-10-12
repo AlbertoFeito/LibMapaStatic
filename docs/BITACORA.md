@@ -4513,3 +4513,21 @@ quedaban en la misma línea): parecía prototipo. Se le da aspecto de producto. 
 
 Verificado con capturas offscreen en claro y oscuro (coherentes). Compila sin warnings, **19 tests** en
 verde (no-regresión). Sin cambios de API → sin PDF.
+
+## 111. Demo: paleta por tema (fin del fondo blanco), fondos de grupo e iconos pulidos
+
+Retoques finales de diseño sobre el tema, a partir del feedback del usuario. **Solo `demo/main.cpp`**.
+
+- **Paleta (QPalette) por tema.** La hoja de estilo no alcanzaba a los contenedores «planos» (páginas de
+  las pestañas, el `QScrollArea`, la ficha), que se quedaban **blancos** en el tema oscuro. Se aplica
+  ahora también una `QPalette` propia (`paletaClara`/`paletaOscura`: Window/Base/Text/Button/Highlight…)
+  junto a la QSS; así todos los widgets planos toman el fondo del tema y desaparece el blanco.
+- **Fondos de grupo en el árbol.** Las cabeceras Base/Overlays/Entidades reciben una **banda sutil**
+  (`QPalette::AlternateBase`) para separarlas visualmente. Al cambiar de tema se **reconstruye el panel**
+  para que el color de banda se actualice.
+- **Iconos pulidos.** Se redibujan `editar` (lápiz limpio, sin la línea que se salía del lienzo ni la
+  variable sin usar) y `deshacer`/`rehacer` (flecha curva de retorno con `QPainterPath`, cabeza sólida).
+- Acento **azul** (elegido por el usuario) sin cambios. Panel un poco más ancho (min. 340 px).
+
+Verificado con capturas offscreen en claro y oscuro: sin blanco, bandas de grupo visibles e iconos
+limpios. Compila sin warnings, **19 tests** en verde (no-regresión). Sin cambios de API → sin PDF.
