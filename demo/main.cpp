@@ -571,6 +571,22 @@ private:
         auto *accLimpiar = new QAction(tr("Limpiar análisis"), this);
         connect(accLimpiar, &QAction::triggered, this, &Ventana::limpiarAnalisis);
 
+        // --- Selección de zona (bbox o polígono) SIN zoom -------------------
+        // Marca un área o un polígono y la librería emite areaSelected /
+        // polygonSelected (lo que usa fill_map para elegir qué teselas bajar);
+        // aquí se informa de la zona en la barra de estado.
+        m_accSelArea = accHerr(tr("Seleccionar área"), MapTool::SelectArea);
+        m_accSelPoli = accHerr(tr("Seleccionar polígono (zona)"), MapTool::SelectPolygon);
+        m_accSelArea->setStatusTip(tr("Arrastra un rectángulo: informa de su bbox."));
+        m_accSelPoli->setStatusTip(tr("Marca un polígono clic a clic (doble clic cierra)."));
+
+        // Mostrar/ocultar los objetivos simulados (capacidad setTargetsVisible).
+        m_accVerObjetivos = new QAction(tr("Mostrar objetivos"), this);
+        m_accVerObjetivos->setCheckable(true);
+        m_accVerObjetivos->setChecked(true);
+        connect(m_accVerObjetivos, &QAction::toggled, this,
+                [this](bool on) { m_mapa->setTargetsVisible(on); });
+
         // Glifos del resto de acciones de barra (los de dibujo ya los puso
         // accHerr). aplicarIconos() los pinta con el color del tema.
         m_accGuardar->setProperty("glifo", QStringLiteral("guardar"));
@@ -660,7 +676,11 @@ private:
         QMenu *mDatos = mb->addMenu(tr("&Datos"));
         mDatos->addAction(accGeo);
         mDatos->addSeparator();
+        mDatos->addAction(m_accSelArea);
+        mDatos->addAction(m_accSelPoli);
+        mDatos->addSeparator();
         mDatos->addAction(m_accSimular);
+        mDatos->addAction(m_accVerObjetivos);
 
         QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
         connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
@@ -1412,6 +1432,26 @@ private:
         connect(m_mapa, &MapWidget::errorOccurred, this,
                 [this](const QString &e) {
                     statusBar()->showMessage(tr("Error: %1").arg(e), 8000);
+                });
+
+        // Selección de zona: la librería deja el recuadro/contorno visible y
+        // emite la geometría; aquí se informa (fill_map la usaría para descargar).
+        connect(m_mapa, &MapWidget::areaSelected, this,
+                [this](const QGeoCoordinate &nw, const QGeoCoordinate &se) {
+                    statusBar()->showMessage(
+                        tr("Área: NO %1,%2  →  SE %3,%4")
+                            .arg(nw.latitude(), 0, 'f', 4).arg(nw.longitude(), 0, 'f', 4)
+                            .arg(se.latitude(), 0, 'f', 4).arg(se.longitude(), 0, 'f', 4),
+                        10000);
+                    m_accNavegar->setChecked(true);
+                    m_mapa->setActiveTool(MapTool::None);
+                });
+        connect(m_mapa, &MapWidget::polygonSelected, this,
+                [this](const QVector<QGeoCoordinate> &pol) {
+                    statusBar()->showMessage(
+                        tr("Polígono de zona: %1 vértices").arg(pol.size()), 10000);
+                    m_accNavegar->setChecked(true);
+                    m_mapa->setActiveTool(MapTool::None);
                 });
 
         connect(m_grupo, &QActionGroup::triggered, this, [this](QAction *a) {
@@ -3668,6 +3708,9 @@ private:
     QSpinBox *m_numObjetivos = nullptr;
     QComboBox *m_traza = nullptr;
     QAction *m_accSimular = nullptr;
+    QAction *m_accVerObjetivos = nullptr;   //!< mostrar/ocultar objetivos
+    QAction *m_accSelArea = nullptr;        //!< seleccionar área (bbox)
+    QAction *m_accSelPoli = nullptr;        //!< seleccionar polígono (zona)
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.

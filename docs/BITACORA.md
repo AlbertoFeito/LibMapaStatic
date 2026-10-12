@@ -4539,3 +4539,25 @@ basta para `QToolTip` en Windows. Se añade una regla **`QToolTip`** a las dos h
 texto oscuro sobre blanco con borde; oscuro: texto claro sobre gris oscuro), así el nombre de cada
 herramienta se lee bien al pasar el ratón. **Solo `demo/main.cpp`**; sin cambios de API. Compila sin
 warnings, **19 tests** en verde.
+
+## 113. Demo: cobertura completa del API (selección de zona + visibilidad de objetivos)
+
+Auditoría de la superficie pública de `MapWidget` frente a lo que el `demo` ejercita, antes del PR. El
+demo ya cubría casi todo; faltaban dos capacidades de cara al usuario, que se añaden (**solo
+`demo/main.cpp`**):
+
+- **Selección de zona sin zoom:** herramientas **«Seleccionar área»** (`MapTool::SelectArea`) y
+  **«Seleccionar polígono (zona)»** (`MapTool::SelectPolygon`) en el menú *Datos*. La librería deja el
+  recuadro/contorno visible y emite `areaSelected`/`polygonSelected`; el demo informa de la zona en la
+  barra de estado (es lo que usa `fill_map` para elegir qué teselas descargar).
+- **Mostrar/ocultar objetivos:** acción *«Mostrar objetivos»* en *Datos* (`setTargetsVisible`).
+
+El resto de la API queda cubierto por el demo: navegación (zoom/centro/ajuste a Cuba), capas base
+(exclusivas) y overlays, **entidades** (alta/edición/estilo/atributos/coordenadas, mover/insertar/quitar
+vértices, deshacer/rehacer, guardar/cargar explícito, `.geo`), **objetivos** (simulación con `kind` +
+atributos, proveedor de símbolos, presupuesto de detalle, traza, clic→datos), **elevación** (perfil,
+visión A→B, viewshed, picos, hillshade en vivo, cota bajo el cursor) y herramientas (medir, zoom-área,
+rejilla, cobertura por zoom). Quedan sin UI dedicada solo *getters* y variantes redundantes (p. ej.
+`visibleNorthWest`, `featuresOfType`, `clearUndoHistory`) o deliberadamente no usadas por el guardado
+explícito (`setFeaturesDbFile`/`saveFeaturesNow`); el rango de zoom por capa se demuestra con los
+overlays del paquete (curvas de nivel con `z` limitado). Compila sin warnings, **19 tests** en verde.
