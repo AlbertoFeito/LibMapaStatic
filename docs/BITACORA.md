@@ -4397,3 +4397,27 @@ Tras insertar/quitar se repuebla la tabla (cambia el nº de filas); al mover, el
 sin perder el foco de edición. Compila sin warnings, **19 tests** en verde (no-regresión). Validación
 visual en el PC del usuario. Siguiente: Fase E (guardado explícito; elevación y A/B siguen siendo
 temporales).
+
+## 106. Demo más profesional — Fase E: guardado explícito (fuera el autoguardado)
+
+El demo activaba el **autoguardado** de la librería (`MapConfig::featuresDbFile`): cada dibujo/edición se
+escribía solo en el fichero `--features`. El usuario pidió **guardado explícito**: los cambios viven en
+memoria hasta que se pulsa Guardar. Sigue siendo **solo `demo/main.cpp`** (la librería ya ofrecía las dos
+vías: automática con `featuresDbFile`, manual con `saveFeaturesTo`/`loadFeaturesFrom`).
+
+- **Sin autoguardado.** Ya no se fija `cfg.featuresDbFile`. Si se pasa `--features <fichero>`, se
+  **carga** al arrancar (si existe) y se recuerda como **fichero de trabajo** (`m_archivoActual`) para
+  «Guardar»; nada se guarda solo. `loadFeaturesFrom` reinyecta los overlays del paquete, así que la carga
+  va **antes** de `ocultarOverlaysAlIniciar` para que los overlays sigan arrancando ocultos.
+- **Estado «sucio».** `m_sucio` + `marcarSucio()`: un **asterisco** en el título marca que hay cambios
+  sin guardar. Lo llaman solo las ediciones de **entidades de usuario** (alta, propiedades, estilo,
+  vértices, borrar/vaciar/crear/mover capa, cargar `.geo`); las capas **temporales** (análisis de
+  elevación, pines A/B — ya marcadas `setFeatureLayerTransient`) **no** lo llaman, así que trabajar con
+  el terreno no ensucia el documento. Guardar/Guardar como/Abrir lo limpian.
+- **Confirmación al cerrar/abrir.** `closeEvent` y `abrir()` pasan por `confirmarDescartar()`
+  (Guardar / Descartar / Cancelar); si el guardado falla o se cancela, no se cierra ni se reemplaza.
+- **Elevación y A/B siguen temporales** (ya lo eran): nunca se guardan como entidades, ni con el
+  guardado explícito, porque sus capas son `transient`. Confirmado.
+
+Compila sin warnings, **19 tests** en verde (no-regresión; la librería no cambia). Validación visual en
+el PC del usuario. Siguiente: Fase F (pulido + documentación final).

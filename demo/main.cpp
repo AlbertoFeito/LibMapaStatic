@@ -22,6 +22,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
@@ -185,7 +186,9 @@ public:
         }
         cfg.elevationDir = demDir;          // carpeta .hgt para la cota (opcional)
         cfg.elevationDbFile = demDb;        // BD de elevacion (prioritaria si viene)
-        cfg.featuresDbFile = featuresDb;    // persistencia automatica (opcional)
+        // GUARDADO EXPLÍCITO: NO se fija cfg.featuresDbFile (eso activaría el
+        // autoguardado). Si se pasa --features, se carga al arrancar y se recuerda
+        // como fichero de trabajo para «Guardar»; los cambios no se guardan solos.
         cfg.cacheMiB = 192;
 
         m_demActivo = esPaquete || !demDir.isEmpty() || !demDb.isEmpty();
@@ -215,6 +218,19 @@ public:
         conectarSenales();
         aplicarEstiloAlTrazo();
         prepararSeguimiento();
+
+        // Guardado explícito: si viene --features, se CARGA (si existe) y se
+        // recuerda como fichero de trabajo; a partir de ahí «Guardar» escribe
+        // ahí, pero nada se guarda solo. loadFeaturesFrom reinyecta los overlays
+        // del paquete (los deja visibles), así que la carga va ANTES de ocultar.
+        if (!featuresDb.isEmpty()) {
+            if (QFileInfo::exists(featuresDb))
+                m_mapa->loadFeaturesFrom(featuresDb);
+            m_archivoActual = featuresDb;
+            m_sucio = false;
+            actualizarTitulo();
+        }
+
         reconstruirPanel();
         ocultarOverlaysAlIniciar();   // los overlays arrancan ocultos (no cargan)
 
@@ -691,6 +707,7 @@ private:
             }
         }
         m_nombrePendiente.clear();
+        marcarSucio();               // entidad nueva: hay algo que guardar
         volverANavegar();
         m_mapa->selectFeature(id);   // deja ver sus datos en el panel
     }
@@ -2454,6 +2471,7 @@ private:
             return;
         }
         m_mapa->removeFeature(id);           // el panel se refresca por senal
+        marcarSucio();
         statusBar()->showMessage(tr("Entidad %1 borrada").arg(id), 3000);
     }
 
@@ -2471,6 +2489,7 @@ private:
                 != QMessageBox::Yes)
             return;
         m_mapa->clearFeatureLayer(capa);
+        marcarSucio();
         statusBar()->showMessage(tr("Capa '%1' vaciada").arg(capa), 3000);
     }
 
@@ -2486,6 +2505,7 @@ private:
             return;
         m_mapa->addFeatureLayer(nombre, nombre, nCapas * 10);
         m_mapa->setActiveFeatureLayer(nombre);
+        marcarSucio();
         resaltarCapaActiva();
     }
 
@@ -2504,6 +2524,7 @@ private:
                     .arg(capa).arg(n)) != QMessageBox::Yes)
             return;
         m_mapa->removeFeatureLayer(capa);
+        marcarSucio();
     }
 
     void moverCapa(int direccion)
@@ -2518,6 +2539,7 @@ private:
                 return;
             m_mapa->setFeatureLayerZOrder(capas[i].id, capas[j].zOrder);
             m_mapa->setFeatureLayerZOrder(capas[j].id, capas[i].zOrder);
+            marcarSucio();
             return;
         }
     }
@@ -2553,6 +2575,7 @@ private:
             return;
         f->style = estiloActual();
         m_mapa->updateFeature(*f);
+        marcarSucio();
     }
 
     void aplicarPropiedades()
@@ -2579,6 +2602,7 @@ private:
         }
         f->attributes = atributos;
         m_mapa->updateFeature(*f);
+        marcarSucio();
     }
 
     //! Vuelca la entidad seleccionada a los campos del panel.
@@ -2694,7 +2718,9 @@ private:
             mostrarCoords(id);   // restaura el valor bueno
             return;
         }
-        if (!m_mapa->moveVertex(id, fila, QGeoCoordinate(la, lo)))
+        if (m_mapa->moveVertex(id, fila, QGeoCoordinate(la, lo)))
+            marcarSucio();
+        else
             statusBar()->showMessage(tr("No se pudo mover el vértice."), 4000);
     }
 
@@ -2723,10 +2749,12 @@ private:
         const QGeoCoordinate &b = f->geometry[vecino];
         const QGeoCoordinate medio((a.latitude() + b.latitude()) / 2.0,
                                    (a.longitude() + b.longitude()) / 2.0);
-        if (m_mapa->insertVertex(id, fila + 1, medio))
+        if (m_mapa->insertVertex(id, fila + 1, medio)) {
+            marcarSucio();
             mostrarCoords(id);                 // cambió el nº de filas
-        else
+        } else {
             statusBar()->showMessage(tr("No se pudo insertar el vértice."), 4000);
+        }
     }
 
     //! Quita el vértice seleccionado (la librería rechaza bajar del mínimo:
@@ -2741,12 +2769,14 @@ private:
             statusBar()->showMessage(tr("Elige primero un vértice en la tabla."), 4000);
             return;
         }
-        if (m_mapa->removeVertex(id, fila))
+        if (m_mapa->removeVertex(id, fila)) {
+            marcarSucio();
             mostrarCoords(id);
-        else
+        } else {
             statusBar()->showMessage(
                 tr("No se puede quitar: la geometría quedaría por debajo del "
                    "mínimo de vértices."), 4000);
+        }
     }
 
     void pintarBotonColor(QPushButton *boton, const QColor &c)
@@ -2775,12 +2805,15 @@ private:
             guardarComo();
             return;
         }
-        if (m_mapa->saveFeaturesTo(m_archivoActual))
+        if (m_mapa->saveFeaturesTo(m_archivoActual)) {
+            m_sucio = false;
+            actualizarTitulo();
             statusBar()->showMessage(tr("Guardadas %1 entidades en %2")
                 .arg(m_mapa->featureCount()).arg(m_archivoActual), 6000);
-        else
+        } else {
             QMessageBox::warning(this, tr("Guardar"),
                 tr("No se pudo guardar en:\n%1").arg(m_archivoActual));
+        }
     }
 
     void guardarComo()
@@ -2794,6 +2827,7 @@ private:
         if (m_mapa->saveFeaturesTo(ruta)) {
             m_archivoActual = ruta;
             m_ultimoDir = QFileInfo(ruta).absolutePath();
+            m_sucio = false;
             actualizarTitulo();
             statusBar()->showMessage(tr("Guardadas %1 entidades en %2")
                 .arg(m_mapa->featureCount()).arg(ruta), 6000);
@@ -2805,13 +2839,9 @@ private:
 
     void abrir()
     {
-        // Cargar sustituye TODO. Se avisa si hay trabajo sin guardar; de todos
-        // modos es deshacible (queda en la pila de deshacer).
-        if (m_mapa->featureCount() > 0 &&
-            QMessageBox::question(this, tr("Abrir"),
-                tr("Se reemplazaran las %1 entidad(es) actuales.\n"
-                   "La carga se puede deshacer. Continuar?")
-                    .arg(m_mapa->featureCount())) != QMessageBox::Yes)
+        // Cargar sustituye TODO. Con guardado explícito, primero se ofrece
+        // guardar lo pendiente (y se puede cancelar la apertura).
+        if (!confirmarDescartar())
             return;
 
         const QString ruta = QFileDialog::getOpenFileName(this,
@@ -2823,6 +2853,7 @@ private:
         if (m_mapa->loadFeaturesFrom(ruta)) {
             m_archivoActual = ruta;
             m_ultimoDir = QFileInfo(ruta).absolutePath();
+            m_sucio = false;
             actualizarTitulo();
             // El panel se refresca solo: loadFeaturesFrom -> setContents emite
             // layersChanged. No hace falta reconstruir a mano.
@@ -2844,10 +2875,51 @@ private:
     {
         const QString f = m_archivoActual.isEmpty()
             ? tr("(sin guardar)") : QFileInfo(m_archivoActual).fileName();
+        // Un asterisco delante marca que hay cambios sin guardar (explícito).
+        const QString marca = m_sucio ? QStringLiteral("*") : QString();
         const DataPackageInfo paquete = m_mapa ? m_mapa->packageInfo() : DataPackageInfo();
         const QString datos = paquete.isValid()
             ? tr("  -  datos: %1 %2").arg(paquete.name, paquete.dataVersion) : QString();
-        setWindowTitle(tr("libmapa - demostracion  -  %1%2").arg(f, datos));
+        setWindowTitle(tr("libmapa - demostracion  -  %1%2%3").arg(marca, f, datos));
+    }
+
+    //! Marca el documento como modificado (guardado explícito): refresca el
+    //! título con el asterisco. Lo llaman las ediciones de entidades de usuario;
+    //! las capas temporales (análisis, A/B) NO lo llaman, por eso no ensucian.
+    void marcarSucio()
+    {
+        if (m_sucio)
+            return;
+        m_sucio = true;
+        actualizarTitulo();
+    }
+
+    //! Pregunta si guardar los cambios pendientes. Devuelve false solo si el
+    //! usuario cancela (para abortar el cierre o la apertura de otro fichero).
+    bool confirmarDescartar()
+    {
+        if (!m_sucio)
+            return true;
+        const auto r = QMessageBox::question(this, tr("Cambios sin guardar"),
+            tr("Hay entidades sin guardar. ¿Quieres guardarlas?"),
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+            QMessageBox::Save);
+        if (r == QMessageBox::Cancel)
+            return false;
+        if (r == QMessageBox::Save) {
+            guardar();
+            return !m_sucio;      // si el guardado se canceló/falló, no sigas
+        }
+        return true;              // Descartar
+    }
+
+    //! Al cerrar la ventana, ofrece guardar lo pendiente (guardado explícito).
+    void closeEvent(QCloseEvent *e) override
+    {
+        if (confirmarDescartar())
+            e->accept();
+        else
+            e->ignore();
     }
 
     // ============================================ datos / simulacion ======
@@ -2874,6 +2946,7 @@ private:
         }
         m_ultimoDir = QFileInfo(ruta).absolutePath();
         m_mapa->setActiveFeatureLayer(id);
+        marcarSucio();               // el .geo entra como entidad guardable
         statusBar()->showMessage(tr("Cargado %1 como una entidad en la capa '%2'")
             .arg(QFileInfo(ruta).fileName(), id), 5000);
     }
@@ -3153,6 +3226,7 @@ private:
     QColor m_colorLinea = QColor(0xd3, 0x2f, 0x2f);
     QColor m_colorRelleno = QColor(0xd3, 0x2f, 0x2f, 70);
     QString m_archivoActual;
+    bool m_sucio = false;        //!< hay entidades sin guardar (guardado explícito)
     QString m_ultimoDir;
 
     // Alta de entidad en curso (diálogo → dibuja → Navegar): nombre a aplicar a
@@ -3187,8 +3261,8 @@ int main(int argc, char *argv[])
 
     // Primer positional: la carpeta de un paquete de datos (o su mapa.json), o un
     // datasets.json. Opcionales: --dem <carpeta> / --dem-db <fichero>
-    // (elevacion) y --features <fichero> (persistencia automatica de entidades:
-    // lo que dibujes se guarda y recarga solo); con paquete, mandan sobre el suyo.
+    // (elevacion) y --features <fichero> (entidades: se CARGA al arrancar y es el
+    // fichero de trabajo para «Guardar»; el guardado es EXPLÍCITO, no automático).
     QString datasets;
     QString demDir, demDb, featuresDb;
     for (int i = 1; i < argc; ++i) {
