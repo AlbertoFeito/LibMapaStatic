@@ -929,6 +929,60 @@ qint64 MapWidget::loadFeaturesAsLayer(const QString &databasePath,
     return primero;
 }
 
+// Importa GeoJSON/KML/GPX: lee con VectorFormats y AÑADE cada entidad a la
+// capa (creandola si no existe), como loadFeaturesAsLayer. El fichero aporta
+// nombre, atributos y estilo; la capa la pone quien importa.
+qint64 MapWidget::importVectorFile(const QString &path, const QString &layerId,
+                                   const QString &displayName, QString *error)
+{
+    if (!d->view)
+        return -1;
+
+    QString motivo;
+    const QVector<MapFeature> feats = readVectorFile(path, &motivo);
+    if (feats.isEmpty()) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return -1;
+    }
+
+    addFeatureLayer(layerId, displayName.isEmpty() ? layerId : displayName, 0);
+    qint64 primero = -1;
+    for (MapFeature f : feats) {
+        f.id = -1;
+        f.layerId = layerId;
+        const qint64 id = addFeature(f);
+        if (primero < 0)
+            primero = id;
+    }
+    return primero;
+}
+
+// Exporta las entidades (todas, o las de una capa) al formato que diga la
+// extension. Sin entidades no se escribe nada: un fichero vacio solo confunde.
+bool MapWidget::exportVectorFile(const QString &path, const QString &layerId,
+                                 QString *error)
+{
+    const QVector<MapFeature> feats = layerId.isEmpty() ? features()
+                                                        : featuresInLayer(layerId);
+    if (feats.isEmpty()) {
+        if (error)
+            *error = layerId.isEmpty()
+                ? QStringLiteral("No hay entidades que exportar")
+                : QStringLiteral("La capa '%1' no tiene entidades").arg(layerId);
+        return false;
+    }
+    QString motivo;
+    if (!writeVectorFile(path, feats, &motivo)) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return false;
+    }
+    return true;
+}
+
 // ------------------------------------------------------ objetivos moviles --
 
 // Reenvios al TargetModel (capa dinamica de objetivos moviles), cada uno

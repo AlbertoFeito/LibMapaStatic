@@ -128,6 +128,8 @@ private slots:
     //! Escala grafica y cuadricula: ocultas por defecto, se dibujan al
     //! encenderlas y la resolucion sigue al zoom.
     void scaleBarAndGraticuleDraw();
+    //! Importar GeoJSON como capa y exportarla a KML/GPX/GeoJSON ida y vuelta.
+    void importsAndExportsVectorFiles();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2044,6 +2046,56 @@ void TstMapWidget::scaleBarAndGraticuleDraw()
     // A zoom mundial la cuadricula sigue dibujandose sin colgarse.
     w.setZoom(2);
     QVERIFY(!captura().isNull());
+}
+
+// Un GeoJSON de otra herramienta entra como capa (añadiendo, no reemplazando);
+// esa capa sale a KML, GPX y GeoJSON y vuelve a entrar con las mismas
+// entidades. Errores (fichero que no existe, capa vacia) se informan.
+void TstMapWidget::importsAndExportsVectorFiles()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString origen = dir.filePath(QStringLiteral("zonas.geojson"));
+    {
+        QFile f(origen);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(R"({"type":"FeatureCollection","features":[
+          {"type":"Feature","properties":{"name":"Z1","nivel":"alto"},
+           "geometry":{"type":"Polygon","coordinates":[[[-82,23],[-81,23],[-81,24],[-82,23]]]}},
+          {"type":"Feature","properties":{"name":"P1"},
+           "geometry":{"type":"Point","coordinates":[-80,22]}}]})");
+    }
+
+    QString err;
+    const qint64 primero = w.importVectorFile(origen, QStringLiteral("importada"),
+                                              QStringLiteral("Importada"), &err);
+    QVERIFY2(primero > 0, qPrintable(err));
+    QCOMPARE(w.featuresInLayer(QStringLiteral("importada")).size(), 2);
+    const auto z1 = w.feature(primero);
+    QVERIFY(z1.has_value());
+    QCOMPARE(z1->name, QStringLiteral("Z1"));
+    QCOMPARE(z1->attributes.value(QStringLiteral("nivel")).toString(), QStringLiteral("alto"));
+
+    // Importar otra vez AÑADE a la misma capa.
+    QVERIFY(w.importVectorFile(origen, QStringLiteral("importada")) > 0);
+    QCOMPARE(w.featuresInLayer(QStringLiteral("importada")).size(), 4);
+
+    for (const QString &ext : { QStringLiteral("kml"), QStringLiteral("gpx"), QStringLiteral("geojson") }) {
+        const QString salida = dir.filePath(QStringLiteral("salida.") + ext);
+        QVERIFY2(w.exportVectorFile(salida, QStringLiteral("importada"), &err), qPrintable(err));
+        const QString capa = QStringLiteral("vuelta_") + ext;
+        QVERIFY(w.importVectorFile(salida, capa) > 0);
+        QCOMPARE(w.featuresInLayer(capa).size(), 4);
+    }
+
+    QVERIFY(w.importVectorFile(dir.filePath(QStringLiteral("no_existe.kml")),
+                               QStringLiteral("x"), QString(), &err) < 0);
+    QVERIFY(!err.isEmpty());
+    QVERIFY(!w.exportVectorFile(dir.filePath(QStringLiteral("vacia.kml")),
+                                QStringLiteral("capa_sin_nada"), &err));
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

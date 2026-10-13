@@ -123,6 +123,8 @@ add_library(libmapa_core STATIC
 
     src/io/GeoFile.cpp
     include/libmapa/GeoFile.h
+    src/io/VectorFormats.cpp
+    include/libmapa/VectorFormats.h
     src/io/DataPackage.cpp
     src/io/DataPackage.h
     include/libmapa/DataPackage.h
@@ -368,6 +370,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_contours)
     libmapa_add_test(tst_zonemonitor)
     libmapa_add_test(tst_mapdecor)
+    libmapa_add_test(tst_vectorformats)
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 

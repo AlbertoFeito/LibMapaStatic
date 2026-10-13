@@ -557,6 +557,11 @@ private:
 
         auto *accGeo = new QAction(tr("Cargar .geo..."), this);
         connect(accGeo, &QAction::triggered, this, &Ventana::cargarGeo);
+        // Intercambio con otras herramientas: GeoJSON / KML / GPX.
+        auto *accImportar = new QAction(tr("Importar GeoJSON/KML/GPX..."), this);
+        connect(accImportar, &QAction::triggered, this, &Ventana::importarVectorial);
+        auto *accExportar = new QAction(tr("Exportar capa activa a GeoJSON/KML/GPX..."), this);
+        connect(accExportar, &QAction::triggered, this, &Ventana::exportarVectorial);
 
         m_numObjetivos = new QSpinBox(this);
         m_numObjetivos->setRange(1, 5000);
@@ -710,6 +715,8 @@ private:
 
         QMenu *mDatos = mb->addMenu(tr("&Datos"));
         mDatos->addAction(accGeo);
+        mDatos->addAction(accImportar);
+        mDatos->addAction(accExportar);
         mDatos->addSeparator();
         mDatos->addAction(m_accSelArea);
         mDatos->addAction(m_accSelPoli);
@@ -3449,6 +3456,49 @@ private:
         marcarSucio();               // el .geo entra como entidad guardable
         statusBar()->showMessage(tr("Cargado %1 como una entidad en la capa '%2'")
             .arg(QFileInfo(ruta).fileName(), id), 5000);
+    }
+
+    // Importa un GeoJSON/KML/GPX como capa nueva (id = nombre del fichero). Cada
+    // entidad del fichero entra con su nombre, atributos y estilo.
+    void importarVectorial()
+    {
+        const QString ruta = QFileDialog::getOpenFileName(this,
+            tr("Importar entidades"), dirTrabajo(),
+            tr("Vectorial (*.geojson *.json *.kml *.gpx);;Todos (*)"));
+        if (ruta.isEmpty())
+            return;
+        const QString id = QFileInfo(ruta).completeBaseName().toLower();
+        QString error;
+        const qint64 fid = m_mapa->importVectorFile(ruta, id,
+            QFileInfo(ruta).completeBaseName(), &error);
+        if (fid < 0) {
+            QMessageBox::warning(this, tr("Importar"), tr("No se pudo importar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        m_mapa->setActiveFeatureLayer(id);
+        marcarSucio();
+        statusBar()->showMessage(tr("Importadas %1 entidades en la capa '%2'")
+            .arg(m_mapa->featuresInLayer(id).size()).arg(id), 5000);
+    }
+
+    // Exporta la capa activa; el formato lo decide la extension elegida.
+    void exportarVectorial()
+    {
+        const QString capa = m_mapa->activeFeatureLayer();
+        const QString ruta = QFileDialog::getSaveFileName(this,
+            tr("Exportar capa '%1'").arg(capa), dirTrabajo() + QLatin1Char('/') + capa + QStringLiteral(".geojson"),
+            tr("GeoJSON (*.geojson);;KML (*.kml);;GPX (*.gpx)"));
+        if (ruta.isEmpty())
+            return;
+        QString error;
+        if (!m_mapa->exportVectorFile(ruta, capa, &error)) {
+            QMessageBox::warning(this, tr("Exportar"), tr("No se pudo exportar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        statusBar()->showMessage(tr("Capa '%1' exportada a %2")
+            .arg(capa, QFileInfo(ruta).fileName()), 5000);
     }
 
     // Prepara el seguimiento de objetivos: dibuja el juego de iconos (una vez) y

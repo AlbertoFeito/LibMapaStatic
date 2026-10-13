@@ -35,6 +35,7 @@ SOURCES += \
     $$ROOT/src/tiles/TileLoader.cpp \
     $$ROOT/src/tiles/TileService.cpp \
     $$ROOT/src/io/GeoFile.cpp \
+    $$ROOT/src/io/VectorFormats.cpp \
     $$ROOT/src/io/DataPackage.cpp \
     $$ROOT/src/io/PackageCheck.cpp \
     $$ROOT/src/dem/GridElevation.cpp \

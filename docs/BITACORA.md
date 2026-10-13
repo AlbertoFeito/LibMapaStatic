@@ -4673,3 +4673,55 @@ depuración y marca teselas, no grados).
   `rpQueuedReplot`; el test procesa eventos antes de capturar.
 
 Compila sin warnings; **21 tests** en verde (18 sin QCustomPlot), Qt 6.4.
+
+## 117. Intercambio vectorial: GeoJSON, KML y GPX
+
+**Problema.** Las entidades solo entraban y salían en formatos propios: la BD
+SQLite del repositorio vectorial y los `.geo` heredados. Para traer una zona
+dibujada en QGIS o Google Earth, o descargar los puntos de un GPS de mano, había
+que convertir fuera; y lo dibujado en el mapa no se podía llevar a ninguna otra
+herramienta.
+
+**Qué se hizo.**
+- `VectorFormats` (núcleo, API pública en `include/libmapa/VectorFormats.h`,
+  `tst_vectorformats`): `readVectorFile` / `writeVectorFile` eligen el formato por
+  la extensión (`.geojson`/`.json`, `.kml`, `.gpx`), más los lectores y escritores
+  sobre memoria por formato.
+- `MapWidget::importVectorFile(ruta, capa)` añade las entidades del fichero a una
+  capa (como `loadFeaturesAsLayer`); `exportVectorFile(ruta, capa)` escribe todas
+  o las de una capa.
+- `demo`: *Datos → Importar GeoJSON/KML/GPX…* y *Exportar capa activa…*.
+
+**Por qué así.**
+- **Sin dependencias nuevas.** JSON (`QJsonDocument`) y XML (`QXmlStreamReader/
+  Writer`) vienen en Qt Core, en Qt 5 y 6. Nada de GDAL: sería una dependencia
+  enorme para tres formatos de texto, y la librería se despliega en PCs sin
+  conexión con dos juegos de DLL ya cuidados.
+- **Qué se conserva en cada formato** (lo que el formato admite, nada inventado):
+  GeoJSON lo guarda todo — nombre, descripción, tipo de dominio
+  (`libmapa_type`), atributos y estilo con las claves «simplestyle» (`stroke`,
+  `fill`…), que entienden geojson.io y muchos visores. KML guarda tipo y
+  atributos en `ExtendedData` y el estilo en `LineStyle`/`PolyStyle` (colores
+  `aabbggrr`); al leer se resuelven los `styleUrl` a estilos compartidos, que es
+  como exportan Google Earth y QGIS. GPX no tiene polígonos ni atributos: un
+  polígono se escribe como track cerrado con una extensión propia
+  (`libmapa:polygon`), válida según el esquema, y al releerlo vuelve a ser
+  polígono; la elevación de un waypoint (`ele`) se guarda como atributo y vuelve
+  a su sitio al exportar.
+- **Multi-parte de verdad.** `MultiPolygon`/`MultiLineString`/`MultiPoint`,
+  `MultiGeometry` de KML y los varios `trkseg` de un track son UNA entidad con
+  varias partes, igual que un `.geo`.
+- **Huecos ignorados.** `MapFeature` no modela anillos interiores; se toma el
+  exterior. Mejor una zona sin su hueco que inventar una parte que se rellenaría.
+- **Robustez al leer.** Vértices o partes inválidos se descartan (una línea de
+  un solo punto no entra); un fichero sin ninguna geometría válida es un error
+  con motivo, no una capa vacía silenciosa. En GPX, el `<name>` de cada `rtept`
+  no pisa el de la ruta (solo cuentan los hijos directos).
+- **Escritura atómica** con `QSaveFile`: un fallo a medias no deja un fichero
+  truncado encima del bueno. GeoJSON se escribe compacto (indentado, cada
+  coordenada ocupaba cuatro líneas).
+- Detalle de pruebas: `MapFeature` lleva un `QPixmap` (icono del estilo), que
+  exige `QGuiApplication`; por eso `tst_vectorformats` usa `QTEST_MAIN` como los
+  demás tests que manejan entidades.
+
+Compila sin warnings; **22 tests** en verde (19 sin QCustomPlot), Qt 6.4.

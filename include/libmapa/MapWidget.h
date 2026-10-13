@@ -3,6 +3,7 @@
 
 #include "libmapa/DataPackage.h"
 #include "libmapa/GeoFile.h"
+#include "libmapa/VectorFormats.h"
 #include "libmapa/Elevation.h"
 #include "libmapa/MapFeature.h"
 #include "libmapa/MapTarget.h"
@@ -298,6 +299,34 @@ public:
     qint64 loadFeaturesAsLayer(const QString &databasePath, const QString &layerId,
                                const QString &displayName = QString(),
                                QString *error = nullptr);
+
+    /*!
+     * \brief Importa un fichero GeoJSON, KML o GPX (segun su extension) como
+     *        capa: cada entidad del fichero es una entidad del mapa.
+     *
+     * Conserva lo que traiga el fichero (nombre, descripcion, atributos y, en
+     * GeoJSON/KML, el estilo; ver VectorFormats.h). La capa se crea si no existe
+     * y las entidades se AÑADEN (no reemplazan lo que ya hubiera en ella).
+     *
+     * \return el id de la primera entidad añadida, o -1 si el fichero no se pudo
+     *         leer o no tenia geometrias validas (el motivo queda en \a error).
+     */
+    qint64 importVectorFile(const QString &path, const QString &layerId,
+                            const QString &displayName = QString(),
+                            QString *error = nullptr);
+
+    /*!
+     * \brief Exporta entidades a GeoJSON, KML o GPX (segun la extension).
+     *
+     * Con \a layerId vacio exporta TODAS las entidades; si no, solo las de esa
+     * capa. Para llevarlas a QGIS, Google Earth o un GPS. GPX no guarda
+     * atributos ni estilo (sí nombre, descripcion y tipo).
+     *
+     * \return false si no hay nada que exportar o no se pudo escribir (el motivo
+     *         queda en \a error).
+     */
+    bool exportVectorFile(const QString &path, const QString &layerId = QString(),
+                          QString *error = nullptr);
 
     // --- Objetivos moviles (capa dinamica) -------------------------------
     /*!

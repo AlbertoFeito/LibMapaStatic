@@ -137,7 +137,7 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
     <rect x="34" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="42" y="316" fill="#145374" font-weight="700">tiles</text><text x="42" y="332" font-size="8.5">TileService·Loader·Cache·Source·Planner·Probe</text>
     <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·ZoneMonitor</text>
     <rect x="338" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="346" y="316" fill="#145374" font-weight="700">db</text><text x="346" y="332" font-size="8.5">ConnectionPool·Schema·VectorRepository</text>
-    <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · Elevation</text>
+    <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · VectorFormats · Elevation</text>
     <rect x="622" y="298" width="106" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="630" y="316" fill="#145374" font-weight="700">tipos</text><text x="630" y="332" font-size="8.5">MapFeature·MapTarget</text>
     <rect x="34" y="352" width="694" height="30" rx="5" fill="#f7f9fb" stroke="#c4ccd6"/><text x="42" y="371" fill="#5b6b7b">Qt: QGeoCoordinate · QImage · QSqlDatabase · QCache · QThread</text>
   </g>
@@ -352,7 +352,7 @@ la API que usa la aplicación:</p>
 <tr><td>Capa base</td><td class="mono">availableBaseLayers · baseLayerId · setBaseLayerId · reloadBaseLayer</td></tr>
 <tr><td>Navegación</td><td class="mono">center/setCenter · zoom/setZoom · zoomIn/Out · fitBounds · visibleNorthWest/SouthEast · <b>setMaxZoomOverride</b></td></tr>
 <tr><td>Capas de entidades</td><td class="mono">addFeatureLayer · setFeatureLayerVisible · setFeatureLayerZOrder</td></tr>
-<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer · loadFeaturesAsLayer · setFeatureLayerZoomRange · setFeatureLayerTransient</td></tr>
+<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer · loadFeaturesAsLayer · <b>importVectorFile · exportVectorFile</b> · setFeatureLayerZoomRange · setFeatureLayerTransient</td></tr>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
@@ -405,6 +405,19 @@ ficheros <code>.geo</code>/<code>.xyz</code>: listas de coordenadas donde <code>
 separa trazados. Un fichero puede traer varios trazados (aguas jurisdiccionales,
 corredores, divisiones). <code>MapWidget::loadGeoAsLayer()</code> lo carga como <b>una
 entidad multi-parte</b>. También lo usa <code>geo_to_tiles</code> para rasterizar.</p>
+
+<h3><span class="cls">VectorFormats</span> <span class="tag">include/libmapa/VectorFormats.h</span></h3>
+<p>Intercambio con otras herramientas (QGIS, Google Earth, GPS): lee y escribe
+<code>MapFeature</code> en <b>GeoJSON</b>, <b>KML</b> y <b>GPX</b>, eligiendo el formato por la
+extensión. Escritura atómica (<code>QSaveFile</code>). Sin dependencias nuevas: JSON y
+XML de Qt Core. Probado sin ventanas en <code>tst_vectorformats</code>.</p>
+<table><tr><th>Formato</th><th>Qué conserva</th></tr>
+<tr><td>GeoJSON</td><td>Todo: geometría (Point/LineString/Polygon y sus Multi*), nombre, descripción, tipo de dominio (<code>libmapa_type</code>), atributos y estilo «simplestyle» (<code>stroke</code>, <code>stroke-width</code>, <code>fill</code>…).</td></tr>
+<tr><td>KML</td><td>Geometría (MultiGeometry = partes), nombre, descripción, tipo y atributos en <code>ExtendedData</code>, estilo en línea o por <code>styleUrl</code> (colores <code>aabbggrr</code>). Carpetas aplanadas; KMZ no.</td></tr>
+<tr><td>GPX</td><td>Puntos (<code>wpt</code>, con <code>ele</code>), rutas y tracks (un <code>trkseg</code> por parte), nombre, descripción y tipo. Sin atributos ni estilo; los polígonos van como track cerrado con la extensión <code>libmapa:polygon</code> y vuelven a ser polígonos al releerlos.</td></tr>
+</table>
+<p>Los huecos de los polígonos se ignoran (el modelo no los tiene). <code>MapWidget::importVectorFile</code>
+añade las entidades de un fichero a una capa; <code>exportVectorFile</code> escribe todas o las de una capa.</p>
 
 <h3><span class="cls">DataPackage</span> <span class="tag">io/DataPackage.h · público: DataPackageInfo</span></h3>
 <p>El producto final trabaja <b>sin conexión</b>: todos sus datos viajan en un
