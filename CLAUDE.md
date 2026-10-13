@@ -4,9 +4,9 @@ Guía para cualquier sesión de Claude Code que trabaje en este repo. Son las
 reglas que ya venimos aplicando; respétalas siempre.
 
 ## Rama y commits
-- **Trabaja SIEMPRE en la rama `claude/sharp-goodall-dt7hh5`.** Nunca commitees a
+- **Trabaja SIEMPRE en la rama `claude/fervent-mccarthy-v9rl6d`.** Nunca commitees a
   `main`. Si el checkout arranca en `main` (contenedor nuevo), recupera la rama:
-  `git fetch origin claude/sharp-goodall-dt7hh5 && git reset --hard origin/claude/sharp-goodall-dt7hh5`.
+  `git fetch origin claude/fervent-mccarthy-v9rl6d && git reset --hard origin/claude/fervent-mccarthy-v9rl6d`.
 - Antes de commitear, si puede haber otra sesión, `git fetch` y ponte al día.
 - Mensajes de commit en español, claros, explicando el porqué.
 - **Cierra cada commit** con la línea de atribución
@@ -15,7 +15,7 @@ reglas que ya venimos aplicando; respétalas siempre.
   añaden además su línea `Claude-Session: <url de la sesión>`.
 - Fuera de esa línea final del commit, **nunca** pongas un identificador de
   modelo en commits, PRs, comentarios de código ni ningún artefacto del repo.
-- `git push -u origin claude/sharp-goodall-dt7hh5`; si el push da un 503
+- `git push -u origin claude/fervent-mccarthy-v9rl6d`; si el push da un 503
   transitorio del servicio de credenciales, reintenta con backoff (2,4,8,16 s).
 
 ## Estilo de código
