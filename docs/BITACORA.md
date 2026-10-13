@@ -4628,3 +4628,48 @@ vigilarlo si ya lo estaba). Las señales `targetEnteredZone`/`targetLeftZone` se
 muestran en la barra de estado («⚠ Buque 3 ENTRA en «Zona A» (2 dentro)»). Se
 prueba dibujando un polígono sobre la ruta de la simulación de objetivos. **Solo
 `demo/main.cpp`**; sin cambios de API. Compila sin warnings, **20 tests** en verde.
+
+## 116. Escala gráfica y cuadrícula de coordenadas
+
+**Problema.** En un mapa sin conexión de uso operativo faltaban dos referencias
+básicas: cuánto mide lo que se ve (no había escala) y en qué coordenadas está
+cada cosa sin mover el ratón (no había cuadrícula; la «rejilla» existente es de
+depuración y marca teselas, no grados).
+
+**Qué se hizo.**
+- `geo/MapDecor` (núcleo, funciones puras, `tst_mapdecor`): `scaleBar` elige la
+  barra con valor redondo 1-2-5×10ⁿ que cabe en 120 px, en metros/km o en millas
+  náuticas; `graticuleStep` elige el paso de la cuadrícula; `formatLatitude` /
+  `formatLongitude` rotulan en sexagesimal con la precisión del paso.
+- Dos capas nuevas en `src/widget/`, como las demás (`QCPLayerable`):
+  `ScaleBarLayer` (abajo a la izquierda, encima de todo) y `GraticuleLayer`
+  (encima de las entidades, debajo de los objetivos).
+- `MapWidget`: `setScaleBarVisible`, `setScaleBarUnits`, `metersPerPixel`,
+  `setGraticuleVisible`, `setGraticuleColor`. Ambas **ocultas por defecto** para no
+  cambiar lo que ya pintan las apps existentes.
+- `demo`: en *Ver*, «Escala gráfica» (encendida), «Escala en millas náuticas» y
+  «Cuadrícula de coordenadas» (blanca sobre la capa satelital).
+
+**Por qué así.**
+- **La escala se mide, no se deduce del zoom.** Se toma la distancia geodésica
+  real entre dos píxeles separados 100 px en el CENTRO de la vista. En Mercator la
+  escala cambia con la latitud (a 60° un píxel cubre la mitad de terreno que en el
+  ecuador), y el centro es donde mira el operador. Comprobado sobre la captura: a
+  zoom 8 y 22°N un grado de longitud ocupa ~182 px (≈103 km), y la barra de 50 km
+  mide ~88 px. El test verifica además que un zoom más da la mitad de m/px.
+- **Millas náuticas** porque el seguimiento es naval/aéreo; el redondeo se hace
+  en millas (0.2, 0.5, 1, 2 NM), no en metros, para que la etiqueta salga limpia.
+- **Pasos de carta, no decimales.** La cuadrícula usa 90°…1°, 30'…1', 30"…1":
+  dividen el grado sexagesimal, así las líneas caen en 23°30' y no en 23,5°, que
+  es como se leen las cartas. El paso sale del eje que más líneas pediría (ancho
+  o alto) y es el mismo en ambos, para una cuadrícula homogénea.
+- **Paralelos en la proyección del mapa.** Se dibujan en el eje Y en grados de
+  Mercator, igual que las teselas: caen exactamente donde debe estar esa latitud.
+- **Rótulos que no se pisan.** Longitudes arriba, latitudes a la izquierda; se
+  omite lo que caería en la esquina superior izquierda y en la franja inferior
+  donde va la escala (se vio en una captura que el rótulo de 21°55'N tapaba la
+  barra).
+- **Repintado diferido.** Como el resto de `MapWidget`, los cambios repintan con
+  `rpQueuedReplot`; el test procesa eventos antes de capturar.
+
+Compila sin warnings; **21 tests** en verde (18 sin QCustomPlot), Qt 6.4.

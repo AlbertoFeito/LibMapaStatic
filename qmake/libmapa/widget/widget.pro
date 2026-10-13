@@ -31,6 +31,8 @@ SOURCES += \
     $$ROOT/src/widget/TargetModel.cpp \
     $$ROOT/src/widget/TargetLayer.cpp \
     $$ROOT/src/widget/CoverageLayer.cpp \
+    $$ROOT/src/widget/GraticuleLayer.cpp \
+    $$ROOT/src/widget/ScaleBarLayer.cpp \
     $$ROOT/src/widget/HillshadeLayer.cpp \
     $$ROOT/src/widget/MapView.cpp \
     $$ROOT/src/widget/MapWidget.cpp
@@ -45,6 +47,8 @@ HEADERS += \
     $$ROOT/src/widget/TargetModel.h \
     $$ROOT/src/widget/TargetLayer.h \
     $$ROOT/src/widget/CoverageLayer.h \
+    $$ROOT/src/widget/GraticuleLayer.h \
+    $$ROOT/src/widget/ScaleBarLayer.h \
     $$ROOT/src/widget/HillshadeLayer.h \
     $$ROOT/src/widget/MapView.h
 

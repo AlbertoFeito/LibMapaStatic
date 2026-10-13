@@ -125,6 +125,9 @@ private slots:
     //! Alertas de zona: entradas/salidas de objetivos en un poligono vigilado,
     //! siguiendo tambien las ediciones y el deshacer de la zona.
     void zoneAlertsFollowTargetsAndZoneEdits();
+    //! Escala grafica y cuadricula: ocultas por defecto, se dibujan al
+    //! encenderlas y la resolucion sigue al zoom.
+    void scaleBarAndGraticuleDraw();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -1989,6 +1992,58 @@ void TstMapWidget::zoneAlertsFollowTargetsAndZoneEdits()
     QCOMPARE(sale.count(), 2);
     QVERIFY(w.updateTarget(a, QGeoCoordinate(26.0, -82.0)));
     QCOMPARE(sale.count(), 2);
+}
+
+// La escala y la cuadricula no cambian nada hasta encenderlas; encendidas,
+// pintan algo en la vista. La resolucion en el centro se mide de verdad: a un
+// zoom mas, la mitad de metros por pixel.
+void TstMapWidget::scaleBarAndGraticuleDraw()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    w.setCenter(QGeoCoordinate(22.0, -79.5));
+
+    QVERIFY(!w.isScaleBarVisible());
+    QVERIFY(!w.isGraticuleVisible());
+    QCOMPARE(w.scaleBarUnits(), ScaleUnits::Metric);
+
+    const double mpp10 = w.metersPerPixel();
+    QVERIFY(mpp10 > 0.0);
+    w.setZoom(11);
+    const double mpp11 = w.metersPerPixel();
+    QVERIFY2(qAbs(mpp11 / mpp10 - 0.5) < 0.02,
+             qPrintable(QStringLiteral("%1 -> %2").arg(mpp10).arg(mpp11)));
+
+    // MapWidget repinta en diferido (rpQueuedReplot): se procesan los eventos
+    // antes de capturar para ver el estado nuevo.
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+    const QImage base = captura();
+    const QRect esquina(0, 600 - 60, 160, 60);   // donde va la escala
+
+    w.setScaleBarVisible(true);
+    QVERIFY(w.isScaleBarVisible());
+    const QImage conEscala = captura();
+    QVERIFY(conEscala.copy(esquina) != base.copy(esquina));
+
+    w.setScaleBarUnits(ScaleUnits::Nautical);
+    QCOMPARE(w.scaleBarUnits(), ScaleUnits::Nautical);
+    QVERIFY(!captura().isNull());
+
+    w.setScaleBarVisible(false);
+    w.setGraticuleVisible(true);
+    w.setGraticuleColor(QColor(255, 255, 255, 180));
+    QCOMPARE(w.graticuleColor(), QColor(255, 255, 255, 180));
+    QVERIFY(w.isGraticuleVisible());
+    QVERIFY(captura() != base);
+
+    // A zoom mundial la cuadricula sigue dibujandose sin colgarse.
+    w.setZoom(2);
+    QVERIFY(!captura().isNull());
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

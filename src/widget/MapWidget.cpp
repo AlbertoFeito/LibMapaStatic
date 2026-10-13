@@ -1328,6 +1328,80 @@ void MapWidget::setDebugGridVisible(bool visible)
     }
 }
 
+// ------------------------------------------- escala grafica y cuadricula ----
+
+// Muestra u oculta la escala grafica. Solo repinta: la capa calcula la barra en
+// cada dibujado, asi sigue al zoom y al desplazamiento sin mas avisos.
+void MapWidget::setScaleBarVisible(bool on)
+{
+    if (!d->view || !d->view->scaleBarLayer())
+        return;
+    d->view->scaleBarLayer()->setVisible(on);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// ¿Se ve la escala grafica?
+bool MapWidget::isScaleBarVisible() const
+{
+    return d->view && d->view->scaleBarLayer() && d->view->scaleBarLayer()->visible();
+}
+
+// Cambia las unidades de la escala (metrico / millas nauticas) y repinta.
+void MapWidget::setScaleBarUnits(ScaleUnits units)
+{
+    if (!d->view || !d->view->scaleBarLayer())
+        return;
+    d->view->scaleBarLayer()->setUnits(units);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Unidades actuales de la escala (metrico si no hay vista).
+ScaleUnits MapWidget::scaleBarUnits() const
+{
+    return d->view && d->view->scaleBarLayer() ? d->view->scaleBarLayer()->units()
+                                               : ScaleUnits::Metric;
+}
+
+// Metros por pixel en el centro, medidos como los mide la escala. Sincroniza
+// antes la geometria para no medir sobre un tamano de vista viejo.
+double MapWidget::metersPerPixel() const
+{
+    d->syncGeometry();
+    return d->view && d->view->scaleBarLayer()
+        ? d->view->scaleBarLayer()->metersPerPixelAtCenter() : 0.0;
+}
+
+// Muestra u oculta la cuadricula de coordenadas; se recalcula en cada dibujado.
+void MapWidget::setGraticuleVisible(bool on)
+{
+    if (!d->view || !d->view->graticuleLayer())
+        return;
+    d->view->graticuleLayer()->setVisible(on);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// ¿Se ve la cuadricula?
+bool MapWidget::isGraticuleVisible() const
+{
+    return d->view && d->view->graticuleLayer() && d->view->graticuleLayer()->visible();
+}
+
+// Color de lineas y rotulos de la cuadricula, y repinta.
+void MapWidget::setGraticuleColor(const QColor &color)
+{
+    if (!d->view || !d->view->graticuleLayer())
+        return;
+    d->view->graticuleLayer()->setColor(color);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Color actual de la cuadricula (invalido si no hay vista).
+QColor MapWidget::graticuleColor() const
+{
+    return d->view && d->view->graticuleLayer() ? d->view->graticuleLayer()->color()
+                                                : QColor();
+}
+
 // Enciende o apaga la mancha de cobertura. Al encenderla recalcula; al apagarla
 // solo oculta la capa y repinta.
 void MapWidget::setCoverageVisible(bool on)

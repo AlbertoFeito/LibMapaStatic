@@ -500,6 +500,29 @@ private:
         m_accRejilla = new QAction(tr("Rejilla"), this);
         m_accRejilla->setCheckable(true);
         connect(m_accRejilla, &QAction::toggled, m_mapa, &MapWidget::setDebugGridVisible);
+        // Escala gráfica y cuadrícula de coordenadas (capas de la librería). La
+        // escala arranca encendida; la cuadrícula, a petición.
+        m_accEscala = new QAction(tr("Escala gráfica"), this);
+        m_accEscala->setCheckable(true);
+        connect(m_accEscala, &QAction::toggled, m_mapa, &MapWidget::setScaleBarVisible);
+        m_accEscala->setChecked(true);
+        m_accEscalaNm = new QAction(tr("Escala en millas náuticas"), this);
+        m_accEscalaNm->setCheckable(true);
+        connect(m_accEscalaNm, &QAction::toggled, this, [this](bool nm) {
+            m_mapa->setScaleBarUnits(nm ? ScaleUnits::Nautical : ScaleUnits::Metric);
+        });
+        m_accCuadricula = new QAction(tr("Cuadrícula de coordenadas"), this);
+        m_accCuadricula->setCheckable(true);
+        connect(m_accCuadricula, &QAction::toggled, m_mapa, &MapWidget::setGraticuleVisible);
+        // Sobre la capa satelital (oscura) la cuadrícula va en blanco.
+        auto colorCuadricula = [this](const QString &capa) {
+            const bool oscura = capa.contains(QLatin1String("sat"), Qt::CaseInsensitive);
+            m_mapa->setGraticuleColor(oscura ? QColor(255, 255, 255, 200)
+                                             : QColor(20, 40, 60, 150));
+        };
+        colorCuadricula(m_mapa->baseLayerId());
+        connect(m_mapa, &MapWidget::baseLayerChanged, this, colorCuadricula);
+
         m_accCobertura = new QAction(tr("Cobertura"), this);
         m_accCobertura->setCheckable(true);
         m_accCobertura->setToolTip(tr("Mancha de zonas con teselas del zoom elegido."));
@@ -636,6 +659,10 @@ private:
         mVer->addAction(accAmpliar);
         mVer->addAction(accReducir);
         mVer->addAction(accCuba);
+        mVer->addSeparator();
+        mVer->addAction(m_accEscala);
+        mVer->addAction(m_accEscalaNm);
+        mVer->addAction(m_accCuadricula);
         mVer->addSeparator();
         mVer->addAction(m_accRejilla);
         mVer->addAction(m_accCobertura);
@@ -3673,6 +3700,9 @@ private:
     QAction *m_accAbrir = nullptr;
     QAction *m_accRejilla = nullptr;
     QAction *m_accCobertura = nullptr;
+    QAction *m_accEscala = nullptr;        //!< escala gráfica
+    QAction *m_accEscalaNm = nullptr;      //!< escala en millas náuticas
+    QAction *m_accCuadricula = nullptr;    //!< cuadrícula de coordenadas
     QMenu *m_menuVer = nullptr;
     QAction *m_accTemaClaro = nullptr;
     QAction *m_accTemaOscuro = nullptr;

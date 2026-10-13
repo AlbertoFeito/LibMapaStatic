@@ -87,6 +87,22 @@ MapView::MapView(TileService *service, QWidget *parent)
     m_coverageLayer->setLayer(QStringLiteral("coverage"));
     m_coverageLayer->setVisible(false);
 
+    // CUADRICULA de coordenadas: encima de las entidades y por debajo de los
+    // objetivos (orienta sin tapar lo que se mueve). Oculta por defecto.
+    addLayer(QStringLiteral("graticule"), layer(QStringLiteral("features")),
+             QCustomPlot::limAbove);
+    m_graticuleLayer = new GraticuleLayer(this);
+    m_graticuleLayer->setLayer(QStringLiteral("graticule"));
+    m_graticuleLayer->setVisible(false);
+
+    // ESCALA GRAFICA: encima de todo, es un elemento de la pantalla. Oculta por
+    // defecto.
+    addLayer(QStringLiteral("scalebar"), layer(QStringLiteral("coverage")),
+             QCustomPlot::limAbove);
+    m_scaleBarLayer = new ScaleBarLayer(this);
+    m_scaleBarLayer->setLayer(QStringLiteral("scalebar"));
+    m_scaleBarLayer->setVisible(false);
+
     // Capa de RELIEVE SOMBREADO (hillshade): justo ENCIMA de las teselas y por
     // DEBAJO de las entidades, para que el sombreado adorne la base sin tapar los
     // overlays. Oculta por defecto; la calcula MapWidget desde el DEM local.

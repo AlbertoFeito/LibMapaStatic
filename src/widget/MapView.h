@@ -6,6 +6,8 @@
 #include "libmapa/MapTypes.h"
 #include "tiles/TileService.h"
 #include "widget/CoverageLayer.h"
+#include "widget/GraticuleLayer.h"
+#include "widget/ScaleBarLayer.h"
 #include "widget/HillshadeLayer.h"
 #include "widget/FeatureLayer.h"
 #include "widget/OverlayModel.h"
@@ -48,6 +50,8 @@ public:
     TargetModel *targetModel() const { return m_targetModel; }
     TargetLayer *targetLayer() const { return m_targetLayer; }
     CoverageLayer *coverageLayer() const { return m_coverageLayer; }
+    GraticuleLayer *graticuleLayer() const { return m_graticuleLayer; }
+    ScaleBarLayer *scaleBarLayer() const { return m_scaleBarLayer; }
     HillshadeLayer *hillshadeLayer() const { return m_hillshadeLayer; }
 
     QGeoCoordinate center() const;
@@ -209,6 +213,8 @@ private:
     TargetModel *m_targetModel = nullptr;
     TargetLayer *m_targetLayer = nullptr;
     CoverageLayer *m_coverageLayer = nullptr;
+    GraticuleLayer *m_graticuleLayer = nullptr;
+    ScaleBarLayer *m_scaleBarLayer = nullptr;
     HillshadeLayer *m_hillshadeLayer = nullptr;
 
     int m_zoom = 10;

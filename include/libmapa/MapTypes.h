@@ -57,6 +57,12 @@ struct BaseLayerInfo {
     bool available = false;
 };
 
+//! Unidades de la escala grafica (MapWidget::setScaleBarUnits).
+enum class ScaleUnits {
+    Metric,     //!< metros / kilometros
+    Nautical    //!< millas nauticas (1 NM = 1852 m), para uso naval/aereo
+};
+
 //! Resultado de una medicion sobre el mapa.
 struct Measurement {
     QGeoCoordinate from;

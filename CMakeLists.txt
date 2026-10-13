@@ -91,6 +91,8 @@ add_library(libmapa_core STATIC
     src/geo/WebMercator.h
     src/geo/TileMatrix.cpp
     src/geo/TileMatrix.h
+    src/geo/MapDecor.cpp
+    src/geo/MapDecor.h
     src/geo/ZoneMonitor.cpp
     src/geo/ZoneMonitor.h
 
@@ -181,6 +183,10 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/TargetLayer.h
         src/widget/CoverageLayer.cpp
         src/widget/CoverageLayer.h
+        src/widget/GraticuleLayer.cpp
+        src/widget/GraticuleLayer.h
+        src/widget/ScaleBarLayer.cpp
+        src/widget/ScaleBarLayer.h
         src/widget/HillshadeLayer.cpp
         src/widget/HillshadeLayer.h
         src/widget/MapView.cpp
@@ -361,6 +367,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_elevationanalysis)
     libmapa_add_test(tst_contours)
     libmapa_add_test(tst_zonemonitor)
+    libmapa_add_test(tst_mapdecor)
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 

@@ -185,6 +185,14 @@ Mercator. Es matemática pura, sin estado ni Qt más allá de <code>QGeoCoordina
 <tr><td class="mono">clampLatitude(lat)</td><td>Acota la latitud al máximo de Mercator (~±85,05°) para que la proyección no se dispare.</td></tr>
 </table>
 
+<h3><span class="cls">MapDecor</span> <span class="tag">geo/MapDecor.h</span></h3>
+<p>Cálculos puros de la <b>escala gráfica</b> y la <b>cuadrícula</b> (sin dibujo; <code>tst_mapdecor</code>).</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">scaleBar(m/px, maxPx, unidades)</td><td>La barra más larga con valor redondo 1-2-5×10ⁿ que cabe; en metros/km o en millas náuticas (redondeo en millas).</td></tr>
+<tr><td class="mono">graticuleStep(tramo°, maxLíneas)</td><td>Paso «de carta» (90°…1°, 30'…1', 30"…1") más fino que no supera las líneas pedidas.</td></tr>
+<tr><td class="mono">formatLatitude / formatLongitude</td><td>Rótulo sexagesimal con la precisión del paso (23°N, 23°30'N, 23°30'15"N); longitud normalizada a (−180, 180].</td></tr>
+</table>
+
 <h3><span class="cls">ZoneMonitor</span> <span class="tag">geo/ZoneMonitor.h</span></h3>
 <p>Lógica de las <b>alertas de zona</b>: qué objetivos están dentro de qué polígonos
 vigilados y cuándo entran o salen. Sin widget ni señales (se prueba sin ventanas,
@@ -352,6 +360,7 @@ la API que usa la aplicación:</p>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · <b>señales targetEnteredZone / targetLeftZone</b></td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
+<tr><td>Escala / cuadrícula</td><td class="mono">setScaleBarVisible · setScaleBarUnits (Metric/Nautical) · metersPerPixel · setGraticuleVisible · setGraticuleColor</td></tr>
 <tr><td>Cobertura / relieve</td><td class="mono">setCoverageVisible · setCoverageZoom · refreshCoverage · <b>setHillshadeVisible · setHillshadeSun · setHillshadeOpacity · setHillshadeExaggeration · setHillshadeColored · refreshHillshade</b></td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
 <tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
@@ -377,6 +386,8 @@ añadió para la descarga.</p>
 <tr><td class="cls">TileLayer</td><td>Pinta las teselas del plan (con la escalera de respaldo). Lee del <code>TileCache</code>.</td></tr>
 <tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar. <b>Recorte por viewport</b>: salta (sin proyectar a píxeles) las entidades cuya caja no toca la vista, y respeta el <b>rango de zoom</b> de la capa — así una capa densa (curvas de nivel) no frena el <i>pan</i>. Un punto con icono se ancla por <code>FeatureStyle::iconAnchor</code> (normalizado; <code>(0.5,1.0)</code> = la punta del pin marca el lugar) y su <b>hit-test</b> cubre todo el pixmap, para poder agarrarlo.</td></tr>
 <tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas. El símbolo lo decide el proveedor de la app (icono + rotación por rumbo + escala); sin proveedor, un galón por defecto. Para miles de objetivos: culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza.</td></tr>
+<tr><td class="cls">GraticuleLayer</td><td>Cuadrícula de meridianos y paralelos con rótulos en el borde. Paso automático según el zoom (pasos de carta), paralelos en la proyección del mapa. Encima de las entidades y debajo de los objetivos.</td></tr>
+<tr><td class="cls">ScaleBarLayer</td><td>Escala gráfica abajo a la izquierda, medida en el centro de la vista con la distancia geodésica real entre dos píxeles (en Mercator la escala cambia con la latitud). Encima de todo.</td></tr>
 <tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
 <tr><td class="cls">HillshadeLayer</td><td><b>Relieve sombreado</b> (hillshade) en vivo: capa «tonta» que pinta una imagen —calculada por <code>MapWidget</code> del DEM LOCAL (sin conexión)— estirada entre los píxeles de sus esquinas (alineada con la base, eje X=longitud, Y=grados de Mercator). Va encima de las teselas y debajo de las entidades. Gris en <i>Multiply</i> sobre la base, o tintado por altura (hipsométrico) en <i>SourceOver</i>.</td></tr>
 </table>

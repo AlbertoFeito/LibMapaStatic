@@ -485,6 +485,35 @@ public:
     //! Descarta el trazado en curso.
     bool cancelDrawing();
 
+    // --- Escala grafica y cuadricula de coordenadas -----------------------
+    /*!
+     * \brief Escala grafica en la esquina inferior izquierda (oculta por defecto).
+     *
+     * Barra de longitud redonda (1-2-5 x 10^n) medida en el CENTRO de la vista:
+     * en Mercator la escala cambia con la latitud, y el centro es donde se mira.
+     */
+    void setScaleBarVisible(bool on);
+    bool isScaleBarVisible() const;
+    //! Metros/kilometros (por defecto) o millas nauticas.
+    void setScaleBarUnits(ScaleUnits units);
+    ScaleUnits scaleBarUnits() const;
+    //! Resolucion del mapa en el centro de la vista, en metros por pixel
+    //! (0 si aun no hay vista). Es el dato con el que se dibuja la escala.
+    double metersPerPixel() const;
+
+    /*!
+     * \brief Cuadricula de meridianos y paralelos con su rotulo (oculta por defecto).
+     *
+     * La separacion se elige sola segun el zoom, en pasos de carta (grados,
+     * 30', 10', 1', 30"...), y cada linea se rotula en el borde con esa
+     * precision (23°30'N). Va encima de las entidades y debajo de los objetivos.
+     */
+    void setGraticuleVisible(bool on);
+    bool isGraticuleVisible() const;
+    //! Color de lineas y rotulos (p. ej. claro sobre la capa satelital).
+    void setGraticuleColor(const QColor &color);
+    QColor graticuleColor() const;
+
     // --- Diagnostico -----------------------------------------------------
     //! Porcentaje de la pantalla resuelto con teselas propias (no ancestros).
     double exactCoverage() const;
