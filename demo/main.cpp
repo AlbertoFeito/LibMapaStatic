@@ -587,6 +587,14 @@ private:
         connect(m_accVerObjetivos, &QAction::toggled, this,
                 [this](bool on) { m_mapa->setTargetsVisible(on); });
 
+        // Alertas de zona (watchZone): vigila / deja de vigilar el polígono
+        // seleccionado; las entradas y salidas se avisan en la barra de estado.
+        m_accVigilarZona = new QAction(tr("Vigilar zona seleccionada"), this);
+        m_accVigilarZona->setStatusTip(
+            tr("Avisa cuando un objetivo entra o sale del polígono seleccionado "
+               "(otra vez = dejar de vigilar)."));
+        connect(m_accVigilarZona, &QAction::triggered, this, &Ventana::alternarVigilancia);
+
         // Glifos del resto de acciones de barra (los de dibujo ya los puso
         // accHerr). aplicarIconos() los pinta con el color del tema.
         m_accGuardar->setProperty("glifo", QStringLiteral("guardar"));
@@ -681,6 +689,7 @@ private:
         mDatos->addSeparator();
         mDatos->addAction(m_accSimular);
         mDatos->addAction(m_accVerObjetivos);
+        mDatos->addAction(m_accVigilarZona);
 
         QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
         connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
@@ -3446,6 +3455,14 @@ private:
         // Clic sobre un objetivo -> la libreria lo resalta y emite targetClicked;
         // aqui mostramos sus datos de dominio (sus attributes) en la barra de
         // estado. Es el cierre del ciclo ver -> seleccionar -> consultar.
+        // Alertas de zona: la librería avisa al cruzar el borde de una zona vigilada.
+        connect(m_mapa, &MapWidget::targetEnteredZone, this, [this](qint64 obj, qint64 zona) {
+            statusBar()->showMessage(textoAlertaZona(obj, zona, true), 6000);
+        });
+        connect(m_mapa, &MapWidget::targetLeftZone, this, [this](qint64 obj, qint64 zona) {
+            statusBar()->showMessage(textoAlertaZona(obj, zona, false), 6000);
+        });
+
         connect(m_mapa, &MapWidget::targetClicked, this,
                 [this](qint64 id, const QGeoCoordinate &) {
                     const auto t = m_mapa->target(id);
@@ -3461,6 +3478,43 @@ private:
                             .arg(id).arg(t->kind, datos.join(QStringLiteral("   "))),
                         8000);
                 });
+    }
+
+    // Vigila (o deja de vigilar) el polígono seleccionado como zona de alerta.
+    // Al empezar, la librería ya avisa de los objetivos que estén dentro.
+    void alternarVigilancia()
+    {
+        const qint64 id = m_mapa->selectedFeature();
+        const auto f = id >= 0 ? m_mapa->feature(id) : std::nullopt;
+        if (!f || f->kind != GeometryKind::Polygon) {
+            statusBar()->showMessage(tr("Selecciona primero un polígono para vigilarlo"), 4000);
+            return;
+        }
+        const QString nombre = f->name.isEmpty() ? tr("zona %1").arg(id) : f->name;
+        if (m_mapa->isZoneWatched(id)) {
+            m_mapa->unwatchZone(id);
+            statusBar()->showMessage(tr("Se deja de vigilar «%1»").arg(nombre), 4000);
+            return;
+        }
+        m_mapa->watchZone(id);
+        statusBar()->showMessage(
+            tr("Vigilando «%1»: %2 objetivos dentro")
+                .arg(nombre).arg(m_mapa->targetsInZone(id).size()), 5000);
+    }
+
+    // Texto de una alerta de zona para la barra de estado: qué objetivo (primera
+    // línea de su etiqueta), qué zona y cuántos quedan dentro.
+    QString textoAlertaZona(qint64 objetivo, qint64 zona, bool entra) const
+    {
+        const auto t = m_mapa->target(objetivo);
+        const auto f = m_mapa->feature(zona);
+        const QString quien = t && !t->label.isEmpty()
+            ? t->label.section(QLatin1Char('\n'), 0, 0) : tr("Objetivo %1").arg(objetivo);
+        const QString donde = f && !f->name.isEmpty()
+            ? f->name.section(QLatin1Char('\n'), 0, 0) : tr("zona %1").arg(zona);
+        return (entra ? tr("⚠ %1 ENTRA en «%2» (%3 dentro)")
+                      : tr("%1 sale de «%2» (%3 dentro)"))
+            .arg(quien, donde).arg(m_mapa->targetsInZone(zona).size());
     }
 
     void alternarSimulacion(bool on)
@@ -3709,6 +3763,7 @@ private:
     QComboBox *m_traza = nullptr;
     QAction *m_accSimular = nullptr;
     QAction *m_accVerObjetivos = nullptr;   //!< mostrar/ocultar objetivos
+    QAction *m_accVigilarZona = nullptr;    //!< alertas de zona del polígono seleccionado
     QAction *m_accSelArea = nullptr;        //!< seleccionar área (bbox)
     QAction *m_accSelPoli = nullptr;        //!< seleccionar polígono (zona)
     QTimer *m_simReloj = nullptr;

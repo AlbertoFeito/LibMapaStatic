@@ -4619,3 +4619,12 @@ dónde viene el objetivo: encajan dentro.
 Limitación conocida: zonas que crucen el antimeridiano (±180°) no se tratan.
 
 Compila sin warnings; **20 tests** en verde (17 sin QCustomPlot), Qt 6.4.
+
+## 115. Demo: probar las alertas de zona
+
+Para poder probar §114 sin escribir código, el `demo` añade en *Datos* la acción
+**«Vigilar zona seleccionada»**: con un polígono seleccionado lo vigila (o deja de
+vigilarlo si ya lo estaba). Las señales `targetEnteredZone`/`targetLeftZone` se
+muestran en la barra de estado («⚠ Buque 3 ENTRA en «Zona A» (2 dentro)»). Se
+prueba dibujando un polígono sobre la ruta de la simulación de objetivos. **Solo
+`demo/main.cpp`**; sin cambios de API. Compila sin warnings, **20 tests** en verde.
