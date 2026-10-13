@@ -363,6 +363,43 @@ public:
     void setSelectedTarget(qint64 id);
     qint64 selectedTarget() const;
 
+    // --- Alertas de zona (objetivos que entran o salen de un area) --------
+    /*!
+     * \brief Vigila una entidad POLIGONAL como zona de alerta.
+     *
+     * Desde ese momento, cada vez que un objetivo movil entra o sale de ella se
+     * emite \ref targetEnteredZone o \ref targetLeftZone. Que la zona sea
+     * "prohibida", "de interes" o "de fondeo" lo decide la app (con el \c type
+     * o los atributos de la entidad); la libreria solo hace la geometria.
+     *
+     * - Los objetivos que YA estan dentro al empezar a vigilar producen una
+     *   entrada: asi la app se entera de lo que hay en la zona.
+     * - "Dentro" es lo que se ve dentro en el mapa (lados rectos en la
+     *   proyeccion del mapa). En una entidad multi-parte basta con una parte.
+     * - Si la entidad cambia de forma (edicion, arrastre, deshacer), se
+     *   reevalua y se emiten las entradas/salidas que provoque. Si se borra,
+     *   se deja de vigilar sin emitir salidas.
+     * - Borrar un objetivo (o \ref clearTargets) tampoco emite salidas: no se
+     *   ha ido, ha dejado de existir. Una posicion invalida si lo saca.
+     * - La vigilancia no se guarda con las entidades: la app la vuelve a pedir
+     *   al cargar (p. ej. para todas las entidades de cierto \c type).
+     *
+     * Coste: cada actualizacion de un objetivo se compara con todas las zonas
+     * vigiladas, con un descarte rapido por caja envolvente.
+     *
+     * \return false si no existe la entidad o no es un poligono.
+     */
+    bool watchZone(qint64 featureId);
+    //! Deja de vigilar una zona (sin emitir salidas). false si no se vigilaba.
+    bool unwatchZone(qint64 featureId);
+    bool isZoneWatched(qint64 featureId) const;
+    //! Ids de las entidades vigiladas como zona, ordenados.
+    QVector<qint64> watchedZones() const;
+    //! Objetivos que estan ahora dentro de una zona vigilada, ordenados.
+    QVector<qint64> targetsInZone(qint64 featureId) const;
+    //! Zonas vigiladas en las que esta ahora un objetivo, ordenadas.
+    QVector<qint64> zonesOfTarget(qint64 targetId) const;
+
     // --- Seleccion -------------------------------------------------------
     qint64 selectedFeature() const;
     void selectFeature(qint64 id);
@@ -525,6 +562,10 @@ signals:
     void featureSelected(qint64 id);      //!< -1 al deseleccionar
     //! Clic sobre un objetivo movil sin herramienta activa (ya queda resaltado).
     void targetClicked(qint64 id, const QGeoCoordinate &position);
+    //! Un objetivo movil ha entrado en una zona vigilada (ver \ref watchZone).
+    void targetEnteredZone(qint64 targetId, qint64 zoneFeatureId);
+    //! Un objetivo movil ha salido de una zona vigilada (ver \ref watchZone).
+    void targetLeftZone(qint64 targetId, qint64 zoneFeatureId);
     void featureLayersChanged();
     //! Emitida al crear una entidad con el raton.
     void featureCreated(qint64 id);

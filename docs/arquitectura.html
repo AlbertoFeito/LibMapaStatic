@@ -135,7 +135,7 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
   <text x="30" y="286" fill="#39424e" font-weight="700">libmapa_core &nbsp;<tspan font-weight="400" font-size="9">(sin ventanas: Core · Gui · Sql · Positioning)</tspan></text>
   <g font-size="10">
     <rect x="34" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="42" y="316" fill="#145374" font-weight="700">tiles</text><text x="42" y="332" font-size="8.5">TileService·Loader·Cache·Source·Planner·Probe</text>
-    <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·TileKey</text>
+    <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·ZoneMonitor</text>
     <rect x="338" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="346" y="316" fill="#145374" font-weight="700">db</text><text x="346" y="332" font-size="8.5">ConnectionPool·Schema·VectorRepository</text>
     <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · Elevation</text>
     <rect x="622" y="298" width="106" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="630" y="316" fill="#145374" font-weight="700">tipos</text><text x="630" y="332" font-size="8.5">MapFeature·MapTarget</text>
@@ -183,6 +183,20 @@ Mercator. Es matemática pura, sin estado ni Qt más allá de <code>QGeoCoordina
 <tr><td class="mono">forward(coord) → QPointF</td><td>Lat/lon → metros Web Mercator (EPSG:3857).</td></tr>
 <tr><td class="mono">inverse(x,y) → QGeoCoordinate</td><td>Metros → lat/lon (la usa <code>geo_to_tiles</code> al leer <code>.xyz</code>).</td></tr>
 <tr><td class="mono">clampLatitude(lat)</td><td>Acota la latitud al máximo de Mercator (~±85,05°) para que la proyección no se dispare.</td></tr>
+</table>
+
+<h3><span class="cls">ZoneMonitor</span> <span class="tag">geo/ZoneMonitor.h</span></h3>
+<p>Lógica de las <b>alertas de zona</b>: qué objetivos están dentro de qué polígonos
+vigilados y cuándo entran o salen. Sin widget ni señales (se prueba sin ventanas,
+<code>tst_zonemonitor</code>); <code>MapWidget</code> le pasa los cambios y convierte
+sus transiciones en señales. Prueba de pertenencia en <b>Web Mercator</b> (lados
+rectos como se dibujan: «dentro» es lo que se ve dentro), cualquier anillo de una
+zona multi-parte, con descarte previo por caja envolvente: O(zonas) por actualización.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">setZone(id, anillos) → transiciones</td><td>Alta o cambio de forma; reevalúa todos los objetivos. Una zona nueva avisa de los que ya estaban dentro.</td></tr>
+<tr><td class="mono">updateTarget(id, pos) → transiciones</td><td>Movimiento de un objetivo; posición inválida = sale de todas.</td></tr>
+<tr><td class="mono">removeZone · removeTarget · clearTargets</td><td>Olvidan sin generar salidas (borrar no es «salir»).</td></tr>
+<tr><td class="mono">targetsIn · zonesOf · isInside</td><td>Consultas del estado actual.</td></tr>
 </table>
 
 <h3><span class="cls">TileMatrix</span> <span class="tag">geo/TileMatrix.h</span></h3>
@@ -335,6 +349,7 @@ la API que usa la aplicación:</p>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
+<tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · <b>señales targetEnteredZone / targetLeftZone</b></td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
 <tr><td>Cobertura / relieve</td><td class="mono">setCoverageVisible · setCoverageZoom · refreshCoverage · <b>setHillshadeVisible · setHillshadeSun · setHillshadeOpacity · setHillshadeExaggeration · setHillshadeColored · refreshHillshade</b></td></tr>
@@ -527,6 +542,13 @@ buques, aeronaves y UAVs con su icono orientado al rumbo. Un clic sobre un
 objetivo (sin herramienta) lo resalta y emite <code>targetClicked(id, pos)</code>
 (<code>targetAt(pixel)</code> hace el hit-test); la app lee entonces sus
 <code>attributes</code> para mostrarlos.</p>
+<p><b>Alertas de zona.</b> <code>watchZone(idPoligono)</code> convierte una entidad
+poligonal en zona vigilada: cada <code>addTarget</code>/<code>updateTarget</code>
+pasa por <code>ZoneMonitor</code> y, si el objetivo cruza el borde, se emite
+<code>targetEnteredZone(objetivo, zona)</code> o <code>targetLeftZone</code>. Las
+ediciones de la zona (vértices, arrastre, deshacer, cargas en bloque) la reevalúan;
+borrar el objetivo o la zona no genera salidas. Qué significa la zona («prohibida»,
+«de interés»…) lo decide la app por su <code>type</code>: la librería solo hace la geometría.</p>
 
 <h3>9.3 · Entidades y ficheros .geo</h3>
 <p><code>loadGeoAsLayer(ruta)</code> → <code>GeoFile</code> lee los trazados →

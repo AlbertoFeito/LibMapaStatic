@@ -122,6 +122,9 @@ private slots:
     //! targetAt encuentra el objetivo bajo el pixel; un clic lo selecciona y
     //! emite targetClicked.
     void selectsTargetByClick();
+    //! Alertas de zona: entradas/salidas de objetivos en un poligono vigilado,
+    //! siguiendo tambien las ediciones y el deshacer de la zona.
+    void zoneAlertsFollowTargetsAndZoneEdits();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -1911,6 +1914,81 @@ void TstMapWidget::selectsTargetByClick()
     // Deseleccionar desde codigo.
     w.setSelectedTarget(-1);
     QCOMPARE(w.selectedTarget(), qint64(-1));
+}
+
+// Una zona vigilada avisa de quien entra y sale: al empezar (los que ya estan),
+// al moverse los objetivos y al cambiar la forma de la zona, incluso por
+// deshacer. Borrar un objetivo o la zona no genera salidas.
+void TstMapWidget::zoneAlertsFollowTargetsAndZoneEdits()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    MapFeature zona;
+    zona.kind = GeometryKind::Polygon;
+    zona.type = QStringLiteral("zona_prohibida");
+    zona.geometry = { QGeoCoordinate(22.5, -82.5), QGeoCoordinate(22.5, -81.5),
+                      QGeoCoordinate(23.5, -81.5), QGeoCoordinate(23.5, -82.5) };
+    const qint64 zonaId = w.addFeature(zona);
+    QVERIFY(zonaId > 0);
+
+    MapTarget t;
+    t.position = QGeoCoordinate(23.0, -82.0);          // dentro
+    const qint64 a = w.addTarget(t);
+    t.position = QGeoCoordinate(25.0, -82.0);          // fuera
+    const qint64 b = w.addTarget(t);
+
+    QSignalSpy entra(&w, &MapWidget::targetEnteredZone);
+    QSignalSpy sale(&w, &MapWidget::targetLeftZone);
+
+    // Un punto no es una zona.
+    MapFeature punto;
+    punto.geometry = { QGeoCoordinate(23.0, -82.0) };
+    QVERIFY(!w.watchZone(w.addFeature(punto)));
+    QVERIFY(!w.watchZone(999999));
+
+    // Vigilar avisa del que ya esta dentro.
+    QVERIFY(w.watchZone(zonaId));
+    QVERIFY(w.isZoneWatched(zonaId));
+    QCOMPARE(w.watchedZones(), QVector<qint64>({zonaId}));
+    QCOMPARE(entra.count(), 1);
+    QCOMPARE(entra.at(0).at(0).toLongLong(), a);
+    QCOMPARE(entra.at(0).at(1).toLongLong(), zonaId);
+    QCOMPARE(w.targetsInZone(zonaId), QVector<qint64>({a}));
+
+    // b entra, a sale.
+    QVERIFY(w.updateTarget(b, QGeoCoordinate(22.8, -81.8)));
+    QCOMPARE(entra.count(), 2);
+    QCOMPARE(entra.at(1).at(0).toLongLong(), b);
+    QVERIFY(w.updateTarget(a, QGeoCoordinate(24.0, -82.0)));
+    QCOMPARE(sale.count(), 1);
+    QCOMPARE(sale.at(0).at(0).toLongLong(), a);
+    QCOMPARE(w.zonesOfTarget(b), QVector<qint64>({zonaId}));
+    QVERIFY(w.zonesOfTarget(a).isEmpty());
+
+    // La zona se encoge al norte (sin b): b sale. Deshacer la devuelve: b entra.
+    QVERIFY(w.moveVertex(zonaId, 0, QGeoCoordinate(23.0, -82.5)));
+    QVERIFY(w.moveVertex(zonaId, 1, QGeoCoordinate(23.0, -81.5)));
+    QCOMPARE(sale.count(), 2);
+    QCOMPARE(sale.at(1).at(0).toLongLong(), b);
+    QVERIFY(w.undo());
+    QVERIFY(w.undo());
+    QCOMPARE(entra.count(), 3);
+    QCOMPARE(entra.at(2).at(0).toLongLong(), b);
+
+    // Borrar el objetivo no es "salir".
+    QVERIFY(w.removeTarget(b));
+    QCOMPARE(sale.count(), 2);
+    QVERIFY(w.targetsInZone(zonaId).isEmpty());
+
+    // Borrar la zona la deja de vigilar, sin salidas.
+    QVERIFY(w.updateTarget(a, QGeoCoordinate(23.0, -82.0)));
+    QCOMPARE(entra.count(), 4);
+    QVERIFY(w.removeFeature(zonaId));
+    QVERIFY(!w.isZoneWatched(zonaId));
+    QCOMPARE(sale.count(), 2);
+    QVERIFY(w.updateTarget(a, QGeoCoordinate(26.0, -82.0)));
+    QCOMPARE(sale.count(), 2);
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

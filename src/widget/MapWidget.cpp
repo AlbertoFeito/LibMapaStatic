@@ -6,6 +6,7 @@
 #include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
 #include "geo/WebMercator.h"
+#include "geo/ZoneMonitor.h"
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileService.h"
 #include "db/VectorRepository.h"
@@ -120,6 +121,42 @@ public:
     QVector<DataPackage::Overlay> overlays;
     QSet<QString> fixedLayers;
     QStringList dataWarnings;      // comprobacion rapida del paquete al abrir
+
+    // Alertas de zona: que objetivos estan dentro de que entidades vigiladas.
+    // La logica vive en ZoneMonitor (probada sin ventanas); aqui solo se le
+    // pasan los cambios de objetivos y entidades y se emiten sus transiciones.
+    ZoneMonitor zones;
+
+    // Convierte las transiciones de ZoneMonitor en senales publicas. El estado
+    // ya esta actualizado al emitir, asi que un slot puede consultar
+    // targetsInZone o mover objetivos sin ver datos a medias.
+    void emitZoneTransitions(const QVector<ZoneMonitor::Transition> &cambios)
+    {
+        for (const ZoneMonitor::Transition &t : cambios) {
+            if (t.entered)
+                emit q->targetEnteredZone(t.targetId, t.zoneId);
+            else
+                emit q->targetLeftZone(t.targetId, t.zoneId);
+        }
+    }
+
+    // Vuelve a leer una zona vigilada de su entidad: si la entidad ya no existe
+    // o ha dejado de ser un poligono, se deja de vigilar en silencio; si cambio
+    // de forma, se reevalua y se emiten las entradas/salidas. Comparar con el
+    // contorno guardado evita reevaluar cuando la edicion no toco la geometria.
+    void syncZone(qint64 featureId)
+    {
+        if (!zones.hasZone(featureId) || !view)
+            return;
+        const std::optional<MapFeature> f = view->overlayModel()->feature(featureId);
+        if (!f || f->kind != GeometryKind::Polygon) {
+            zones.removeZone(featureId);
+            return;
+        }
+        const QVector<QVector<QGeoCoordinate>> contorno = f->outlines();
+        if (contorno != zones.zoneRings(featureId))
+            emitZoneTransitions(zones.setZone(featureId, contorno));
+    }
 
     /*!
      * \brief Carga las capas fijas del paquete que aun no esten en el modelo.
@@ -317,6 +354,16 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(modelo, &OverlayModel::featureRemoved, this, &MapWidget::featureRemoved);
     connect(modelo, &OverlayModel::selectionChanged, this, &MapWidget::featureSelected);
     connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
+    // Zonas vigiladas: seguir la geometria de su entidad. Las cargas en bloque y
+    // el deshacer solo emiten layersChanged, por eso tambien se resincroniza ahi.
+    connect(modelo, &OverlayModel::featureUpdated, this,
+            [this](qint64 id) { d->syncZone(id); });
+    connect(modelo, &OverlayModel::featureRemoved, this,
+            [this](qint64 id) { d->zones.removeZone(id); });
+    connect(modelo, &OverlayModel::layersChanged, this, [this] {
+        for (qint64 id : d->zones.zones())
+            d->syncZone(id);
+    });
     connect(d->view, &MapView::targetClicked, this, &MapWidget::targetClicked);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
     connect(d->view, &MapView::featureDragStarted, this, &MapWidget::featureDragStarted);
@@ -890,14 +937,22 @@ qint64 MapWidget::loadFeaturesAsLayer(const QString &databasePath,
 // Inserta o actualiza un objetivo movil; devuelve su id.
 qint64 MapWidget::addTarget(const MapTarget &target)
 {
-    return d->view ? d->view->targetModel()->upsert(target) : -1;
+    if (!d->view)
+        return -1;
+    const qint64 id = d->view->targetModel()->upsert(target);
+    if (id >= 0)
+        d->emitZoneTransitions(d->zones.updateTarget(id, target.position));
+    return id;
 }
 
 // Mueve un objetivo a una nueva posicion/rumbo (camino rapido de refresco).
 bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
                              double headingDeg)
 {
-    return d->view && d->view->targetModel()->update(id, position, headingDeg);
+    if (!d->view || !d->view->targetModel()->update(id, position, headingDeg))
+        return false;
+    d->emitZoneTransitions(d->zones.updateTarget(id, position));
+    return true;
 }
 
 // Cambia la etiqueta de un objetivo.
@@ -960,15 +1015,17 @@ qint64 MapWidget::selectedTarget() const
     return d->view ? d->view->selectedTarget() : -1;
 }
 
-// Elimina un objetivo.
+// Elimina un objetivo; tambien lo olvidan las zonas vigiladas, sin emitir salida.
 bool MapWidget::removeTarget(qint64 id)
 {
+    d->zones.removeTarget(id);
     return d->view && d->view->targetModel()->remove(id);
 }
 
-// Elimina todos los objetivos.
+// Elimina todos los objetivos (las zonas vigiladas quedan vacias, sin salidas).
 void MapWidget::clearTargets()
 {
+    d->zones.clearTargets();
     if (d->view)
         d->view->targetModel()->clear();
 }
@@ -1006,6 +1063,56 @@ void MapWidget::setTargetsVisible(bool visible)
         d->view->targetLayer()->setVisible(visible);
         d->view->replot(QCustomPlot::rpQueuedReplot);
     }
+}
+
+// ------------------------------------------------------ alertas de zona ----
+
+// Empieza a vigilar un poligono: se registra su contorno en ZoneMonitor con las
+// posiciones de los objetivos actuales y se emiten las entradas de quienes ya
+// estan dentro. Si ya se vigilaba, solo se resincroniza su forma.
+bool MapWidget::watchZone(qint64 featureId)
+{
+    if (!d->view)
+        return false;
+    const std::optional<MapFeature> f = d->view->overlayModel()->feature(featureId);
+    if (!f || f->kind != GeometryKind::Polygon || !f->isValid())
+        return false;
+    if (d->zones.hasZone(featureId)) {
+        d->syncZone(featureId);
+        return true;
+    }
+    d->emitZoneTransitions(d->zones.setZone(featureId, f->outlines()));
+    return d->zones.hasZone(featureId);
+}
+
+// Deja de vigilar una zona sin emitir salidas: la app lo ha pedido, ya lo sabe.
+bool MapWidget::unwatchZone(qint64 featureId)
+{
+    return d->zones.removeZone(featureId);
+}
+
+// ¿Se vigila esta entidad como zona?
+bool MapWidget::isZoneWatched(qint64 featureId) const
+{
+    return d->zones.hasZone(featureId);
+}
+
+// Entidades vigiladas como zona, ordenadas por id.
+QVector<qint64> MapWidget::watchedZones() const
+{
+    return d->zones.zones();
+}
+
+// Objetivos dentro de una zona vigilada (vacio si no se vigila).
+QVector<qint64> MapWidget::targetsInZone(qint64 featureId) const
+{
+    return d->zones.targetsIn(featureId);
+}
+
+// Zonas vigiladas que contienen a un objetivo.
+QVector<qint64> MapWidget::zonesOfTarget(qint64 targetId) const
+{
+    return d->zones.zonesOf(targetId);
 }
 
 // Id de la entidad seleccionada (o -1).

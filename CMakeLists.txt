@@ -91,6 +91,8 @@ add_library(libmapa_core STATIC
     src/geo/WebMercator.h
     src/geo/TileMatrix.cpp
     src/geo/TileMatrix.h
+    src/geo/ZoneMonitor.cpp
+    src/geo/ZoneMonitor.h
 
     src/db/SqliteConnectionPool.cpp
     src/db/SqliteConnectionPool.h
@@ -358,6 +360,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_sqliteelevation)
     libmapa_add_test(tst_elevationanalysis)
     libmapa_add_test(tst_contours)
+    libmapa_add_test(tst_zonemonitor)
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 

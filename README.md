@@ -12,12 +12,13 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 19 tests (16 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 20 tests (17 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
 - **Etiquetas ancladas y movibles**: el rótulo de una entidad o de un objetivo puede desplazarse (`setFeatureLabelOffset` / `setTargetLabelOffset`), queda unido a su punto por una línea guía y, al ser relativo, lo sigue cuando se mueve; se localiza aparte con `featureLabelAt` / `targetLabelAt` (hasta 3 líneas, por `\n`)
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
+- **Alertas de zona**: cualquier polígono puede vigilarse (`watchZone`) y la librería avisa cuando un objetivo entra o sale (`targetEnteredZone` / `targetLeftZone`), siguiendo también las ediciones de la zona
 
 ## Uso
 
@@ -91,6 +92,22 @@ connect(mapa, &libmapa::MapWidget::targetClicked, this, [=](qint64 id, auto){
     auto t = mapa->target(id);                 // t->kind, t->attributes...
     panel->mostrar(t->attributes);
 });
+```
+
+**Alertas de zona.** Un polígono cualquiera (dibujado o cargado) se vigila con
+`watchZone(id)`: la librería avisa cuando un objetivo entra o sale. Al empezar a
+vigilar avisa de los que ya están dentro; si la zona se edita (vértices, arrastre,
+deshacer) se reevalúa. Borrar un objetivo o la zona no cuenta como «salir». La
+vigilancia no se guarda con las entidades: vuelve a pedirla al cargar.
+
+```cpp
+for (const auto &f : mapa->featuresOfType("zona_prohibida"))
+    mapa->watchZone(f.id);
+
+connect(mapa, &libmapa::MapWidget::targetEnteredZone, this, [=](qint64 obj, qint64 zona){
+    alarma->disparar(mapa->target(obj)->attributes["mmsi"], zona);
+});
+// En cualquier momento: mapa->targetsInZone(zona), mapa->zonesOfTarget(obj)
 ```
 
 ## El paquete de datos
@@ -562,7 +579,7 @@ src/
   io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               19 tests (16 sin QCustomPlot)
+tests/               20 tests (17 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
@@ -598,6 +615,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 16 | Análisis de elevación: perfil del terreno a lo largo de una ruta (`MapWidget::elevationProfile`) sobre el origen DEM existente |
 | 17 | Visibilidad punto a punto (`MapWidget::lineOfSight`): línea de visión con altura de antenas y curvatura 4/3 |
 | 18 | Viewshed 360° (`MapWidget::viewshed`): ángulo de cierre, horizonte y picos, y zona de visibilidad a una altura por azimut |
+| 19 | Alertas de zona: un polígono vigilado avisa de los objetivos que entran o salen (`watchZone`, `targetEnteredZone`/`targetLeftZone`) |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

@@ -22,6 +22,7 @@ SOURCES += \
     $$ROOT/src/core/Logging.cpp \
     $$ROOT/src/geo/WebMercator.cpp \
     $$ROOT/src/geo/TileMatrix.cpp \
+    $$ROOT/src/geo/ZoneMonitor.cpp \
     $$ROOT/src/db/SqliteConnectionPool.cpp \
     $$ROOT/src/db/Schema.cpp \
     $$ROOT/src/db/VectorRepository.cpp \

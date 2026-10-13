@@ -4561,3 +4561,61 @@ rejilla, cobertura por zoom). Quedan sin UI dedicada solo *getters* y variantes 
 `visibleNorthWest`, `featuresOfType`, `clearUndoHistory`) o deliberadamente no usadas por el guardado
 explícito (`setFeaturesDbFile`/`saveFeaturesNow`); el rango de zoom por capa se demuestra con los
 overlays del paquete (curvas de nivel con `z` limitado). Compila sin warnings, **19 tests** en verde.
+
+## 114. Alertas de zona: avisar cuando un objetivo entra o sale de un polígono
+
+**Problema.** La librería ya tenía objetivos móviles y polígonos, pero nada los
+relacionaba: para saber si un buque había entrado en una zona prohibida la app
+tenía que repetir, en cada actualización, una prueba de punto en polígono contra
+todas sus zonas y llevar ella el estado «dentro/fuera». Es geometría pura y la
+librería ya conoce las dos cosas.
+
+**Antes, una decisión de alcance.** Se valoró que la librería leyera directamente
+NMEA (GPS/GLONASS/BeiDou) o AIS. Se descartó: recibir datos es puerto serie o
+UDP/TCP, y la librería tiene prohibida la red (guarda en `CMakeLists.txt`); además
+la obligaría a conocer cada protocolo, en contra del diseño (objetivos agnósticos
+del dominio). La recepción y decodificación quedan en la app, que llama a
+`addTarget`/`updateTarget`. Las alertas de zona, en cambio, no necesitan saber de
+dónde viene el objetivo: encajan dentro.
+
+**Qué se hizo.**
+- `geo/ZoneMonitor` (núcleo, sin widget ni señales): guarda los contornos de las
+  zonas, la última posición de cada objetivo y quién está dentro de qué. Cada
+  operación devuelve las transiciones (entra/sale) que provoca. Se prueba sin
+  ventanas (`tst_zonemonitor`, 8 casos).
+- `MapWidget`: `watchZone(idPoligono)`, `unwatchZone`, `isZoneWatched`,
+  `watchedZones`, `targetsInZone`, `zonesOfTarget` y las señales
+  `targetEnteredZone(objetivo, zona)` / `targetLeftZone`. `addTarget`,
+  `updateTarget`, `removeTarget` y `clearTargets` pasan por el monitor.
+- La zona sigue a su entidad: `featureUpdated` (vértices, arrastre, edición) la
+  reevalúa; `featureRemoved` la deja de vigilar. Las cargas en bloque y el
+  **deshacer** solo emiten `layersChanged`, así que ahí también se resincronizan
+  las zonas vigiladas (comparando el contorno guardado para no reevaluar si la
+  geometría no cambió).
+
+**Por qué así.**
+- **«Dentro» en Web Mercator, no en grados.** Los polígonos se dibujan con lados
+  rectos en la proyección del mapa. Hacer el ray-casting en lon/lat daba un
+  resultado distinto de lo que ve el operador en lados largos e inclinados: en un
+  triángulo (0,0)-(0,60)-(60,60), a lon 30 la hipotenusa pasa por lat 30 en grados
+  pero por lat ≈35,3 en Mercator; un objetivo a lat 33 se VE dentro y así cuenta
+  (lo fija un test). `GeoMath::pointInPolygon` sigue en grados porque solo decide
+  qué teselas bajar.
+- **Vigilar avisa de lo que ya hay dentro.** Una zona recién vigilada empieza vacía
+  y los objetivos que ya están en ella producen una entrada: la app se entera del
+  estado inicial por el mismo canal, sin una consulta aparte.
+- **Borrar no es salir.** Quitar un objetivo, vaciar los objetivos o borrar/dejar
+  de vigilar una zona no emite salidas: la app lo ha pedido y ya lo sabe; una
+  «salida» ahí dispararía alarmas falsas. Una posición inválida sí saca al objetivo
+  de todas sus zonas (ha perdido el fijo; ya no se sabe que esté dentro).
+- **Multi-parte = cualquier parte.** Un `.geo` con varios anillos es una sola zona;
+  basta con estar dentro de uno.
+- **Coste.** O(zonas) por actualización de objetivo, con descarte por caja
+  envolvente antes de recorrer los lados; 2000 objetivos contra 20 zonas se
+  resuelven en milisegundos en el test.
+- **No se persiste** la vigilancia (igual que los objetivos): la app la vuelve a
+  pedir al cargar, p. ej. para todas las entidades de cierto `type`.
+
+Limitación conocida: zonas que crucen el antimeridiano (±180°) no se tratan.
+
+Compila sin warnings; **20 tests** en verde (17 sin QCustomPlot), Qt 6.4.
