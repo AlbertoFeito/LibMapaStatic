@@ -7,6 +7,7 @@
 #include "widget/OverlayModel.h"
 
 #include <QPixmap>
+#include <QSet>
 #include <functional>
 
 namespace libmapa {
@@ -77,6 +78,15 @@ public:
     int segmentAt(const MapFeature &feature, const QPoint &pixel,
                   double tolerancePx = 10.0) const;
 
+    /*!
+     * \brief Entidades "en alerta": se dibujan con un resalte del color de
+     *        alerta por debajo (aro alrededor de un punto, borde ancho y velo en
+     *        un poligono). Lo usa MapWidget para las alertas de zona.
+     */
+    void setAlerted(const QSet<qint64> &ids);
+    void setAlertColor(const QColor &color);
+    QColor alertColor() const { return m_alertColor; }
+
     //! Entidades dibujadas en el ultimo repintado.
     int lastDrawnCount() const { return m_lastDrawn; }
     //! Veces que se reutilizo el pixmap en vez de volver a dibujar.
@@ -88,6 +98,7 @@ protected:
 
 private:
     void drawFeature(QPainter *painter, const MapFeature &f, bool selected) const;
+    void drawAlert(QPainter *painter, const MapFeature &f) const;
     //! Dibuja UNA parte (un punto de ella) de una entidad Point.
     void drawPointPart(QPainter *painter, const MapFeature &f,
                        const QVector<QGeoCoordinate> &part, bool selected) const;
@@ -131,6 +142,10 @@ private:
     mutable QCPRange m_cacheX, m_cacheY;
     mutable int m_lastDrawn = 0;
     mutable int m_cacheHits = 0;
+
+    // Alertas de zona: ids a resaltar y su color.
+    QSet<qint64> m_alerted;
+    QColor m_alertColor = QColor(0xff, 0x17, 0x44);
 
     // El trazo en curso NO va al pixmap cacheado: cambia con cada movimiento
     // del raton y obligaria a redibujar todas las entidades cada vez.

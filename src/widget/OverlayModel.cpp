@@ -495,6 +495,10 @@ bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
         return false;
 
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->geometry[index] = to;
     emit featureUpdated(id);
     emit changed();
@@ -509,6 +513,10 @@ bool OverlayModel::setLabelOffset(qint64 id, const QPointF &offsetPx)
     if (it == m_features.end())
         return false;
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->style.labelOffsetPx = offsetPx;
     emit featureUpdated(id);
     emit changed();
@@ -536,6 +544,10 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
         return false;
 
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->geometry.insert(index, at);
     emit featureUpdated(id);
     emit changed();
@@ -561,6 +573,10 @@ bool OverlayModel::removeVertex(qint64 id, int index)
         return false;
 
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->geometry.remove(index);
     emit featureUpdated(id);
     emit changed();
@@ -611,6 +627,10 @@ bool OverlayModel::moveFeature(qint64 id, double deltaLat, double deltaLon)
     }
 
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->geometry = nuevaGeom;
     it->parts = nuevasPartes;
     emit featureUpdated(id);

@@ -126,18 +126,105 @@ public:
     // La logica vive en ZoneMonitor (probada sin ventanas); aqui solo se le
     // pasan los cambios de objetivos y entidades y se emiten sus transiciones.
     ZoneMonitor zones;
+    // Las mismas zonas, vigilando las ENTIDADES PUNTO (marcadores fijos que el
+    // operador coloca o arrastra). Monitor aparte porque los ids de entidad y de
+    // objetivo son espacios distintos y podrian coincidir.
+    ZoneMonitor pointZones;
+    // Resalte en el mapa de las zonas ocupadas y de los puntos dentro de ellas.
+    bool zoneHighlight = true;
+
+    // Recalcula que entidades estan "en alerta" (zonas vigiladas con algo
+    // dentro, y entidades punto dentro de alguna) y se lo pasa a la capa de
+    // entidades, que solo redibuja si el conjunto cambio. Se llama tras
+    // cualquier cambio de pertenencia, tambien los silenciosos (borrados).
+    void refreshAlerts()
+    {
+        if (!view || !view->featureLayer())
+            return;
+        QSet<qint64> alerta;
+        if (zoneHighlight) {
+            for (qint64 z : zones.zones()) {
+                const QVector<qint64> puntos = pointZones.targetsIn(z);
+                if (!puntos.isEmpty() || !zones.targetsIn(z).isEmpty())
+                    alerta.insert(z);
+                for (qint64 p : puntos)
+                    alerta.insert(p);
+            }
+        }
+        view->featureLayer()->setAlerted(alerta);
+        view->replot(QCustomPlot::rpQueuedReplot);
+    }
 
     // Convierte las transiciones de ZoneMonitor en senales publicas. El estado
     // ya esta actualizado al emitir, asi que un slot puede consultar
     // targetsInZone o mover objetivos sin ver datos a medias.
     void emitZoneTransitions(const QVector<ZoneMonitor::Transition> &cambios)
     {
+        if (!cambios.isEmpty())
+            refreshAlerts();
         for (const ZoneMonitor::Transition &t : cambios) {
             if (t.entered)
                 emit q->targetEnteredZone(t.targetId, t.zoneId);
             else
                 emit q->targetLeftZone(t.targetId, t.zoneId);
         }
+    }
+
+    // Igual para las entidades punto: featureEnteredZone / featureLeftZone.
+    void emitPointZoneTransitions(const QVector<ZoneMonitor::Transition> &cambios)
+    {
+        if (!cambios.isEmpty())
+            refreshAlerts();
+        for (const ZoneMonitor::Transition &t : cambios) {
+            if (t.entered)
+                emit q->featureEnteredZone(t.targetId, t.zoneId);
+            else
+                emit q->featureLeftZone(t.targetId, t.zoneId);
+        }
+    }
+
+    // Lleva la posicion de una entidad al monitor de puntos: si es un punto, su
+    // (primera) posicion; si ya no existe o no es un punto, se olvida sin
+    // emitir salida. Sin zonas vigiladas no se hace nada (coste cero).
+    void syncPoint(qint64 featureId)
+    {
+        if (!view || zones.zones().isEmpty())
+            return;
+        const std::optional<MapFeature> f = view->overlayModel()->feature(featureId);
+        if (!f || f->kind != GeometryKind::Point) {
+            pointZones.removeTarget(featureId);
+            return;
+        }
+        emitPointZoneTransitions(pointZones.updateTarget(featureId, f->position()));
+    }
+
+    // Resincroniza TODAS las entidades punto con el modelo: tras cargas en bloque
+    // o deshacer, que solo avisan con layersChanged. Olvida las que ya no estan.
+    // O(puntos x zonas) con descarte por caja; solo si hay zonas vigiladas.
+    void syncAllPoints()
+    {
+        if (!view || zones.zones().isEmpty())
+            return;
+        QSet<qint64> vivos;
+        for (const MapFeature &f : view->overlayModel()->features()) {
+            if (f.kind != GeometryKind::Point)
+                continue;
+            vivos.insert(f.id);
+            emitPointZoneTransitions(pointZones.updateTarget(f.id, f.position()));
+        }
+        for (qint64 id : pointZones.trackedTargets())
+            if (!vivos.contains(id))
+                pointZones.removeTarget(id);
+    }
+
+    // Deja de vigilar una zona en los dos monitores, sin emitir salidas.
+    bool dropZone(qint64 featureId)
+    {
+        pointZones.removeZone(featureId);
+        const bool habia = zones.removeZone(featureId);
+        if (habia)
+            refreshAlerts();
+        return habia;
     }
 
     // Vuelve a leer una zona vigilada de su entidad: si la entidad ya no existe
@@ -150,12 +237,14 @@ public:
             return;
         const std::optional<MapFeature> f = view->overlayModel()->feature(featureId);
         if (!f || f->kind != GeometryKind::Polygon) {
-            zones.removeZone(featureId);
+            dropZone(featureId);
             return;
         }
         const QVector<QVector<QGeoCoordinate>> contorno = f->outlines();
-        if (contorno != zones.zoneRings(featureId))
+        if (contorno != zones.zoneRings(featureId)) {
             emitZoneTransitions(zones.setZone(featureId, contorno));
+            emitPointZoneTransitions(pointZones.setZone(featureId, contorno));
+        }
     }
 
     /*!
@@ -356,11 +445,22 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
     // Zonas vigiladas: seguir la geometria de su entidad. Las cargas en bloque y
     // el deshacer solo emiten layersChanged, por eso tambien se resincroniza ahi.
-    connect(modelo, &OverlayModel::featureUpdated, this,
-            [this](qint64 id) { d->syncZone(id); });
-    connect(modelo, &OverlayModel::featureRemoved, this,
-            [this](qint64 id) { d->zones.removeZone(id); });
+    // Las entidades PUNTO tambien se vigilan: alta, movimiento (edicion o
+    // arrastre) y borrado; en bloque, se resincronizan todas (primero los
+    // puntos, luego las zonas).
+    connect(modelo, &OverlayModel::featureAdded, this,
+            [this](qint64 id) { d->syncPoint(id); });
+    connect(modelo, &OverlayModel::featureUpdated, this, [this](qint64 id) {
+        d->syncPoint(id);
+        d->syncZone(id);
+    });
+    connect(modelo, &OverlayModel::featureRemoved, this, [this](qint64 id) {
+        d->dropZone(id);
+        d->pointZones.removeTarget(id);
+        d->refreshAlerts();
+    });
     connect(modelo, &OverlayModel::layersChanged, this, [this] {
+        d->syncAllPoints();
         for (qint64 id : d->zones.zones())
             d->syncZone(id);
     });
@@ -1073,6 +1173,7 @@ qint64 MapWidget::selectedTarget() const
 bool MapWidget::removeTarget(qint64 id)
 {
     d->zones.removeTarget(id);
+    d->refreshAlerts();
     return d->view && d->view->targetModel()->remove(id);
 }
 
@@ -1080,6 +1181,7 @@ bool MapWidget::removeTarget(qint64 id)
 void MapWidget::clearTargets()
 {
     d->zones.clearTargets();
+    d->refreshAlerts();
     if (d->view)
         d->view->targetModel()->clear();
 }
@@ -1136,13 +1238,17 @@ bool MapWidget::watchZone(qint64 featureId)
         return true;
     }
     d->emitZoneTransitions(d->zones.setZone(featureId, f->outlines()));
+    // Puntos: se cargan sus posiciones (si es la primera zona, aun no se
+    // seguian) y despues se da de alta la zona, que avisa de los que ya estan.
+    d->syncAllPoints();
+    d->emitPointZoneTransitions(d->pointZones.setZone(featureId, f->outlines()));
     return d->zones.hasZone(featureId);
 }
 
 // Deja de vigilar una zona sin emitir salidas: la app lo ha pedido, ya lo sabe.
 bool MapWidget::unwatchZone(qint64 featureId)
 {
-    return d->zones.removeZone(featureId);
+    return d->dropZone(featureId);
 }
 
 // ¿Se vigila esta entidad como zona?
@@ -1167,6 +1273,40 @@ QVector<qint64> MapWidget::targetsInZone(qint64 featureId) const
 QVector<qint64> MapWidget::zonesOfTarget(qint64 targetId) const
 {
     return d->zones.zonesOf(targetId);
+}
+
+// Enciende/apaga el resalte de las zonas ocupadas y sus puntos, y repinta.
+void MapWidget::setZoneAlertHighlight(bool on)
+{
+    d->zoneHighlight = on;
+    d->refreshAlerts();
+}
+
+// ¿Se resaltan las zonas ocupadas?
+bool MapWidget::isZoneAlertHighlight() const
+{
+    return d->zoneHighlight;
+}
+
+// Color del resalte de alerta (rojo por defecto).
+void MapWidget::setZoneAlertColor(const QColor &color)
+{
+    if (!d->view || !d->view->featureLayer())
+        return;
+    d->view->featureLayer()->setAlertColor(color);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Entidades punto dentro de una zona vigilada (vacio si no se vigila).
+QVector<qint64> MapWidget::featuresInZone(qint64 zoneFeatureId) const
+{
+    return d->pointZones.targetsIn(zoneFeatureId);
+}
+
+// Zonas vigiladas que contienen a una entidad punto.
+QVector<qint64> MapWidget::zonesOfFeature(qint64 featureId) const
+{
+    return d->pointZones.zonesOf(featureId);
 }
 
 // Id de la entidad seleccionada (o -1).

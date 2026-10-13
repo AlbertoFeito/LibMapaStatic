@@ -4725,3 +4725,47 @@ herramienta.
   demás tests que manejan entidades.
 
 Compila sin warnings; **22 tests** en verde (19 sin QCustomPlot), Qt 6.4.
+
+## 118. Alertas de zona: también para entidades punto, resalte en el mapa, y deshacer arreglado
+
+**Problema (lo vio el usuario en el demo).** Un «Objetivo» colocado dentro de
+un «Área objetivo» no avisaba de nada. Causas:
+1. En el demo, «Objetivo» es una **entidad punto** (`type="objetivo"`), no un
+   objetivo móvil (`MapTarget`); §114 solo vigilaba objetivos móviles.
+2. El área no se vigilaba sola: había que seleccionarla y usar *Vigilar zona
+   seleccionada*.
+3. El único aviso era un texto efímero en la barra de estado: nada en el mapa.
+
+**Qué se hizo.**
+- `MapWidget` vigila también las **entidades punto** con un segundo
+  `ZoneMonitor` (los ids de entidad y de objetivo son espacios distintos y
+  podrían coincidir): señales `featureEnteredZone` / `featureLeftZone`, consultas
+  `featuresInZone` / `zonesOfFeature`. Se alimenta de `featureAdded`,
+  `featureUpdated` (edición y arrastre) y `featureRemoved`; tras cargas en bloque
+  o deshacer (solo `layersChanged`) se resincronizan todos los puntos. Solo
+  trabaja si hay zonas vigiladas (coste cero si no). `ZoneMonitor::trackedTargets`
+  permite olvidar los que ya no existen.
+- **Resalte en el mapa** (`setZoneAlertHighlight`, activo por defecto;
+  `setZoneAlertColor`): una zona vigilada con algo dentro se dibuja con borde
+  ancho y velo rojo, y cada punto dentro, con un aro. Lo pinta `FeatureLayer`
+  por debajo de la entidad, en píxeles; solo redibuja si cambia el conjunto.
+- `demo`: las «Área objetivo» se vigilan **solas** (al crearlas, cargarlas o
+  deshacer), salvo las que el usuario desactive; los objetivos móviles dentro de
+  una zona se pintan en **rojo y más grandes** (por el proveedor de símbolos); y
+  un indicador fijo en la barra de estado («⚠ N en zonas») lo resume.
+
+**Fallo de fondo encontrado al probarlo: deshacer no deshacía.** El test de
+«deshacer el arrastre saca el punto de la zona» falló porque el punto seguía
+dentro tras `undo()`. En `OverlayModel`, cinco ediciones (`moveVertex`,
+`insertVertex`, `removeVertex`, `moveFeature`, `setLabelOffset`) tomaban un
+iterador del `QHash` y DESPUÉS llamaban a `pushUndo()`, que copia el hash para
+la pila de deshacer. Los contenedores de Qt comparten datos entre copias
+(*implicit sharing*): escribir por el iterador antiguo no separaba los datos y
+modificaba también la instantánea guardada. Resultado: deshacer un arrastre,
+una inserción de vértice o un movimiento de entidad restauraba el estado ya
+modificado — no hacía nada. Ningún test cubría el deshacer de esas ediciones.
+Arreglo mínimo: volver a buscar el iterador tras `pushUndo()` (fuerza la
+separación). Nuevo test `tst_overlaymodel::undoRestoresEveryEdit` que cubre las
+cinco y el rehacer.
+
+Compila sin warnings; **22 tests** en verde (19 sin QCustomPlot), Qt 6.4.

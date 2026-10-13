@@ -122,7 +122,9 @@ void TstZoneMonitor::removalsAreSilent()
     m.updateTarget(11, QGeoCoordinate(23.1, -82.0));
     QCOMPARE(m.zonesOf(10), QVector<qint64>({1, 2}));
 
+    QCOMPARE(m.trackedTargets(), QVector<qint64>({10, 11}));
     m.removeTarget(10);
+    QCOMPARE(m.trackedTargets(), QVector<qint64>({11}));
     QCOMPARE(m.targetsIn(1), QVector<qint64>({11}));
     QVERIFY(m.zonesOf(10).isEmpty());
 

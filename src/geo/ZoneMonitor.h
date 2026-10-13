@@ -83,6 +83,8 @@ public:
     //! Zonas en las que esta ahora el objetivo.
     QVector<qint64> zonesOf(qint64 targetId) const;
     bool isInside(qint64 targetId, qint64 zoneId) const;
+    //! Ids de todos los objetivos con posicion conocida, ordenados.
+    QVector<qint64> trackedTargets() const;
 
 private:
     struct Zone {

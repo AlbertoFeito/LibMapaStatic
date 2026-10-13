@@ -357,7 +357,7 @@ la API que usa la aplicación:</p>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
-<tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · <b>señales targetEnteredZone / targetLeftZone</b></td></tr>
+<tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b></td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
 <tr><td>Escala / cuadrícula</td><td class="mono">setScaleBarVisible · setScaleBarUnits (Metric/Nautical) · metersPerPixel · setGraticuleVisible · setGraticuleColor</td></tr>
@@ -571,7 +571,7 @@ poligonal en zona vigilada: cada <code>addTarget</code>/<code>updateTarget</code
 pasa por <code>ZoneMonitor</code> y, si el objetivo cruza el borde, se emite
 <code>targetEnteredZone(objetivo, zona)</code> o <code>targetLeftZone</code>. Las
 ediciones de la zona (vértices, arrastre, deshacer, cargas en bloque) la reevalúan;
-borrar el objetivo o la zona no genera salidas. Qué significa la zona («prohibida»,
+borrar el objetivo o la zona no genera salidas. También se vigilan las <b>entidades punto</b> (marcadores que el operador coloca o arrastra) con sus propias señales, y la zona ocupada se <b>resalta en el mapa</b> (borde y velo rojos, aro en los puntos). Qué significa la zona («prohibida»,
 «de interés»…) lo decide la app por su <code>type</code>: la librería solo hace la geometría.</p>
 
 <h3>9.3 · Entidades y ficheros .geo</h3>

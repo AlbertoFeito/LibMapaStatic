@@ -192,6 +192,18 @@ QVector<qint64> ZoneMonitor::zonesOf(qint64 targetId) const
     return ids;
 }
 
+// Objetivos cuya posicion se conoce (los que cuentan al dar de alta una zona),
+// ordenados por id. Sirve para resincronizar contra otra fuente de verdad.
+QVector<qint64> ZoneMonitor::trackedTargets() const
+{
+    QVector<qint64> ids;
+    ids.reserve(m_positions.size());
+    for (auto it = m_positions.cbegin(); it != m_positions.cend(); ++it)
+        ids.append(it.key());
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
 // ¿Esta ahora el objetivo dentro de la zona? false si alguno no existe.
 bool ZoneMonitor::isInside(qint64 targetId, qint64 zoneId) const
 {

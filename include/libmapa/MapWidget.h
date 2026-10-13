@@ -410,6 +410,10 @@ public:
      *   se deja de vigilar sin emitir salidas.
      * - Borrar un objetivo (o \ref clearTargets) tampoco emite salidas: no se
      *   ha ido, ha dejado de existir. Una posicion invalida si lo saca.
+     * - Tambien se vigilan las ENTIDADES PUNTO (marcadores que el operador pone
+     *   o arrastra), con sus propias señales \ref featureEnteredZone /
+     *   \ref featureLeftZone: los ids de entidad y de objetivo son espacios
+     *   distintos. Cuenta su (primera) posicion; borrarla no es «salir».
      * - La vigilancia no se guarda con las entidades: la app la vuelve a pedir
      *   al cargar (p. ej. para todas las entidades de cierto \c type).
      *
@@ -428,6 +432,17 @@ public:
     QVector<qint64> targetsInZone(qint64 featureId) const;
     //! Zonas vigiladas en las que esta ahora un objetivo, ordenadas.
     QVector<qint64> zonesOfTarget(qint64 targetId) const;
+    //! Entidades PUNTO que estan ahora dentro de una zona vigilada, ordenadas.
+    QVector<qint64> featuresInZone(qint64 zoneFeatureId) const;
+    //! Zonas vigiladas en las que esta ahora una entidad punto, ordenadas.
+    QVector<qint64> zonesOfFeature(qint64 featureId) const;
+    //! Resalte en el mapa (activo por defecto): una zona vigilada con algo
+    //! dentro se pinta con borde ancho y velo del color de alerta, y cada
+    //! entidad punto dentro de una zona lleva un aro. Los objetivos moviles los
+    //! marca la app con su proveedor de simbolos (\ref zonesOfTarget).
+    void setZoneAlertHighlight(bool on);
+    bool isZoneAlertHighlight() const;
+    void setZoneAlertColor(const QColor &color);
 
     // --- Seleccion -------------------------------------------------------
     qint64 selectedFeature() const;
@@ -624,6 +639,11 @@ signals:
     void targetEnteredZone(qint64 targetId, qint64 zoneFeatureId);
     //! Un objetivo movil ha salido de una zona vigilada (ver \ref watchZone).
     void targetLeftZone(qint64 targetId, qint64 zoneFeatureId);
+    //! Una entidad PUNTO ha entrado en una zona vigilada (al crearla, moverla,
+    //! arrastrarla o deshacer).
+    void featureEnteredZone(qint64 featureId, qint64 zoneFeatureId);
+    //! Una entidad PUNTO ha salido de una zona vigilada.
+    void featureLeftZone(qint64 featureId, qint64 zoneFeatureId);
     void featureLayersChanged();
     //! Emitida al crear una entidad con el raton.
     void featureCreated(qint64 id);

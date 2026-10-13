@@ -61,6 +61,7 @@
 #include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QSet>
 #include <QStatusBar>
 #include <QTableWidget>
 #include <QTabWidget>
@@ -1515,6 +1516,11 @@ private:
         connect(m_mapa, &MapWidget::featureRemoved, this, &Ventana::pedirReconstruir);
         connect(m_mapa, &MapWidget::featureUpdated, this, &Ventana::pedirReconstruir);
         connect(m_mapa, &MapWidget::featureLayersChanged, this, &Ventana::pedirReconstruir);
+        // Toda «Área objetivo» queda vigilada sola (creada, cargada o restaurada).
+        connect(m_mapa, &MapWidget::featureLayersChanged, this, &Ventana::vigilarAreasObjetivo);
+        connect(m_mapa, &MapWidget::featureRemoved, this, [this](qint64) {
+            actualizarIndicadorAlertas();
+        });
 
         connect(m_mapa, &MapWidget::featureSelected, this, &Ventana::seleccionEnMapa);
 
@@ -1569,6 +1575,11 @@ private:
         statusBar()->addPermanentWidget(m_coords);
         statusBar()->addPermanentWidget(m_cota);
         statusBar()->addPermanentWidget(m_info);
+        m_alertas = new QLabel(this);
+        m_alertas->setToolTip(tr("Objetivos dentro de zonas vigiladas (las «Área objetivo» "
+                                 "se vigilan solas; cualquier polígono, con Datos → "
+                                 "Vigilar zona seleccionada)."));
+        statusBar()->addPermanentWidget(m_alertas);
     }
 
     // Muestra la cota del terreno bajo el cursor (o "—" si no hay DEM/dato).
@@ -3512,16 +3523,26 @@ private:
         m_icoAereo   = iconoAereo(QColor(0x0c, 0x97, 0x8a));
         m_icoUav     = iconoUav(QColor(0x3c, 0xb0, 0x4a));
         m_icoUavBajo = iconoUav(QColor(0xd0, 0x3a, 0x2a));
+        // Variantes de ALERTA: objetivo dentro de una zona vigilada.
+        const QColor alerta(0xff, 0x17, 0x44);
+        m_icoBuqueZona = iconoBuque(alerta);
+        m_icoAereoZona = iconoAereo(alerta);
+        m_icoUavZona   = iconoUav(alerta);
 
         m_mapa->setTargetSymbolProvider([this](const MapTarget &t) {
             TargetSymbol s;                         // icono nulo => galon
+            // Dentro de una zona vigilada: icono rojo y algo mayor (la alerta
+            // se VE en el mapa, no solo en la barra de estado).
+            const bool enZona = !m_mapa->zonesOfTarget(t.id).isEmpty();
             if (t.kind == QLatin1String("buque"))
-                s.icon = m_icoBuque;
+                s.icon = enZona ? m_icoBuqueZona : m_icoBuque;
             else if (t.kind == QLatin1String("aeronave"))
-                s.icon = m_icoAereo;
+                s.icon = enZona ? m_icoAereoZona : m_icoAereo;
             else if (t.kind == QLatin1String("uav"))
-                s.icon = t.attributes.value(QStringLiteral("bateria")).toInt() < 20
+                s.icon = enZona ? m_icoUavZona
+                       : t.attributes.value(QStringLiteral("bateria")).toInt() < 20
                              ? m_icoUavBajo : m_icoUav;
+            s.scale = enZona ? 1.3 : 1.0;
             s.rotateWithHeading = true;
             return s;
         });
@@ -3534,10 +3555,21 @@ private:
         // estado. Es el cierre del ciclo ver -> seleccionar -> consultar.
         // Alertas de zona: la librería avisa al cruzar el borde de una zona vigilada.
         connect(m_mapa, &MapWidget::targetEnteredZone, this, [this](qint64 obj, qint64 zona) {
-            statusBar()->showMessage(textoAlertaZona(obj, zona, true), 6000);
+            statusBar()->showMessage(textoAlertaZona(obj, false, zona, true), 6000);
+            actualizarIndicadorAlertas();
         });
         connect(m_mapa, &MapWidget::targetLeftZone, this, [this](qint64 obj, qint64 zona) {
-            statusBar()->showMessage(textoAlertaZona(obj, zona, false), 6000);
+            statusBar()->showMessage(textoAlertaZona(obj, false, zona, false), 6000);
+            actualizarIndicadorAlertas();
+        });
+        // Los «Objetivo» que coloca el operador son ENTIDADES punto: su propia señal.
+        connect(m_mapa, &MapWidget::featureEnteredZone, this, [this](qint64 ent, qint64 zona) {
+            statusBar()->showMessage(textoAlertaZona(ent, true, zona, true), 8000);
+            actualizarIndicadorAlertas();
+        });
+        connect(m_mapa, &MapWidget::featureLeftZone, this, [this](qint64 ent, qint64 zona) {
+            statusBar()->showMessage(textoAlertaZona(ent, true, zona, false), 8000);
+            actualizarIndicadorAlertas();
         });
 
         connect(m_mapa, &MapWidget::targetClicked, this,
@@ -3570,10 +3602,14 @@ private:
         const QString nombre = f->name.isEmpty() ? tr("zona %1").arg(id) : f->name;
         if (m_mapa->isZoneWatched(id)) {
             m_mapa->unwatchZone(id);
+            m_noVigilar.insert(id);           // no volver a vigilarla sola
+            actualizarIndicadorAlertas();
             statusBar()->showMessage(tr("Se deja de vigilar «%1»").arg(nombre), 4000);
             return;
         }
+        m_noVigilar.remove(id);
         m_mapa->watchZone(id);
+        actualizarIndicadorAlertas();
         statusBar()->showMessage(
             tr("Vigilando «%1»: %2 objetivos dentro")
                 .arg(nombre).arg(m_mapa->targetsInZone(id).size()), 5000);
@@ -3581,17 +3617,66 @@ private:
 
     // Texto de una alerta de zona para la barra de estado: qué objetivo (primera
     // línea de su etiqueta), qué zona y cuántos quedan dentro.
-    QString textoAlertaZona(qint64 objetivo, qint64 zona, bool entra) const
+    // \a esEntidad: el que cruza es una entidad punto (un «Objetivo» colocado)
+    // y no un objetivo móvil. El recuento suma ambos.
+    QString textoAlertaZona(qint64 quienId, bool esEntidad, qint64 zona, bool entra) const
     {
-        const auto t = m_mapa->target(objetivo);
+        QString quien;
+        if (esEntidad) {
+            const auto e = m_mapa->feature(quienId);
+            quien = e && !e->name.isEmpty() ? e->name.section(QLatin1Char('\n'), 0, 0)
+                                            : tr("Entidad %1").arg(quienId);
+        } else {
+            const auto t = m_mapa->target(quienId);
+            quien = t && !t->label.isEmpty() ? t->label.section(QLatin1Char('\n'), 0, 0)
+                                             : tr("Objetivo %1").arg(quienId);
+        }
         const auto f = m_mapa->feature(zona);
-        const QString quien = t && !t->label.isEmpty()
-            ? t->label.section(QLatin1Char('\n'), 0, 0) : tr("Objetivo %1").arg(objetivo);
         const QString donde = f && !f->name.isEmpty()
             ? f->name.section(QLatin1Char('\n'), 0, 0) : tr("zona %1").arg(zona);
+        const int dentro = int(m_mapa->targetsInZone(zona).size()
+                               + m_mapa->featuresInZone(zona).size());
         return (entra ? tr("⚠ %1 ENTRA en «%2» (%3 dentro)")
                       : tr("%1 sale de «%2» (%3 dentro)"))
-            .arg(quien, donde).arg(m_mapa->targetsInZone(zona).size());
+            .arg(quien, donde).arg(dentro);
+    }
+
+    // Indicador fijo de la barra de estado: cuántos objetivos (móviles o
+    // colocados) hay ahora dentro de alguna zona vigilada. Rojo si hay alguno.
+    void actualizarIndicadorAlertas()
+    {
+        if (!m_alertas)
+            return;
+        QSet<qint64> moviles, puntos;
+        for (qint64 z : m_mapa->watchedZones()) {
+            for (qint64 t : m_mapa->targetsInZone(z))
+                moviles.insert(t);
+            for (qint64 p : m_mapa->featuresInZone(z))
+                puntos.insert(p);
+        }
+        const int n = int(moviles.size() + puntos.size());
+        const int zonas = int(m_mapa->watchedZones().size());
+        m_alertas->setText(zonas == 0 ? QString()
+                           : n == 0 ? tr("Zonas vigiladas: %1").arg(zonas)
+                                    : tr("⚠ %1 en zonas").arg(n));
+        m_alertas->setStyleSheet(n > 0 ? QStringLiteral("QLabel { color:#fff; background:#d50032;"
+                                                        " font-weight:bold; padding:0 6px; }")
+                                       : QString());
+    }
+
+    // Vigila automáticamente toda «Área objetivo» (al crearla, cargarla o
+    // deshacer), salvo las que el usuario desactivó a mano.
+    void vigilarAreasObjetivo()
+    {
+        bool alguna = false;
+        for (const MapFeature &f : m_mapa->featuresOfType(QStringLiteral("objetivo_area"))) {
+            if (f.kind != GeometryKind::Polygon || m_noVigilar.contains(f.id)
+                || m_mapa->isZoneWatched(f.id))
+                continue;
+            alguna = m_mapa->watchZone(f.id) || alguna;
+        }
+        if (alguna)
+            actualizarIndicadorAlertas();
     }
 
     void alternarSimulacion(bool on)
@@ -3851,6 +3936,9 @@ private:
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.
     // Juego de iconos de la app para la simbologia de objetivos (Fase 2).
     QPixmap m_icoBuque, m_icoAereo, m_icoUav, m_icoUavBajo;
+    QPixmap m_icoBuqueZona, m_icoAereoZona, m_icoUavZona;   //!< dentro de zona vigilada
+    QLabel *m_alertas = nullptr;            //!< indicador fijo «⚠ N en zonas»
+    QSet<qint64> m_noVigilar;               //!< áreas objetivo que el usuario desactivó
 };
 
 int main(int argc, char *argv[])

@@ -42,6 +42,12 @@ private slots:
     void clearsSelectionWhenFeatureIsRemoved();
     void notifiesObserversOnClear();
     void emitsChangedOnEveryMutation();
+
+    // --- Deshacer --------------------------------------------------------
+    //! Cada edicion (mover/insertar/quitar vertice, mover entidad, desplazar
+    //! etiqueta) se deshace de verdad y se rehace. Regresion: la instantanea
+    //! de deshacer compartia datos con el modelo y la edicion la alteraba.
+    void undoRestoresEveryEdit();
 };
 
 static MapFeature punto(const QString &nombre, double lat, double lon,
@@ -441,6 +447,41 @@ void TstOverlayModel::insertVertexRespectsMaxVerticesCap()
     const qint64 id2 = m.addFeature(libre);
     QVERIFY(m.insertVertex(id2, 10, QGeoCoordinate(24.0, -83.0)));
     QCOMPARE(m.feature(id2)->geometry.size(), 11);
+}
+
+// ---------------------------------------------------------------- deshacer --
+
+void TstOverlayModel::undoRestoresEveryEdit()
+{
+    OverlayModel m;
+    const qint64 p = m.addFeature(punto(QStringLiteral("P"), 23.0, -82.0));
+    const qint64 z = m.addFeature(poligono(QStringLiteral("Z"), 4));
+    const MapFeature zonaOriginal = *m.feature(z);
+
+    // Mover el vertice de un punto (lo que hace el arrastre) y deshacerlo.
+    QVERIFY(m.moveVertex(p, 0, QGeoCoordinate(24.0, -81.0)));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(p)->position(), QGeoCoordinate(23.0, -82.0));
+    QVERIFY(m.redo());
+    QCOMPARE(m.feature(p)->position(), QGeoCoordinate(24.0, -81.0));
+
+    // Insertar y quitar vertices.
+    QVERIFY(m.insertVertex(z, 1, QGeoCoordinate(22.9, -81.95)));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(z)->geometry, zonaOriginal.geometry);
+    QVERIFY(m.removeVertex(z, 0));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(z)->geometry, zonaOriginal.geometry);
+
+    // Mover la entidad entera.
+    QVERIFY(m.moveFeature(z, 0.5, 0.5));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(z)->geometry, zonaOriginal.geometry);
+
+    // Desplazar la etiqueta.
+    QVERIFY(m.setLabelOffset(z, QPointF(30, -20)));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(z)->style.labelOffsetPx, zonaOriginal.style.labelOffsetPx);
 }
 
 QTEST_MAIN(TstOverlayModel)

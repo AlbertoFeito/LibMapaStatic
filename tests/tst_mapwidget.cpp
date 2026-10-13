@@ -125,6 +125,9 @@ private slots:
     //! Alertas de zona: entradas/salidas de objetivos en un poligono vigilado,
     //! siguiendo tambien las ediciones y el deshacer de la zona.
     void zoneAlertsFollowTargetsAndZoneEdits();
+    //! Alertas de zona para ENTIDADES PUNTO (el «Objetivo» del demo dentro de
+    //! un «Área objetivo»): alta, arrastre/edicion, deshacer y borrado.
+    void zoneAlertsCoverPointFeatures();
     //! Escala grafica y cuadricula: ocultas por defecto, se dibujan al
     //! encenderlas y la resolucion sigue al zoom.
     void scaleBarAndGraticuleDraw();
@@ -1994,6 +1997,82 @@ void TstMapWidget::zoneAlertsFollowTargetsAndZoneEdits()
     QCOMPARE(sale.count(), 2);
     QVERIFY(w.updateTarget(a, QGeoCoordinate(26.0, -82.0)));
     QCOMPARE(sale.count(), 2);
+}
+
+// El caso del demo: el operador coloca un «Objetivo» (entidad punto, no un
+// objetivo movil) dentro de un «Área objetivo». Debe avisar al vigilar, al
+// crear o mover puntos y al deshacer; no al borrar. Y no por la señal de
+// objetivos moviles.
+void TstMapWidget::zoneAlertsCoverPointFeatures()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    MapFeature area;
+    area.kind = GeometryKind::Polygon;
+    area.type = QStringLiteral("objetivo_area");
+    area.geometry = { QGeoCoordinate(22.5, -82.5), QGeoCoordinate(22.5, -81.5),
+                      QGeoCoordinate(23.5, -81.5), QGeoCoordinate(23.5, -82.5) };
+    const qint64 zona = w.addFeature(area);
+
+    MapFeature punto;
+    punto.type = QStringLiteral("objetivo");
+    punto.geometry = { QGeoCoordinate(23.0, -82.0) };       // dentro
+    const qint64 dentro = w.addFeature(punto);
+    punto.geometry = { QGeoCoordinate(25.0, -82.0) };       // fuera
+    const qint64 fuera = w.addFeature(punto);
+
+    QSignalSpy entra(&w, &MapWidget::featureEnteredZone);
+    QSignalSpy sale(&w, &MapWidget::featureLeftZone);
+    QSignalSpy entraObjetivo(&w, &MapWidget::targetEnteredZone);
+
+    // Vigilar avisa del punto que ya estaba dentro (y solo por la señal de entidades).
+    QVERIFY(w.watchZone(zona));
+    QCOMPARE(entra.count(), 1);
+    QCOMPARE(entra.at(0).at(0).toLongLong(), dentro);
+    QCOMPARE(entra.at(0).at(1).toLongLong(), zona);
+    QCOMPARE(entraObjetivo.count(), 0);
+    QCOMPARE(w.featuresInZone(zona), QVector<qint64>({dentro}));
+    QVERIFY(w.featuresInZone(zona).indexOf(zona) < 0);      // la zona no es un punto
+
+    // El resalte (activo por defecto) se ve en el mapa: apagarlo cambia la imagen.
+    w.resize(600, 450);
+    w.setZoom(8);
+    w.setCenter(QGeoCoordinate(23.0, -82.0));
+    QVERIFY(w.isZoneAlertHighlight());
+    QCoreApplication::processEvents();
+    const QImage conResalte = w.grab().toImage();
+    w.setZoneAlertHighlight(false);
+    QCoreApplication::processEvents();
+    QVERIFY(w.grab().toImage() != conResalte);
+    w.setZoneAlertHighlight(true);
+
+    // Crear un punto dentro avisa al momento.
+    punto.geometry = { QGeoCoordinate(22.8, -81.8) };
+    const qint64 nuevo = w.addFeature(punto);
+    QCOMPARE(entra.count(), 2);
+    QCOMPARE(entra.at(1).at(0).toLongLong(), nuevo);
+
+    // Arrastrar (moveVertex, lo que hace el raton) el de fuera hacia dentro.
+    QVERIFY(w.moveVertex(fuera, 0, QGeoCoordinate(23.2, -82.2)));
+    QCOMPARE(entra.count(), 3);
+    QCOMPARE(entra.at(2).at(0).toLongLong(), fuera);
+    QCOMPARE(w.zonesOfFeature(fuera), QVector<qint64>({zona}));
+
+    // Deshacer el arrastre lo devuelve fuera: sale.
+    QVERIFY(w.undo());
+    QCOMPARE(sale.count(), 1);
+    QCOMPARE(sale.at(0).at(0).toLongLong(), fuera);
+
+    // Borrar un punto que esta dentro no es «salir».
+    QVERIFY(w.removeFeature(nuevo));
+    QCOMPARE(sale.count(), 1);
+    QCOMPARE(w.featuresInZone(zona), QVector<qint64>({dentro}));
+
+    // Dejar de vigilar: mover puntos ya no avisa.
+    QVERIFY(w.unwatchZone(zona));
+    QVERIFY(w.moveVertex(dentro, 0, QGeoCoordinate(30.0, -70.0)));
+    QCOMPARE(sale.count(), 1);
 }
 
 // La escala y la cuadricula no cambian nada hasta encenderlas; encendidas,

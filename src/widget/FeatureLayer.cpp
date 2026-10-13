@@ -250,6 +250,8 @@ void FeatureLayer::draw(QCPPainter *painter)
 void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
                                bool selected) const
 {
+    if (m_alerted.contains(f.id))
+        drawAlert(painter, f);           // por debajo: la entidad queda encima
     const auto partes = f.outlines();
 
     for (const QVector<QGeoCoordinate> &parte : partes) {
@@ -320,6 +322,59 @@ void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f,
         painter->setPen(QPen(Qt::black, 1, Qt::DashLine));
         painter->drawEllipse(pos, r + 5, r + 5);
     }
+}
+
+// Resalte de alerta de zona, en PIXELES (no cambia con el zoom): un aro grueso
+// alrededor de cada punto, y en lineas/poligonos un borde ancho translucido con
+// un velo del color de alerta. Se pinta antes que la entidad.
+void FeatureLayer::drawAlert(QPainter *painter, const MapFeature &f) const
+{
+    QColor borde = m_alertColor;
+    borde.setAlpha(200);
+    QColor velo = m_alertColor;
+    velo.setAlpha(45);
+    for (const QVector<QGeoCoordinate> &parte : f.outlines()) {
+        if (f.kind == GeometryKind::Point) {
+            if (parte.isEmpty())
+                continue;
+            const QPointF pos = screenPos(parte.first());
+            const double r = f.style.pointRadiusPx + 8.0;
+            painter->setPen(QPen(borde, 4.0));
+            painter->setBrush(velo);
+            painter->drawEllipse(pos, r, r);
+            continue;
+        }
+        const QPolygonF poly = screenPolygonOf(parte);
+        if (poly.size() < 2)
+            continue;
+        QPen pen(borde, f.style.lineWidth + 6.0);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(pen);
+        if (f.kind == GeometryKind::Polygon) {
+            painter->setBrush(velo);
+            painter->drawPolygon(poly);
+        } else {
+            painter->setBrush(Qt::NoBrush);
+            painter->drawPolyline(poly);
+        }
+    }
+}
+
+// Fija las entidades en alerta. Solo invalida el dibujo si el conjunto cambia:
+// con objetivos moviendose se llama a menudo con el mismo conjunto.
+void FeatureLayer::setAlerted(const QSet<qint64> &ids)
+{
+    if (ids == m_alerted)
+        return;
+    m_alerted = ids;
+    markDirty();
+}
+
+// Cambia el color del resalte de alerta y redibuja.
+void FeatureLayer::setAlertColor(const QColor &color)
+{
+    m_alertColor = color;
+    markDirty();
 }
 
 // Dibuja una parte de tipo LINEA o POLIGONO: relleno + contorno para poligonos,
