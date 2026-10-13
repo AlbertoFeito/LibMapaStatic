@@ -1589,6 +1589,22 @@ void MapWidget::setGraticuleColor(const QColor &color)
     d->view->replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Cambia entre cuadricula geografica y UTM, y repinta.
+void MapWidget::setGraticuleMode(GraticuleMode mode)
+{
+    if (!d->view || !d->view->graticuleLayer())
+        return;
+    d->view->graticuleLayer()->setMode(mode);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Modo actual de la cuadricula (geografica si no hay vista).
+GraticuleMode MapWidget::graticuleMode() const
+{
+    return d->view && d->view->graticuleLayer() ? d->view->graticuleLayer()->mode()
+                                                : GraticuleMode::Geographic;
+}
+
 // Color actual de la cuadricula (invalido si no hay vista).
 QColor MapWidget::graticuleColor() const
 {

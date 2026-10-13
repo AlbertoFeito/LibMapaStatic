@@ -1,6 +1,7 @@
 #ifndef LIBMAPA_MAPWIDGET_H_
 #define LIBMAPA_MAPWIDGET_H_
 
+#include "libmapa/Coordinates.h"
 #include "libmapa/DataPackage.h"
 #include "libmapa/GeoFile.h"
 #include "libmapa/VectorFormats.h"
@@ -557,6 +558,11 @@ public:
     //! Color de lineas y rotulos (p. ej. claro sobre la capa satelital).
     void setGraticuleColor(const QColor &color);
     QColor graticuleColor() const;
+    //! Cuadricula geografica (por defecto) o UTM: lineas de este/norte
+    //! constantes de cada zona visible, cada 100 km .. 100 m segun el zoom,
+    //! con los limites de zona marcados. Las conversiones, en Coordinates.h.
+    void setGraticuleMode(GraticuleMode mode);
+    GraticuleMode graticuleMode() const;
 
     // --- Diagnostico -----------------------------------------------------
     //! Porcentaje de la pantalla resuelto con teselas propias (no ancestros).

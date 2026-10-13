@@ -185,6 +185,19 @@ Mercator. Es matemática pura, sin estado ni Qt más allá de <code>QGeoCoordina
 <tr><td class="mono">clampLatitude(lat)</td><td>Acota la latitud al máximo de Mercator (~±85,05°) para que la proyección no se dispare.</td></tr>
 </table>
 
+<h3><span class="cls">Coordinates</span> <span class="tag">include/libmapa/Coordinates.h</span></h3>
+<p>Coordenadas en los formatos de trabajo: decimal, grados-minutos-segundos,
+grados-minutos decimales, <b>UTM</b> y <b>MGRS</b> (WGS84). UTM con las series de
+Krüger de orden 6 (Karney 2011): coincide con PROJ al milímetro; MGRS idéntico a
+GeoTrans (NGA). Incluye las excepciones de zona de Noruega (32V) y Svalbard
+(31X–37X). Cobertura UTM: 80°S–84°N (los polos, UPS, no). <code>tst_coordinates</code>
+compara con referencias de PROJ 9.8 y de la librería <i>mgrs</i>.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">toUtm(coord, zonaForzada) / fromUtm</td><td>Geográfica ↔ UTM (zona, banda, hemisferio, este, norte). La zona forzada sirve para las cuadrículas que cruzan un límite.</td></tr>
+<tr><td class="mono">toMgrs(coord, precisión) / fromMgrs</td><td>MGRS de 10 km a 1 m; los dígitos se truncan (esquina suroeste de la celda), como manda la norma.</td></tr>
+<tr><td class="mono">formatCoordinate / parseCoordinate</td><td>Texto en cualquier formato, y lectura de lo que escribe una persona (MGRS, UTM, decimal o sexagesimal con hemisferio, «O» = oeste).</td></tr>
+</table>
+
 <h3><span class="cls">MapDecor</span> <span class="tag">geo/MapDecor.h</span></h3>
 <p>Cálculos puros de la <b>escala gráfica</b> y la <b>cuadrícula</b> (sin dibujo; <code>tst_mapdecor</code>).</p>
 <table><tr><th>Función</th><th>Qué hace</th></tr>
@@ -360,7 +373,7 @@ la API que usa la aplicación:</p>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b></td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
-<tr><td>Escala / cuadrícula</td><td class="mono">setScaleBarVisible · setScaleBarUnits (Metric/Nautical) · metersPerPixel · setGraticuleVisible · setGraticuleColor</td></tr>
+<tr><td>Escala / cuadrícula</td><td class="mono">setScaleBarVisible · setScaleBarUnits (Metric/Nautical) · metersPerPixel · setGraticuleVisible · setGraticuleColor · <b>setGraticuleMode (Geographic/Utm)</b></td></tr>
 <tr><td>Cobertura / relieve</td><td class="mono">setCoverageVisible · setCoverageZoom · refreshCoverage · <b>setHillshadeVisible · setHillshadeSun · setHillshadeOpacity · setHillshadeExaggeration · setHillshadeColored · refreshHillshade</b></td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
 <tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
@@ -386,7 +399,7 @@ añadió para la descarga.</p>
 <tr><td class="cls">TileLayer</td><td>Pinta las teselas del plan (con la escalera de respaldo). Lee del <code>TileCache</code>.</td></tr>
 <tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar. <b>Recorte por viewport</b>: salta (sin proyectar a píxeles) las entidades cuya caja no toca la vista, y respeta el <b>rango de zoom</b> de la capa — así una capa densa (curvas de nivel) no frena el <i>pan</i>. Un punto con icono se ancla por <code>FeatureStyle::iconAnchor</code> (normalizado; <code>(0.5,1.0)</code> = la punta del pin marca el lugar) y su <b>hit-test</b> cubre todo el pixmap, para poder agarrarlo.</td></tr>
 <tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas. El símbolo lo decide el proveedor de la app (icono + rotación por rumbo + escala); sin proveedor, un galón por defecto. Para miles de objetivos: culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza.</td></tr>
-<tr><td class="cls">GraticuleLayer</td><td>Cuadrícula de meridianos y paralelos con rótulos en el borde. Paso automático según el zoom (pasos de carta), paralelos en la proyección del mapa. Encima de las entidades y debajo de los objetivos.</td></tr>
+<tr><td class="cls">GraticuleLayer</td><td>Cuadrícula de meridianos y paralelos con rótulos en el borde, o <b>UTM</b> (líneas de este/norte por zona, 100 km–100 m, curvas muestreadas y recortadas a la zona, límites de zona marcados). Paso automático según el zoom (pasos de carta), paralelos en la proyección del mapa. Encima de las entidades y debajo de los objetivos.</td></tr>
 <tr><td class="cls">ScaleBarLayer</td><td>Escala gráfica abajo a la izquierda, medida en el centro de la vista con la distancia geodésica real entre dos píxeles (en Mercator la escala cambia con la latitud). Encima de todo.</td></tr>
 <tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
 <tr><td class="cls">HillshadeLayer</td><td><b>Relieve sombreado</b> (hillshade) en vivo: capa «tonta» que pinta una imagen —calculada por <code>MapWidget</code> del DEM LOCAL (sin conexión)— estirada entre los píxeles de sus esquinas (alineada con la base, eje X=longitud, Y=grados de Mercator). Va encima de las teselas y debajo de las entidades. Gris en <i>Multiply</i> sobre la base, o tintado por altura (hipsométrico) en <i>SourceOver</i>.</td></tr>

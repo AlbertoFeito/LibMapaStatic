@@ -63,6 +63,12 @@ enum class ScaleUnits {
     Nautical    //!< millas nauticas (1 NM = 1852 m), para uso naval/aereo
 };
 
+//! Que cuadricula dibuja MapWidget::setGraticuleVisible.
+enum class GraticuleMode {
+    Geographic, //!< meridianos y paralelos (grados, minutos, segundos)
+    Utm         //!< lineas de este/norte UTM constantes, por zona (en metros/km)
+};
+
 //! Resultado de una medicion sobre el mapa.
 struct Measurement {
     QGeoCoordinate from;

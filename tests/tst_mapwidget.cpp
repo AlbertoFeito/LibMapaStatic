@@ -2122,6 +2122,16 @@ void TstMapWidget::scaleBarAndGraticuleDraw()
     QVERIFY(w.isGraticuleVisible());
     QVERIFY(captura() != base);
 
+    // Cuadricula UTM: otro dibujo que la geografica, y vuelta atras.
+    QCOMPARE(w.graticuleMode(), GraticuleMode::Geographic);
+    const QImage geografica = captura();
+    w.setGraticuleMode(GraticuleMode::Utm);
+    QCOMPARE(w.graticuleMode(), GraticuleMode::Utm);
+    QVERIFY(captura() != geografica);
+    w.setZoom(4);                                   // varias zonas: solo limites
+    QVERIFY(!captura().isNull());
+    w.setGraticuleMode(GraticuleMode::Geographic);
+
     // A zoom mundial la cuadricula sigue dibujandose sin colgarse.
     w.setZoom(2);
     QVERIFY(!captura().isNull());

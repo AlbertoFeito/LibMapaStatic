@@ -669,6 +669,35 @@ private:
         mVer->addAction(m_accEscala);
         mVer->addAction(m_accEscalaNm);
         mVer->addAction(m_accCuadricula);
+        // Cuadrícula UTM en vez de la geográfica (las dos van por la misma acción).
+        auto *accCuadriculaUtm = mVer->addAction(tr("Cuadrícula UTM"));
+        accCuadriculaUtm->setCheckable(true);
+        connect(accCuadriculaUtm, &QAction::toggled, this, [this](bool utm) {
+            m_mapa->setGraticuleMode(utm ? GraticuleMode::Utm : GraticuleMode::Geographic);
+            if (utm && !m_accCuadricula->isChecked())
+                m_accCuadricula->setChecked(true);    // pedir UTM implica verla
+        });
+        // Formato de la coordenada bajo el cursor (barra de estado).
+        QMenu *mFormato = mVer->addMenu(tr("Formato de coordenadas"));
+        auto *gFormato = new QActionGroup(this);
+        const QList<QPair<QString, CoordinateFormat>> formatos = {
+            { tr("Decimal (23.11360, -82.36660)"), CoordinateFormat::Decimal },
+            { tr("Grados, minutos, segundos"), CoordinateFormat::DMS },
+            { tr("Grados y minutos decimales"), CoordinateFormat::DDM },
+            { tr("UTM (17Q 360057 2556751)"), CoordinateFormat::UTM },
+            { tr("MGRS (17Q LF 60056 56750)"), CoordinateFormat::MGRS },
+        };
+        for (const auto &f : formatos) {
+            QAction *a = mFormato->addAction(f.first);
+            a->setCheckable(true);
+            a->setChecked(f.second == m_formatoCoord);
+            gFormato->addAction(a);
+            const CoordinateFormat fmt = f.second;
+            connect(a, &QAction::triggered, this, [this, fmt] { m_formatoCoord = fmt; });
+        }
+        // Ir a una coordenada escrita en cualquier formato.
+        connect(mVer->addAction(tr("Ir a coordenada...")), &QAction::triggered,
+                this, &Ventana::irACoordenada);
         mVer->addSeparator();
         mVer->addAction(m_accRejilla);
         mVer->addAction(m_accCobertura);
@@ -1451,9 +1480,10 @@ private:
 
         connect(m_mapa, &MapWidget::mouseMoved, this,
                 [this](const QGeoCoordinate &p) {
-                    m_coords->setText(QStringLiteral("  %1, %2  ")
-                        .arg(p.latitude(), 0, 'f', 5)
-                        .arg(p.longitude(), 0, 'f', 5));
+                    // En el formato elegido en Ver → Formato de coordenadas.
+                    const QString txt = formatCoordinate(p, m_formatoCoord);
+                    m_coords->setText(QStringLiteral("  %1  ").arg(
+                        txt.isEmpty() ? tr("(fuera de UTM)") : txt));
                     mostrarCota(p);
                 });
 
@@ -3469,6 +3499,31 @@ private:
             .arg(QFileInfo(ruta).fileName(), id), 5000);
     }
 
+    // Pide una coordenada (decimal, GMS, UTM o MGRS), centra el mapa en ella y
+    // la muestra en todos los formatos, como comprobación cruzada.
+    void irACoordenada()
+    {
+        bool aceptado = false;
+        const QString txt = QInputDialog::getText(this, tr("Ir a coordenada"),
+            tr("Coordenada (p. ej. 23.1136, -82.3666 · 17Q LF 60056 56750 · "
+               "17Q 360057 2556751 · 23°06'49\"N 82°22'00\"W):"),
+            QLineEdit::Normal, QString(), &aceptado);
+        if (!aceptado || txt.trimmed().isEmpty())
+            return;
+        bool ok = false;
+        const QGeoCoordinate c = parseCoordinate(txt, &ok);
+        if (!ok) {
+            QMessageBox::warning(this, tr("Ir a coordenada"),
+                                 tr("No se reconoce «%1» como coordenada.").arg(txt));
+            return;
+        }
+        m_mapa->setCenter(c);
+        statusBar()->showMessage(tr("%1  ·  %2  ·  %3")
+            .arg(formatCoordinate(c, CoordinateFormat::DMS),
+                 formatCoordinate(c, CoordinateFormat::UTM),
+                 formatCoordinate(c, CoordinateFormat::MGRS)), 15000);
+    }
+
     // Importa un GeoJSON/KML/GPX como capa nueva (id = nombre del fichero). Cada
     // entidad del fichero entra con su nombre, atributos y estilo.
     void importarVectorial()
@@ -3838,6 +3893,7 @@ private:
     QAction *m_accEscala = nullptr;        //!< escala gráfica
     QAction *m_accEscalaNm = nullptr;      //!< escala en millas náuticas
     QAction *m_accCuadricula = nullptr;    //!< cuadrícula de coordenadas
+    CoordinateFormat m_formatoCoord = CoordinateFormat::Decimal;   //!< coordenada bajo el cursor
     QMenu *m_menuVer = nullptr;
     QAction *m_accTemaClaro = nullptr;
     QAction *m_accTemaOscuro = nullptr;

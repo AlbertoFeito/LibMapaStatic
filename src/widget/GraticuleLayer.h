@@ -1,6 +1,7 @@
 #ifndef LIBMAPA_WIDGET_GRATICULELAYER_H_
 #define LIBMAPA_WIDGET_GRATICULELAYER_H_
 
+#include "libmapa/MapTypes.h"
 #include "qcustomplot.h"
 
 #include <QColor>
@@ -31,12 +32,20 @@ public:
     void setColor(const QColor &color) { m_color = color; }
     QColor color() const { return m_color; }
 
+    //! Cuadricula geografica (por defecto) o UTM.
+    void setMode(GraticuleMode mode) { m_mode = mode; }
+    GraticuleMode mode() const { return m_mode; }
+
 protected:
     void applyDefaultAntialiasingHint(QCPPainter *painter) const override;
     void draw(QCPPainter *painter) override;
 
 private:
+    void drawGeographic(QCPPainter *painter);
+    void drawUtm(QCPPainter *painter);
+
     QColor m_color = QColor(20, 40, 60, 150);
+    GraticuleMode m_mode = GraticuleMode::Geographic;
 };
 
 } // namespace libmapa

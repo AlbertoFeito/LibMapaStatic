@@ -12,7 +12,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 22 tests (19 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 23 tests (20 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
@@ -20,6 +20,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
 - **Alertas de zona**: cualquier polígono puede vigilarse (`watchZone`) y la librería avisa cuando un objetivo móvil o una entidad punto entra o sale (`targetEnteredZone` / `featureEnteredZone`…) y resalta en el mapa la zona ocupada
 - **Escala gráfica y cuadrícula de coordenadas**: `setScaleBarVisible` (metros/km o millas náuticas) y `setGraticuleVisible` (meridianos y paralelos rotulados, con paso automático según el zoom: 1°, 30', 5', 30"…)
+- **Coordenadas UTM y MGRS** (`Coordinates.h`): conversión y formato en decimal, GMS, UTM y MGRS (al milímetro frente a PROJ), lectura de lo que escribe una persona en cualquiera de ellos, y cuadrícula UTM (`setGraticuleMode`)
 - **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión
 
 ## Uso
@@ -43,6 +44,10 @@ connect(mapa, &libmapa::MapWidget::mouseMoved,
 mapa->setScaleBarVisible(true);                            // escala abajo a la izquierda
 mapa->setScaleBarUnits(libmapa::ScaleUnits::Nautical);     // o Metric (por defecto)
 mapa->setGraticuleVisible(true);                           // meridianos y paralelos rotulados
+
+mapa->setGraticuleMode(libmapa::GraticuleMode::Utm);       // o cuadrícula UTM
+QString mgrs = libmapa::formatCoordinate(p, libmapa::CoordinateFormat::MGRS);  // "17Q LF 60056 56750"
+QGeoCoordinate c = libmapa::parseCoordinate("17Q 360057 2556751");            // cualquier formato
 
 mapa->importVectorFile("zonas.kml", "zonas");              // GeoJSON / KML / GPX como capa
 mapa->exportVectorFile("zonas.geojson", "zonas");          // formato según la extensión
@@ -588,7 +593,7 @@ src/
   io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               22 tests (19 sin QCustomPlot)
+tests/               23 tests (20 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
@@ -627,6 +632,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 19 | Alertas de zona: un polígono vigilado avisa de los objetivos que entran o salen (`watchZone`, `targetEnteredZone`/`targetLeftZone`) |
 | 20 | Escala gráfica (métrica o náutica) y cuadrícula de coordenadas rotulada (`setScaleBarVisible`, `setGraticuleVisible`) |
 | 21 | Intercambio vectorial: importar/exportar entidades en GeoJSON, KML y GPX (`importVectorFile`, `exportVectorFile`) |
+| 22 | Coordenadas UTM/MGRS (conversión, formato, lectura) y cuadrícula UTM; alertas de zona también para entidades punto, con resalte en el mapa |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

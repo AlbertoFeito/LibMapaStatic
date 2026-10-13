@@ -91,6 +91,8 @@ add_library(libmapa_core STATIC
     src/geo/WebMercator.h
     src/geo/TileMatrix.cpp
     src/geo/TileMatrix.h
+    src/geo/Coordinates.cpp
+    include/libmapa/Coordinates.h
     src/geo/MapDecor.cpp
     src/geo/MapDecor.h
     src/geo/ZoneMonitor.cpp
@@ -371,6 +373,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_zonemonitor)
     libmapa_add_test(tst_mapdecor)
     libmapa_add_test(tst_vectorformats)
+    libmapa_add_test(tst_coordinates)
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 

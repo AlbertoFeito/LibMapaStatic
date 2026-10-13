@@ -4769,3 +4769,53 @@ separación). Nuevo test `tst_overlaymodel::undoRestoresEveryEdit` que cubre las
 cinco y el rehacer.
 
 Compila sin warnings; **22 tests** en verde (19 sin QCustomPlot), Qt 6.4.
+
+## 119. Coordenadas UTM y MGRS, y cuadrícula UTM
+
+**Problema.** Todo se mostraba e introducía en grados decimales. En operaciones
+se trabaja en UTM y, sobre todo, en MGRS («17Q LF 60056 56750»): sin ellos el
+operador tenía que convertir a mano para leer o dar una posición.
+
+**Qué se hizo.**
+- `Coordinates` (núcleo, API pública `include/libmapa/Coordinates.h`,
+  `tst_coordinates`): `toUtm`/`fromUtm` (zona natural o forzada), `toMgrs`/
+  `fromMgrs` (1 m a 10 km), `utmZoneFor`, y `formatCoordinate` /
+  `parseCoordinate` para decimal, GMS, grados-minutos decimales, UTM y MGRS.
+- `GraticuleLayer` con modo UTM (`MapWidget::setGraticuleMode`): líneas de este y
+  norte constantes por cada zona visible, cada 100 km … 100 m según el zoom, con
+  los límites de zona marcados; a escala de continente solo los límites.
+- `demo`: *Ver → Formato de coordenadas* (la de bajo el cursor), *Cuadrícula UTM*
+  e *Ir a coordenada…* (acepta cualquier formato y muestra los demás).
+
+**Por qué así.**
+- **Series de Krüger de orden 6 (Karney 2011)**, no las fórmulas clásicas de
+  Snyder: error sub-milimétrico en toda la zona y fuera de ella (sirve para
+  forzar la zona vecina en la cuadrícula), con el mismo coste.
+- **Verificado contra referencias externas**, no solo ida y vuelta: 13 puntos
+  (La Habana, Nueva York, Sídney, Islandia, la excepción noruega 32V, Svalbard
+  31X/33X a ambos lados de 9°E, el ecuador, un punto a 0,0001° al sur, 83,5°N y
+  79,9°S) calculados con PROJ 9.8 (pyproj) y con la librería *mgrs* (GeoTrans):
+  este/norte a < 1 mm y MGRS idéntico carácter a carácter. Incluso el caso del
+  meridiano 180 exacto (zona 1) se alineó con GeoTrans, que era lo que el test
+  esperaba al revés.
+- **MGRS trunca**, no redondea: la referencia nombra la esquina suroeste de la
+  celda que contiene el punto (norma NGA). Al leer se reconstruye el norte con
+  la fila (ciclo de 2000 km) y la banda: una banda mide ~900 km, así que solo hay
+  una solución.
+- **Excepciones de zona** de Noruega y Svalbard en las coordenadas; la
+  cuadrícula dibuja las zonas estándar de 6° (documentado).
+- **Cuadrícula UTM en la proyección del mapa**: una línea de este constante es
+  una curva en Mercator; se muestrea (40 tramos) y se recorta a los 6° de su
+  zona. En el límite de dos zonas se ven las dos cuadrículas, ligeramente
+  giradas entre sí, como en una carta. Se comprobó sobre capturas a zoom 3, 6, 9
+  y 12 (centro 21,5°N 78,2°W, zona 17: rótulos ~790 kmE y ~2380 kmN, coherentes);
+  a zoom 6 los rótulos de 100 km se pisaban y se añadió un descarte de rótulos
+  solapados.
+- **Lectura tolerante**: MGRS con o sin espacios ni cero en la zona, UTM con
+  banda, decimal con coma o espacio, y sexagesimal con hemisferio (también «O»
+  de oeste y coma decimal), en cualquier orden lat/lon.
+
+Fuera de 80°S–84°N no hay UTM/MGRS (los polos son UPS, no soportado): las
+funciones devuelven inválido y el demo muestra «(fuera de UTM)».
+
+Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.
