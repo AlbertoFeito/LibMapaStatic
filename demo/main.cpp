@@ -827,6 +827,17 @@ private:
         accReproducir->setStatusTip(tr("Vuelve a ver cómo se movieron los objetivos de un "
                                        "historial exportado, con su hora."));
         connect(accReproducir, &QAction::triggered, this, &Ventana::abrirReproduccion);
+        // Salir del modo reproducción: quita sus objetivos y rutas y cierra la
+        // barra. Esc solo mientras se reproduce (fuera de ese modo, Esc es de
+        // las herramientas del mapa: cancelar un dibujo, una medida...).
+        m_accSalirRep = mDatos->addAction(style()->standardIcon(QStyle::SP_DialogCloseButton),
+                                          tr("Salir de la reproducción"));
+        m_accSalirRep->setShortcut(QKeySequence(Qt::Key_Escape));
+        m_accSalirRep->setShortcutContext(Qt::WindowShortcut);
+        m_accSalirRep->setStatusTip(tr("Quita del mapa los objetivos y rutas de la "
+                                       "reproducción y cierra su barra."));
+        m_accSalirRep->setEnabled(false);
+        connect(m_accSalirRep, &QAction::triggered, this, &Ventana::salirReproduccion);
 
         QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
         connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
@@ -1681,6 +1692,17 @@ private:
                                  "se vigilan solas; cualquier polígono, con Datos → "
                                  "Vigilar zona seleccionada)."));
         statusBar()->addPermanentWidget(m_alertas);
+        // Indicador del MODO reproducción: se ve mientras dura, y un clic sale.
+        m_modoRep = new QPushButton(tr("▶ Reproducción · Esc para salir"), this);
+        m_modoRep->setFlat(true);
+        m_modoRep->setCursor(Qt::PointingHandCursor);
+        m_modoRep->setToolTip(tr("Estás viendo un historial grabado, no objetivos en vivo. "
+                                 "Pulsa aquí o Esc para salir."));
+        m_modoRep->setStyleSheet(QStringLiteral("QPushButton { color:#fff; background:#1565c0;"
+                                                " font-weight:bold; padding:0 8px; border:none; }"));
+        m_modoRep->hide();
+        connect(m_modoRep, &QPushButton::clicked, this, &Ventana::salirReproduccion);
+        statusBar()->addPermanentWidget(m_modoRep);
     }
 
     // Muestra la cota del terreno bajo el cursor (o "—" si no hay DEM/dato).
@@ -3897,7 +3919,10 @@ private:
         m_ultimoDir = QFileInfo(ruta).absolutePath();
         m_player->setRoutesVisible(m_repRutas->isChecked());
         m_barraRep->show();
-        statusBar()->showMessage(tr("%1 pistas de %2 a %3. Pulsa ▶ para reproducir.")
+        m_accSalirRep->setEnabled(true);
+        m_modoRep->show();
+        statusBar()->showMessage(tr("%1 pistas de %2 a %3. Pulsa ▶ para reproducir; "
+                                    "Esc o «Salir de la reproducción» para terminar.")
             .arg(m_player->tracks().size())
             .arg(m_player->startTime().toLocalTime().toString(QStringLiteral("dd/MM HH:mm:ss")),
                  m_player->endTime().toLocalTime().toString(QStringLiteral("dd/MM HH:mm:ss"))),
@@ -3913,6 +3938,9 @@ private:
         m_barraRep = new QToolBar(tr("Reproducción"), this);
         m_barraRep->setObjectName(QStringLiteral("barraReproduccion"));
         m_barraRep->setMovable(false);
+        // Que no se pueda ocultar desde el menú contextual de las barras: se
+        // quedaría la reproducción activa sin controles. Se sale con su botón.
+        m_barraRep->toggleViewAction()->setEnabled(false);
         addToolBar(Qt::BottomToolBarArea, m_barraRep);
 
         auto *play = m_barraRep->addAction(style()->standardIcon(QStyle::SP_MediaPlay), tr("Reproducir"));
@@ -3962,12 +3990,25 @@ private:
         m_barraRep->addWidget(m_repRutas);
         connect(m_repRutas, &QCheckBox::toggled, m_player, &TrackPlayer::setRoutesVisible);
 
-        auto *cerrar = m_barraRep->addAction(style()->standardIcon(QStyle::SP_DialogCloseButton),
-                                             tr("Cerrar la reproducción"));
-        connect(cerrar, &QAction::triggered, this, [this] {
-            m_player->clear();
-            m_barraRep->hide();
-        });
+        m_barraRep->addSeparator();
+        auto *salir = new QToolButton(m_barraRep);
+        salir->setDefaultAction(m_accSalirRep);
+        salir->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        m_barraRep->addWidget(salir);
+    }
+
+    // Sale del modo reproducción: el reproductor quita sus objetivos y sus
+    // rutas (el mapa queda como antes de abrir el historial), se cierra la
+    // barra y se apaga el indicador. Sin reproducción activa no hace nada.
+    void salirReproduccion()
+    {
+        if (!m_player || !m_player->isLoaded())
+            return;
+        m_player->clear();
+        m_barraRep->hide();
+        m_modoRep->hide();
+        m_accSalirRep->setEnabled(false);
+        statusBar()->showMessage(tr("Reproducción cerrada"), 4000);
     }
 
     // Exporta el historial completo de todos los objetivos a GPX con horas.
@@ -4272,6 +4313,7 @@ private:
     void alternarSimulacion(bool on)
     {
         if (on) {
+            salirReproduccion();          // en vivo y reproducción no se mezclan
             iniciarSimulacion(m_numObjetivos->value());
             m_simReloj->start();
         } else {
@@ -4540,6 +4582,8 @@ private:
     QSlider *m_repSlider = nullptr;         //!< posición en el tiempo
     QLabel *m_repHora = nullptr;            //!< hora de la reproducción
     QCheckBox *m_repRutas = nullptr;        //!< mostrar rutas completas
+    QAction *m_accSalirRep = nullptr;       //!< salir del modo reproducción (Esc)
+    QPushButton *m_modoRep = nullptr;       //!< indicador "▶ Reproducción" (clic = salir)
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.

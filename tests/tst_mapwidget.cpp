@@ -2661,7 +2661,13 @@ void TstMapWidget::trackPlayerReplaysHistory()
 
     player.stop();
     QCOMPARE(player.currentTime(), t0);
-    player.clear();
+    QVERIFY(player.isLoaded());
+    QSignalSpy salida(&player, &TrackPlayer::cleared);
+    player.clear();                                        // salir de la reproduccion
+    QCOMPARE(salida.count(), 1);
+    QVERIFY(!player.isLoaded());
+    player.clear();                                        // ya fuera: no vuelve a avisar
+    QCOMPARE(salida.count(), 1);
     QVERIFY(w.featuresInLayer(QStringLiteral("replay_routes")).isEmpty());
     QCOMPARE(w.targets().size(), 1);                       // solo el ajeno
     QVERIFY(w.target(idAjeno).has_value());

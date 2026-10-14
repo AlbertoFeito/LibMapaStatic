@@ -138,9 +138,10 @@ void TrackPlayer::seek(const QDateTime &time)
     advanceTo(t);
 }
 
-// Quita todo del mapa y olvida las pistas.
+// Sale de la reproduccion: quita todo del mapa, olvida las pistas y avisa.
 void TrackPlayer::clear()
 {
+    const bool habia = isLoaded();
     pause();
     resetTargets();
     m_tracks.clear();
@@ -148,6 +149,8 @@ void TrackPlayer::clear()
     m_fed.clear();
     m_start = m_end = m_time = QDateTime();
     syncRoutes();
+    if (habia)
+        emit cleared();
 }
 
 // Fotograma: avanza el tiempo de la reproduccion lo que manda la velocidad

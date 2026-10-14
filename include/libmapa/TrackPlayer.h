@@ -53,6 +53,9 @@ public:
     //! Pistas a reproducir; deja la reproduccion parada al principio.
     void setTracks(const QVector<GpxTrack> &tracks);
     QVector<GpxTrack> tracks() const { return m_tracks; }
+    //! ¿Hay un historial cargado? Es el "modo reproduccion": de true a false
+    //! solo con \ref clear (o al destruir el reproductor).
+    bool isLoaded() const { return !m_tracks.isEmpty(); }
 
     QDateTime startTime() const { return m_start; }
     QDateTime endTime() const { return m_end; }
@@ -78,7 +81,8 @@ public slots:
     void stop();
     //! Lleva la reproduccion a \a time (se recorta al rango de las pistas).
     void seek(const QDateTime &time);
-    //! Quita objetivos y rutas y olvida las pistas.
+    //! SALIR de la reproduccion: para, quita del mapa sus objetivos y sus
+    //! rutas, y olvida las pistas. Emite \ref cleared.
     void clear();
 
 signals:
@@ -86,6 +90,8 @@ signals:
     void playingChanged(bool playing);
     //! Se llego al final reproduciendo.
     void finished();
+    //! Se salio de la reproduccion (\ref clear): el mapa ya no tiene nada suyo.
+    void cleared();
 
 private:
     void tick();

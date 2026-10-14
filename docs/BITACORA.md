@@ -5177,3 +5177,44 @@ Tests:
 - `tst_overlaymodel::undoLeavesTransientLayersAlone`.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 125. Salir del modo reproducción
+
+**El problema.** La reproducción (§124) se abría y funcionaba bien, pero no se
+veía cómo terminar. El único botón de cerrar era un icono «X» al final de la
+barra, sin texto, fácil de pasar por alto. Además, la barra se podía ocultar
+desde el menú contextual de las barras de herramientas, y entonces la
+reproducción seguía activa (objetivos y rutas en el mapa) sin ningún control
+para quitarla.
+
+**Qué se hizo.**
+- **Librería**: `TrackPlayer::isLoaded()` dice si hay una reproducción
+  activa, y la nueva señal `cleared()` avisa al salir. `clear()` queda
+  documentado como «salir de la reproducción»: para, quita del mapa los
+  objetivos y las rutas que puso, olvida las pistas y emite `cleared()` (solo
+  si había algo).
+- **Demo**, varias formas de salir:
+  - el botón **«Salir de la reproducción»**, con texto, en la propia barra;
+  - la misma acción en **Datos**;
+  - la tecla **Esc**;
+  - un clic en el indicador azul **«▶ Reproducción · Esc para salir»** de la
+    barra de estado, que se ve mientras dura el modo. Sirve además para no
+    confundir lo grabado con objetivos en vivo.
+- La barra de reproducción ya no se puede ocultar desde el menú contextual
+  (`toggleViewAction` desactivada): solo se cierra saliendo.
+- Activar la simulación sale antes de la reproducción: en vivo y reproducido
+  no se mezclan.
+
+**Por qué Esc solo durante la reproducción.** Fuera de ese modo, Esc es de las
+herramientas del mapa (cancelar un dibujo o una medida). La acción está
+desactivada mientras no se reproduce, así que su atajo no le quita la tecla a
+la vista.
+
+Comprobado en la demo bajo Xvfb, con pulsación real (`QTest::keyClick`, que
+pasa por los atajos de Qt, enlazado solo para la prueba). Abierta con 20
+pistas: 20 objetivos y 20 rutas. Tras Esc: 0 objetivos, 0 rutas, la barra
+cerrada y el indicador apagado. El indicador y «Simular» también salen.
+`tst_mapwidget::trackPlayerReplaysHistory` comprueba `cleared()` e
+`isLoaded()`.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
