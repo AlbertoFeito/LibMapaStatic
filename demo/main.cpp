@@ -15,6 +15,7 @@
  */
 
 #include "libmapa/MapWidget.h"
+#include "libmapa/TrackPlayer.h"
 
 #include "qcustomplot.h"      // ya compilado dentro de libmapa_widget; aquí solo se usa
 
@@ -69,6 +70,8 @@
 #include <QPalette>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSlider>
+#include <QStyle>
 #include <QToolBar>
 #include <QToolButton>
 #include <QToolTip>
@@ -820,6 +823,10 @@ private:
         mDatos->addAction(m_accVigilarZona);
         mDatos->addAction(m_accProximidad);
         mDatos->addAction(accHistorialGpx);
+        auto *accReproducir = mDatos->addAction(tr("Reproducir historial (GPX)..."));
+        accReproducir->setStatusTip(tr("Vuelve a ver cómo se movieron los objetivos de un "
+                                       "historial exportado, con su hora."));
+        connect(accReproducir, &QAction::triggered, this, &Ventana::abrirReproduccion);
 
         QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
         connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
@@ -3867,6 +3874,102 @@ private:
         statusBar()->showMessage(tr("Vista exportada a %1").arg(QFileInfo(ruta).fileName()), 5000);
     }
 
+    // Abre un historial GPX y lo reproduce con la barra de reproducción. La
+    // simulación se para: mezclar objetivos simulados y reproducidos confunde.
+    void abrirReproduccion()
+    {
+        const QString ruta = QFileDialog::getOpenFileName(this, tr("Reproducir historial"),
+            dirTrabajo(), tr("GPX (*.gpx)"));
+        if (ruta.isEmpty())
+            return;
+        if (m_accSimular && m_accSimular->isChecked())
+            m_accSimular->setChecked(false);
+        if (!m_player) {
+            m_player = new TrackPlayer(m_mapa, this);
+            crearBarraReproduccion();
+        }
+        QString error;
+        if (!m_player->loadFile(ruta, &error)) {
+            QMessageBox::warning(this, tr("Reproducir historial"),
+                                 tr("No se pudo cargar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        m_player->setRoutesVisible(m_repRutas->isChecked());
+        m_barraRep->show();
+        statusBar()->showMessage(tr("%1 pistas de %2 a %3. Pulsa ▶ para reproducir.")
+            .arg(m_player->tracks().size())
+            .arg(m_player->startTime().toLocalTime().toString(QStringLiteral("dd/MM HH:mm:ss")),
+                 m_player->endTime().toLocalTime().toString(QStringLiteral("dd/MM HH:mm:ss"))),
+            8000);
+    }
+
+    // Barra de reproducción (abajo): reproducir/pausa, parar, deslizador de
+    // tiempo (mil pasos sobre el rango del fichero), hora actual, velocidad,
+    // rutas completas y cerrar. El deslizador manda al reproductor y el
+    // reproductor al deslizador (con las señales bloqueadas, para no rebotar).
+    void crearBarraReproduccion()
+    {
+        m_barraRep = new QToolBar(tr("Reproducción"), this);
+        m_barraRep->setObjectName(QStringLiteral("barraReproduccion"));
+        m_barraRep->setMovable(false);
+        addToolBar(Qt::BottomToolBarArea, m_barraRep);
+
+        auto *play = m_barraRep->addAction(style()->standardIcon(QStyle::SP_MediaPlay), tr("Reproducir"));
+        play->setCheckable(true);
+        connect(play, &QAction::triggered, this,
+                [this](bool on) { on ? m_player->play() : m_player->pause(); });
+        connect(m_player, &TrackPlayer::playingChanged, this, [this, play](bool on) {
+            QSignalBlocker b(play);
+            play->setChecked(on);
+            play->setIcon(style()->standardIcon(on ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+        });
+        auto *parar = m_barraRep->addAction(style()->standardIcon(QStyle::SP_MediaStop), tr("Al principio"));
+        connect(parar, &QAction::triggered, m_player, &TrackPlayer::stop);
+
+        m_repSlider = new QSlider(Qt::Horizontal, m_barraRep);
+        m_repSlider->setRange(0, 1000);
+        m_repSlider->setMinimumWidth(300);
+        m_barraRep->addWidget(m_repSlider);
+        connect(m_repSlider, &QSlider::valueChanged, this, [this](int v) {
+            const qint64 total = m_player->startTime().msecsTo(m_player->endTime());
+            m_player->seek(m_player->startTime().addMSecs(total * v / 1000));
+        });
+
+        m_repHora = new QLabel(m_barraRep);
+        m_repHora->setMinimumWidth(170);
+        m_repHora->setAlignment(Qt::AlignCenter);
+        m_barraRep->addWidget(m_repHora);
+        connect(m_player, &TrackPlayer::timeChanged, this, [this](const QDateTime &t) {
+            m_repHora->setText(t.toLocalTime().toString(QStringLiteral("dd/MM/yyyy HH:mm:ss")));
+            const qint64 total = m_player->startTime().msecsTo(m_player->endTime());
+            QSignalBlocker b(m_repSlider);
+            m_repSlider->setValue(total > 0 ? int(m_player->startTime().msecsTo(t) * 1000 / total) : 0);
+        });
+
+        auto *vel = new QComboBox(m_barraRep);
+        for (int f : { 1, 10, 60, 300, 1800 })
+            vel->addItem(QStringLiteral("×%1").arg(f), f);
+        vel->setCurrentIndex(2);                       // ×60: un minuto por segundo
+        vel->setToolTip(tr("Velocidad respecto al tiempo real"));
+        m_barraRep->addWidget(vel);
+        connect(vel, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this, vel](int) { m_player->setSpeed(vel->currentData().toDouble()); });
+
+        m_repRutas = new QCheckBox(tr("Rutas"), m_barraRep);
+        m_repRutas->setChecked(true);
+        m_repRutas->setToolTip(tr("Recorrido completo de cada pista, con su inicio y su fin"));
+        m_barraRep->addWidget(m_repRutas);
+        connect(m_repRutas, &QCheckBox::toggled, m_player, &TrackPlayer::setRoutesVisible);
+
+        auto *cerrar = m_barraRep->addAction(style()->standardIcon(QStyle::SP_DialogCloseButton),
+                                             tr("Cerrar la reproducción"));
+        connect(cerrar, &QAction::triggered, this, [this] {
+            m_player->clear();
+            m_barraRep->hide();
+        });
+    }
+
     // Exporta el historial completo de todos los objetivos a GPX con horas.
     void exportarHistorialGpx()
     {
@@ -4432,6 +4535,11 @@ private:
     int m_cpaMinutos = 10;                  //!< horizonte de la alerta CPA (min)
     RangeRings m_anillos;                   //!< últimos ajustes de anillos (1 NM x 5)
     BearingLine m_ebl;                      //!< marcación en curso (origen ya fijado)
+    TrackPlayer *m_player = nullptr;        //!< reproducción de historiales (al abrir uno)
+    QToolBar *m_barraRep = nullptr;         //!< barra de reproducción (abajo)
+    QSlider *m_repSlider = nullptr;         //!< posición en el tiempo
+    QLabel *m_repHora = nullptr;            //!< hora de la reproducción
+    QCheckBox *m_repRutas = nullptr;        //!< mostrar rutas completas
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.

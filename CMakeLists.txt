@@ -131,6 +131,8 @@ add_library(libmapa_core STATIC
     include/libmapa/GeoFile.h
     src/io/VectorFormats.cpp
     include/libmapa/VectorFormats.h
+    src/geo/TrackReplay.cpp
+    include/libmapa/TrackReplay.h
     src/io/DataPackage.cpp
     src/io/DataPackage.h
     include/libmapa/DataPackage.h
@@ -203,6 +205,8 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/MapView.h
         src/widget/MapWidget.cpp
         include/libmapa/MapWidget.h
+        src/widget/TrackPlayer.cpp
+        include/libmapa/TrackPlayer.h
         include/libmapa/MapTypes.h
         include/libmapa/MapFeature.h
         include/libmapa/MapTarget.h

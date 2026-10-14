@@ -5106,3 +5106,74 @@ Tests:
   `routesShowStartAndEnd`.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 124. Reproducción de historiales en el tiempo
+
+**Qué se hizo.**
+- **`TrackReplay.h`** (público, núcleo):
+  - `sampleTrack(pista, hora)` devuelve si la pista existía en ese instante,
+    dónde estaba (interpolando por la ortodrómica entre los puntos grabados),
+    con qué rumbo y qué último punto había alcanzado;
+  - `trackTimeRange` da el rango de horas de un conjunto de pistas.
+- **`TrackPlayer`** (público, widget):
+  - `loadFile` / `setTracks`, `play`, `pause`, `stop` (vuelve al principio),
+    `seek(hora)` y `setSpeed` (factor sobre el tiempo real; 60 por defecto);
+  - `setRoutesVisible` y `targetIdOf`;
+  - señales `timeChanged`, `playingChanged` y `finished`.
+- **Capas temporales fuera de deshacer.** `OverlayModel::setLayerUndoable` y
+  `MapWidget::setFeatureLayerTransient` sacan una capa de deshacer/rehacer:
+  sus altas, bajas y vaciados no apilan, y al restaurar una instantánea se
+  conserva su contenido actual.
+- **Demo**: *Datos → Reproducir historial (GPX)…*, con una barra abajo:
+  - reproducir/pausa, volver al principio y un deslizador de tiempo;
+  - la hora, la velocidad (×1, ×10, ×60, ×300, ×1800), «Rutas» y cerrar.
+  Al abrir un historial se para la simulación.
+
+**Cómo funciona.** Cada pista es un **objetivo normal del mapa** mientras
+existió (entre su primer y su último punto con hora). Cuando aparece, se da de
+alta en su origen con su hora y se le pasan uno a uno los puntos grabados ya
+alcanzados, también con su hora. Después recibe la posición interpolada del
+instante. Al acabar su tiempo se quita.
+
+**Por qué así.**
+- **Objetivos, no una capa aparte.** Al reproducir con la API pública de
+  objetivos funciona todo lo demás sin tocarlo: los iconos por `kind` (el
+  `type` del track), la traza, el historial con su «origen HH:mm:ss» al
+  seleccionar, las alertas de zona y de proximidad y los anillos o marcaciones
+  colgados de una pista. Las alertas CPA usan además las horas del fichero, así
+  que el análisis de un incidente pasado da los mismos avisos que en vivo.
+- **Se pasan los puntos reales, no solo el interpolado.** A ×1800 un
+  fotograma salta minutos. Si solo se moviera el objetivo a la posición
+  interpolada, su traza y su historial se saltarían los giros grabados. Se le
+  pasan todos los puntos alcanzados con su hora.
+- **Hacia atrás se rehace desde el origen.** Ir atrás en el tiempo no puede
+  dejar al objetivo con la traza «del futuro»: el reproductor lo quita y lo
+  vuelve a construir hasta esa hora. El test comprueba que el historial se
+  acorta y que el origen sigue siendo el primer punto.
+- **Tiempo real medido.** Cada fotograma (100 ms) avanza según el tiempo real
+  transcurrido (`QElapsedTimer`) por la velocidad, no según el intervalo
+  teórico. Así un equipo cargado no ralentiza la reproducción.
+- **Rutas completas con inicio y fin.** Con «Rutas», cada pista entera se ve en
+  discontinua en una capa temporal, como track GPX: lleva sus marcas de inicio
+  y fin (§123), y al seleccionarla, sus horas. Se ve qué falta por recorrer.
+- **Fuera de deshacer.** Esas rutas entraban en la pila de deshacer, y como
+  deshacer restaura instantáneas completas, un «deshacer» del usuario podía
+  quitarlas, o hacerlas reaparecer tras cerrar la reproducción. Ahora las capas
+  temporales no apilan y se conservan al restaurar. El siguiente id nunca
+  retrocede, para no repetir el de una entidad temporal conservada. Vale
+  también para cualquier otra capa temporal de la app.
+- Solo toca sus objetivos: los demás del mapa no se ven afectados (comprobado
+  en el test).
+
+Comprobado en la demo bajo Xvfb: 30 objetivos simulados, historial exportado y
+reproducido a ×60. A mitad de la reproducción, «Buque 1» seleccionado muestra
+su origen y su recorrido hasta ese momento; el resto de su ruta va en
+discontinua hasta el fin, y la barra muestra la hora.
+Tests:
+- `tst_vectorformats::samplesTracksInTime`: interpolación, rumbo, límites y
+  puntos sin hora;
+- `tst_mapwidget::trackPlayerReplaysHistory`: aparición escalonada, posiciones
+  interpoladas, ir atrás, rutas, reproducción hasta `finished`, limpieza;
+- `tst_overlaymodel::undoLeavesTransientLayersAlone`.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.

@@ -234,6 +234,8 @@ public:
     //! Marca una capa como TEMPORAL: se excluye del guardado (\a saveFeaturesTo),
     //! como las capas fijas del paquete. Para resultados de análisis o marcadores
     //! auxiliares que no deben persistir. \a transient=false la vuelve guardable.
+    //! Una capa temporal tampoco entra en deshacer/rehacer: sus cambios no se
+    //! apilan y un deshacer del usuario no la hace desaparecer ni reaparecer.
     void setFeatureLayerTransient(const QString &id, bool transient = true);
 
     // --- Entidades -------------------------------------------------------

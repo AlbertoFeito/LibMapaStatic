@@ -1052,6 +1052,10 @@ void MapWidget::setFeatureLayerTransient(const QString &id, bool transient)
         d->fixedLayers.insert(id);
     else
         d->fixedLayers.remove(id);
+    // Tampoco entra en deshacer: lo temporal lo pone y quita la app, y un
+    // "deshacer" del usuario no debe hacerlo desaparecer ni reaparecer.
+    if (d->view)
+        d->view->overlayModel()->setLayerUndoable(id, !transient);
 }
 
 // Anade una entidad; devuelve su id (o -1).

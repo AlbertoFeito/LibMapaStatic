@@ -1,3 +1,4 @@
+#include "libmapa/TrackReplay.h"
 #include "libmapa/VectorFormats.h"
 
 #include <QTemporaryDir>
@@ -22,6 +23,7 @@ private slots:
     void writesAndReadsFiles();
     void gpxTracksKeepTimes();
     void gpxRoutesKnowStartAndEnd();
+    void samplesTracksInTime();
 };
 
 // Tres entidades de prueba: un punto con atributos, una linea de dos partes y
@@ -375,6 +377,55 @@ void TstVectorFormats::gpxRoutesKnowStartAndEnd()
             QVERIFY(!e.attributes.contains(QStringLiteral("gpx_kind")));
         }
     }
+}
+
+// Muestreo de una pista en el tiempo: fuera de su rango no existe; en un punto
+// grabado esta en el; entre dos, interpolada por la ortodromica en proporcion
+// al tiempo y con el rumbo del tramo. Los puntos sin hora no cuentan.
+void TstVectorFormats::samplesTracksInTime()
+{
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413000LL).toUTC();
+    const QGeoCoordinate a(20.0, -80.0);
+    const QGeoCoordinate b = a.atDistanceAndAzimuth(1000.0, 90.0);
+    const QGeoCoordinate c = b.atDistanceAndAzimuth(2000.0, 0.0);
+    GpxTrack t;
+    t.points = { { a, t0 },
+                 { QGeoCoordinate(0.0, 0.0), QDateTime() },          // sin hora: se ignora
+                 { b, t0.addSecs(100) },
+                 { c, t0.addSecs(300) } };
+
+    QVERIFY(!sampleTrack(t, t0.addSecs(-1)).active);
+    QVERIFY(!sampleTrack(t, t0.addSecs(301)).active);
+    QVERIFY(!sampleTrack(t, QDateTime()).active);
+
+    TrackSample s = sampleTrack(t, t0);
+    QVERIFY(s.active);
+    QCOMPARE(s.pointIndex, 0);
+    QVERIFY(s.position.distanceTo(a) < 0.01);
+
+    s = sampleTrack(t, t0.addSecs(50));                       // mitad del primer tramo
+    QVERIFY(qAbs(s.position.distanceTo(a) - 500.0) < 0.5);
+    QVERIFY(qAbs(s.headingDeg - 90.0) < 0.1);
+    QCOMPARE(s.pointIndex, 0);
+
+    s = sampleTrack(t, t0.addSecs(250));                      // 3/4 del segundo tramo
+    QVERIFY(qAbs(s.position.distanceTo(b) - 1500.0) < 0.5);
+    QVERIFY(qAbs(s.headingDeg) < 0.2 || qAbs(s.headingDeg - 360.0) < 0.2);
+    QCOMPARE(s.pointIndex, 2);
+
+    s = sampleTrack(t, t0.addSecs(300));                      // el ultimo, incluido
+    QVERIFY(s.active);
+    QCOMPARE(s.pointIndex, 3);
+    QVERIFY(s.position.distanceTo(c) < 0.01);
+
+    GpxTrack otra;
+    otra.points = { { a, t0.addSecs(-60) }, { b, t0.addSecs(60) } };
+    QDateTime ini, fin;
+    QVERIFY(trackTimeRange({ t, otra }, &ini, &fin));
+    QCOMPARE(ini, t0.addSecs(-60));
+    QCOMPARE(fin, t0.addSecs(300));
+    QVERIFY(!trackTimeRange({ GpxTrack() }, &ini, &fin));
+    QVERIFY(!ini.isValid());
 }
 
 QTEST_MAIN(TstVectorFormats)

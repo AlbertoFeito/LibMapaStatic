@@ -1,6 +1,7 @@
 #include "SyntheticTileDb.h"
 
 #include "libmapa/MapWidget.h"
+#include "libmapa/TrackPlayer.h"
 #include "libmapa/MapFeature.h"
 #include "db/SqliteConnectionPool.h"
 #include "db/VectorRepository.h"
@@ -151,6 +152,9 @@ private slots:
     //! Un historial GPX importado marca su inicio y fin; la linea seleccionada
     //! los rotula. Los modos de setRouteEndpoints cambian lo que se ve.
     void routesShowStartAndEnd();
+    //! Reproduccion de un historial: los objetivos aparecen, se mueven y
+    //! desaparecen con las horas del fichero; ir atras rehace su historial.
+    void trackPlayerReplaysHistory();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2583,6 +2587,88 @@ void TstMapWidget::routesShowStartAndEnd()
     QVERIFY(captura() != seleccionada);
     w.setRouteEndpoints(RouteEndpoints::Routes);
     QCOMPARE(w.routeEndpoints(), RouteEndpoints::Routes);
+}
+
+// Dos pistas que empiezan a distinta hora. Al principio solo existe la
+// primera; a mitad las dos, interpoladas; ir hacia atras rehace el objetivo
+// (historial corto). Reproducir a mucha velocidad llega al final. Las rutas
+// van en una capa temporal y el reproductor no toca los demas objetivos.
+void TstMapWidget::trackPlayerReplaysHistory()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    MapTarget ajeno;
+    ajeno.position = QGeoCoordinate(10.0, 10.0);
+    const qint64 idAjeno = w.addTarget(ajeno);
+
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413000LL).toUTC();
+    const QGeoCoordinate a(22.0, -80.0);
+    GpxTrack p1;
+    p1.name = QStringLiteral("Buque 1");
+    p1.type = QStringLiteral("buque");
+    p1.targetId = 41;
+    for (int i = 0; i <= 10; ++i)                         // 10 min al este, 1 km/min
+        p1.points.append({ a.atDistanceAndAzimuth(1000.0 * i, 90.0), t0.addSecs(60 * i) });
+    GpxTrack p2;
+    p2.name = QStringLiteral("UAV 2");
+    for (int i = 0; i <= 4; ++i)                          // empieza a los 5 min
+        p2.points.append({ a.atDistanceAndAzimuth(500.0 * i, 0.0), t0.addSecs(300 + 60 * i) });
+
+    TrackPlayer player(&w);
+    QSignalSpy horas(&player, &TrackPlayer::timeChanged);
+    player.setTracks({ p1, p2 });
+    QCOMPARE(player.startTime(), t0);
+    QCOMPARE(player.endTime(), t0.addSecs(600));
+    QCOMPARE(player.currentTime(), t0);
+    QVERIFY(player.targetIdOf(0) >= 0);
+    QCOMPARE(player.targetIdOf(1), qint64(-1));           // aun no ha aparecido
+    const qint64 id1 = player.targetIdOf(0);
+    QCOMPARE(w.target(id1)->label, QStringLiteral("Buque 1"));
+    QCOMPARE(w.target(id1)->kind, QStringLiteral("buque"));
+    QCOMPARE(w.targetOrigin(id1).time, t0);
+    QVERIFY(horas.count() >= 1);
+
+    player.seek(t0.addSecs(390));                         // 6.5 min
+    QVERIFY(player.targetIdOf(1) >= 0);
+    QVERIFY(qAbs(w.target(id1)->position.distanceTo(a) - 6500.0) < 1.0);
+    QVERIFY(qAbs(w.target(player.targetIdOf(1))->position.distanceTo(a) - 750.0) < 1.0);
+    QCOMPARE(w.targetOrigin(player.targetIdOf(1)).time, t0.addSecs(300));
+    const int largo = int(w.targetHistory(player.targetIdOf(0)).size());
+    QVERIFY(largo >= 7);
+
+    player.seek(t0.addSecs(120));                         // hacia atras
+    QCOMPARE(player.targetIdOf(1), qint64(-1));           // la segunda ya no esta
+    QVERIFY(w.targetHistory(player.targetIdOf(0)).size() < largo);
+    QCOMPARE(w.targetOrigin(player.targetIdOf(0)).time, t0);
+
+    // Rutas completas en una capa temporal, como tracks GPX (inicio y fin).
+    player.setRoutesVisible(true);
+    const QVector<MapFeature> rutas = w.featuresInLayer(QStringLiteral("replay_routes"));
+    QCOMPARE(rutas.size(), 2);
+    QCOMPARE(rutas.first().attributes.value(QStringLiteral("gpx_kind")).toString(),
+             QStringLiteral("trk"));
+    QVERIFY(rutas.first().attributes.contains(QStringLiteral("time_end")));
+
+    // A x3600 los 10 min pasan en unos 170 ms reales.
+    QSignalSpy fin(&player, &TrackPlayer::finished);
+    player.setSpeed(3600.0);
+    player.play();
+    QVERIFY(player.isPlaying());
+    QVERIFY(fin.wait(3000));
+    QVERIFY(!player.isPlaying());
+    QCOMPARE(player.currentTime(), t0.addSecs(600));
+    QVERIFY(player.targetIdOf(0) >= 0);                   // su ultimo punto, incluido
+
+    player.stop();
+    QCOMPARE(player.currentTime(), t0);
+    player.clear();
+    QVERIFY(w.featuresInLayer(QStringLiteral("replay_routes")).isEmpty());
+    QCOMPARE(w.targets().size(), 1);                       // solo el ajeno
+    QVERIFY(w.target(idAjeno).has_value());
+
+    QString err;
+    QVERIFY(!player.loadFile(QStringLiteral("/no/existe.gpx"), &err));
+    QVERIFY(!err.isEmpty());
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

@@ -36,12 +36,14 @@ SOURCES += \
     $$ROOT/src/widget/RangeLayer.cpp \
     $$ROOT/src/widget/HillshadeLayer.cpp \
     $$ROOT/src/widget/MapView.cpp \
-    $$ROOT/src/widget/MapWidget.cpp
+    $$ROOT/src/widget/MapWidget.cpp \
+    $$ROOT/src/widget/TrackPlayer.cpp
 
 # Cabeceras con Q_OBJECT (para el MOC).
 HEADERS += \
     $$LIBMAPA_QCP_DIR/qcustomplot.h \
     $$ROOT/include/libmapa/MapWidget.h \
+    $$ROOT/include/libmapa/TrackPlayer.h \
     $$ROOT/src/widget/TileLayer.h \
     $$ROOT/src/widget/OverlayModel.h \
     $$ROOT/src/widget/FeatureLayer.h \
