@@ -42,6 +42,13 @@ private slots:
     void clearsSelectionWhenFeatureIsRemoved();
     void notifiesObserversOnClear();
     void emitsChangedOnEveryMutation();
+
+    // --- Deshacer --------------------------------------------------------
+    //! Cada edicion (mover/insertar/quitar vertice, mover entidad, desplazar
+    //! etiqueta) se deshace de verdad y se rehace. Regresion: la instantanea
+    //! de deshacer compartia datos con el modelo y la edicion la alteraba.
+    void undoRestoresEveryEdit();
+    void undoLeavesTransientLayersAlone();
 };
 
 static MapFeature punto(const QString &nombre, double lat, double lon,
@@ -441,6 +448,75 @@ void TstOverlayModel::insertVertexRespectsMaxVerticesCap()
     const qint64 id2 = m.addFeature(libre);
     QVERIFY(m.insertVertex(id2, 10, QGeoCoordinate(24.0, -83.0)));
     QCOMPARE(m.feature(id2)->geometry.size(), 11);
+}
+
+// ---------------------------------------------------------------- deshacer --
+
+void TstOverlayModel::undoRestoresEveryEdit()
+{
+    OverlayModel m;
+    const qint64 p = m.addFeature(punto(QStringLiteral("P"), 23.0, -82.0));
+    const qint64 z = m.addFeature(poligono(QStringLiteral("Z"), 4));
+    const MapFeature zonaOriginal = *m.feature(z);
+
+    // Mover el vertice de un punto (lo que hace el arrastre) y deshacerlo.
+    QVERIFY(m.moveVertex(p, 0, QGeoCoordinate(24.0, -81.0)));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(p)->position(), QGeoCoordinate(23.0, -82.0));
+    QVERIFY(m.redo());
+    QCOMPARE(m.feature(p)->position(), QGeoCoordinate(24.0, -81.0));
+
+    // Insertar y quitar vertices.
+    QVERIFY(m.insertVertex(z, 1, QGeoCoordinate(22.9, -81.95)));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(z)->geometry, zonaOriginal.geometry);
+    QVERIFY(m.removeVertex(z, 0));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(z)->geometry, zonaOriginal.geometry);
+
+    // Mover la entidad entera.
+    QVERIFY(m.moveFeature(z, 0.5, 0.5));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(z)->geometry, zonaOriginal.geometry);
+
+    // Desplazar la etiqueta.
+    QVERIFY(m.setLabelOffset(z, QPointF(30, -20)));
+    QVERIFY(m.undo());
+    QCOMPARE(m.feature(z)->style.labelOffsetPx, zonaOriginal.style.labelOffsetPx);
+}
+
+// Una capa fuera de deshacer: sus altas no apilan nada, y deshacer una edicion
+// del usuario (anterior o posterior) no la toca; borrarla tampoco apila.
+void TstOverlayModel::undoLeavesTransientLayersAlone()
+{
+    OverlayModel m;
+    m.addLayer(QStringLiteral("temp"));
+    m.setLayerUndoable(QStringLiteral("temp"), false);
+    QVERIFY(!m.isLayerUndoable(QStringLiteral("temp")));
+
+    const qint64 usuario = m.addFeature(punto(QStringLiteral("U"), 1.0, 1.0));
+    QCOMPARE(m.undoDepth(), 1);
+
+    MapFeature t = punto(QStringLiteral("T"), 2.0, 2.0);
+    t.layerId = QStringLiteral("temp");
+    const qint64 temporal = m.addFeature(t);
+    QCOMPARE(m.undoDepth(), 1);                       // no apila
+
+    QVERIFY(m.undo());                                // deshace la del usuario
+    QVERIFY(!m.feature(usuario).has_value());
+    QVERIFY(m.feature(temporal).has_value());         // la temporal sigue
+    QVERIFY(m.redo());
+    QVERIFY(m.feature(usuario).has_value());
+    QVERIFY(m.feature(temporal).has_value());
+
+    // Se quita la capa temporal y se deshace algo del usuario: no reaparece.
+    QVERIFY(m.moveFeature(usuario, 0.5, 0.5));
+    m.clearLayer(QStringLiteral("temp"));
+    QVERIFY(!m.feature(temporal).has_value());
+    QVERIFY(m.undo());
+    QVERIFY(!m.feature(temporal).has_value());
+    // Un alta nueva no reutiliza el id de la temporal.
+    QVERIFY(m.addFeature(punto(QStringLiteral("N"), 3.0, 3.0)) > temporal);
 }
 
 QTEST_MAIN(TstOverlayModel)

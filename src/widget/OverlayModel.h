@@ -4,6 +4,7 @@
 #include "libmapa/MapFeature.h"
 
 #include <QHash>
+#include <QSet>
 #include <QObject>
 #include <QVector>
 #include <optional>
@@ -95,6 +96,16 @@ public:
     bool undo();
     bool redo();
     void clearUndoHistory();
+    /*!
+     * \brief Saca una capa de deshacer/rehacer (capas TEMPORALES: resultados de
+     *        analisis, rutas de una reproduccion, capas fijas del paquete).
+     *
+     * Sus altas, bajas y vaciados no apilan nada, y al deshacer o rehacer se
+     * conserva su contenido ACTUAL: una instantanea antigua no la hace
+     * desaparecer ni reaparecer.
+     */
+    void setLayerUndoable(const QString &layerId, bool undoable);
+    bool isLayerUndoable(const QString &layerId) const { return !m_sinDeshacer.contains(layerId); }
     int undoDepth() const { return static_cast<int>(m_undo.size()); }
 
     // --- Carga masiva ----------------------------------------------------
@@ -145,6 +156,7 @@ private:
     QVector<Snapshot> m_redo;
     int m_groupDepth = 0;
     int m_maxUndo = 50;
+    QSet<QString> m_sinDeshacer;   //!< Capas fuera de deshacer/rehacer.
 };
 
 } // namespace libmapa

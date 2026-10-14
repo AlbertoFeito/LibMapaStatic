@@ -4561,3 +4561,660 @@ rejilla, cobertura por zoom). Quedan sin UI dedicada solo *getters* y variantes 
 `visibleNorthWest`, `featuresOfType`, `clearUndoHistory`) o deliberadamente no usadas por el guardado
 explícito (`setFeaturesDbFile`/`saveFeaturesNow`); el rango de zoom por capa se demuestra con los
 overlays del paquete (curvas de nivel con `z` limitado). Compila sin warnings, **19 tests** en verde.
+
+## 114. Alertas de zona: avisar cuando un objetivo entra o sale de un polígono
+
+**Problema.** La librería ya tenía objetivos móviles y polígonos, pero nada los
+relacionaba: para saber si un buque había entrado en una zona prohibida la app
+tenía que repetir, en cada actualización, una prueba de punto en polígono contra
+todas sus zonas y llevar ella el estado «dentro/fuera». Es geometría pura y la
+librería ya conoce las dos cosas.
+
+**Antes, una decisión de alcance.** Se valoró que la librería leyera directamente
+NMEA (GPS/GLONASS/BeiDou) o AIS. Se descartó: recibir datos es puerto serie o
+UDP/TCP, y la librería tiene prohibida la red (guarda en `CMakeLists.txt`); además
+la obligaría a conocer cada protocolo, en contra del diseño (objetivos agnósticos
+del dominio). La recepción y decodificación quedan en la app, que llama a
+`addTarget`/`updateTarget`. Las alertas de zona, en cambio, no necesitan saber de
+dónde viene el objetivo: encajan dentro.
+
+**Qué se hizo.**
+- `geo/ZoneMonitor` (núcleo, sin widget ni señales): guarda los contornos de las
+  zonas, la última posición de cada objetivo y quién está dentro de qué. Cada
+  operación devuelve las transiciones (entra/sale) que provoca. Se prueba sin
+  ventanas (`tst_zonemonitor`, 8 casos).
+- `MapWidget`: `watchZone(idPoligono)`, `unwatchZone`, `isZoneWatched`,
+  `watchedZones`, `targetsInZone`, `zonesOfTarget` y las señales
+  `targetEnteredZone(objetivo, zona)` / `targetLeftZone`. `addTarget`,
+  `updateTarget`, `removeTarget` y `clearTargets` pasan por el monitor.
+- La zona sigue a su entidad: `featureUpdated` (vértices, arrastre, edición) la
+  reevalúa; `featureRemoved` la deja de vigilar. Las cargas en bloque y el
+  **deshacer** solo emiten `layersChanged`, así que ahí también se resincronizan
+  las zonas vigiladas (comparando el contorno guardado para no reevaluar si la
+  geometría no cambió).
+
+**Por qué así.**
+- **«Dentro» en Web Mercator, no en grados.** Los polígonos se dibujan con lados
+  rectos en la proyección del mapa. Hacer el ray-casting en lon/lat daba un
+  resultado distinto de lo que ve el operador en lados largos e inclinados: en un
+  triángulo (0,0)-(0,60)-(60,60), a lon 30 la hipotenusa pasa por lat 30 en grados
+  pero por lat ≈35,3 en Mercator; un objetivo a lat 33 se VE dentro y así cuenta
+  (lo fija un test). `GeoMath::pointInPolygon` sigue en grados porque solo decide
+  qué teselas bajar.
+- **Vigilar avisa de lo que ya hay dentro.** Una zona recién vigilada empieza vacía
+  y los objetivos que ya están en ella producen una entrada: la app se entera del
+  estado inicial por el mismo canal, sin una consulta aparte.
+- **Borrar no es salir.** Quitar un objetivo, vaciar los objetivos o borrar/dejar
+  de vigilar una zona no emite salidas: la app lo ha pedido y ya lo sabe; una
+  «salida» ahí dispararía alarmas falsas. Una posición inválida sí saca al objetivo
+  de todas sus zonas (ha perdido el fijo; ya no se sabe que esté dentro).
+- **Multi-parte = cualquier parte.** Un `.geo` con varios anillos es una sola zona;
+  basta con estar dentro de uno.
+- **Coste.** O(zonas) por actualización de objetivo, con descarte por caja
+  envolvente antes de recorrer los lados; 2000 objetivos contra 20 zonas se
+  resuelven en milisegundos en el test.
+- **No se persiste** la vigilancia (igual que los objetivos): la app la vuelve a
+  pedir al cargar, p. ej. para todas las entidades de cierto `type`.
+
+Limitación conocida: zonas que crucen el antimeridiano (±180°) no se tratan.
+
+Compila sin warnings; **20 tests** en verde (17 sin QCustomPlot), Qt 6.4.
+
+## 115. Demo: probar las alertas de zona
+
+Para poder probar §114 sin escribir código, el `demo` añade en *Datos* la acción
+**«Vigilar zona seleccionada»**: con un polígono seleccionado lo vigila (o deja de
+vigilarlo si ya lo estaba). Las señales `targetEnteredZone`/`targetLeftZone` se
+muestran en la barra de estado («⚠ Buque 3 ENTRA en «Zona A» (2 dentro)»). Se
+prueba dibujando un polígono sobre la ruta de la simulación de objetivos. **Solo
+`demo/main.cpp`**; sin cambios de API. Compila sin warnings, **20 tests** en verde.
+
+## 116. Escala gráfica y cuadrícula de coordenadas
+
+**Problema.** En un mapa sin conexión de uso operativo faltaban dos referencias
+básicas: cuánto mide lo que se ve (no había escala) y en qué coordenadas está
+cada cosa sin mover el ratón (no había cuadrícula; la «rejilla» existente es de
+depuración y marca teselas, no grados).
+
+**Qué se hizo.**
+- `geo/MapDecor` (núcleo, funciones puras, `tst_mapdecor`): `scaleBar` elige la
+  barra con valor redondo 1-2-5×10ⁿ que cabe en 120 px, en metros/km o en millas
+  náuticas; `graticuleStep` elige el paso de la cuadrícula; `formatLatitude` /
+  `formatLongitude` rotulan en sexagesimal con la precisión del paso.
+- Dos capas nuevas en `src/widget/`, como las demás (`QCPLayerable`):
+  `ScaleBarLayer` (abajo a la izquierda, encima de todo) y `GraticuleLayer`
+  (encima de las entidades, debajo de los objetivos).
+- `MapWidget`: `setScaleBarVisible`, `setScaleBarUnits`, `metersPerPixel`,
+  `setGraticuleVisible`, `setGraticuleColor`. Ambas **ocultas por defecto** para no
+  cambiar lo que ya pintan las apps existentes.
+- `demo`: en *Ver*, «Escala gráfica» (encendida), «Escala en millas náuticas» y
+  «Cuadrícula de coordenadas» (blanca sobre la capa satelital).
+
+**Por qué así.**
+- **La escala se mide, no se deduce del zoom.** Se toma la distancia geodésica
+  real entre dos píxeles separados 100 px en el CENTRO de la vista. En Mercator la
+  escala cambia con la latitud (a 60° un píxel cubre la mitad de terreno que en el
+  ecuador), y el centro es donde mira el operador. Comprobado sobre la captura: a
+  zoom 8 y 22°N un grado de longitud ocupa ~182 px (≈103 km), y la barra de 50 km
+  mide ~88 px. El test verifica además que un zoom más da la mitad de m/px.
+- **Millas náuticas** porque el seguimiento es naval/aéreo; el redondeo se hace
+  en millas (0.2, 0.5, 1, 2 NM), no en metros, para que la etiqueta salga limpia.
+- **Pasos de carta, no decimales.** La cuadrícula usa 90°…1°, 30'…1', 30"…1":
+  dividen el grado sexagesimal, así las líneas caen en 23°30' y no en 23,5°, que
+  es como se leen las cartas. El paso sale del eje que más líneas pediría (ancho
+  o alto) y es el mismo en ambos, para una cuadrícula homogénea.
+- **Paralelos en la proyección del mapa.** Se dibujan en el eje Y en grados de
+  Mercator, igual que las teselas: caen exactamente donde debe estar esa latitud.
+- **Rótulos que no se pisan.** Longitudes arriba, latitudes a la izquierda; se
+  omite lo que caería en la esquina superior izquierda y en la franja inferior
+  donde va la escala (se vio en una captura que el rótulo de 21°55'N tapaba la
+  barra).
+- **Repintado diferido.** Como el resto de `MapWidget`, los cambios repintan con
+  `rpQueuedReplot`; el test procesa eventos antes de capturar.
+
+Compila sin warnings; **21 tests** en verde (18 sin QCustomPlot), Qt 6.4.
+
+## 117. Intercambio vectorial: GeoJSON, KML y GPX
+
+**Problema.** Las entidades solo entraban y salían en formatos propios: la BD
+SQLite del repositorio vectorial y los `.geo` heredados. Para traer una zona
+dibujada en QGIS o Google Earth, o descargar los puntos de un GPS de mano, había
+que convertir fuera; y lo dibujado en el mapa no se podía llevar a ninguna otra
+herramienta.
+
+**Qué se hizo.**
+- `VectorFormats` (núcleo, API pública en `include/libmapa/VectorFormats.h`,
+  `tst_vectorformats`): `readVectorFile` / `writeVectorFile` eligen el formato por
+  la extensión (`.geojson`/`.json`, `.kml`, `.gpx`), más los lectores y escritores
+  sobre memoria por formato.
+- `MapWidget::importVectorFile(ruta, capa)` añade las entidades del fichero a una
+  capa (como `loadFeaturesAsLayer`); `exportVectorFile(ruta, capa)` escribe todas
+  o las de una capa.
+- `demo`: *Datos → Importar GeoJSON/KML/GPX…* y *Exportar capa activa…*.
+
+**Por qué así.**
+- **Sin dependencias nuevas.** JSON (`QJsonDocument`) y XML (`QXmlStreamReader/
+  Writer`) vienen en Qt Core, en Qt 5 y 6. Nada de GDAL: sería una dependencia
+  enorme para tres formatos de texto, y la librería se despliega en PCs sin
+  conexión con dos juegos de DLL ya cuidados.
+- **Qué se conserva en cada formato** (lo que el formato admite, nada inventado):
+  GeoJSON lo guarda todo — nombre, descripción, tipo de dominio
+  (`libmapa_type`), atributos y estilo con las claves «simplestyle» (`stroke`,
+  `fill`…), que entienden geojson.io y muchos visores. KML guarda tipo y
+  atributos en `ExtendedData` y el estilo en `LineStyle`/`PolyStyle` (colores
+  `aabbggrr`); al leer se resuelven los `styleUrl` a estilos compartidos, que es
+  como exportan Google Earth y QGIS. GPX no tiene polígonos ni atributos: un
+  polígono se escribe como track cerrado con una extensión propia
+  (`libmapa:polygon`), válida según el esquema, y al releerlo vuelve a ser
+  polígono; la elevación de un waypoint (`ele`) se guarda como atributo y vuelve
+  a su sitio al exportar.
+- **Multi-parte de verdad.** `MultiPolygon`/`MultiLineString`/`MultiPoint`,
+  `MultiGeometry` de KML y los varios `trkseg` de un track son UNA entidad con
+  varias partes, igual que un `.geo`.
+- **Huecos ignorados.** `MapFeature` no modela anillos interiores; se toma el
+  exterior. Mejor una zona sin su hueco que inventar una parte que se rellenaría.
+- **Robustez al leer.** Vértices o partes inválidos se descartan (una línea de
+  un solo punto no entra); un fichero sin ninguna geometría válida es un error
+  con motivo, no una capa vacía silenciosa. En GPX, el `<name>` de cada `rtept`
+  no pisa el de la ruta (solo cuentan los hijos directos).
+- **Escritura atómica** con `QSaveFile`: un fallo a medias no deja un fichero
+  truncado encima del bueno. GeoJSON se escribe compacto (indentado, cada
+  coordenada ocupaba cuatro líneas).
+- Detalle de pruebas: `MapFeature` lleva un `QPixmap` (icono del estilo), que
+  exige `QGuiApplication`; por eso `tst_vectorformats` usa `QTEST_MAIN` como los
+  demás tests que manejan entidades.
+
+Compila sin warnings; **22 tests** en verde (19 sin QCustomPlot), Qt 6.4.
+
+## 118. Alertas de zona: también para entidades punto, resalte en el mapa, y deshacer arreglado
+
+**Problema (lo vio el usuario en el demo).** Un «Objetivo» colocado dentro de
+un «Área objetivo» no avisaba de nada. Causas:
+1. En el demo, «Objetivo» es una **entidad punto** (`type="objetivo"`), no un
+   objetivo móvil (`MapTarget`); §114 solo vigilaba objetivos móviles.
+2. El área no se vigilaba sola: había que seleccionarla y usar *Vigilar zona
+   seleccionada*.
+3. El único aviso era un texto efímero en la barra de estado: nada en el mapa.
+
+**Qué se hizo.**
+- `MapWidget` vigila también las **entidades punto** con un segundo
+  `ZoneMonitor` (los ids de entidad y de objetivo son espacios distintos y
+  podrían coincidir): señales `featureEnteredZone` / `featureLeftZone`, consultas
+  `featuresInZone` / `zonesOfFeature`. Se alimenta de `featureAdded`,
+  `featureUpdated` (edición y arrastre) y `featureRemoved`; tras cargas en bloque
+  o deshacer (solo `layersChanged`) se resincronizan todos los puntos. Solo
+  trabaja si hay zonas vigiladas (coste cero si no). `ZoneMonitor::trackedTargets`
+  permite olvidar los que ya no existen.
+- **Resalte en el mapa** (`setZoneAlertHighlight`, activo por defecto;
+  `setZoneAlertColor`): una zona vigilada con algo dentro se dibuja con borde
+  ancho y velo rojo, y cada punto dentro, con un aro. Lo pinta `FeatureLayer`
+  por debajo de la entidad, en píxeles; solo redibuja si cambia el conjunto.
+- `demo`: las «Área objetivo» se vigilan **solas** (al crearlas, cargarlas o
+  deshacer), salvo las que el usuario desactive; los objetivos móviles dentro de
+  una zona se pintan en **rojo y más grandes** (por el proveedor de símbolos); y
+  un indicador fijo en la barra de estado («⚠ N en zonas») lo resume.
+
+**Fallo de fondo encontrado al probarlo: deshacer no deshacía.** El test de
+«deshacer el arrastre saca el punto de la zona» falló porque el punto seguía
+dentro tras `undo()`. En `OverlayModel`, cinco ediciones (`moveVertex`,
+`insertVertex`, `removeVertex`, `moveFeature`, `setLabelOffset`) tomaban un
+iterador del `QHash` y DESPUÉS llamaban a `pushUndo()`, que copia el hash para
+la pila de deshacer. Los contenedores de Qt comparten datos entre copias
+(*implicit sharing*): escribir por el iterador antiguo no separaba los datos y
+modificaba también la instantánea guardada. Resultado: deshacer un arrastre,
+una inserción de vértice o un movimiento de entidad restauraba el estado ya
+modificado — no hacía nada. Ningún test cubría el deshacer de esas ediciones.
+Arreglo mínimo: volver a buscar el iterador tras `pushUndo()` (fuerza la
+separación). Nuevo test `tst_overlaymodel::undoRestoresEveryEdit` que cubre las
+cinco y el rehacer.
+
+Compila sin warnings; **22 tests** en verde (19 sin QCustomPlot), Qt 6.4.
+
+## 119. Coordenadas UTM y MGRS, y cuadrícula UTM
+
+**Problema.** Todo se mostraba e introducía en grados decimales. En operaciones
+se trabaja en UTM y, sobre todo, en MGRS («17Q LF 60056 56750»): sin ellos el
+operador tenía que convertir a mano para leer o dar una posición.
+
+**Qué se hizo.**
+- `Coordinates` (núcleo, API pública `include/libmapa/Coordinates.h`,
+  `tst_coordinates`): `toUtm`/`fromUtm` (zona natural o forzada), `toMgrs`/
+  `fromMgrs` (1 m a 10 km), `utmZoneFor`, y `formatCoordinate` /
+  `parseCoordinate` para decimal, GMS, grados-minutos decimales, UTM y MGRS.
+- `GraticuleLayer` con modo UTM (`MapWidget::setGraticuleMode`): líneas de este y
+  norte constantes por cada zona visible, cada 100 km … 100 m según el zoom, con
+  los límites de zona marcados; a escala de continente solo los límites.
+- `demo`: *Ver → Formato de coordenadas* (la de bajo el cursor), *Cuadrícula UTM*
+  e *Ir a coordenada…* (acepta cualquier formato y muestra los demás).
+
+**Por qué así.**
+- **Series de Krüger de orden 6 (Karney 2011)**, no las fórmulas clásicas de
+  Snyder: error sub-milimétrico en toda la zona y fuera de ella (sirve para
+  forzar la zona vecina en la cuadrícula), con el mismo coste.
+- **Verificado contra referencias externas**, no solo ida y vuelta: 13 puntos
+  (La Habana, Nueva York, Sídney, Islandia, la excepción noruega 32V, Svalbard
+  31X/33X a ambos lados de 9°E, el ecuador, un punto a 0,0001° al sur, 83,5°N y
+  79,9°S) calculados con PROJ 9.8 (pyproj) y con la librería *mgrs* (GeoTrans):
+  este/norte a < 1 mm y MGRS idéntico carácter a carácter. Incluso el caso del
+  meridiano 180 exacto (zona 1) se alineó con GeoTrans, que era lo que el test
+  esperaba al revés.
+- **MGRS trunca**, no redondea: la referencia nombra la esquina suroeste de la
+  celda que contiene el punto (norma NGA). Al leer se reconstruye el norte con
+  la fila (ciclo de 2000 km) y la banda: una banda mide ~900 km, así que solo hay
+  una solución.
+- **Excepciones de zona** de Noruega y Svalbard en las coordenadas; la
+  cuadrícula dibuja las zonas estándar de 6° (documentado).
+- **Cuadrícula UTM en la proyección del mapa**: una línea de este constante es
+  una curva en Mercator; se muestrea (40 tramos) y se recorta a los 6° de su
+  zona. En el límite de dos zonas se ven las dos cuadrículas, ligeramente
+  giradas entre sí, como en una carta. Se comprobó sobre capturas a zoom 3, 6, 9
+  y 12 (centro 21,5°N 78,2°W, zona 17: rótulos ~790 kmE y ~2380 kmN, coherentes);
+  a zoom 6 los rótulos de 100 km se pisaban y se añadió un descarte de rótulos
+  solapados.
+- **Lectura tolerante**: MGRS con o sin espacios ni cero en la zona, UTM con
+  banda, decimal con coma o espacio, y sexagesimal con hemisferio (también «O»
+  de oeste y coma decimal), en cualquier orden lat/lon.
+
+Fuera de 80°S–84°N no hay UTM/MGRS (los polos son UPS, no soportado): las
+funciones devuelven inválido y el demo muestra «(fuera de UTM)».
+
+Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.
+
+## 120. Historial completo de cada objetivo, desde su origen
+
+**Problema (lo pidió el usuario).** La traza de un objetivo solo guardaba sus
+últimas 300 posiciones (`setTargetTrailLength`): pasado eso se perdía de dónde
+venía. Para saber el **origen** —dónde se empezó a ver en el sistema— hay que
+conservar todo el recorrido mientras el objetivo exista, y al seleccionarlo
+verlo entero desde el primer punto.
+
+**Qué se hizo.**
+- `TargetModel` guarda, aparte de la traza que se dibuja para todos, un
+  **historial** por objetivo con posición y hora. Se abre con el alta (ORIGEN),
+  crece con cada `update` y se pierde solo al borrar el objetivo.
+- `MapWidget`: `targetHistory(id)`, `targetOrigin(id)` (`TargetTrackPoint` =
+  posición + hora), `setTargetHistoryLimit`, `setTargetHistoryMinDistance` y
+  `setSelectedTargetHistoryVisible`. `addTarget`/`updateTarget` aceptan la hora
+  del dato (p. ej. la del mensaje AIS); sin ella, la actual en UTC.
+- `TargetLayer`: el objetivo **seleccionado** dibuja todo su historial del
+  origen a la posición actual (línea de su color sobre halo blanco) y marca el
+  origen con un cuadro y su hora («origen 22:13:20»).
+- `demo`: al pinchar un objetivo, la barra de estado añade su origen (en el
+  formato de coordenadas elegido), la hora y cuántos puntos tiene el historial.
+
+**Por qué así.**
+- **Historial separado de la traza dibujada.** La traza corta es para pintar
+  miles de objetivos a 30 fps; el historial es el dato. Mezclarlos obligaba a
+  elegir entre perder el origen o dibujar recorridos de horas para todos.
+- **Memoria acotada sin perder el origen.** Con miles de objetivos durante
+  horas, guardarlo todo sin límite agotaría la memoria. Tres medidas: puntos
+  compactos (lat, lon, ms: 24 bytes; `QGeoCoordinate`+`QDateTime` costarían
+  varias veces más), no anotar un punto a menos de 1 m del anterior (un objetivo
+  parado no crece) y, pasado el tope (5000 por defecto), **aclarar** quitando
+  uno de cada dos intermedios: el recorrido conserva su forma con la mitad de
+  resolución y **el origen y la última posición nunca se pierden**.
+- **Dibujado fuera del culling.** El historial del seleccionado se pinta
+  aunque el objetivo esté fuera de pantalla: su recorrido —y su origen— pueden
+  cruzar la vista.
+- **Hora del dato, no de llegada**, cuando la app la tiene: el origen debe decir
+  cuándo se vio, no cuándo se procesó el mensaje.
+- `QDateTime::fromMSecsSinceEpoch(ms).toUTC()` en vez de la variante con
+  `Qt::UTC`, obsoleta en Qt 6.9+ (avisaría en el Qt 6.11 del PC local).
+
+Comprobado en captura: un objetivo que hace una «L» con la traza dibujada
+limitada a 5 puntos muestra, seleccionado, la «L» entera y el origen con su hora.
+Tests: `tst_targetmodel` (historial más allá de la traza, aclarado que conserva
+extremos, distancia mínima, horas, borrado) y `tst_mapwidget`.
+
+Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.
+
+## 121. Historial a GPX con horas, exportar la vista a imagen o PDF, y «Seleccionar área / polígono» que por fin se ven
+
+**Qué se hizo.**
+- **Historial de objetivos a GPX.** `VectorFormats` gana `GpxTrack` (nombre,
+  descripción, tipo, id del objetivo y puntos `TargetTrackPoint`),
+  `tracksToGpx`, `writeGpxTracks` y `parseGpxTracks`. `MapWidget::exportTargetHistory(path, ids)`
+  escribe un `<trk>` por objetivo con su historial completo desde el origen y la
+  hora de cada punto (`<time>` UTC ISO 8601 con milisegundos). El id va como
+  extensión `libmapa:targetId`.
+- **Exportar la vista.** `MapWidget::renderImage(scale)` devuelve la vista como
+  `QImage`; `exportView(path, MapExportOptions)` la guarda en PDF o en cualquier
+  formato de imagen de Qt según la extensión. `MapExportOptions`: título, notas,
+  atribución, pie sí/no, factor de resolución de la imagen y hoja/margen del PDF.
+  El pie lleva la extensión (NO/SE), el zoom, la fecha UTC y, en PDF, la
+  **escala de impresión** («escala aprox. 1:1 570 000 (en el centro)»).
+- **Consultar una zona.** `targetsInArea(polígono)` y `featuresInArea(polígono)`
+  dicen qué hay dentro sin vigilar nada; `polygonArea` y `pathLength`
+  (`Coordinates.h`) dan superficie y perímetro.
+- `clearAreaSelection()` quita ahora también el contorno de `SelectPolygon`.
+- **Demo.** Datos → *Exportar vista a imagen o PDF…* (Ctrl+P) y *Exportar
+  historial de objetivos (GPX)…*. Y el arreglo de *Seleccionar área* /
+  *Seleccionar polígono*: ver abajo.
+
+**El fallo de «Seleccionar área / polígono» en la demo.** La librería hacía
+su parte: deja la marca en el mapa y emite `areaSelected` / `polygonSelected`.
+Pero la demo, al recibir la señal, volvía a Navegar en el acto
+(`setActiveTool(None)`), y cambiar de herramienta **borra la marca**. Lo único
+que quedaba era un mensaje de 10 s en la barra de estado («Polígono de zona:
+4 vértices»), fácil de no ver. Parecía que no hacían nada. Además, nada
+explicaba para qué servían: en `fill_map` eligen qué teselas bajar, pero en la
+demo no hacían nada con la zona.
+Ahora, al cerrar la zona (fuera del evento de ratón, con `singleShot`, para que
+se repinte con la marca) se abre **«Zona seleccionada»** con:
+- superficie, perímetro y esquinas (en el formato de coordenadas elegido);
+- objetivos y entidades que hay dentro (cuántos y los primeros nombres);
+- *Crear área* (polígono en la capa activa), *Crear y vigilar* (lo mismo y
+  queda como zona de alerta), *Exportar zona…* (encuadra y exporta la vista),
+  *Cerrar*.
+Al cerrar se quita la marca y se vuelve a Navegar. Los textos de ayuda de
+las dos herramientas explican cómo se usan (rectángulo con dos clics; polígono
+clic a clic, cerrado con doble clic, clic derecho o Intro; Esc cancela).
+
+**Por qué así.**
+- **GPX con hora y no GeoJSON.** GPX es el formato de recorridos con tiempo que
+  entienden QGIS (capa temporal), GPXSee o Google Earth. Lo de antes,
+  `toGpx(features)`, no sirve: una entidad línea no tiene horas.
+  `parseGpxTracks` cierra el ciclo y permite releer un historial para
+  reproducirlo. Las horas se leen con o sin milisegundos y con cualquier zona
+  horaria, y se pasan a UTC.
+- **PDF vectorial a la resolución lógica de la pantalla.** Con `QPdfWriter` a
+  300 ppp, los textos de las capas (en puntos) salían el triple de grandes en
+  proporción al mapa. A la resolución de la pantalla la hoja es una copia fiel
+  de la vista, y no se pierde calidad: entidades, objetivos, escala y
+  cuadrícula van como vectores (`QCustomPlot::toPainter` sobre un `QCPPainter`
+  en modo vectorial) y las teselas a su resolución nativa. Se hace con
+  `QPdfWriter` (QtGui) y no con `savePdf` de QCustomPlot (que usa `QPrinter`)
+  porque hacían falta título, pie y una hoja con márgenes.
+- **La escala 1:N solo en PDF.** En una imagen no hay tamaño físico. En la hoja
+  sí: metros de terreno del ancho del mapa entre los milímetros que ocupa. Se
+  calcula en el centro de la vista (Mercator varía con la latitud) y se
+  redondea a tres cifras.
+- **Escritura atómica (`QSaveFile`)** como en el resto de exportaciones; con una
+  extensión desconocida no se crea fichero. JPEG se aplana sobre blanco, porque
+  no tiene canal alfa.
+- **Superficie exacta en el elipsoide para lo habitual.** La fórmula esférica
+  de Chamberlain-Duquette con radio autálico se equivocaba hasta un 0.9 % a
+  latitudes altas. Con **latitudes autálicas** (Snyder 3-12), un trapecio de
+  meridianos y paralelos sale exacto en WGS84 (12 308.46 km² para 1°×1° en el
+  ecuador, 6 123.14 km² a 60° N; comprobado en el test).
+- **`featuresInArea` por vértices**: una entidad cuenta si algún vértice cae
+  dentro. Es lo que espera quien marca una zona («qué hay aquí») y cuesta
+  O(vértices). Un polígono enorme que rodea la zona sin vértices dentro no
+  cuenta, y está documentado.
+
+Comprobado: el PNG con título y pie, el PDF (renderizado con `pdftoppm`) y la
+demo bajo Xvfb. El diálogo de una zona de 4 vértices muestra 126 284 km², 41
+objetivos y 1 entidad; *Crear y vigilar* deja «Zona 1» vigilada con sus 41
+objetivos en rojo.
+Tests: `tst_vectorformats::gpxTracksKeepTimes`,
+`tst_coordinates::measuresAreaAndLength`, y en `tst_mapwidget`:
+`exportsTargetHistoryToGpx`, `exportsViewToImageAndPdf` y
+`areaQueriesFindTargetsAndFeatures`.
+
+Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.
+
+## 122. Alertas de proximidad entre objetivos (CPA/TCPA)
+
+**Qué se hizo.**
+- **`Proximity.h`** (público, núcleo): `CpaResult` (distancia en el CPA, TCPA,
+  distancia actual y dónde estará cada uno en el CPA), `computeCpa(posA,
+  velA, rumboA, posB, velB, rumboB)`, `ProximityAlert` y `knotsToMetersPerSecond`.
+- **`geo/ProximityMonitor`** (núcleo; `tst_proximity`): guarda el estado de
+  cada móvil (posición, velocidad, rumbo y hora) y devuelve qué pares entran o
+  salen de alerta, igual que `ZoneMonitor` con las zonas.
+- **`TargetModel`**: hora de la última posición (`lastUpdateMsecs`) y
+  `estimateVelocity(id, ventana)`, la velocidad y el rumbo según la propia traza.
+- **`MapWidget`**:
+  - `setProximityAlert(distancia, horizonte)` (0 apaga), `proximityAlerts`,
+    `targetCpa`, `setTargetVelocity`, `setProximityLinesVisible` y
+    `setProximityColor`;
+  - señales `proximityAlertRaised(a, b, cpaMetros, tcpaSeg)` y
+    `proximityAlertCleared(a, b)`.
+- **`TargetLayer`**: dibuja cada par en alerta con una línea discontinua de cada
+  objetivo a su punto de CPA, la distancia mínima entre esos dos puntos y el
+  rótulo («CPA 453 m en 1 min», o «… (se alejan)»). Va encima de los objetivos
+  y omite los rótulos que se pisarían.
+- **Demo**:
+  - *Datos → Alertas de proximidad (CPA)…*, con la distancia en NM y el
+    horizonte en minutos;
+  - un aviso en la barra de estado y el recuento «⚠ N CPA» en el indicador;
+  - la simulación pasa la hora a la librería: es un «time-lapse» de 30 s
+    simulados por paso.
+
+**Criterio de alerta.** Un par está en alerta si ya está a menos de la
+distancia, o si su CPA cae por debajo de ella dentro del horizonte
+(0 ≤ TCPA ≤ horizonte). Lo primero cubre a dos que ya están encima aunque se
+alejen. Lo segundo es el aviso anticipado, que es lo útil.
+
+**Por qué así.**
+- **Velocidad estimada por la traza, no por `MapTarget::speed`.** La librería
+  no interpreta `speed`: sus unidades son de la app (la demo pone nudos solo a
+  los buques). Para no cambiar ese contrato, la velocidad sale del
+  desplazamiento en los últimos 30 s del historial, que ya tiene horas (§120).
+  La app con datos mejores, como SOG/COG del AIS, los da con
+  `setTargetVelocity` en m/s, y esos mandan sobre la estima.
+- **Estima que se para.** El historial no anota movimientos de menos de 1 m;
+  un objetivo parado deja de crecer, y sin más la estima se quedaría con la
+  última velocidad. Por eso cada objetivo guarda la hora de su última posición
+  aunque no se anote, y la estima mide hasta ella. Se leyó el reloj una sola
+  vez por actualización: con dos lecturas, historial y «última hora» podían
+  diferir en 1 ms, y la estima habría tomado el punto actual como origen
+  (velocidad 0).
+- **Estima de posición entre fuentes desfasadas.** Si un móvil informó hace 60 s
+  y el otro ahora, se lleva el atrasado a la hora del reciente antes del
+  cálculo. Sin ello, un AIS cada 10 s frente a un radar cada 2 s daría TCPA
+  erróneos (comprobado en `monitorDeadReckonsOlderFixes`).
+- **Plano tangente local.** Para distancias de alerta (decenas de km) es
+  exacto. Las posiciones del CPA se calculan sobre la esfera con
+  `atDistanceAndAzimuth`. Se tratan los pares a ambos lados de ±180°.
+- **Coste.** Mover un objetivo reevalúa sus pares, O(n). Antes del cálculo
+  completo hay un descarte barato: la distancia actual menos lo máximo que
+  pueden acercarse en el horizonte. 2000 móviles en un recuadro de 2°
+  cuadran con la fuerza bruta (1022 pares) y la pasada completa tarda unos
+  230 ms en Release, es decir ~0.1 ms por actualización. Con las alertas
+  apagadas no se alimenta el monitor y el coste es cero.
+- **Borrar no es alejarse**, como en las zonas: quitar un objetivo no emite fin
+  de alerta. Apagar las alertas sí emite el fin de las activas.
+- **Demo en tiempo simulado.** La simulación movía los objetivos 0.002–0.006°
+  cada 100 ms reales, unos 4 km/s de reloj de pared. Con la estima por traza eso
+  daba 190 pares en alerta y CPA en segundos. Ahora pasa a la librería su hora
+  simulada (30 s por paso): las velocidades salen de 7 a 22 m/s, y a 1 NM /
+  10 min hay unas pocas alertas creíbles.
+
+Comprobado en la demo bajo Xvfb (con 250 objetivos, unas 3–7 alertas a
+1 NM / 10 min). De cerca, dos aeronaves casi de frente muestran su punto de
+encuentro y «CPA 453 m en 1 min».
+Tests: `tst_proximity` (de frente, rumbos que se cruzan con referencia hecha a
+mano —TCPA 100 s, CPA 707.1 m—, paralelos, alejándose, entradas inválidas,
+±180°, transiciones, estima de posición, cambio de criterios, borrados y 2000
+móviles contra fuerza bruta), `tst_targetmodel::estimatesVelocityFromTrack` y
+`tst_mapwidget::proximityAlertsWarnOfCloseApproach`.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 123. Anillos de distancia y marcaciones, e inicio y fin de las rutas
+
+**Qué se hizo.**
+- **`RangeRings` y `BearingLine`** (públicos, `MapTypes.h`):
+  - anillos de distancia (VRM) alrededor de un punto o de un objetivo, cada
+    cierta separación, con radiales opcionales;
+  - líneas de marcación (EBL) de un punto u objetivo a otro, o con un rumbo y
+    una longitud.
+- **`MapWidget`**: `addRangeRings`, `updateRangeRings`, `addBearingLine`,
+  `updateBearingLine`, `removeRangeMark`, `clearRangeMarks`, `rangeMarks` y
+  `bearingLineMeasure` (rumbo y distancia actuales).
+- **`RangeLayer`** (`src/widget`) las dibuja:
+  - anillos geodésicos con su distancia arriba (el exterior en continua, los
+    demás discontinuos);
+  - radiales con su marcación («030°») y cruz en el centro;
+  - marcaciones por la ortodrómica, con halo, flecha en el destino y el
+    rótulo «202° · 26.7 NM».
+- **`MapDecor`**: `formatDistance` (sin ceros sobrantes: «1 NM», «2.5 km»),
+  `formatBearing` («045°») y `geodesicCircle`. Los rótulos CPA usan ahora el
+  mismo formato.
+- **Inicio y fin de rutas**:
+  - al leer GPX, cada ruta o track guarda `gpx_kind` y, si sus puntos traen
+    hora, `time_start` y `time_end`; un historial exportado trae además
+    `target_id`;
+  - `FeatureLayer` marca el inicio (círculo verde) y el fin (cuadrado rojo);
+  - la línea seleccionada lleva además «inicio 13:56:42» y «fin 14:26:42», con
+    fecha si no son de hoy o la ruta cruza de día;
+  - `setRouteEndpoints`: `Hidden`, `Selected`, `Routes` (por defecto: siempre
+    las rutas GPX, y cualquier línea al seleccionarla) o `AllLines`.
+- **Demo**, en el menú *Ver*:
+  - *Anillos de distancia…*: separación en NM, número y radiales cada 30°,
+    alrededor del objetivo seleccionado o de un punto que se pinche;
+  - *Marcación (rumbo y distancia)*: del objetivo seleccionado, o de un punto,
+    a otro objetivo o punto; si se pincha cerca de un objetivo, la línea
+    cuelga de él;
+  - *Inicio y fin de rutas* (los cuatro modos) y *Quitar anillos y
+    marcaciones*.
+
+**Por qué así.**
+- **En la capa de los objetivos.** Unos anillos o una marcación que cuelgan de
+  un objetivo tienen que moverse con él. `RangeLayer` es otro `QCPLayerable` de
+  la capa *buffered* «targets», creado antes que `TargetLayer`. Cuando los
+  objetivos repintan su capa se repinta también, sin tocar teselas ni
+  entidades, y los objetivos quedan encima.
+- **Geodésicos, no círculos de pantalla.** En Mercator una distancia real se
+  estira con la latitud: un anillo de 5 NM dibujado como círculo de píxeles
+  mentiría al norte y al sur. Se trazan con `atDistanceAndAzimuth` y las
+  marcaciones largas siguen la ortodrómica. El test comprueba el radio a 0°,
+  45° y 75°.
+- **El rumbo y la distancia se miden al dibujar**, con los objetivos donde
+  estén. No se guarda ningún valor que pueda quedarse viejo, y
+  `bearingLineMeasure` da lo mismo que el rótulo.
+- **Inicio y fin solo en las rutas.** Ponerlos en todas las líneas llenaría de
+  marcas las costas y overlays de solo lectura. Lo que el usuario pidió eran
+  las rutas de los historiales: por eso por defecto van siempre en lo leído de
+  GPX y en cualquier línea al seleccionarla. Los rótulos salen solo en la
+  seleccionada y hacia fuera del recorrido (el de inicio por detrás, el de fin
+  por delante), para que no se pisen aunque la ruta sea corta. Las marcas se
+  dibujan encima de los tiradores de edición.
+- **La hora viaja en atributos.** Así la conserva también un GeoJSON exportado
+  después, y sirve para cualquier GPX con tiempos, no solo los de esta
+  librería.
+
+Comprobado en la demo bajo Xvfb: anillos de 5 NM con radiales alrededor de una
+aeronave y una marcación «202° · 26.7 NM» hasta un buque; y un historial
+exportado, reimportado y seleccionado con «inicio 13:56:42» y «fin 14:26:42».
+Tests:
+- `tst_mapdecor`: formatos, y radio del anillo a varias latitudes;
+- `tst_vectorformats::gpxRoutesKnowStartAndEnd`;
+- `tst_mapwidget`: `rangeRingsAndBearingLinesFollowTargets`, que comprueba que
+  la marcación pasa de 045° a 180° al moverse el objetivo, y
+  `routesShowStartAndEnd`.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 124. Reproducción de historiales en el tiempo
+
+**Qué se hizo.**
+- **`TrackReplay.h`** (público, núcleo):
+  - `sampleTrack(pista, hora)` devuelve si la pista existía en ese instante,
+    dónde estaba (interpolando por la ortodrómica entre los puntos grabados),
+    con qué rumbo y qué último punto había alcanzado;
+  - `trackTimeRange` da el rango de horas de un conjunto de pistas.
+- **`TrackPlayer`** (público, widget):
+  - `loadFile` / `setTracks`, `play`, `pause`, `stop` (vuelve al principio),
+    `seek(hora)` y `setSpeed` (factor sobre el tiempo real; 60 por defecto);
+  - `setRoutesVisible` y `targetIdOf`;
+  - señales `timeChanged`, `playingChanged` y `finished`.
+- **Capas temporales fuera de deshacer.** `OverlayModel::setLayerUndoable` y
+  `MapWidget::setFeatureLayerTransient` sacan una capa de deshacer/rehacer:
+  sus altas, bajas y vaciados no apilan, y al restaurar una instantánea se
+  conserva su contenido actual.
+- **Demo**: *Datos → Reproducir historial (GPX)…*, con una barra abajo:
+  - reproducir/pausa, volver al principio y un deslizador de tiempo;
+  - la hora, la velocidad (×1, ×10, ×60, ×300, ×1800), «Rutas» y cerrar.
+  Al abrir un historial se para la simulación.
+
+**Cómo funciona.** Cada pista es un **objetivo normal del mapa** mientras
+existió (entre su primer y su último punto con hora). Cuando aparece, se da de
+alta en su origen con su hora y se le pasan uno a uno los puntos grabados ya
+alcanzados, también con su hora. Después recibe la posición interpolada del
+instante. Al acabar su tiempo se quita.
+
+**Por qué así.**
+- **Objetivos, no una capa aparte.** Al reproducir con la API pública de
+  objetivos funciona todo lo demás sin tocarlo: los iconos por `kind` (el
+  `type` del track), la traza, el historial con su «origen HH:mm:ss» al
+  seleccionar, las alertas de zona y de proximidad y los anillos o marcaciones
+  colgados de una pista. Las alertas CPA usan además las horas del fichero, así
+  que el análisis de un incidente pasado da los mismos avisos que en vivo.
+- **Se pasan los puntos reales, no solo el interpolado.** A ×1800 un
+  fotograma salta minutos. Si solo se moviera el objetivo a la posición
+  interpolada, su traza y su historial se saltarían los giros grabados. Se le
+  pasan todos los puntos alcanzados con su hora.
+- **Hacia atrás se rehace desde el origen.** Ir atrás en el tiempo no puede
+  dejar al objetivo con la traza «del futuro»: el reproductor lo quita y lo
+  vuelve a construir hasta esa hora. El test comprueba que el historial se
+  acorta y que el origen sigue siendo el primer punto.
+- **Tiempo real medido.** Cada fotograma (100 ms) avanza según el tiempo real
+  transcurrido (`QElapsedTimer`) por la velocidad, no según el intervalo
+  teórico. Así un equipo cargado no ralentiza la reproducción.
+- **Rutas completas con inicio y fin.** Con «Rutas», cada pista entera se ve en
+  discontinua en una capa temporal, como track GPX: lleva sus marcas de inicio
+  y fin (§123), y al seleccionarla, sus horas. Se ve qué falta por recorrer.
+- **Fuera de deshacer.** Esas rutas entraban en la pila de deshacer, y como
+  deshacer restaura instantáneas completas, un «deshacer» del usuario podía
+  quitarlas, o hacerlas reaparecer tras cerrar la reproducción. Ahora las capas
+  temporales no apilan y se conservan al restaurar. El siguiente id nunca
+  retrocede, para no repetir el de una entidad temporal conservada. Vale
+  también para cualquier otra capa temporal de la app.
+- Solo toca sus objetivos: los demás del mapa no se ven afectados (comprobado
+  en el test).
+
+Comprobado en la demo bajo Xvfb: 30 objetivos simulados, historial exportado y
+reproducido a ×60. A mitad de la reproducción, «Buque 1» seleccionado muestra
+su origen y su recorrido hasta ese momento; el resto de su ruta va en
+discontinua hasta el fin, y la barra muestra la hora.
+Tests:
+- `tst_vectorformats::samplesTracksInTime`: interpolación, rumbo, límites y
+  puntos sin hora;
+- `tst_mapwidget::trackPlayerReplaysHistory`: aparición escalonada, posiciones
+  interpoladas, ir atrás, rutas, reproducción hasta `finished`, limpieza;
+- `tst_overlaymodel::undoLeavesTransientLayersAlone`.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 125. Salir del modo reproducción
+
+**El problema.** La reproducción (§124) se abría y funcionaba bien, pero no se
+veía cómo terminar. El único botón de cerrar era un icono «X» al final de la
+barra, sin texto, fácil de pasar por alto. Además, la barra se podía ocultar
+desde el menú contextual de las barras de herramientas, y entonces la
+reproducción seguía activa (objetivos y rutas en el mapa) sin ningún control
+para quitarla.
+
+**Qué se hizo.**
+- **Librería**: `TrackPlayer::isLoaded()` dice si hay una reproducción
+  activa, y la nueva señal `cleared()` avisa al salir. `clear()` queda
+  documentado como «salir de la reproducción»: para, quita del mapa los
+  objetivos y las rutas que puso, olvida las pistas y emite `cleared()` (solo
+  si había algo).
+- **Demo**, varias formas de salir:
+  - el botón **«Salir de la reproducción»**, con texto, en la propia barra;
+  - la misma acción en **Datos**;
+  - la tecla **Esc**;
+  - un clic en el indicador azul **«▶ Reproducción · Esc para salir»** de la
+    barra de estado, que se ve mientras dura el modo. Sirve además para no
+    confundir lo grabado con objetivos en vivo.
+- La barra de reproducción ya no se puede ocultar desde el menú contextual
+  (`toggleViewAction` desactivada): solo se cierra saliendo.
+- Activar la simulación sale antes de la reproducción: en vivo y reproducido
+  no se mezclan.
+
+**Por qué Esc solo durante la reproducción.** Fuera de ese modo, Esc es de las
+herramientas del mapa (cancelar un dibujo o una medida). La acción está
+desactivada mientras no se reproduce, así que su atajo no le quita la tecla a
+la vista.
+
+Comprobado en la demo bajo Xvfb, con pulsación real (`QTest::keyClick`, que
+pasa por los atajos de Qt, enlazado solo para la prueba). Abierta con 20
+pistas: 20 objetivos y 20 rutas. Tras Esc: 0 objetivos, 0 rutas, la barra
+cerrada y el indicador apagado. El indicador y «Simular» también salen.
+`tst_mapwidget::trackPlayerReplaysHistory` comprueba `cleared()` e
+`isLoaded()`.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.

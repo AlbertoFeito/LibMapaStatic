@@ -6,6 +6,9 @@
 #include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
 #include "geo/WebMercator.h"
+#include "geo/MapDecor.h"
+#include "geo/ProximityMonitor.h"
+#include "geo/ZoneMonitor.h"
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileService.h"
 #include "db/VectorRepository.h"
@@ -15,8 +18,17 @@
 #include "widget/HillshadeLayer.h"
 #include "widget/MapView.h"
 
+#include <QDateTime>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
+#include <QFontMetricsF>
+#include <QImageWriter>
+#include <QPageLayout>
+#include <QPageSize>
+#include <QPainter>
+#include <QPdfWriter>
+#include <QSaveFile>
 #include <QtMath>
 #include <cmath>
 #include <vector>
@@ -120,6 +132,222 @@ public:
     QVector<DataPackage::Overlay> overlays;
     QSet<QString> fixedLayers;
     QStringList dataWarnings;      // comprobacion rapida del paquete al abrir
+
+    // Alertas de zona: que objetivos estan dentro de que entidades vigiladas.
+    // La logica vive en ZoneMonitor (probada sin ventanas); aqui solo se le
+    // pasan los cambios de objetivos y entidades y se emiten sus transiciones.
+    ZoneMonitor zones;
+    // Las mismas zonas, vigilando las ENTIDADES PUNTO (marcadores fijos que el
+    // operador coloca o arrastra). Monitor aparte porque los ids de entidad y de
+    // objetivo son espacios distintos y podrian coincidir.
+    ZoneMonitor pointZones;
+    // Resalte en el mapa de las zonas ocupadas y de los puntos dentro de ellas.
+    bool zoneHighlight = true;
+
+    // Alertas de proximidad (CPA/TCPA). La logica vive en ProximityMonitor; solo
+    // se le pasan objetivos mientras las alertas esten activas (coste cero si no).
+    ProximityMonitor proximity;
+    // Velocidad (m/s) y rumbo dados por la app; mandan sobre la estima por traza.
+    QHash<qint64, QPair<double, double>> reportedVelocity;
+    bool proximityLines = true;
+    // Ventana de la estima de velocidad por la traza: lo bastante larga para
+    // promediar el ruido de posicion, y corta para seguir un cambio de rumbo.
+    static constexpr qint64 kVentanaVelocidadMs = 30000;
+
+    // Estado de un objetivo para el monitor: posicion, hora de la ultima
+    // posicion y velocidad (la de la app o la estimada; parado si no hay).
+    ProximityMonitor::Track trackOf(qint64 id) const
+    {
+        ProximityMonitor::Track t;
+        if (!view)
+            return t;
+        const TargetModel *m = view->targetModel();
+        const auto it = m->entries().constFind(id);
+        if (it == m->entries().constEnd())
+            return t;
+        t.position = it->target.position;
+        t.msecs = it->lastMsecs;
+        const auto v = reportedVelocity.constFind(id);
+        if (v != reportedVelocity.constEnd()) {
+            t.speed = v->first;
+            t.course = v->second;
+        } else {
+            double vel = 0.0, rumbo = 0.0;
+            if (m->estimateVelocity(id, kVentanaVelocidadMs, &vel, &rumbo)) {
+                t.speed = vel;
+                t.course = rumbo;
+            }
+        }
+        return t;
+    }
+
+    // Texto corto de una alerta para el mapa: "CPA 0.32 NM en 4 min", o la
+    // distancia actual si ya estan dentro y se alejan. Unidades de la escala.
+    QString textoCpa(const CpaResult &c) const
+    {
+        const ScaleUnits u = view && view->scaleBarLayer() ? view->scaleBarLayer()->units()
+                                                           : ScaleUnits::Metric;
+        const auto distancia = [u](double m) { return MapDecor::formatDistance(m, u); };
+        if (c.timeSeconds < 0.0)
+            return QStringLiteral("%1 (se alejan)").arg(distancia(c.currentDistanceMeters));
+        const double s = c.timeSeconds;
+        const QString cuando = s < 60.0 ? QStringLiteral("%1 s").arg(qRound(s))
+            : s < 3600.0 ? QStringLiteral("%1 min").arg(qRound(s / 60.0))
+                         : QStringLiteral("%1 h %2").arg(int(s / 3600.0))
+                               .arg(int(std::fmod(s, 3600.0) / 60.0), 2, 10, QLatin1Char('0'));
+        return QStringLiteral("CPA %1 en %2").arg(distancia(c.distanceMeters), cuando);
+    }
+
+    // Pasa a la capa de objetivos las lineas de los pares en alerta.
+    void refreshProximityLines()
+    {
+        if (!view || !view->targetLayer())
+            return;
+        QVector<TargetLayer::ProximityLine> lineas;
+        if (proximityLines) {
+            for (const ProximityMonitor::Transition &a : proximity.alerts())
+                lineas.append({ a.a, a.b, a.cpa.positionA, a.cpa.positionB, textoCpa(a.cpa) });
+        }
+        view->targetLayer()->setProximityLines(lineas);
+    }
+
+    // Emite las transiciones del monitor como señales publicas (con el estado
+    // ya al dia) y refresca las lineas del mapa.
+    void emitProximityTransitions(const QVector<ProximityMonitor::Transition> &cambios)
+    {
+        refreshProximityLines();
+        for (const ProximityMonitor::Transition &t : cambios) {
+            if (t.raised)
+                emit q->proximityAlertRaised(t.a, t.b, t.cpa.distanceMeters, t.cpa.timeSeconds);
+            else
+                emit q->proximityAlertCleared(t.a, t.b);
+        }
+    }
+
+    // Lleva un objetivo al monitor de proximidad (solo con alertas activas).
+    void syncProximity(qint64 id)
+    {
+        if (!proximity.isEnabled())
+            return;
+        const bool habiaLineas = proximity.hasAlerts();
+        const auto cambios = proximity.updateTrack(id, trackOf(id));
+        if (!cambios.isEmpty() || habiaLineas)
+            emitProximityTransitions(cambios);
+    }
+
+    // Recalcula que entidades estan "en alerta" (zonas vigiladas con algo
+    // dentro, y entidades punto dentro de alguna) y se lo pasa a la capa de
+    // entidades, que solo redibuja si el conjunto cambio. Se llama tras
+    // cualquier cambio de pertenencia, tambien los silenciosos (borrados).
+    void refreshAlerts()
+    {
+        if (!view || !view->featureLayer())
+            return;
+        QSet<qint64> alerta;
+        if (zoneHighlight) {
+            for (qint64 z : zones.zones()) {
+                const QVector<qint64> puntos = pointZones.targetsIn(z);
+                if (!puntos.isEmpty() || !zones.targetsIn(z).isEmpty())
+                    alerta.insert(z);
+                for (qint64 p : puntos)
+                    alerta.insert(p);
+            }
+        }
+        view->featureLayer()->setAlerted(alerta);
+        view->replot(QCustomPlot::rpQueuedReplot);
+    }
+
+    // Convierte las transiciones de ZoneMonitor en senales publicas. El estado
+    // ya esta actualizado al emitir, asi que un slot puede consultar
+    // targetsInZone o mover objetivos sin ver datos a medias.
+    void emitZoneTransitions(const QVector<ZoneMonitor::Transition> &cambios)
+    {
+        if (!cambios.isEmpty())
+            refreshAlerts();
+        for (const ZoneMonitor::Transition &t : cambios) {
+            if (t.entered)
+                emit q->targetEnteredZone(t.targetId, t.zoneId);
+            else
+                emit q->targetLeftZone(t.targetId, t.zoneId);
+        }
+    }
+
+    // Igual para las entidades punto: featureEnteredZone / featureLeftZone.
+    void emitPointZoneTransitions(const QVector<ZoneMonitor::Transition> &cambios)
+    {
+        if (!cambios.isEmpty())
+            refreshAlerts();
+        for (const ZoneMonitor::Transition &t : cambios) {
+            if (t.entered)
+                emit q->featureEnteredZone(t.targetId, t.zoneId);
+            else
+                emit q->featureLeftZone(t.targetId, t.zoneId);
+        }
+    }
+
+    // Lleva la posicion de una entidad al monitor de puntos: si es un punto, su
+    // (primera) posicion; si ya no existe o no es un punto, se olvida sin
+    // emitir salida. Sin zonas vigiladas no se hace nada (coste cero).
+    void syncPoint(qint64 featureId)
+    {
+        if (!view || zones.zones().isEmpty())
+            return;
+        const std::optional<MapFeature> f = view->overlayModel()->feature(featureId);
+        if (!f || f->kind != GeometryKind::Point) {
+            pointZones.removeTarget(featureId);
+            return;
+        }
+        emitPointZoneTransitions(pointZones.updateTarget(featureId, f->position()));
+    }
+
+    // Resincroniza TODAS las entidades punto con el modelo: tras cargas en bloque
+    // o deshacer, que solo avisan con layersChanged. Olvida las que ya no estan.
+    // O(puntos x zonas) con descarte por caja; solo si hay zonas vigiladas.
+    void syncAllPoints()
+    {
+        if (!view || zones.zones().isEmpty())
+            return;
+        QSet<qint64> vivos;
+        for (const MapFeature &f : view->overlayModel()->features()) {
+            if (f.kind != GeometryKind::Point)
+                continue;
+            vivos.insert(f.id);
+            emitPointZoneTransitions(pointZones.updateTarget(f.id, f.position()));
+        }
+        for (qint64 id : pointZones.trackedTargets())
+            if (!vivos.contains(id))
+                pointZones.removeTarget(id);
+    }
+
+    // Deja de vigilar una zona en los dos monitores, sin emitir salidas.
+    bool dropZone(qint64 featureId)
+    {
+        pointZones.removeZone(featureId);
+        const bool habia = zones.removeZone(featureId);
+        if (habia)
+            refreshAlerts();
+        return habia;
+    }
+
+    // Vuelve a leer una zona vigilada de su entidad: si la entidad ya no existe
+    // o ha dejado de ser un poligono, se deja de vigilar en silencio; si cambio
+    // de forma, se reevalua y se emiten las entradas/salidas. Comparar con el
+    // contorno guardado evita reevaluar cuando la edicion no toco la geometria.
+    void syncZone(qint64 featureId)
+    {
+        if (!zones.hasZone(featureId) || !view)
+            return;
+        const std::optional<MapFeature> f = view->overlayModel()->feature(featureId);
+        if (!f || f->kind != GeometryKind::Polygon) {
+            dropZone(featureId);
+            return;
+        }
+        const QVector<QVector<QGeoCoordinate>> contorno = f->outlines();
+        if (contorno != zones.zoneRings(featureId)) {
+            emitZoneTransitions(zones.setZone(featureId, contorno));
+            emitPointZoneTransitions(pointZones.setZone(featureId, contorno));
+        }
+    }
 
     /*!
      * \brief Carga las capas fijas del paquete que aun no esten en el modelo.
@@ -317,6 +545,27 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(modelo, &OverlayModel::featureRemoved, this, &MapWidget::featureRemoved);
     connect(modelo, &OverlayModel::selectionChanged, this, &MapWidget::featureSelected);
     connect(modelo, &OverlayModel::layersChanged, this, &MapWidget::featureLayersChanged);
+    // Zonas vigiladas: seguir la geometria de su entidad. Las cargas en bloque y
+    // el deshacer solo emiten layersChanged, por eso tambien se resincroniza ahi.
+    // Las entidades PUNTO tambien se vigilan: alta, movimiento (edicion o
+    // arrastre) y borrado; en bloque, se resincronizan todas (primero los
+    // puntos, luego las zonas).
+    connect(modelo, &OverlayModel::featureAdded, this,
+            [this](qint64 id) { d->syncPoint(id); });
+    connect(modelo, &OverlayModel::featureUpdated, this, [this](qint64 id) {
+        d->syncPoint(id);
+        d->syncZone(id);
+    });
+    connect(modelo, &OverlayModel::featureRemoved, this, [this](qint64 id) {
+        d->dropZone(id);
+        d->pointZones.removeTarget(id);
+        d->refreshAlerts();
+    });
+    connect(modelo, &OverlayModel::layersChanged, this, [this] {
+        d->syncAllPoints();
+        for (qint64 id : d->zones.zones())
+            d->syncZone(id);
+    });
     connect(d->view, &MapView::targetClicked, this, &MapWidget::targetClicked);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
     connect(d->view, &MapView::featureDragStarted, this, &MapWidget::featureDragStarted);
@@ -421,10 +670,247 @@ void MapWidget::reloadBaseLayer()
     d->view->refreshPlan();
 }
 
-// Oculta el recuadro de "seleccionar area" (herramienta SelectArea).
+// Quita la marca de "seleccionar area" o "seleccionar poligono" que queda
+// visible tras emitir la seleccion.
 void MapWidget::clearAreaSelection()
 {
-    d->view->clearAreaSelection();
+    if (d->view)
+        d->view->clearAreaSelection();
+}
+
+// ------------------------------------------------------ exportar la vista --
+
+namespace {
+
+// Texto de una coordenada para el pie: decimal con 5 cifras (~1 m), corto y
+// sin ambiguedad para cualquiera que lo lea.
+QString textoPie(const QGeoCoordinate &c)
+{
+    return c.isValid() ? QStringLiteral("%1, %2").arg(c.latitude(), 0, 'f', 5)
+                                                 .arg(c.longitude(), 0, 'f', 5)
+                       : QStringLiteral("?");
+}
+
+// Redondea el denominador de escala a dos o tres cifras significativas
+// (1:23 456 -> 1:23 500): la escala de una hoja Mercator ya es aproximada.
+qint64 escalaRedonda(double denominador)
+{
+    if (!(denominador > 0.0) || !std::isfinite(denominador))
+        return 0;
+    const double p = std::pow(10.0, std::floor(std::log10(denominador)) - 2.0);
+    return qint64(std::llround(std::round(denominador / p) * p));
+}
+
+// Entero con los miles separados por espacios (1 570 000), como en las cartas;
+// no depende del idioma del sistema.
+QString conMiles(qint64 n)
+{
+    QString s = QString::number(n);
+    for (int i = int(s.size()) - 3; i > 0; i -= 3)
+        s.insert(i, QLatin1Char(' '));
+    return s;
+}
+
+// Lineas del pie: extension de la vista y zoom (y la escala, si se conoce), la
+// fecha UTC de la exportacion, y las notas y la atribucion si las hay.
+QStringList lineasPie(const QGeoCoordinate &nw, const QGeoCoordinate &se, int zoom,
+                      qint64 escala, const MapExportOptions &o)
+{
+    QString l1 = QStringLiteral("NO %1  \u2014  SE %2   \u00b7   zoom %3")
+                     .arg(textoPie(nw), textoPie(se)).arg(zoom);
+    if (escala > 0)
+        l1 += QStringLiteral("   \u00b7   escala aprox. 1:%1 (en el centro)")
+                  .arg(conMiles(escala));
+    QStringList l2;
+    l2 << QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyy-MM-dd HH:mm 'UTC'"));
+    if (!o.notes.isEmpty())
+        l2 << o.notes;
+    if (!o.attribution.isEmpty())
+        l2 << o.attribution;
+    return { l1, l2.join(QStringLiteral("   \u00b7   ")) };
+}
+
+} // namespace
+
+// Dibuja la vista con QCustomPlot::toPixmap al tamaño del widget por \a scale.
+// Antes se fuerza un replot inmediato: si el widget no se ha pintado aun, la
+// disposicion de los ejes (y con ella la posicion de todo) estaria sin calcular.
+QImage MapWidget::renderImage(double scale) const
+{
+    if (!d->view)
+        return QImage();
+    d->syncGeometry();
+    const double s = (scale > 0.0 && std::isfinite(scale)) ? scale : 1.0;
+    d->view->replot(QCustomPlot::rpImmediateRefresh);
+    return d->view->toPixmap(d->view->width(), d->view->height(), s).toImage();
+}
+
+// Guarda la vista: PDF (vectorial, con escala de impresion en el pie) o imagen
+// (titulo y pie como bandas encima y debajo). Siempre a traves de QSaveFile.
+bool MapWidget::exportView(const QString &path, const MapExportOptions &o, QString *error)
+{
+    const auto fallo = [&](const QString &motivo) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return false;
+    };
+    if (!d->view)
+        return fallo(QStringLiteral("No hay mapa que exportar"));
+    d->syncGeometry();
+    const int vw = d->view->width(), vh = d->view->height();
+    if (vw < 2 || vh < 2)
+        return fallo(QStringLiteral("La vista no tiene tamaño"));
+
+    const QString ext = QFileInfo(path).suffix().toLower();
+    const bool pdf = ext == QLatin1String("pdf");
+    if (!pdf && !QImageWriter::supportedImageFormats().contains(ext.toLatin1()))
+        return fallo(QStringLiteral("%1: formato no reconocido (usa .pdf, .png, .jpg...)").arg(path));
+
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
+        return fallo(QStringLiteral("No se pudo escribir %1: %2").arg(path, f.errorString()));
+
+    const QGeoCoordinate nw = visibleNorthWest(), se = visibleSouthEast();
+    const QColor tinta(0x20, 0x20, 0x20);
+
+    if (pdf) {
+        // Resolucion = la logica de la pantalla: asi los tamaños de letra y de
+        // linea de las capas guardan la misma proporcion que en pantalla. No
+        // resta calidad: vectores y texto son vectores, y las teselas van a su
+        // resolucion nativa.
+        const int dpi = qMax(72, d->view->logicalDpiX());
+        QPdfWriter pdfw(&f);
+        pdfw.setResolution(dpi);
+        pdfw.setCreator(QStringLiteral("libmapa"));
+        pdfw.setTitle(o.title);
+        const double ancho = qMax(50.0, o.pageWidthMm), alto = qMax(50.0, o.pageHeightMm);
+        const bool apaisada = vw > vh;
+        pdfw.setPageLayout(QPageLayout(QPageSize(QSizeF(qMin(ancho, alto), qMax(ancho, alto)),
+                                                 QPageSize::Millimeter),
+                                       apaisada ? QPageLayout::Landscape : QPageLayout::Portrait,
+                                       QMarginsF(o.marginMm, o.marginMm, o.marginMm, o.marginMm),
+                                       QPageLayout::Millimeter));
+
+        QCPPainter p;
+        if (!p.begin(&pdfw))
+            return fallo(QStringLiteral("No se pudo crear el PDF %1").arg(path));
+        p.setMode(QCPPainter::pmVectorized);
+        p.setMode(QCPPainter::pmNoCaching);
+        p.setPen(tinta);
+        const QRectF hoja(0, 0, pdfw.width(), pdfw.height());
+        double y = 0.0;
+        QRectF titulo;      // se escribe al final, alineado con el mapa ya centrado
+        if (!o.title.isEmpty()) {
+            QFont ft = font();
+            ft.setPointSizeF(15.0);
+            ft.setBold(true);
+            const double h = QFontMetricsF(ft, &pdfw).height() * 1.4;
+            titulo = QRectF(0, 0, hoja.width(), h);
+            y = h;
+        }
+        QFont fp = font();
+        fp.setPointSizeF(7.5);
+        const double hLinea = QFontMetricsF(fp, &pdfw).height();
+        const double hPie = o.footer ? hLinea * 2.6 : 0.0;
+
+        // El mapa, encajado sin deformar en lo que queda de hoja.
+        const QRectF hueco(0, y, hoja.width(), hoja.height() - y - hPie);
+        const double k = qMin(hueco.width() / vw, hueco.height() / vh);
+        const QRectF mapa(hueco.left() + (hueco.width() - vw * k) / 2.0, hueco.top(),
+                          vw * k, vh * k);
+        d->view->replot(QCustomPlot::rpImmediateRefresh);
+        p.save();
+        p.translate(mapa.topLeft());
+        p.scale(k, k);
+        p.setClipRect(QRectF(0, 0, vw, vh));
+        d->view->toPainter(&p, vw, vh);
+        p.restore();
+        p.setPen(QPen(tinta, 0.8));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(mapa);
+        if (!titulo.isNull()) {
+            QFont ft = font();
+            ft.setPointSizeF(15.0);
+            ft.setBold(true);
+            p.setFont(ft);
+            p.drawText(QRectF(mapa.left(), titulo.top(), mapa.width(), titulo.height()),
+                       Qt::AlignLeft | Qt::AlignVCenter, o.title);
+        }
+
+        if (o.footer) {
+            // Escala de impresion: metros de terreno que cubre el ancho del
+            // mapa entre lo que mide ese ancho en la hoja.
+            const double mmHoja = mapa.width() / dpi * 25.4;
+            const double terreno = metersPerPixel() * vw;
+            const QStringList lineas = lineasPie(nw, se, zoom(),
+                                                 escalaRedonda(terreno / (mmHoja / 1000.0)), o);
+            p.setFont(fp);
+            p.setPen(tinta);
+            double yl = mapa.bottom() + hLinea * 0.4;
+            for (const QString &l : lineas) {
+                p.drawText(QRectF(mapa.left(), yl, hoja.width() - mapa.left(), hLinea),
+                           Qt::AlignLeft | Qt::AlignVCenter, l);
+                yl += hLinea * 1.1;
+            }
+        }
+        p.end();
+    } else {
+        const double s = (o.imageScale > 0.0 && std::isfinite(o.imageScale)) ? o.imageScale : 1.0;
+        QImage img = renderImage(s);
+        if (img.isNull())
+            return fallo(QStringLiteral("No se pudo dibujar la vista"));
+        if (!o.title.isEmpty() || o.footer) {
+            // Bandas blancas: titulo encima y pie debajo, en pixeles de la
+            // imagen (escalados con ella).
+            QFont ft = font();
+            ft.setPixelSize(qRound(17 * s));
+            ft.setBold(true);
+            QFont fp = font();
+            fp.setPixelSize(qRound(11 * s));
+            const int hTit = o.title.isEmpty() ? 0 : qRound(QFontMetricsF(ft).height() * 1.6);
+            const int hLinea = qRound(QFontMetricsF(fp).height() * 1.15);
+            const QStringList lineas = o.footer ? lineasPie(nw, se, zoom(), 0, o) : QStringList();
+            const int hPie = lineas.isEmpty() ? 0 : hLinea * int(lineas.size()) + qRound(8 * s);
+            QImage total(img.width(), img.height() + hTit + hPie, QImage::Format_RGB32);
+            total.fill(Qt::white);
+            QPainter p(&total);
+            p.setRenderHint(QPainter::TextAntialiasing);
+            p.drawImage(0, hTit, img);
+            p.setPen(tinta);
+            const int margen = qRound(8 * s);
+            if (hTit > 0) {
+                p.setFont(ft);
+                p.drawText(QRect(margen, 0, total.width() - 2 * margen, hTit),
+                           Qt::AlignLeft | Qt::AlignVCenter, o.title);
+            }
+            p.setFont(fp);
+            int yl = hTit + img.height() + qRound(4 * s);
+            for (const QString &l : lineas) {
+                p.drawText(QRect(margen, yl, total.width() - 2 * margen, hLinea),
+                           Qt::AlignLeft | Qt::AlignVCenter, l);
+                yl += hLinea;
+            }
+            p.end();
+            img = total;
+        }
+        // JPEG no tiene canal alfa: se aplana sobre blanco para que lo
+        // transparente no salga negro.
+        if (ext == QLatin1String("jpg") || ext == QLatin1String("jpeg")) {
+            QImage plano(img.size(), QImage::Format_RGB32);
+            plano.fill(Qt::white);
+            QPainter pp(&plano);
+            pp.drawImage(0, 0, img);
+            pp.end();
+            img = plano;
+        }
+        if (!img.save(&f, ext.toLatin1().constData()))
+            return fallo(QStringLiteral("No se pudo codificar la imagen %1").arg(path));
+    }
+
+    if (!f.commit())
+        return fallo(QStringLiteral("No se pudo escribir %1: %2").arg(path, f.errorString()));
+    return true;
 }
 
 // ---------------------------------------------------------- navegacion --
@@ -566,6 +1052,10 @@ void MapWidget::setFeatureLayerTransient(const QString &id, bool transient)
         d->fixedLayers.insert(id);
     else
         d->fixedLayers.remove(id);
+    // Tampoco entra en deshacer: lo temporal lo pone y quita la app, y un
+    // "deshacer" del usuario no debe hacerlo desaparecer ni reaparecer.
+    if (d->view)
+        d->view->overlayModel()->setLayerUndoable(id, !transient);
 }
 
 // Anade una entidad; devuelve su id (o -1).
@@ -882,22 +1372,87 @@ qint64 MapWidget::loadFeaturesAsLayer(const QString &databasePath,
     return primero;
 }
 
+// Importa GeoJSON/KML/GPX: lee con VectorFormats y AÑADE cada entidad a la
+// capa (creandola si no existe), como loadFeaturesAsLayer. El fichero aporta
+// nombre, atributos y estilo; la capa la pone quien importa.
+qint64 MapWidget::importVectorFile(const QString &path, const QString &layerId,
+                                   const QString &displayName, QString *error)
+{
+    if (!d->view)
+        return -1;
+
+    QString motivo;
+    const QVector<MapFeature> feats = readVectorFile(path, &motivo);
+    if (feats.isEmpty()) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return -1;
+    }
+
+    addFeatureLayer(layerId, displayName.isEmpty() ? layerId : displayName, 0);
+    qint64 primero = -1;
+    for (MapFeature f : feats) {
+        f.id = -1;
+        f.layerId = layerId;
+        const qint64 id = addFeature(f);
+        if (primero < 0)
+            primero = id;
+    }
+    return primero;
+}
+
+// Exporta las entidades (todas, o las de una capa) al formato que diga la
+// extension. Sin entidades no se escribe nada: un fichero vacio solo confunde.
+bool MapWidget::exportVectorFile(const QString &path, const QString &layerId,
+                                 QString *error)
+{
+    const QVector<MapFeature> feats = layerId.isEmpty() ? features()
+                                                        : featuresInLayer(layerId);
+    if (feats.isEmpty()) {
+        if (error)
+            *error = layerId.isEmpty()
+                ? QStringLiteral("No hay entidades que exportar")
+                : QStringLiteral("La capa '%1' no tiene entidades").arg(layerId);
+        return false;
+    }
+    QString motivo;
+    if (!writeVectorFile(path, feats, &motivo)) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return false;
+    }
+    return true;
+}
+
 // ------------------------------------------------------ objetivos moviles --
 
 // Reenvios al TargetModel (capa dinamica de objetivos moviles), cada uno
 // documentado en TargetModel; devuelven un valor neutro sin vista.
 
 // Inserta o actualiza un objetivo movil; devuelve su id.
-qint64 MapWidget::addTarget(const MapTarget &target)
+qint64 MapWidget::addTarget(const MapTarget &target, const QDateTime &time)
 {
-    return d->view ? d->view->targetModel()->upsert(target) : -1;
+    if (!d->view)
+        return -1;
+    const qint64 id = d->view->targetModel()->upsert(target, time);
+    if (id >= 0) {
+        d->emitZoneTransitions(d->zones.updateTarget(id, target.position));
+        d->syncProximity(id);
+    }
+    return id;
 }
 
 // Mueve un objetivo a una nueva posicion/rumbo (camino rapido de refresco).
 bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
-                             double headingDeg)
+                             double headingDeg, const QDateTime &time)
 {
-    return d->view && d->view->targetModel()->update(id, position, headingDeg);
+    if (!d->view || !d->view->targetModel()->update(id, position, headingDeg, time))
+        return false;
+    d->emitZoneTransitions(d->zones.updateTarget(id, position));
+    d->syncProximity(id);
+    return true;
 }
 
 // Cambia la etiqueta de un objetivo.
@@ -960,15 +1515,25 @@ qint64 MapWidget::selectedTarget() const
     return d->view ? d->view->selectedTarget() : -1;
 }
 
-// Elimina un objetivo.
+// Elimina un objetivo; tambien lo olvidan las zonas vigiladas, sin emitir salida.
 bool MapWidget::removeTarget(qint64 id)
 {
+    d->zones.removeTarget(id);
+    d->refreshAlerts();
+    d->proximity.removeTrack(id);
+    d->reportedVelocity.remove(id);
+    d->refreshProximityLines();
     return d->view && d->view->targetModel()->remove(id);
 }
 
-// Elimina todos los objetivos.
+// Elimina todos los objetivos (las zonas vigiladas quedan vacias, sin salidas).
 void MapWidget::clearTargets()
 {
+    d->zones.clearTargets();
+    d->refreshAlerts();
+    d->proximity.clear();
+    d->reportedVelocity.clear();
+    d->refreshProximityLines();
     if (d->view)
         d->view->targetModel()->clear();
 }
@@ -999,6 +1564,81 @@ void MapWidget::setTargetTrailLength(int maxPoints)
         d->view->targetModel()->setTrailMaxPoints(maxPoints);
 }
 
+// Historial completo (desde el origen) de un objetivo; vacio si no existe.
+QVector<TargetTrackPoint> MapWidget::targetHistory(qint64 id) const
+{
+    return d->view ? d->view->targetModel()->history(id) : QVector<TargetTrackPoint>();
+}
+
+// Un track GPX por objetivo con historial (todos si \a ids viene vacio): la
+// etiqueta (primera linea) como nombre, el kind como tipo y el id como
+// extension, para poder volver a asociarlo al releerlo.
+bool MapWidget::exportTargetHistory(const QString &path, const QVector<qint64> &ids,
+                                    QString *error)
+{
+    QVector<qint64> lista = ids;
+    if (lista.isEmpty())
+        for (const MapTarget &t : targets())
+            lista.append(t.id);
+    std::sort(lista.begin(), lista.end());
+
+    QVector<GpxTrack> tracks;
+    for (qint64 id : lista) {
+        const auto t = target(id);
+        if (!t)
+            continue;
+        GpxTrack g;
+        g.targetId = id;
+        g.name = t->label.section(QLatin1Char('\n'), 0, 0).trimmed();
+        if (g.name.isEmpty())
+            g.name = QStringLiteral("Objetivo %1").arg(id);
+        g.type = t->kind;
+        g.points = targetHistory(id);
+        if (!g.points.isEmpty())
+            tracks.append(g);
+    }
+    if (tracks.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("No hay historial de objetivos que exportar");
+        return false;
+    }
+    QString motivo;
+    if (!writeGpxTracks(path, tracks, &motivo)) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return false;
+    }
+    return true;
+}
+
+// Origen (primer punto del historial) de un objetivo.
+TargetTrackPoint MapWidget::targetOrigin(qint64 id) const
+{
+    return d->view ? d->view->targetModel()->origin(id) : TargetTrackPoint();
+}
+
+// Tope de puntos del historial por objetivo (se aclara al superarlo).
+void MapWidget::setTargetHistoryLimit(int maxPoints)
+{
+    if (d->view)
+        d->view->targetModel()->setHistoryMaxPoints(maxPoints);
+}
+
+// Distancia minima entre puntos del historial, en metros.
+void MapWidget::setTargetHistoryMinDistance(double meters)
+{
+    if (d->view)
+        d->view->targetModel()->setHistoryMinDistance(meters);
+}
+
+// Enciende/apaga el dibujo del historial del objetivo seleccionado.
+void MapWidget::setSelectedTargetHistoryVisible(bool on)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setSelectedHistoryVisible(on);
+}
+
 // Muestra u oculta la capa entera de objetivos (repinta solo esa capa).
 void MapWidget::setTargetsVisible(bool visible)
 {
@@ -1006,6 +1646,216 @@ void MapWidget::setTargetsVisible(bool visible)
         d->view->targetLayer()->setVisible(visible);
         d->view->replot(QCustomPlot::rpQueuedReplot);
     }
+}
+
+// ------------------------------------------------------ alertas de zona ----
+
+// Empieza a vigilar un poligono: se registra su contorno en ZoneMonitor con las
+// posiciones de los objetivos actuales y se emiten las entradas de quienes ya
+// estan dentro. Si ya se vigilaba, solo se resincroniza su forma.
+bool MapWidget::watchZone(qint64 featureId)
+{
+    if (!d->view)
+        return false;
+    const std::optional<MapFeature> f = d->view->overlayModel()->feature(featureId);
+    if (!f || f->kind != GeometryKind::Polygon || !f->isValid())
+        return false;
+    if (d->zones.hasZone(featureId)) {
+        d->syncZone(featureId);
+        return true;
+    }
+    d->emitZoneTransitions(d->zones.setZone(featureId, f->outlines()));
+    // Puntos: se cargan sus posiciones (si es la primera zona, aun no se
+    // seguian) y despues se da de alta la zona, que avisa de los que ya estan.
+    d->syncAllPoints();
+    d->emitPointZoneTransitions(d->pointZones.setZone(featureId, f->outlines()));
+    return d->zones.hasZone(featureId);
+}
+
+// Deja de vigilar una zona sin emitir salidas: la app lo ha pedido, ya lo sabe.
+bool MapWidget::unwatchZone(qint64 featureId)
+{
+    return d->dropZone(featureId);
+}
+
+// ¿Se vigila esta entidad como zona?
+bool MapWidget::isZoneWatched(qint64 featureId) const
+{
+    return d->zones.hasZone(featureId);
+}
+
+// Entidades vigiladas como zona, ordenadas por id.
+QVector<qint64> MapWidget::watchedZones() const
+{
+    return d->zones.zones();
+}
+
+// Objetivos dentro de una zona vigilada (vacio si no se vigila).
+QVector<qint64> MapWidget::targetsInZone(qint64 featureId) const
+{
+    return d->zones.targetsIn(featureId);
+}
+
+// Zonas vigiladas que contienen a un objetivo.
+QVector<qint64> MapWidget::zonesOfTarget(qint64 targetId) const
+{
+    return d->zones.zonesOf(targetId);
+}
+
+// Enciende/apaga el resalte de las zonas ocupadas y sus puntos, y repinta.
+void MapWidget::setZoneAlertHighlight(bool on)
+{
+    d->zoneHighlight = on;
+    d->refreshAlerts();
+}
+
+// ¿Se resaltan las zonas ocupadas?
+bool MapWidget::isZoneAlertHighlight() const
+{
+    return d->zoneHighlight;
+}
+
+// Color del resalte de alerta (rojo por defecto).
+void MapWidget::setZoneAlertColor(const QColor &color)
+{
+    if (!d->view || !d->view->featureLayer())
+        return;
+    d->view->featureLayer()->setAlertColor(color);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// ------------------------------------------------- alertas de proximidad --
+
+// Activa (o cambia, o apaga con distancia <= 0) las alertas CPA/TCPA. Al
+// activarlas se cargan todos los objetivos en el monitor; al apagarlas se emite
+// el fin de las activas y se vacia el monitor para no gastar nada.
+void MapWidget::setProximityAlert(double distanceMeters, double horizonSeconds)
+{
+    const bool estaba = d->proximity.isEnabled();
+    const bool activar = std::isfinite(distanceMeters) && distanceMeters > 0.0;
+    if (activar && !estaba && d->view) {
+        for (const MapTarget &t : targets())
+            d->proximity.updateTrack(t.id, d->trackOf(t.id));   // sin criterios: no avisa
+    }
+    d->emitProximityTransitions(d->proximity.setCriteria(activar ? distanceMeters : 0.0,
+                                                         horizonSeconds));
+    if (!activar)
+        d->proximity.clear();
+}
+
+// Distancia de alerta en metros (0 = apagadas).
+double MapWidget::proximityAlertDistance() const
+{
+    return d->proximity.distance();
+}
+
+// Horizonte de la alerta en segundos.
+double MapWidget::proximityAlertHorizon() const
+{
+    return d->proximity.horizon();
+}
+
+// Pares en alerta, ordenados, con su CPA.
+QVector<ProximityAlert> MapWidget::proximityAlerts() const
+{
+    QVector<ProximityAlert> v;
+    for (const ProximityMonitor::Transition &t : d->proximity.alerts())
+        v.append({ t.a, t.b, t.cpa });
+    return v;
+}
+
+// CPA de dos objetivos al momento, con el mismo modelo de velocidad que las
+// alertas (aunque esten apagadas).
+CpaResult MapWidget::targetCpa(qint64 targetA, qint64 targetB) const
+{
+    if (!d->view || targetA == targetB || !d->view->targetModel()->contains(targetA)
+        || !d->view->targetModel()->contains(targetB))
+        return CpaResult();
+    return ProximityMonitor::evaluate(d->trackOf(targetA), d->trackOf(targetB));
+}
+
+// Velocidad/rumbo dados por la app (NaN = volver a estimar por la traza). Se
+// reevaluan en el acto los pares del objetivo.
+bool MapWidget::setTargetVelocity(qint64 id, double speedMetersPerSecond, double courseDeg)
+{
+    if (!d->view || !d->view->targetModel()->contains(id))
+        return false;
+    if (std::isnan(speedMetersPerSecond) || !std::isfinite(courseDeg))
+        d->reportedVelocity.remove(id);
+    else
+        d->reportedVelocity.insert(id, qMakePair(std::max(0.0, speedMetersPerSecond), courseDeg));
+    d->syncProximity(id);
+    return true;
+}
+
+// Muestra u oculta las lineas de maximo acercamiento.
+void MapWidget::setProximityLinesVisible(bool on)
+{
+    d->proximityLines = on;
+    d->refreshProximityLines();
+}
+
+// ¿Se dibujan las lineas CPA?
+bool MapWidget::isProximityLinesVisible() const
+{
+    return d->proximityLines;
+}
+
+// Color de las lineas y rotulos CPA.
+void MapWidget::setProximityColor(const QColor &color)
+{
+    if (d->view && d->view->targetLayer() && color.isValid()) {
+        d->view->targetLayer()->setProximityColor(color);
+        d->refreshProximityLines();
+    }
+}
+
+// Entidades punto dentro de una zona vigilada (vacio si no se vigila).
+QVector<qint64> MapWidget::featuresInZone(qint64 zoneFeatureId) const
+{
+    return d->pointZones.targetsIn(zoneFeatureId);
+}
+
+// Zonas vigiladas que contienen a una entidad punto.
+QVector<qint64> MapWidget::zonesOfFeature(qint64 featureId) const
+{
+    return d->pointZones.zonesOf(featureId);
+}
+
+// Objetivos dentro de un poligono cualquiera: un ZoneMonitor de usar y tirar
+// con una sola zona, para que el criterio de "dentro" sea el de las alertas.
+QVector<qint64> MapWidget::targetsInArea(const QVector<QGeoCoordinate> &polygon) const
+{
+    ZoneMonitor m;
+    m.setZone(0, { polygon });
+    if (!m.hasZone(0))
+        return {};
+    for (const MapTarget &t : targets())
+        m.updateTarget(t.id, t.position);
+    return m.targetsIn(0);
+}
+
+// Entidades con algun vertice dentro del poligono (mismo criterio que arriba).
+// Cada vertice se prueba como un "objetivo" del monitor hasta que uno cae dentro.
+QVector<qint64> MapWidget::featuresInArea(const QVector<QGeoCoordinate> &polygon) const
+{
+    ZoneMonitor m;
+    m.setZone(0, { polygon });
+    if (!m.hasZone(0))
+        return {};
+    QVector<qint64> ids;
+    for (const MapFeature &f : features()) {
+        for (const QGeoCoordinate &c : f.geometry) {
+            m.updateTarget(f.id, c);
+            if (m.isInside(f.id, 0)) {
+                ids.append(f.id);
+                break;
+            }
+        }
+        m.removeTarget(f.id);
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
 }
 
 // Id de la entidad seleccionada (o -1).
@@ -1219,6 +2069,175 @@ void MapWidget::setDebugGridVisible(bool visible)
         d->view->tileLayer()->setDebugGridVisible(visible);
         d->view->refreshPlan();
     }
+}
+
+// ------------------------------------------- escala grafica y cuadricula ----
+
+// Muestra u oculta la escala grafica. Solo repinta: la capa calcula la barra en
+// cada dibujado, asi sigue al zoom y al desplazamiento sin mas avisos.
+void MapWidget::setScaleBarVisible(bool on)
+{
+    if (!d->view || !d->view->scaleBarLayer())
+        return;
+    d->view->scaleBarLayer()->setVisible(on);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// ¿Se ve la escala grafica?
+bool MapWidget::isScaleBarVisible() const
+{
+    return d->view && d->view->scaleBarLayer() && d->view->scaleBarLayer()->visible();
+}
+
+// Cambia las unidades de la escala (metrico / millas nauticas) y repinta.
+void MapWidget::setScaleBarUnits(ScaleUnits units)
+{
+    if (!d->view || !d->view->scaleBarLayer())
+        return;
+    d->view->scaleBarLayer()->setUnits(units);
+    // Las mismas unidades rotulan anillos, marcaciones y alertas CPA.
+    if (d->view->rangeLayer())
+        d->view->rangeLayer()->setUnits(units);
+    d->refreshProximityLines();
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// ---------------------------------------- anillos de distancia y marcaciones --
+
+// Alta de anillos de distancia; -1 sin vista. Reenvio a RangeLayer.
+qint64 MapWidget::addRangeRings(const RangeRings &rings)
+{
+    return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->addRings(rings) : -1;
+}
+
+// Cambia unos anillos (p. ej. otra separacion). false si el id no es de anillos.
+bool MapWidget::updateRangeRings(qint64 id, const RangeRings &rings)
+{
+    return d->view && d->view->rangeLayer() && d->view->rangeLayer()->updateRings(id, rings);
+}
+
+// Alta de una marcacion; -1 sin vista.
+qint64 MapWidget::addBearingLine(const BearingLine &line)
+{
+    return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->addBearing(line) : -1;
+}
+
+// Cambia una marcacion. false si el id no es de marcacion.
+bool MapWidget::updateBearingLine(qint64 id, const BearingLine &line)
+{
+    return d->view && d->view->rangeLayer() && d->view->rangeLayer()->updateBearing(id, line);
+}
+
+// Quita unos anillos o una marcacion.
+bool MapWidget::removeRangeMark(qint64 id)
+{
+    return d->view && d->view->rangeLayer() && d->view->rangeLayer()->remove(id);
+}
+
+// Quita todos los anillos y marcaciones.
+void MapWidget::clearRangeMarks()
+{
+    if (d->view && d->view->rangeLayer())
+        d->view->rangeLayer()->clear();
+}
+
+// Ids de anillos y marcaciones, ordenados.
+QVector<qint64> MapWidget::rangeMarks() const
+{
+    return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->ids() : QVector<qint64>();
+}
+
+// Rumbo verdadero y distancia actuales de una marcacion (con sus objetivos
+// donde esten ahora). false si no existe o no se puede resolver.
+bool MapWidget::bearingLineMeasure(qint64 id, double *bearingDeg, double *distanceMeters) const
+{
+    QGeoCoordinate a, b;
+    if (!d->view || !d->view->rangeLayer() || !d->view->rangeLayer()->bearingEnds(id, &a, &b))
+        return false;
+    if (bearingDeg)
+        *bearingDeg = a.azimuthTo(b);
+    if (distanceMeters)
+        *distanceMeters = a.distanceTo(b);
+    return true;
+}
+
+// Que lineas marcan su inicio y su fin. Reenvio a la capa de entidades.
+void MapWidget::setRouteEndpoints(RouteEndpoints mode)
+{
+    if (!d->view || !d->view->featureLayer())
+        return;
+    d->view->featureLayer()->setRouteEndpoints(mode);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Modo actual de las marcas de inicio/fin.
+RouteEndpoints MapWidget::routeEndpoints() const
+{
+    return d->view && d->view->featureLayer() ? d->view->featureLayer()->routeEndpoints()
+                                              : RouteEndpoints::Routes;
+}
+
+// Unidades actuales de la escala (metrico si no hay vista).
+ScaleUnits MapWidget::scaleBarUnits() const
+{
+    return d->view && d->view->scaleBarLayer() ? d->view->scaleBarLayer()->units()
+                                               : ScaleUnits::Metric;
+}
+
+// Metros por pixel en el centro, medidos como los mide la escala. Sincroniza
+// antes la geometria para no medir sobre un tamano de vista viejo.
+double MapWidget::metersPerPixel() const
+{
+    d->syncGeometry();
+    return d->view && d->view->scaleBarLayer()
+        ? d->view->scaleBarLayer()->metersPerPixelAtCenter() : 0.0;
+}
+
+// Muestra u oculta la cuadricula de coordenadas; se recalcula en cada dibujado.
+void MapWidget::setGraticuleVisible(bool on)
+{
+    if (!d->view || !d->view->graticuleLayer())
+        return;
+    d->view->graticuleLayer()->setVisible(on);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// ¿Se ve la cuadricula?
+bool MapWidget::isGraticuleVisible() const
+{
+    return d->view && d->view->graticuleLayer() && d->view->graticuleLayer()->visible();
+}
+
+// Color de lineas y rotulos de la cuadricula, y repinta.
+void MapWidget::setGraticuleColor(const QColor &color)
+{
+    if (!d->view || !d->view->graticuleLayer())
+        return;
+    d->view->graticuleLayer()->setColor(color);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Cambia entre cuadricula geografica y UTM, y repinta.
+void MapWidget::setGraticuleMode(GraticuleMode mode)
+{
+    if (!d->view || !d->view->graticuleLayer())
+        return;
+    d->view->graticuleLayer()->setMode(mode);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Modo actual de la cuadricula (geografica si no hay vista).
+GraticuleMode MapWidget::graticuleMode() const
+{
+    return d->view && d->view->graticuleLayer() ? d->view->graticuleLayer()->mode()
+                                                : GraticuleMode::Geographic;
+}
+
+// Color actual de la cuadricula (invalido si no hay vista).
+QColor MapWidget::graticuleColor() const
+{
+    return d->view && d->view->graticuleLayer() ? d->view->graticuleLayer()->color()
+                                                : QColor();
 }
 
 // Enciende o apaga la mancha de cobertura. Al encenderla recalcula; al apagarla

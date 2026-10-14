@@ -1,6 +1,7 @@
 #include "SyntheticTileDb.h"
 
 #include "libmapa/MapWidget.h"
+#include "libmapa/TrackPlayer.h"
 #include "libmapa/MapFeature.h"
 #include "db/SqliteConnectionPool.h"
 #include "db/VectorRepository.h"
@@ -122,6 +123,38 @@ private slots:
     //! targetAt encuentra el objetivo bajo el pixel; un clic lo selecciona y
     //! emite targetClicked.
     void selectsTargetByClick();
+    //! El historial guarda el recorrido completo y el seleccionado lo dibuja
+    //! desde el origen, aunque la traza dibujada para todos sea corta.
+    void selectedTargetShowsFullHistory();
+    //! Alertas de zona: entradas/salidas de objetivos en un poligono vigilado,
+    //! siguiendo tambien las ediciones y el deshacer de la zona.
+    void zoneAlertsFollowTargetsAndZoneEdits();
+    //! Alertas de zona para ENTIDADES PUNTO (el «Objetivo» del demo dentro de
+    //! un «Área objetivo»): alta, arrastre/edicion, deshacer y borrado.
+    void zoneAlertsCoverPointFeatures();
+    //! Escala grafica y cuadricula: ocultas por defecto, se dibujan al
+    //! encenderlas y la resolucion sigue al zoom.
+    void scaleBarAndGraticuleDraw();
+    //! Importar GeoJSON como capa y exportarla a KML/GPX/GeoJSON ida y vuelta.
+    void importsAndExportsVectorFiles();
+    //! Historial de objetivos a GPX con horas, releible con parseGpxTracks.
+    void exportsTargetHistoryToGpx();
+    //! Exportar la vista: imagen (con y sin titulo/pie, a escala) y PDF.
+    void exportsViewToImageAndPdf();
+    //! Que hay dentro de una zona marcada, y quitar la marca de la seleccion.
+    void areaQueriesFindTargetsAndFeatures();
+    //! Alertas CPA/TCPA: dos objetivos en rumbo de colision, con velocidad dada
+    //! por la app o estimada por la traza; señales, lineas y apagado.
+    void proximityAlertsWarnOfCloseApproach();
+    //! Anillos de distancia que siguen a un objetivo y marcaciones entre
+    //! objetivos que se recalculan al moverse; quitar y limpiar.
+    void rangeRingsAndBearingLinesFollowTargets();
+    //! Un historial GPX importado marca su inicio y fin; la linea seleccionada
+    //! los rotula. Los modos de setRouteEndpoints cambian lo que se ve.
+    void routesShowStartAndEnd();
+    //! Reproduccion de un historial: los objetivos aparecen, se mueven y
+    //! desaparecen con las horas del fichero; ir atras rehace su historial.
+    void trackPlayerReplaysHistory();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -1911,6 +1944,737 @@ void TstMapWidget::selectsTargetByClick()
     // Deseleccionar desde codigo.
     w.setSelectedTarget(-1);
     QCOMPARE(w.selectedTarget(), qint64(-1));
+}
+
+// Un objetivo recorre una «L» con la traza dibujada limitada a 5 puntos: el
+// historial conserva el origen y, al seleccionarlo, se dibuja entero (apagar el
+// historial del seleccionado cambia la imagen).
+void TstMapWidget::selectedTargetShowsFullHistory()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(9);
+    w.setCenter(QGeoCoordinate(22.0, -79.5));
+    w.setTargetTrailLength(5);
+
+    MapTarget t;
+    t.position = QGeoCoordinate(21.8, -79.9);
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1700000000000LL).toUTC();
+    const qint64 id = w.addTarget(t, t0);
+    for (int i = 1; i <= 40; ++i)                       // hacia el este...
+        QVERIFY(w.updateTarget(id, QGeoCoordinate(21.8, -79.9 + i * 0.01), 90.0, t0.addSecs(i)));
+    for (int i = 1; i <= 40; ++i)                       // ...y luego al norte
+        QVERIFY(w.updateTarget(id, QGeoCoordinate(21.8 + i * 0.01, -79.5), 0.0, t0.addSecs(40 + i)));
+
+    QCOMPARE(w.targetOrigin(id).position, QGeoCoordinate(21.8, -79.9));
+    QCOMPARE(w.targetOrigin(id).time, t0);
+    QCOMPARE(w.targetHistory(id).size(), 81);
+
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);                               // la capa agrupa repintados (~30 fps)
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+    w.setSelectedTarget(id);
+    const QImage conHistorial = captura();
+    w.setSelectedTargetHistoryVisible(false);
+    const QImage sinHistorial = captura();
+    QVERIFY(conHistorial != sinHistorial);
+    w.setSelectedTargetHistoryVisible(true);
+
+    w.removeTarget(id);
+    QVERIFY(w.targetHistory(id).isEmpty());
+}
+
+// Una zona vigilada avisa de quien entra y sale: al empezar (los que ya estan),
+// al moverse los objetivos y al cambiar la forma de la zona, incluso por
+// deshacer. Borrar un objetivo o la zona no genera salidas.
+void TstMapWidget::zoneAlertsFollowTargetsAndZoneEdits()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    MapFeature zona;
+    zona.kind = GeometryKind::Polygon;
+    zona.type = QStringLiteral("zona_prohibida");
+    zona.geometry = { QGeoCoordinate(22.5, -82.5), QGeoCoordinate(22.5, -81.5),
+                      QGeoCoordinate(23.5, -81.5), QGeoCoordinate(23.5, -82.5) };
+    const qint64 zonaId = w.addFeature(zona);
+    QVERIFY(zonaId > 0);
+
+    MapTarget t;
+    t.position = QGeoCoordinate(23.0, -82.0);          // dentro
+    const qint64 a = w.addTarget(t);
+    t.position = QGeoCoordinate(25.0, -82.0);          // fuera
+    const qint64 b = w.addTarget(t);
+
+    QSignalSpy entra(&w, &MapWidget::targetEnteredZone);
+    QSignalSpy sale(&w, &MapWidget::targetLeftZone);
+
+    // Un punto no es una zona.
+    MapFeature punto;
+    punto.geometry = { QGeoCoordinate(23.0, -82.0) };
+    QVERIFY(!w.watchZone(w.addFeature(punto)));
+    QVERIFY(!w.watchZone(999999));
+
+    // Vigilar avisa del que ya esta dentro.
+    QVERIFY(w.watchZone(zonaId));
+    QVERIFY(w.isZoneWatched(zonaId));
+    QCOMPARE(w.watchedZones(), QVector<qint64>({zonaId}));
+    QCOMPARE(entra.count(), 1);
+    QCOMPARE(entra.at(0).at(0).toLongLong(), a);
+    QCOMPARE(entra.at(0).at(1).toLongLong(), zonaId);
+    QCOMPARE(w.targetsInZone(zonaId), QVector<qint64>({a}));
+
+    // b entra, a sale.
+    QVERIFY(w.updateTarget(b, QGeoCoordinate(22.8, -81.8)));
+    QCOMPARE(entra.count(), 2);
+    QCOMPARE(entra.at(1).at(0).toLongLong(), b);
+    QVERIFY(w.updateTarget(a, QGeoCoordinate(24.0, -82.0)));
+    QCOMPARE(sale.count(), 1);
+    QCOMPARE(sale.at(0).at(0).toLongLong(), a);
+    QCOMPARE(w.zonesOfTarget(b), QVector<qint64>({zonaId}));
+    QVERIFY(w.zonesOfTarget(a).isEmpty());
+
+    // La zona se encoge al norte (sin b): b sale. Deshacer la devuelve: b entra.
+    QVERIFY(w.moveVertex(zonaId, 0, QGeoCoordinate(23.0, -82.5)));
+    QVERIFY(w.moveVertex(zonaId, 1, QGeoCoordinate(23.0, -81.5)));
+    QCOMPARE(sale.count(), 2);
+    QCOMPARE(sale.at(1).at(0).toLongLong(), b);
+    QVERIFY(w.undo());
+    QVERIFY(w.undo());
+    QCOMPARE(entra.count(), 3);
+    QCOMPARE(entra.at(2).at(0).toLongLong(), b);
+
+    // Borrar el objetivo no es "salir".
+    QVERIFY(w.removeTarget(b));
+    QCOMPARE(sale.count(), 2);
+    QVERIFY(w.targetsInZone(zonaId).isEmpty());
+
+    // Borrar la zona la deja de vigilar, sin salidas.
+    QVERIFY(w.updateTarget(a, QGeoCoordinate(23.0, -82.0)));
+    QCOMPARE(entra.count(), 4);
+    QVERIFY(w.removeFeature(zonaId));
+    QVERIFY(!w.isZoneWatched(zonaId));
+    QCOMPARE(sale.count(), 2);
+    QVERIFY(w.updateTarget(a, QGeoCoordinate(26.0, -82.0)));
+    QCOMPARE(sale.count(), 2);
+}
+
+// El caso del demo: el operador coloca un «Objetivo» (entidad punto, no un
+// objetivo movil) dentro de un «Área objetivo». Debe avisar al vigilar, al
+// crear o mover puntos y al deshacer; no al borrar. Y no por la señal de
+// objetivos moviles.
+void TstMapWidget::zoneAlertsCoverPointFeatures()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    MapFeature area;
+    area.kind = GeometryKind::Polygon;
+    area.type = QStringLiteral("objetivo_area");
+    area.geometry = { QGeoCoordinate(22.5, -82.5), QGeoCoordinate(22.5, -81.5),
+                      QGeoCoordinate(23.5, -81.5), QGeoCoordinate(23.5, -82.5) };
+    const qint64 zona = w.addFeature(area);
+
+    MapFeature punto;
+    punto.type = QStringLiteral("objetivo");
+    punto.geometry = { QGeoCoordinate(23.0, -82.0) };       // dentro
+    const qint64 dentro = w.addFeature(punto);
+    punto.geometry = { QGeoCoordinate(25.0, -82.0) };       // fuera
+    const qint64 fuera = w.addFeature(punto);
+
+    QSignalSpy entra(&w, &MapWidget::featureEnteredZone);
+    QSignalSpy sale(&w, &MapWidget::featureLeftZone);
+    QSignalSpy entraObjetivo(&w, &MapWidget::targetEnteredZone);
+
+    // Vigilar avisa del punto que ya estaba dentro (y solo por la señal de entidades).
+    QVERIFY(w.watchZone(zona));
+    QCOMPARE(entra.count(), 1);
+    QCOMPARE(entra.at(0).at(0).toLongLong(), dentro);
+    QCOMPARE(entra.at(0).at(1).toLongLong(), zona);
+    QCOMPARE(entraObjetivo.count(), 0);
+    QCOMPARE(w.featuresInZone(zona), QVector<qint64>({dentro}));
+    QVERIFY(w.featuresInZone(zona).indexOf(zona) < 0);      // la zona no es un punto
+
+    // El resalte (activo por defecto) se ve en el mapa: apagarlo cambia la imagen.
+    w.resize(600, 450);
+    w.setZoom(8);
+    w.setCenter(QGeoCoordinate(23.0, -82.0));
+    QVERIFY(w.isZoneAlertHighlight());
+    QCoreApplication::processEvents();
+    const QImage conResalte = w.grab().toImage();
+    w.setZoneAlertHighlight(false);
+    QCoreApplication::processEvents();
+    QVERIFY(w.grab().toImage() != conResalte);
+    w.setZoneAlertHighlight(true);
+
+    // Crear un punto dentro avisa al momento.
+    punto.geometry = { QGeoCoordinate(22.8, -81.8) };
+    const qint64 nuevo = w.addFeature(punto);
+    QCOMPARE(entra.count(), 2);
+    QCOMPARE(entra.at(1).at(0).toLongLong(), nuevo);
+
+    // Arrastrar (moveVertex, lo que hace el raton) el de fuera hacia dentro.
+    QVERIFY(w.moveVertex(fuera, 0, QGeoCoordinate(23.2, -82.2)));
+    QCOMPARE(entra.count(), 3);
+    QCOMPARE(entra.at(2).at(0).toLongLong(), fuera);
+    QCOMPARE(w.zonesOfFeature(fuera), QVector<qint64>({zona}));
+
+    // Deshacer el arrastre lo devuelve fuera: sale.
+    QVERIFY(w.undo());
+    QCOMPARE(sale.count(), 1);
+    QCOMPARE(sale.at(0).at(0).toLongLong(), fuera);
+
+    // Borrar un punto que esta dentro no es «salir».
+    QVERIFY(w.removeFeature(nuevo));
+    QCOMPARE(sale.count(), 1);
+    QCOMPARE(w.featuresInZone(zona), QVector<qint64>({dentro}));
+
+    // Dejar de vigilar: mover puntos ya no avisa.
+    QVERIFY(w.unwatchZone(zona));
+    QVERIFY(w.moveVertex(dentro, 0, QGeoCoordinate(30.0, -70.0)));
+    QCOMPARE(sale.count(), 1);
+}
+
+// La escala y la cuadricula no cambian nada hasta encenderlas; encendidas,
+// pintan algo en la vista. La resolucion en el centro se mide de verdad: a un
+// zoom mas, la mitad de metros por pixel.
+void TstMapWidget::scaleBarAndGraticuleDraw()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    w.setCenter(QGeoCoordinate(22.0, -79.5));
+
+    QVERIFY(!w.isScaleBarVisible());
+    QVERIFY(!w.isGraticuleVisible());
+    QCOMPARE(w.scaleBarUnits(), ScaleUnits::Metric);
+
+    const double mpp10 = w.metersPerPixel();
+    QVERIFY(mpp10 > 0.0);
+    w.setZoom(11);
+    const double mpp11 = w.metersPerPixel();
+    QVERIFY2(qAbs(mpp11 / mpp10 - 0.5) < 0.02,
+             qPrintable(QStringLiteral("%1 -> %2").arg(mpp10).arg(mpp11)));
+
+    // MapWidget repinta en diferido (rpQueuedReplot): se procesan los eventos
+    // antes de capturar para ver el estado nuevo.
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+    const QImage base = captura();
+    const QRect esquina(0, 600 - 60, 160, 60);   // donde va la escala
+
+    w.setScaleBarVisible(true);
+    QVERIFY(w.isScaleBarVisible());
+    const QImage conEscala = captura();
+    QVERIFY(conEscala.copy(esquina) != base.copy(esquina));
+
+    w.setScaleBarUnits(ScaleUnits::Nautical);
+    QCOMPARE(w.scaleBarUnits(), ScaleUnits::Nautical);
+    QVERIFY(!captura().isNull());
+
+    w.setScaleBarVisible(false);
+    w.setGraticuleVisible(true);
+    w.setGraticuleColor(QColor(255, 255, 255, 180));
+    QCOMPARE(w.graticuleColor(), QColor(255, 255, 255, 180));
+    QVERIFY(w.isGraticuleVisible());
+    QVERIFY(captura() != base);
+
+    // Cuadricula UTM: otro dibujo que la geografica, y vuelta atras.
+    QCOMPARE(w.graticuleMode(), GraticuleMode::Geographic);
+    const QImage geografica = captura();
+    w.setGraticuleMode(GraticuleMode::Utm);
+    QCOMPARE(w.graticuleMode(), GraticuleMode::Utm);
+    QVERIFY(captura() != geografica);
+    w.setZoom(4);                                   // varias zonas: solo limites
+    QVERIFY(!captura().isNull());
+    w.setGraticuleMode(GraticuleMode::Geographic);
+
+    // A zoom mundial la cuadricula sigue dibujandose sin colgarse.
+    w.setZoom(2);
+    QVERIFY(!captura().isNull());
+}
+
+// Un GeoJSON de otra herramienta entra como capa (añadiendo, no reemplazando);
+// esa capa sale a KML, GPX y GeoJSON y vuelve a entrar con las mismas
+// entidades. Errores (fichero que no existe, capa vacia) se informan.
+void TstMapWidget::importsAndExportsVectorFiles()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString origen = dir.filePath(QStringLiteral("zonas.geojson"));
+    {
+        QFile f(origen);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(R"({"type":"FeatureCollection","features":[
+          {"type":"Feature","properties":{"name":"Z1","nivel":"alto"},
+           "geometry":{"type":"Polygon","coordinates":[[[-82,23],[-81,23],[-81,24],[-82,23]]]}},
+          {"type":"Feature","properties":{"name":"P1"},
+           "geometry":{"type":"Point","coordinates":[-80,22]}}]})");
+    }
+
+    QString err;
+    const qint64 primero = w.importVectorFile(origen, QStringLiteral("importada"),
+                                              QStringLiteral("Importada"), &err);
+    QVERIFY2(primero > 0, qPrintable(err));
+    QCOMPARE(w.featuresInLayer(QStringLiteral("importada")).size(), 2);
+    const auto z1 = w.feature(primero);
+    QVERIFY(z1.has_value());
+    QCOMPARE(z1->name, QStringLiteral("Z1"));
+    QCOMPARE(z1->attributes.value(QStringLiteral("nivel")).toString(), QStringLiteral("alto"));
+
+    // Importar otra vez AÑADE a la misma capa.
+    QVERIFY(w.importVectorFile(origen, QStringLiteral("importada")) > 0);
+    QCOMPARE(w.featuresInLayer(QStringLiteral("importada")).size(), 4);
+
+    for (const QString &ext : { QStringLiteral("kml"), QStringLiteral("gpx"), QStringLiteral("geojson") }) {
+        const QString salida = dir.filePath(QStringLiteral("salida.") + ext);
+        QVERIFY2(w.exportVectorFile(salida, QStringLiteral("importada"), &err), qPrintable(err));
+        const QString capa = QStringLiteral("vuelta_") + ext;
+        QVERIFY(w.importVectorFile(salida, capa) > 0);
+        QCOMPARE(w.featuresInLayer(capa).size(), 4);
+    }
+
+    QVERIFY(w.importVectorFile(dir.filePath(QStringLiteral("no_existe.kml")),
+                               QStringLiteral("x"), QString(), &err) < 0);
+    QVERIFY(!err.isEmpty());
+    QVERIFY(!w.exportVectorFile(dir.filePath(QStringLiteral("vacia.kml")),
+                                QStringLiteral("capa_sin_nada"), &err));
+}
+
+static MapFeature puntoDe(const QString &nombre, double lat, double lon);
+
+// El historial completo de cada objetivo sale a GPX con su hora y vuelve igual.
+void TstMapWidget::exportsTargetHistoryToGpx()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString ruta = dir.filePath(QStringLiteral("historial.gpx"));
+    QString err;
+    QVERIFY(!w.exportTargetHistory(ruta, {}, &err));      // sin objetivos: nada
+    QVERIFY(!err.isEmpty());
+    QVERIFY(!QFile::exists(ruta));
+
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413000LL).toUTC();
+    MapTarget a;
+    a.label = QStringLiteral("Buque A\nrumbo 090");
+    a.kind = QStringLiteral("buque");
+    a.position = QGeoCoordinate(23.0, -82.0);
+    const qint64 ida = w.addTarget(a, t0);
+    for (int i = 1; i <= 10; ++i)
+        w.updateTarget(ida, QGeoCoordinate(23.0, -82.0 + i * 0.001), 90.0, t0.addSecs(i * 10));
+    MapTarget b;
+    b.position = QGeoCoordinate(22.0, -80.0);
+    const qint64 idb = w.addTarget(b, t0.addSecs(3));
+
+    QVERIFY2(w.exportTargetHistory(ruta, {}, &err), qPrintable(err));
+    QFile f(ruta);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    const QVector<GpxTrack> tracks = parseGpxTracks(f.readAll(), &err);
+    QCOMPARE(tracks.size(), 2);
+    QCOMPARE(tracks[0].targetId, ida);
+    QCOMPARE(tracks[0].name, QStringLiteral("Buque A"));
+    QCOMPARE(tracks[0].type, QStringLiteral("buque"));
+    QCOMPARE(tracks[0].points.size(), 11);
+    QCOMPARE(tracks[0].points.first().time, t0);           // el origen, con su hora
+    QCOMPARE(tracks[0].points.last().time, t0.addSecs(100));
+    QCOMPARE(tracks[0].points.last().position.longitude(), -81.99);
+    QCOMPARE(tracks[1].name, QStringLiteral("Objetivo %1").arg(idb));
+
+    // Solo los pedidos.
+    QVERIFY(w.exportTargetHistory(ruta, { idb }, &err));
+    QFile g(ruta);
+    QVERIFY(g.open(QIODevice::ReadOnly));
+    QCOMPARE(parseGpxTracks(g.readAll()).size(), 1);
+}
+
+// La vista sale como imagen (del tamaño del widget por la escala, mas las
+// bandas de titulo y pie) y como PDF; una extension desconocida se rechaza sin
+// dejar fichero.
+void TstMapWidget::exportsViewToImageAndPdf()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(640, 480);
+    w.setZoom(8);
+    w.setCenter(QGeoCoordinate(22.0, -79.5));
+    MapFeature zona;
+    zona.kind = GeometryKind::Polygon;
+    zona.geometry = { QGeoCoordinate(21.8, -79.8), QGeoCoordinate(21.8, -79.2),
+                      QGeoCoordinate(22.2, -79.2) };
+    w.addFeature(zona);
+    w.setScaleBarVisible(true);
+
+    const QImage img = w.renderImage();
+    QCOMPARE(img.size(), QSize(640, 480));
+    QCOMPARE(w.renderImage(2.0).size(), QSize(1280, 960));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString err;
+    MapExportOptions sinNada;
+    sinNada.footer = false;
+    const QString png = dir.filePath(QStringLiteral("vista.png"));
+    QVERIFY2(w.exportView(png, sinNada, &err), qPrintable(err));
+    QCOMPARE(QImage(png).size(), QSize(640, 480));
+
+    MapExportOptions con;
+    con.title = QStringLiteral("Sector norte");
+    con.notes = QStringLiteral("Ejercicio 3");
+    con.attribution = QStringLiteral("Datos de prueba");
+    con.imageScale = 1.5;
+    const QString jpg = dir.filePath(QStringLiteral("vista.jpg"));
+    QVERIFY2(w.exportView(jpg, con, &err), qPrintable(err));
+    const QImage conBandas(jpg);
+    QCOMPARE(conBandas.width(), 960);
+    QVERIFY(conBandas.height() > 720);                     // titulo y pie añadidos
+
+    const QString pdf = dir.filePath(QStringLiteral("vista.pdf"));
+    QVERIFY2(w.exportView(pdf, con, &err), qPrintable(err));
+    QFile f(pdf);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    const QByteArray datos = f.readAll();
+    QVERIFY(datos.startsWith("%PDF"));
+    QVERIFY(datos.size() > 2000);
+
+    QVERIFY(!w.exportView(dir.filePath(QStringLiteral("vista.xyz")), con, &err));
+    QVERIFY(!err.isEmpty());
+    QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("vista.xyz"))));
+}
+
+// targetsInArea / featuresInArea responden sin vigilar nada, y
+// clearAreaSelection no rompe nada aunque no haya marca.
+void TstMapWidget::areaQueriesFindTargetsAndFeatures()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    const QVector<QGeoCoordinate> zona = { QGeoCoordinate(22.0, -80.0), QGeoCoordinate(22.0, -79.0),
+                                           QGeoCoordinate(23.0, -79.0), QGeoCoordinate(23.0, -80.0) };
+    MapTarget t;
+    t.position = QGeoCoordinate(22.5, -79.5);
+    const qint64 dentro = w.addTarget(t);
+    t.id = -1;
+    t.position = QGeoCoordinate(24.0, -79.5);
+    w.addTarget(t);
+    QCOMPARE(w.targetsInArea(zona), QVector<qint64>({ dentro }));
+
+    const qint64 punto = w.addFeature(puntoDe(QStringLiteral("P"), 22.2, -79.2));
+    w.addFeature(puntoDe(QStringLiteral("Lejos"), 10.0, 10.0));
+    MapFeature linea;
+    linea.kind = GeometryKind::Polyline;
+    linea.geometry = { QGeoCoordinate(21.0, -81.0), QGeoCoordinate(22.5, -79.5) };  // 1 vertice dentro
+    const qint64 idLinea = w.addFeature(linea);
+    QCOMPARE(w.featuresInArea(zona), QVector<qint64>({ punto, idLinea }));
+    QVERIFY(w.watchedZones().isEmpty());                    // no se vigila nada
+
+    QVERIFY(w.targetsInArea({ QGeoCoordinate(22.0, -80.0) }).isEmpty());   // no es poligono
+    w.clearAreaSelection();
+}
+
+// Dos objetivos a 6 km en rumbo de colision. Con velocidad dada por la app
+// (setTargetVelocity) la alerta salta al activarla; con la estimada por la
+// traza, al moverse. Las lineas se dibujan, y apagar emite el fin.
+void TstMapWidget::proximityAlertsWarnOfCloseApproach()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(11);
+    w.setCenter(QGeoCoordinate(22.0, -79.97));
+
+    QVector<std::pair<qint64, qint64>> empiezan, terminan;
+    double cpaVisto = -1.0, tcpaVisto = -1.0;
+    connect(&w, &MapWidget::proximityAlertRaised, this,
+            [&](qint64 a, qint64 b, double cpa, double tcpa) {
+                empiezan.append({ a, b });
+                cpaVisto = cpa;
+                tcpaVisto = tcpa;
+            });
+    connect(&w, &MapWidget::proximityAlertCleared, this,
+            [&](qint64 a, qint64 b) { terminan.append({ a, b }); });
+
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760000000000LL).toUTC();
+    const QGeoCoordinate pa(22.0, -80.0);
+    const QGeoCoordinate pb = pa.atDistanceAndAzimuth(6000.0, 90.0);
+    MapTarget a;
+    a.position = pa;
+    const qint64 ida = w.addTarget(a, t0);
+    MapTarget b;
+    b.position = pb;
+    const qint64 idb = w.addTarget(b, t0);
+    MapTarget lejos;
+    lejos.position = QGeoCoordinate(10.0, 10.0);
+    w.addTarget(lejos, t0);
+
+    // Velocidades dadas por la app: 5 m/s cada uno, de frente -> TCPA 600 s.
+    QVERIFY(w.setTargetVelocity(ida, 5.0, 90.0));
+    QVERIFY(w.setTargetVelocity(idb, 5.0, 270.0));
+    const CpaResult c = w.targetCpa(ida, idb);
+    QVERIFY(c.valid);
+    QVERIFY(qAbs(c.timeSeconds - 600.0) < 1.0);
+    // ~1 m: "6 km al este" por ortodromica baja ~1 m al sur a 22 grados.
+    QVERIFY(c.distanceMeters < 5.0);
+    QVERIFY(w.proximityAlerts().isEmpty());                 // apagadas: no avisa
+
+    w.setProximityAlert(1852.0, 900.0);
+    QCOMPARE(empiezan.size(), 1);
+    QCOMPARE(empiezan[0], std::make_pair(ida, idb));
+    QVERIFY(cpaVisto < 5.0 && qAbs(tcpaVisto - 600.0) < 1.0);
+    QCOMPARE(w.proximityAlerts().size(), 1);
+    QCOMPARE(w.proximityAlertDistance(), 1852.0);
+
+    // Las lineas CPA se dibujan (y desaparecen al ocultarlas).
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+    const QImage conLineas = captura();
+    w.setProximityLinesVisible(false);
+    QVERIFY(captura() != conLineas);
+    w.setProximityLinesVisible(true);
+
+    // B cae al sur: el CPA ya no baja de 1 NM y la alerta termina.
+    QVERIFY(w.setTargetVelocity(idb, 5.0, 180.0));
+    QCOMPARE(terminan.size(), 1);
+    QVERIFY(w.proximityAlerts().isEmpty());
+
+    // Sin velocidad dada: se estima por la traza. B vuelve a rumbo oeste a
+    // 5 m/s durante 20 s (y A al este): vuelve a saltar.
+    w.setTargetVelocity(ida, std::numeric_limits<double>::quiet_NaN(), 0.0);
+    w.setTargetVelocity(idb, std::numeric_limits<double>::quiet_NaN(), 0.0);
+    for (int s = 1; s <= 20; ++s) {
+        w.updateTarget(ida, pa.atDistanceAndAzimuth(5.0 * s, 90.0), 90.0, t0.addSecs(s));
+        w.updateTarget(idb, pb.atDistanceAndAzimuth(5.0 * s, 270.0), 270.0, t0.addSecs(s));
+    }
+    QCOMPARE(empiezan.size(), 2);
+    QVERIFY(qAbs(w.proximityAlerts().first().cpa.timeSeconds - 580.0) < 3.0);
+
+    // Borrar no emite fin; apagar si, para las que queden.
+    w.setProximityAlert(0.0);
+    QCOMPARE(terminan.size(), 2);
+    QVERIFY(w.proximityAlerts().isEmpty());
+    w.removeTarget(ida);
+    QCOMPARE(terminan.size(), 2);
+    QVERIFY(!w.targetCpa(ida, idb).valid);
+}
+
+// Anillos centrados en un objetivo y una marcacion de ese objetivo a otro: al
+// moverse, la medida de la marcacion cambia sola. Se dibujan, y se quitan.
+void TstMapWidget::rangeRingsAndBearingLinesFollowTargets()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    w.setCenter(QGeoCoordinate(22.0, -80.0));
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    MapTarget a;
+    a.position = QGeoCoordinate(22.0, -80.0);
+    const qint64 ida = w.addTarget(a);
+    MapTarget b;
+    b.position = a.position.atDistanceAndAzimuth(9260.0, 45.0);      // 5 NM al NE
+    const qint64 idb = w.addTarget(b);
+    const QImage sinNada = captura();
+
+    RangeRings r;
+    r.targetId = ida;
+    r.spacingMeters = 1852.0;
+    r.count = 3;
+    r.spokeEveryDeg = 30;
+    const qint64 anillos = w.addRangeRings(r);
+    QVERIFY(anillos > 0);
+    const QImage conAnillos = captura();
+    QVERIFY(conAnillos != sinNada);
+
+    BearingLine l;
+    l.fromTarget = ida;
+    l.toTarget = idb;
+    const qint64 marcacion = w.addBearingLine(l);
+    QVERIFY(marcacion > 0 && marcacion != anillos);
+    QCOMPARE(w.rangeMarks(), QVector<qint64>({ anillos, marcacion }));
+    double rumbo = 0.0, dist = 0.0;
+    QVERIFY(w.bearingLineMeasure(marcacion, &rumbo, &dist));
+    QVERIFY(qAbs(rumbo - 45.0) < 0.1);
+    QVERIFY(qAbs(dist - 9260.0) < 1.0);
+    QVERIFY(captura() != conAnillos);
+
+    // B se mueve 5 NM al sur de A: la marcacion pasa a 180.
+    w.updateTarget(idb, a.position.atDistanceAndAzimuth(9260.0, 180.0));
+    QVERIFY(w.bearingLineMeasure(marcacion, &rumbo, &dist));
+    QVERIFY(qAbs(rumbo - 180.0) < 0.1);
+
+    // Marcacion fija con rumbo y longitud, sin destino.
+    BearingLine fija;
+    fija.from = QGeoCoordinate(22.0, -80.1);
+    fija.bearingDeg = 270.0;
+    fija.lengthMeters = 3000.0;
+    const qint64 idFija = w.addBearingLine(fija);
+    QVERIFY(w.bearingLineMeasure(idFija, &rumbo, &dist));
+    QVERIFY(qAbs(rumbo - 270.0) < 0.1 && qAbs(dist - 3000.0) < 1.0);
+    QVERIFY(!w.updateRangeRings(idFija, r));                 // no es de anillos
+    QVERIFY(w.updateBearingLine(idFija, l));
+
+    // Sin el objetivo de destino, la marcacion no se puede medir (ni se dibuja).
+    w.removeTarget(idb);
+    QVERIFY(!w.bearingLineMeasure(marcacion, &rumbo, &dist));
+
+    QVERIFY(w.removeRangeMark(anillos));
+    QVERIFY(!w.removeRangeMark(anillos));
+    w.clearRangeMarks();
+    QVERIFY(w.rangeMarks().isEmpty());
+}
+
+// Importar un historial GPX: el track marca inicio y fin siempre (modo por
+// defecto), y al seleccionarlo se rotulan con su hora.
+void TstMapWidget::routesShowStartAndEnd()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    w.setCenter(QGeoCoordinate(22.05, -80.0));
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString ruta = dir.filePath(QStringLiteral("historial.gpx"));
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413000LL).toUTC();
+    GpxTrack h;
+    h.name = QStringLiteral("Buque 1");
+    h.targetId = 1;
+    for (int i = 0; i <= 10; ++i)
+        h.points.append({ QGeoCoordinate(22.0 + 0.01 * i, -80.05 + 0.01 * i), t0.addSecs(60 * i) });
+    QVERIFY(writeGpxTracks(ruta, { h }));
+
+    QCOMPARE(w.routeEndpoints(), RouteEndpoints::Routes);
+    const qint64 id = w.importVectorFile(ruta, QStringLiteral("historial"));
+    QVERIFY(id > 0);
+    const auto f = w.feature(id);
+    QVERIFY(f && f->attributes.contains(QStringLiteral("time_end")));
+
+    const QImage conMarcas = captura();
+    w.setRouteEndpoints(RouteEndpoints::Selected);         // sin seleccionar: sin marcas
+    const QImage sinMarcas = captura();
+    QVERIFY(conMarcas != sinMarcas);
+
+    w.selectFeature(id);                                   // seleccionada: marcas + rotulos
+    const QImage seleccionada = captura();
+    w.setRouteEndpoints(RouteEndpoints::Hidden);
+    QVERIFY(captura() != seleccionada);
+    w.setRouteEndpoints(RouteEndpoints::Routes);
+    QCOMPARE(w.routeEndpoints(), RouteEndpoints::Routes);
+}
+
+// Dos pistas que empiezan a distinta hora. Al principio solo existe la
+// primera; a mitad las dos, interpoladas; ir hacia atras rehace el objetivo
+// (historial corto). Reproducir a mucha velocidad llega al final. Las rutas
+// van en una capa temporal y el reproductor no toca los demas objetivos.
+void TstMapWidget::trackPlayerReplaysHistory()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    MapTarget ajeno;
+    ajeno.position = QGeoCoordinate(10.0, 10.0);
+    const qint64 idAjeno = w.addTarget(ajeno);
+
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413000LL).toUTC();
+    const QGeoCoordinate a(22.0, -80.0);
+    GpxTrack p1;
+    p1.name = QStringLiteral("Buque 1");
+    p1.type = QStringLiteral("buque");
+    p1.targetId = 41;
+    for (int i = 0; i <= 10; ++i)                         // 10 min al este, 1 km/min
+        p1.points.append({ a.atDistanceAndAzimuth(1000.0 * i, 90.0), t0.addSecs(60 * i) });
+    GpxTrack p2;
+    p2.name = QStringLiteral("UAV 2");
+    for (int i = 0; i <= 4; ++i)                          // empieza a los 5 min
+        p2.points.append({ a.atDistanceAndAzimuth(500.0 * i, 0.0), t0.addSecs(300 + 60 * i) });
+
+    TrackPlayer player(&w);
+    QSignalSpy horas(&player, &TrackPlayer::timeChanged);
+    player.setTracks({ p1, p2 });
+    QCOMPARE(player.startTime(), t0);
+    QCOMPARE(player.endTime(), t0.addSecs(600));
+    QCOMPARE(player.currentTime(), t0);
+    QVERIFY(player.targetIdOf(0) >= 0);
+    QCOMPARE(player.targetIdOf(1), qint64(-1));           // aun no ha aparecido
+    const qint64 id1 = player.targetIdOf(0);
+    QCOMPARE(w.target(id1)->label, QStringLiteral("Buque 1"));
+    QCOMPARE(w.target(id1)->kind, QStringLiteral("buque"));
+    QCOMPARE(w.targetOrigin(id1).time, t0);
+    QVERIFY(horas.count() >= 1);
+
+    player.seek(t0.addSecs(390));                         // 6.5 min
+    QVERIFY(player.targetIdOf(1) >= 0);
+    QVERIFY(qAbs(w.target(id1)->position.distanceTo(a) - 6500.0) < 1.0);
+    QVERIFY(qAbs(w.target(player.targetIdOf(1))->position.distanceTo(a) - 750.0) < 1.0);
+    QCOMPARE(w.targetOrigin(player.targetIdOf(1)).time, t0.addSecs(300));
+    const int largo = int(w.targetHistory(player.targetIdOf(0)).size());
+    QVERIFY(largo >= 7);
+
+    player.seek(t0.addSecs(120));                         // hacia atras
+    QCOMPARE(player.targetIdOf(1), qint64(-1));           // la segunda ya no esta
+    QVERIFY(w.targetHistory(player.targetIdOf(0)).size() < largo);
+    QCOMPARE(w.targetOrigin(player.targetIdOf(0)).time, t0);
+
+    // Rutas completas en una capa temporal, como tracks GPX (inicio y fin).
+    player.setRoutesVisible(true);
+    const QVector<MapFeature> rutas = w.featuresInLayer(QStringLiteral("replay_routes"));
+    QCOMPARE(rutas.size(), 2);
+    QCOMPARE(rutas.first().attributes.value(QStringLiteral("gpx_kind")).toString(),
+             QStringLiteral("trk"));
+    QVERIFY(rutas.first().attributes.contains(QStringLiteral("time_end")));
+
+    // A x3600 los 10 min pasan en unos 170 ms reales.
+    QSignalSpy fin(&player, &TrackPlayer::finished);
+    player.setSpeed(3600.0);
+    player.play();
+    QVERIFY(player.isPlaying());
+    QVERIFY(fin.wait(3000));
+    QVERIFY(!player.isPlaying());
+    QCOMPARE(player.currentTime(), t0.addSecs(600));
+    QVERIFY(player.targetIdOf(0) >= 0);                   // su ultimo punto, incluido
+
+    player.stop();
+    QCOMPARE(player.currentTime(), t0);
+    QVERIFY(player.isLoaded());
+    QSignalSpy salida(&player, &TrackPlayer::cleared);
+    player.clear();                                        // salir de la reproduccion
+    QCOMPARE(salida.count(), 1);
+    QVERIFY(!player.isLoaded());
+    player.clear();                                        // ya fuera: no vuelve a avisar
+    QCOMPARE(salida.count(), 1);
+    QVERIFY(w.featuresInLayer(QStringLiteral("replay_routes")).isEmpty());
+    QCOMPARE(w.targets().size(), 1);                       // solo el ajeno
+    QVERIFY(w.target(idAjeno).has_value());
+
+    QString err;
+    QVERIFY(!player.loadFile(QStringLiteral("/no/existe.gpx"), &err));
+    QVERIFY(!err.isEmpty());
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

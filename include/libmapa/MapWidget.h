@@ -1,16 +1,20 @@
 #ifndef LIBMAPA_MAPWIDGET_H_
 #define LIBMAPA_MAPWIDGET_H_
 
+#include "libmapa/Coordinates.h"
 #include "libmapa/DataPackage.h"
 #include "libmapa/GeoFile.h"
+#include "libmapa/VectorFormats.h"
 #include "libmapa/Elevation.h"
 #include "libmapa/MapFeature.h"
 #include "libmapa/MapTarget.h"
 #include "libmapa/TargetSymbol.h"
 #include "libmapa/MapTypes.h"
+#include "libmapa/Proximity.h"
 #include "libmapa/libmapa_export.h"
 
 #include <QGeoCoordinate>
+#include <QImage>
 #include <QPointF>
 #include <QString>
 #include <QStringList>
@@ -167,8 +171,35 @@ public:
      */
     void reloadBaseLayer();
 
-    //! Quita el recuadro dibujado con la herramienta SelectArea.
+    //! Quita la marca que dejan SelectArea (el recuadro) o SelectPolygon (el
+    //! contorno) tras emitir areaSelected / polygonSelected. Tambien se quitan
+    //! solas al cambiar de herramienta.
     void clearAreaSelection();
+
+    // --- Exportar la vista -----------------------------------------------
+    /*!
+     * \brief La vista actual como imagen, tal cual se ve.
+     *
+     * \a scale > 1 da mas pixeles por lado (lineas, textos y simbolos se
+     * redibujan nitidos; las teselas se escalan). Imagen nula sin vista.
+     */
+    QImage renderImage(double scale = 1.0) const;
+
+    /*!
+     * \brief Guarda la vista actual en un fichero de imagen o PDF.
+     *
+     * El formato sale de la extension: .pdf, o cualquier formato de imagen de
+     * Qt con escritura (.png, .jpg, .bmp, .tif...). En PDF las entidades, los
+     * objetivos, la escala y la cuadricula van como VECTORES (se imprimen
+     * nitidos a cualquier tamaño) y el pie indica la escala de impresion
+     * (1:N) de la hoja. Titulo, pie, notas y atribucion: \ref MapExportOptions.
+     * Escritura atomica: o queda el fichero completo, o no se toca.
+     *
+     * \return false con el motivo en \a error si no se pudo.
+     */
+    bool exportView(const QString &path,
+                    const MapExportOptions &options = MapExportOptions(),
+                    QString *error = nullptr);
 
     void zoomIn();
     void zoomOut();
@@ -203,6 +234,8 @@ public:
     //! Marca una capa como TEMPORAL: se excluye del guardado (\a saveFeaturesTo),
     //! como las capas fijas del paquete. Para resultados de análisis o marcadores
     //! auxiliares que no deben persistir. \a transient=false la vuelve guardable.
+    //! Una capa temporal tampoco entra en deshacer/rehacer: sus cambios no se
+    //! apilan y un deshacer del usuario no la hace desaparecer ni reaparecer.
     void setFeatureLayerTransient(const QString &id, bool transient = true);
 
     // --- Entidades -------------------------------------------------------
@@ -299,6 +332,34 @@ public:
                                const QString &displayName = QString(),
                                QString *error = nullptr);
 
+    /*!
+     * \brief Importa un fichero GeoJSON, KML o GPX (segun su extension) como
+     *        capa: cada entidad del fichero es una entidad del mapa.
+     *
+     * Conserva lo que traiga el fichero (nombre, descripcion, atributos y, en
+     * GeoJSON/KML, el estilo; ver VectorFormats.h). La capa se crea si no existe
+     * y las entidades se AÑADEN (no reemplazan lo que ya hubiera en ella).
+     *
+     * \return el id de la primera entidad añadida, o -1 si el fichero no se pudo
+     *         leer o no tenia geometrias validas (el motivo queda en \a error).
+     */
+    qint64 importVectorFile(const QString &path, const QString &layerId,
+                            const QString &displayName = QString(),
+                            QString *error = nullptr);
+
+    /*!
+     * \brief Exporta entidades a GeoJSON, KML o GPX (segun la extension).
+     *
+     * Con \a layerId vacio exporta TODAS las entidades; si no, solo las de esa
+     * capa. Para llevarlas a QGIS, Google Earth o un GPS. GPX no guarda
+     * atributos ni estilo (sí nombre, descripcion y tipo).
+     *
+     * \return false si no hay nada que exportar o no se pudo escribir (el motivo
+     *         queda en \a error).
+     */
+    bool exportVectorFile(const QString &path, const QString &layerId = QString(),
+                          QString *error = nullptr);
+
     // --- Objetivos moviles (capa dinamica) -------------------------------
     /*!
      * \brief Da de alta o reemplaza un objetivo movil.
@@ -307,12 +368,16 @@ public:
      * una capa propia que se repinta sola sin rehacer teselas ni entidades.
      * Si \a target.id es < 0 se asigna uno. Devuelve el identificador o -1.
      */
-    qint64 addTarget(const MapTarget &target);
+    //! \a time: hora del dato (p. ej. la del mensaje AIS); invalida = ahora.
+    //! Es la hora del ORIGEN del historial si el objetivo es nuevo.
+    qint64 addTarget(const MapTarget &target, const QDateTime &time = QDateTime());
 
     //! Via rapida del tiempo real: nueva posicion (y rumbo) de un objetivo ya
-    //! existente, anadiendola a su traza. NaN en el rumbo lo deja como estaba.
+    //! existente, anadiendola a su traza y a su historial. NaN en el rumbo lo
+    //! deja como estaba; \a time es la hora del dato (invalida = ahora).
     bool updateTarget(qint64 id, const QGeoCoordinate &position,
-                      double headingDeg = std::numeric_limits<double>::quiet_NaN());
+                      double headingDeg = std::numeric_limits<double>::quiet_NaN(),
+                      const QDateTime &time = QDateTime());
 
     bool setTargetLabel(qint64 id, const QString &text);
 
@@ -350,7 +415,47 @@ public:
 
     //! Longitud de la traza de cada objetivo: < 0 = toda (ilimitada),
     //! 0 = sin traza, > 0 = las ultimas N posiciones (p. ej. 10, 100, 500).
+    //! Es solo lo que se DIBUJA para todos; el historial completo va aparte.
     void setTargetTrailLength(int maxPoints);
+
+    /*!
+     * \brief Historial completo de un objetivo: todas sus posiciones con hora,
+     *        desde que se vio por primera vez en el sistema hasta ahora.
+     *
+     * Se guarda mientras el objetivo exista (se pierde con \ref removeTarget o
+     * \ref clearTargets: leelo antes si la app quiere archivarlo) y es
+     * independiente de la traza dibujada (\ref setTargetTrailLength). El primer
+     * punto es el ORIGEN. Al seleccionar un objetivo se dibuja entero, con el
+     * origen marcado (\ref setSelectedTargetHistoryVisible).
+     *
+     * Memoria acotada: no se anotan puntos a menos de
+     * \ref setTargetHistoryMinDistance metros del anterior (1 m por defecto) y,
+     * pasado \ref setTargetHistoryLimit puntos (5000 por defecto), se aclaran
+     * los intermedios — el origen y la ultima posicion nunca se pierden.
+     */
+    QVector<TargetTrackPoint> targetHistory(qint64 id) const;
+    //! Origen de un objetivo: donde y cuando se vio por primera vez (invalido si
+    //! no existe).
+    TargetTrackPoint targetOrigin(qint64 id) const;
+    void setTargetHistoryLimit(int maxPoints);
+    void setTargetHistoryMinDistance(double meters);
+    //! El objetivo seleccionado dibuja todo su historial desde el origen
+    //! (activo por defecto).
+    void setSelectedTargetHistoryVisible(bool on);
+    /*!
+     * \brief Exporta el historial de objetivos a GPX, con la hora de cada punto.
+     *
+     * Un track por objetivo (nombre = primera linea de su etiqueta, tipo =
+     * su \c kind, y su id como extension libmapa:targetId), con el historial
+     * completo desde el origen. Con \a ids vacio exporta todos. Se puede
+     * reproducir en el tiempo en QGIS o GPXSee, o releer con parseGpxTracks.
+     *
+     * \return false si no hay ningun historial o no se pudo escribir (el motivo
+     *         queda en \a error).
+     */
+    bool exportTargetHistory(const QString &path,
+                             const QVector<qint64> &ids = QVector<qint64>(),
+                             QString *error = nullptr);
     //! Muestra u oculta la capa de objetivos entera.
     void setTargetsVisible(bool visible);
 
@@ -362,6 +467,112 @@ public:
     //! \ref targetClicked; esto permite hacerlo tambien desde codigo.
     void setSelectedTarget(qint64 id);
     qint64 selectedTarget() const;
+
+    // --- Alertas de zona (objetivos que entran o salen de un area) --------
+    /*!
+     * \brief Vigila una entidad POLIGONAL como zona de alerta.
+     *
+     * Desde ese momento, cada vez que un objetivo movil entra o sale de ella se
+     * emite \ref targetEnteredZone o \ref targetLeftZone. Que la zona sea
+     * "prohibida", "de interes" o "de fondeo" lo decide la app (con el \c type
+     * o los atributos de la entidad); la libreria solo hace la geometria.
+     *
+     * - Los objetivos que YA estan dentro al empezar a vigilar producen una
+     *   entrada: asi la app se entera de lo que hay en la zona.
+     * - "Dentro" es lo que se ve dentro en el mapa (lados rectos en la
+     *   proyeccion del mapa). En una entidad multi-parte basta con una parte.
+     * - Si la entidad cambia de forma (edicion, arrastre, deshacer), se
+     *   reevalua y se emiten las entradas/salidas que provoque. Si se borra,
+     *   se deja de vigilar sin emitir salidas.
+     * - Borrar un objetivo (o \ref clearTargets) tampoco emite salidas: no se
+     *   ha ido, ha dejado de existir. Una posicion invalida si lo saca.
+     * - Tambien se vigilan las ENTIDADES PUNTO (marcadores que el operador pone
+     *   o arrastra), con sus propias señales \ref featureEnteredZone /
+     *   \ref featureLeftZone: los ids de entidad y de objetivo son espacios
+     *   distintos. Cuenta su (primera) posicion; borrarla no es «salir».
+     * - La vigilancia no se guarda con las entidades: la app la vuelve a pedir
+     *   al cargar (p. ej. para todas las entidades de cierto \c type).
+     *
+     * Coste: cada actualizacion de un objetivo se compara con todas las zonas
+     * vigiladas, con un descarte rapido por caja envolvente.
+     *
+     * \return false si no existe la entidad o no es un poligono.
+     */
+    bool watchZone(qint64 featureId);
+    //! Deja de vigilar una zona (sin emitir salidas). false si no se vigilaba.
+    bool unwatchZone(qint64 featureId);
+    bool isZoneWatched(qint64 featureId) const;
+    //! Ids de las entidades vigiladas como zona, ordenados.
+    QVector<qint64> watchedZones() const;
+    //! Objetivos que estan ahora dentro de una zona vigilada, ordenados.
+    QVector<qint64> targetsInZone(qint64 featureId) const;
+    //! Zonas vigiladas en las que esta ahora un objetivo, ordenadas.
+    QVector<qint64> zonesOfTarget(qint64 targetId) const;
+    //! Entidades PUNTO que estan ahora dentro de una zona vigilada, ordenadas.
+    QVector<qint64> featuresInZone(qint64 zoneFeatureId) const;
+    //! Zonas vigiladas en las que esta ahora una entidad punto, ordenadas.
+    QVector<qint64> zonesOfFeature(qint64 featureId) const;
+    /*!
+     * \brief Consulta puntual: objetivos dentro de un poligono cualquiera.
+     *
+     * Para la zona que marca el usuario con SelectArea / SelectPolygon (o
+     * cualquier otra), sin vigilarla ni crear entidad. Mismo criterio de
+     * "dentro" que las alertas. Ids ordenados.
+     */
+    QVector<qint64> targetsInArea(const QVector<QGeoCoordinate> &polygon) const;
+    //! Entidades con algun vertice dentro del poligono, ordenadas por id.
+    QVector<qint64> featuresInArea(const QVector<QGeoCoordinate> &polygon) const;
+    //! Resalte en el mapa (activo por defecto): una zona vigilada con algo
+    //! dentro se pinta con borde ancho y velo del color de alerta, y cada
+    //! entidad punto dentro de una zona lleva un aro. Los objetivos moviles los
+    //! marca la app con su proveedor de simbolos (\ref zonesOfTarget).
+    void setZoneAlertHighlight(bool on);
+    bool isZoneAlertHighlight() const;
+    void setZoneAlertColor(const QColor &color);
+
+    // --- Alertas de proximidad (CPA/TCPA) ----------------------------------
+    /*!
+     * \brief Avisa de los pares de objetivos que van a pasar demasiado cerca.
+     *
+     * Un par entra en alerta si ya estan a menos de \a distanceMeters, o si
+     * su punto de maximo acercamiento (CPA) cae por debajo de esa distancia en
+     * los proximos \a horizonSeconds (TCPA). Se emite
+     * \ref proximityAlertRaised al entrar y \ref proximityAlertCleared al
+     * salir, y el mapa dibuja por donde se cruzan (\ref setProximityLinesVisible).
+     *
+     * - Se reevalua cada vez que se mueve cualquiera de los dos.
+     * - Velocidad y rumbo: los que dé la app con \ref setTargetVelocity (p. ej.
+     *   SOG/COG del AIS) o, si no, los estimados por la traza de los ultimos
+     *   30 s. La libreria no interpreta MapTarget::speed (sus unidades son
+     *   cosa de la app).
+     * - Si las ultimas posiciones son de horas distintas, se compara llevando
+     *   la mas antigua a la hora de la otra por estima.
+     * - Borrar un objetivo no emite fin de alerta (ha dejado de existir).
+     *
+     * \a distanceMeters <= 0 apaga las alertas (las activas terminan con su
+     * señal) y deja de calcular: sin alertas, coste cero. Cada movimiento cuesta
+     * O(objetivos), con un descarte rapido de los que no pueden acercarse.
+     */
+    void setProximityAlert(double distanceMeters, double horizonSeconds = 600.0);
+    double proximityAlertDistance() const;
+    double proximityAlertHorizon() const;
+    //! Pares en alerta ahora, ordenados.
+    QVector<ProximityAlert> proximityAlerts() const;
+    //! CPA/TCPA de dos objetivos cualesquiera, ahora (este o no activa la
+    //! alerta). Invalido si alguno no existe.
+    CpaResult targetCpa(qint64 targetA, qint64 targetB) const;
+    /*!
+     * \brief Velocidad (m/s) y rumbo (grados) de un objetivo, dados por la app.
+     *
+     * Para las alertas de proximidad: mandan sobre la estima por la traza.
+     * Con \a speedMetersPerSecond NaN se vuelve a estimar. Se olvida al borrar
+     * el objetivo. false si no existe. (Nudos: knotsToMetersPerSecond.)
+     */
+    bool setTargetVelocity(qint64 id, double speedMetersPerSecond, double courseDeg);
+    //! Lineas de maximo acercamiento de los pares en alerta (activo por defecto).
+    void setProximityLinesVisible(bool on);
+    bool isProximityLinesVisible() const;
+    void setProximityColor(const QColor &color);
 
     // --- Seleccion -------------------------------------------------------
     qint64 selectedFeature() const;
@@ -448,6 +659,81 @@ public:
     //! Descarta el trazado en curso.
     bool cancelDrawing();
 
+    // --- Escala grafica y cuadricula de coordenadas -----------------------
+    /*!
+     * \brief Escala grafica en la esquina inferior izquierda (oculta por defecto).
+     *
+     * Barra de longitud redonda (1-2-5 x 10^n) medida en el CENTRO de la vista:
+     * en Mercator la escala cambia con la latitud, y el centro es donde se mira.
+     */
+    void setScaleBarVisible(bool on);
+    bool isScaleBarVisible() const;
+    //! Metros/kilometros (por defecto) o millas nauticas.
+    void setScaleBarUnits(ScaleUnits units);
+    ScaleUnits scaleBarUnits() const;
+
+    // --- Anillos de distancia y marcaciones ------------------------------
+    /*!
+     * \brief Pone anillos de distancia (VRM) alrededor de un punto o de un
+     *        objetivo (al que siguen al moverse). Ver \ref RangeRings.
+     *
+     * Rotulados en las unidades de la escala (\ref setScaleBarUnits). Si el
+     * objetivo deja de existir, los anillos no se dibujan (siguen guardados).
+     * \return su id (comun con las marcaciones), o -1 sin vista.
+     */
+    qint64 addRangeRings(const RangeRings &rings);
+    bool updateRangeRings(qint64 id, const RangeRings &rings);
+    /*!
+     * \brief Pone una linea de marcacion (EBL) entre puntos u objetivos, o desde
+     *        uno con un rumbo y una longitud. Ver \ref BearingLine.
+     *
+     * Muestra el rumbo verdadero y la distancia ("045° · 5.2 NM"), que se
+     * actualizan solos si los extremos son objetivos que se mueven.
+     */
+    qint64 addBearingLine(const BearingLine &line);
+    bool updateBearingLine(qint64 id, const BearingLine &line);
+    //! Quita unos anillos o una marcacion. false si el id no existe.
+    bool removeRangeMark(qint64 id);
+    void clearRangeMarks();
+    //! Ids de anillos y marcaciones, ordenados.
+    QVector<qint64> rangeMarks() const;
+    //! Rumbo verdadero (grados) y distancia (m) actuales de una marcacion.
+    //! false si no existe o algun extremo no se puede resolver ahora.
+    bool bearingLineMeasure(qint64 id, double *bearingDeg, double *distanceMeters) const;
+
+    /*!
+     * \brief Que lineas marcan su primer y su ultimo punto.
+     *
+     * Inicio con un circulo verde y fin con un cuadrado rojo. La linea
+     * SELECCIONADA lleva ademas los rotulos "inicio" y "fin" con su hora, si
+     * la tiene (atributos \c time_start / \c time_end, que pone la lectura de
+     * GPX). Por defecto \ref RouteEndpoints::Routes: siempre las rutas y
+     * tracks leidos de GPX, y cualquier linea al seleccionarla.
+     */
+    void setRouteEndpoints(RouteEndpoints mode);
+    RouteEndpoints routeEndpoints() const;
+    //! Resolucion del mapa en el centro de la vista, en metros por pixel
+    //! (0 si aun no hay vista). Es el dato con el que se dibuja la escala.
+    double metersPerPixel() const;
+
+    /*!
+     * \brief Cuadricula de meridianos y paralelos con su rotulo (oculta por defecto).
+     *
+     * La separacion se elige sola segun el zoom, en pasos de carta (grados,
+     * 30', 10', 1', 30"...), y cada linea se rotula en el borde con esa
+     * precision (23°30'N). Va encima de las entidades y debajo de los objetivos.
+     */
+    void setGraticuleVisible(bool on);
+    bool isGraticuleVisible() const;
+    //! Color de lineas y rotulos (p. ej. claro sobre la capa satelital).
+    void setGraticuleColor(const QColor &color);
+    QColor graticuleColor() const;
+    //! Cuadricula geografica (por defecto) o UTM: lineas de este/norte
+    //! constantes de cada zona visible, cada 100 km .. 100 m segun el zoom,
+    //! con los limites de zona marcados. Las conversiones, en Coordinates.h.
+    void setGraticuleMode(GraticuleMode mode);
+    GraticuleMode graticuleMode() const;
+
     // --- Diagnostico -----------------------------------------------------
     //! Porcentaje de la pantalla resuelto con teselas propias (no ancestros).
     double exactCoverage() const;
@@ -525,6 +811,22 @@ signals:
     void featureSelected(qint64 id);      //!< -1 al deseleccionar
     //! Clic sobre un objetivo movil sin herramienta activa (ya queda resaltado).
     void targetClicked(qint64 id, const QGeoCoordinate &position);
+    //! Un objetivo movil ha entrado en una zona vigilada (ver \ref watchZone).
+    void targetEnteredZone(qint64 targetId, qint64 zoneFeatureId);
+    //! Un objetivo movil ha salido de una zona vigilada (ver \ref watchZone).
+    void targetLeftZone(qint64 targetId, qint64 zoneFeatureId);
+    //! Una entidad PUNTO ha entrado en una zona vigilada (al crearla, moverla,
+    //! arrastrarla o deshacer).
+    void featureEnteredZone(qint64 featureId, qint64 zoneFeatureId);
+    //! Una entidad PUNTO ha salido de una zona vigilada.
+    void featureLeftZone(qint64 featureId, qint64 zoneFeatureId);
+    //! Dos objetivos van a pasar (o ya estan) a menos de la distancia de alerta
+    //! (\ref setProximityAlert). \a targetA < \a targetB. \a tcpaSeconds
+    //! negativo: ya estan dentro y se alejan.
+    void proximityAlertRaised(qint64 targetA, qint64 targetB, double cpaMeters,
+                              double tcpaSeconds);
+    //! El par deja de estar en alerta de proximidad.
+    void proximityAlertCleared(qint64 targetA, qint64 targetB);
     void featureLayersChanged();
     //! Emitida al crear una entidad con el raton.
     void featureCreated(qint64 id);

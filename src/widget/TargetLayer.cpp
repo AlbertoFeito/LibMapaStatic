@@ -1,5 +1,7 @@
 #include "widget/TargetLayer.h"
 
+#include <QDateTime>
+#include <QFontMetrics>
 #include <QFontMetricsF>
 #include <QLineF>
 #include <QPainter>
@@ -60,6 +62,15 @@ void TargetLayer::setSelected(qint64 id)
     if (m_selected == id)
         return;
     m_selected = id;
+    programarRepintado();
+}
+
+// Enciende/apaga el historial del objetivo seleccionado y repinta.
+void TargetLayer::setSelectedHistoryVisible(bool on)
+{
+    if (m_historyVisible == on)
+        return;
+    m_historyVisible = on;
     programarRepintado();
 }
 
@@ -133,12 +144,152 @@ void TargetLayer::draw(QCPPainter *painter)
     m_labelCells.clear();
     m_labelBoxes.clear();   // cajas de etiqueta de este frame, para hit-test
 
+    // Historial del seleccionado, debajo de todo y FUERA del culling: aunque el
+    // objetivo este fuera de pantalla, su recorrido (y su origen) puede cruzarla.
+    if (m_historyVisible && m_selected >= 0) {
+        const auto it = m_model->entries().constFind(m_selected);
+        if (it != m_model->entries().constEnd())
+            drawHistory(painter, *it);
+    }
+
     // --- Pasada 2: dibujo ----------------------------------------------------
     for (const auto &v : m_visibles) {
         const bool sel = (v.first->target.id == m_selected);
         drawTarget(painter, *v.first, v.second, conTrazas, conEtiquetas, sel,
                    m_labelCells);
     }
+
+    // Alertas de proximidad, ENCIMA de los objetivos (son el aviso que no debe
+    // quedar tapado) y fuera del culling: el punto de encuentro puede estar en
+    // pantalla aunque los dos objetivos aun no lo esten.
+    if (!m_proximity.isEmpty())
+        drawProximity(painter);
+}
+
+// Guarda las lineas CPA de los pares en alerta y pide repintar.
+void TargetLayer::setProximityLines(const QVector<ProximityLine> &lines)
+{
+    m_proximity = lines;
+    programarRepintado();
+}
+
+// Cada par en alerta: discontinua de cada objetivo a donde estara en el CPA, la
+// distancia minima entre esos dos puntos en continua (con un punto en cada
+// extremo) y el rotulo en su centro. Lo que se ve es "por donde se cruzan y a
+// cuanto", sin tener que leer numeros.
+void TargetLayer::drawProximity(QPainter *painter) const
+{
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    QFont f = painter->font();
+    f.setPointSizeF(8.0);
+    f.setBold(true);
+    painter->setFont(f);
+    const QFontMetrics fm(f);
+    const QColor c = m_proximityColor;
+    QVector<QRectF> ocupadas;          // rotulos ya puestos en este dibujado
+
+    for (const ProximityLine &l : m_proximity) {
+        const auto ia = m_model->entries().constFind(l.a);
+        const auto ib = m_model->entries().constFind(l.b);
+        if (ia == m_model->entries().constEnd() || ib == m_model->entries().constEnd())
+            continue;
+        const QPointF pa = screenPos(ia->target.position);
+        const QPointF pb = screenPos(ib->target.position);
+        const QPointF ca = l.cpaA.isValid() ? screenPos(l.cpaA) : pa;
+        const QPointF cb = l.cpaB.isValid() ? screenPos(l.cpaB) : pb;
+
+        QPen discontinua(c, 1.6, Qt::DashLine);
+        painter->setPen(discontinua);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawLine(pa, ca);
+        painter->drawLine(pb, cb);
+
+        painter->setPen(QPen(QColor(255, 255, 255, 190), 5.0, Qt::SolidLine, Qt::RoundCap));
+        painter->drawLine(ca, cb);
+        painter->setPen(QPen(c, 2.6, Qt::SolidLine, Qt::RoundCap));
+        painter->drawLine(ca, cb);
+        painter->setBrush(c);
+        painter->setPen(QPen(Qt::white, 1.2));
+        painter->drawEllipse(ca, 3.5, 3.5);
+        painter->drawEllipse(cb, 3.5, 3.5);
+
+        if (!l.label.isEmpty()) {
+            const QPointF medio = (ca + cb) / 2.0;
+            const QRectF caja(medio.x() + 6.0, medio.y() - fm.height() - 4.0,
+                              fm.horizontalAdvance(l.label) + 8.0, fm.height() + 3.0);
+            // Con muchas alertas juntas, un rotulo que pisaria a otro se omite:
+            // la linea sigue viendose y el detalle esta en proximityAlerts().
+            const QRectF holgada = caja.adjusted(-2.0, -2.0, 2.0, 2.0);
+            if (std::any_of(ocupadas.cbegin(), ocupadas.cend(),
+                            [&holgada](const QRectF &r) { return r.intersects(holgada); }))
+                continue;
+            ocupadas.append(caja);
+            painter->setPen(QPen(c, 1.0));
+            painter->setBrush(QColor(255, 255, 255, 225));
+            painter->drawRoundedRect(caja, 3.0, 3.0);
+            painter->setPen(c.darker(140));
+            painter->drawText(caja, Qt::AlignCenter, l.label);
+        }
+    }
+    painter->restore();
+}
+
+// Dibuja el historial completo de un objetivo, del ORIGEN a la posicion actual:
+// linea del color del objetivo sobre un halo blanco (se ve sobre cualquier
+// fondo), decimada a ~1.5 px, y en el origen un cuadro con la hora en que se vio
+// por primera vez. Es lo que permite saber de donde vino.
+void TargetLayer::drawHistory(QPainter *painter, const TargetModel::Entry &e) const
+{
+    if (e.history.isEmpty())
+        return;
+    QPolygonF linea;
+    linea.reserve(e.history.size() + 1);
+    QPointF ultimo;
+    for (const TargetModel::HistoryPoint &h : e.history) {
+        const QPointF p = screenPos(QGeoCoordinate(h.lat, h.lon));
+        if (linea.isEmpty() || QLineF(ultimo, p).length() >= 1.5) {
+            linea.append(p);
+            ultimo = p;
+        }
+    }
+    // Hasta la posicion actual (el ultimo punto anotado puede ir un poco detras).
+    linea.append(screenPos(e.target.position));
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setBrush(Qt::NoBrush);
+    if (linea.size() >= 2) {
+        QPen halo(QColor(255, 255, 255, 170), 4.5);
+        halo.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(halo);
+        painter->drawPolyline(linea);
+        QPen pen(e.target.color, 2.0);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(pen);
+        painter->drawPolyline(linea);
+    }
+
+    // Marca del origen: cuadro hueco + "origen HH:mm:ss" (hora local).
+    const TargetModel::HistoryPoint &o = e.history.first();
+    const QPointF po = screenPos(QGeoCoordinate(o.lat, o.lon));
+    const QRectF cuadro(po.x() - 5.0, po.y() - 5.0, 10.0, 10.0);
+    painter->setPen(QPen(Qt::white, 4.0));
+    painter->drawRect(cuadro);
+    painter->setPen(QPen(e.target.color.darker(130), 2.0));
+    painter->drawRect(cuadro);
+    const QString txt = tr("origen %1").arg(
+        QDateTime::fromMSecsSinceEpoch(o.msecs).toString(QStringLiteral("HH:mm:ss")));
+    QFont f = painter->font();
+    f.setPointSizeF(8.0);
+    painter->setFont(f);
+    const QFontMetrics fm(f);
+    const QRectF caja(po.x() + 8.0, po.y() - fm.height() / 2.0 - 1.0,
+                      fm.horizontalAdvance(txt) + 6.0, fm.height() + 2.0);
+    painter->fillRect(caja, QColor(255, 255, 255, 200));
+    painter->setPen(Qt::black);
+    painter->drawText(caja, Qt::AlignCenter, txt);
+    painter->restore();
 }
 
 // Dibuja UN objetivo ya situado en 'pos': su traza (si drawTrail), su simbolo

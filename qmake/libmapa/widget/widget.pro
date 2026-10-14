@@ -31,20 +31,28 @@ SOURCES += \
     $$ROOT/src/widget/TargetModel.cpp \
     $$ROOT/src/widget/TargetLayer.cpp \
     $$ROOT/src/widget/CoverageLayer.cpp \
+    $$ROOT/src/widget/GraticuleLayer.cpp \
+    $$ROOT/src/widget/ScaleBarLayer.cpp \
+    $$ROOT/src/widget/RangeLayer.cpp \
     $$ROOT/src/widget/HillshadeLayer.cpp \
     $$ROOT/src/widget/MapView.cpp \
-    $$ROOT/src/widget/MapWidget.cpp
+    $$ROOT/src/widget/MapWidget.cpp \
+    $$ROOT/src/widget/TrackPlayer.cpp
 
 # Cabeceras con Q_OBJECT (para el MOC).
 HEADERS += \
     $$LIBMAPA_QCP_DIR/qcustomplot.h \
     $$ROOT/include/libmapa/MapWidget.h \
+    $$ROOT/include/libmapa/TrackPlayer.h \
     $$ROOT/src/widget/TileLayer.h \
     $$ROOT/src/widget/OverlayModel.h \
     $$ROOT/src/widget/FeatureLayer.h \
     $$ROOT/src/widget/TargetModel.h \
     $$ROOT/src/widget/TargetLayer.h \
     $$ROOT/src/widget/CoverageLayer.h \
+    $$ROOT/src/widget/GraticuleLayer.h \
+    $$ROOT/src/widget/ScaleBarLayer.h \
+    $$ROOT/src/widget/RangeLayer.h \
     $$ROOT/src/widget/HillshadeLayer.h \
     $$ROOT/src/widget/MapView.h
 

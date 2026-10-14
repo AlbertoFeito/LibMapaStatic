@@ -26,11 +26,50 @@ void TargetModel::podarTraza(Entry &e)
         e.trail.remove(0, e.trail.size() - m_trailMax);
 }
 
+// Anota una posicion en el historial del objetivo, con su hora (la dada o, si
+// no es valida, la actual en UTC). Se salta si esta a menos de la distancia
+// minima del ultimo punto anotado (un objetivo parado no llena la memoria), y
+// si el historial se pasa del tope se aclara.
+void TargetModel::anotarHistoria(Entry &e, const QGeoCoordinate &pos, const QDateTime &time)
+{
+    if (!pos.isValid())
+        return;
+    if (!e.history.isEmpty()) {
+        const HistoryPoint &u = e.history.last();
+        const QGeoCoordinate ultimo(u.lat, u.lon);
+        if (ultimo.distanceTo(pos) < m_historyMinDist || ultimo == pos)
+            return;
+    }
+    HistoryPoint p;
+    p.lat = pos.latitude();
+    p.lon = pos.longitude();
+    p.msecs = time.isValid() ? time.toMSecsSinceEpoch() : QDateTime::currentMSecsSinceEpoch();
+    e.history.append(p);
+    aclararHistoria(e);
+}
+
+// Si el historial pasa del tope, quita uno de cada dos puntos INTERMEDIOS: el
+// historial conserva su forma con la mitad de resolucion, y el origen (primer
+// punto) y la posicion mas reciente (ultimo) se mantienen siempre.
+void TargetModel::aclararHistoria(Entry &e) const
+{
+    while (e.history.size() > m_historyMax && e.history.size() > 2) {
+        QVector<HistoryPoint> aclarado;
+        aclarado.reserve(e.history.size() / 2 + 2);
+        const int n = int(e.history.size());
+        aclarado.append(e.history.first());
+        for (int i = 2; i < n - 1; i += 2)
+            aclarado.append(e.history.at(i));
+        aclarado.append(e.history.last());
+        e.history = aclarado;
+    }
+}
+
 // Inserta o actualiza un objetivo. Si viene sin id (< 0) le asigna uno nuevo; si
 // trae id, mantiene el contador por encima de el. Extiende la traza con la nueva
 // posicion (si cambio) y emite changed() para que la vista repinte. Devuelve el
 // id, o -1 si la coordenada no es valida.
-qint64 TargetModel::upsert(MapTarget target)
+qint64 TargetModel::upsert(MapTarget target, const QDateTime &time)
 {
     if (!target.position.isValid())
         return -1;
@@ -48,6 +87,12 @@ qint64 TargetModel::upsert(MapTarget target)
         e.trail.append(target.position);
         podarTraza(e);
     }
+    // El historial se abre con el alta (ORIGEN) y se continua si ya existia.
+    // Una sola lectura del reloj para historial y ultima hora: si no, podrian
+    // diferir en un ms y la estima de velocidad tomaria este mismo punto.
+    const QDateTime hora = time.isValid() ? time : QDateTime::currentDateTimeUtc();
+    anotarHistoria(e, target.position, hora);
+    e.lastMsecs = hora.toMSecsSinceEpoch();
 
     emit changed();
     return target.id;
@@ -57,7 +102,7 @@ qint64 TargetModel::upsert(MapTarget target)
 // alargando su traza. Camino rapido para refrescar posiciones sin reconstruir el
 // objetivo entero. Devuelve false si el id no existe o la posicion no es valida.
 bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
-                         double headingDeg)
+                         double headingDeg, const QDateTime &time)
 {
     if (!position.isValid())
         return false;
@@ -73,6 +118,9 @@ bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
         it->trail.append(position);
         podarTraza(*it);
     }
+    const QDateTime hora = time.isValid() ? time : QDateTime::currentDateTimeUtc();
+    anotarHistoria(*it, position, hora);
+    it->lastMsecs = hora.toMSecsSinceEpoch();
 
     emit changed();
     return true;
@@ -191,6 +239,47 @@ QVector<QGeoCoordinate> TargetModel::trail(qint64 id) const
     return it->trail;
 }
 
+// Historial completo (desde el origen) de un objetivo, con sus horas. Vacio si
+// el id no existe.
+QVector<TargetTrackPoint> TargetModel::history(qint64 id) const
+{
+    QVector<TargetTrackPoint> out;
+    auto it = m_targets.constFind(id);
+    if (it == m_targets.constEnd())
+        return out;
+    out.reserve(it->history.size());
+    for (const HistoryPoint &p : it->history)
+        out.append({ QGeoCoordinate(p.lat, p.lon),
+                     QDateTime::fromMSecsSinceEpoch(p.msecs).toUTC() });
+    return out;
+}
+
+// Origen: el primer punto del historial (donde se vio por primera vez).
+TargetTrackPoint TargetModel::origin(qint64 id) const
+{
+    auto it = m_targets.constFind(id);
+    if (it == m_targets.constEnd() || it->history.isEmpty())
+        return {};
+    const HistoryPoint &p = it->history.first();
+    return { QGeoCoordinate(p.lat, p.lon), QDateTime::fromMSecsSinceEpoch(p.msecs).toUTC() };
+}
+
+// Cambia el tope del historial (minimo 2: origen y posicion actual) y aclara ya
+// los historiales que lo superen.
+void TargetModel::setHistoryMaxPoints(int maxPoints)
+{
+    m_historyMax = qMax(2, maxPoints);
+    for (Entry &e : m_targets)
+        aclararHistoria(e);
+}
+
+// Cambia la distancia minima entre puntos anotados (negativa = 0). Solo afecta
+// a los puntos que lleguen a partir de ahora.
+void TargetModel::setHistoryMinDistance(double meters)
+{
+    m_historyMinDist = qMax(0.0, meters);
+}
+
 // Fija el limite de puntos de traza para TODOS los objetivos y reajusta las
 // trazas actuales al nuevo limite (< 0 ilimitada, 0 sin traza, > 0 ultimas N).
 void TargetModel::setTrailMaxPoints(int maxPoints)
@@ -200,6 +289,51 @@ void TargetModel::setTrailMaxPoints(int maxPoints)
     for (Entry &e : m_targets)
         podarTraza(e);
     emit changed();
+}
+
+// Hora de la ultima posicion de un objetivo (0 si no existe).
+qint64 TargetModel::lastUpdateMsecs(qint64 id) const
+{
+    const auto it = m_targets.constFind(id);
+    return it != m_targets.cend() ? it->lastMsecs : 0;
+}
+
+// Velocidad por la traza: del punto mas antiguo del historial dentro de la
+// ventana (o, si no hay, del ultimo anterior a ella) a la posicion actual. El
+// historial no anota movimientos de menos de historyMinDistance, asi que un
+// objetivo que se para deja de crecer: con la posicion actual y su hora la
+// estima baja sola a 0 en vez de quedarse con la ultima velocidad.
+bool TargetModel::estimateVelocity(qint64 id, qint64 windowMs, double *speed,
+                                   double *course) const
+{
+    const auto it = m_targets.constFind(id);
+    if (it == m_targets.cend())
+        return false;
+    const Entry &e = *it;
+    const qint64 ahora = e.lastMsecs;
+    const HistoryPoint *desde = nullptr;
+    for (int i = int(e.history.size()) - 1; i >= 0; --i) {
+        const HistoryPoint &h = e.history.at(i);
+        if (h.msecs >= ahora)
+            continue;                      // el punto de esta misma posicion
+        if (desde && h.msecs < ahora - windowMs)
+            break;                         // ya tenemos el mas antiguo de la ventana
+        desde = &h;
+        if (h.msecs < ahora - windowMs)
+            break;                         // ninguno en la ventana: el anterior
+    }
+    if (!desde)
+        return false;
+    const QGeoCoordinate origen(desde->lat, desde->lon);
+    const double dist = origen.distanceTo(e.target.position);
+    const double dt = double(ahora - desde->msecs) / 1000.0;
+    if (dt <= 0.0)
+        return false;
+    if (speed)
+        *speed = dist < m_historyMinDist ? 0.0 : dist / dt;
+    if (course)
+        *course = dist > 0.0 ? origen.azimuthTo(e.target.position) : e.target.headingDeg;
+    return true;
 }
 
 } // namespace libmapa

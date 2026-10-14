@@ -2,6 +2,7 @@
 #define LIBMAPA_MAPTARGET_H_
 
 #include <QColor>
+#include <QDateTime>
 #include <QGeoCoordinate>
 #include <QMetaType>
 #include <QPointF>
@@ -51,6 +52,21 @@ struct MapTarget
     //! etiqueta solo cambia esto. (0,0) = pegada al simbolo. Cuando no es nula
     //! se traza una LINEA GUIA del objetivo a la caja de texto.
     QPointF labelOffsetPx = QPointF(0.0, 0.0);
+
+    bool isValid() const { return position.isValid(); }
+};
+
+/*!
+ * \brief Un punto del historial de un objetivo: donde estaba y cuando.
+ *
+ * El primero del historial es el ORIGEN: donde se vio el objetivo por primera
+ * vez en el sistema. La hora es la que dio la app al actualizar (p. ej. la del
+ * mensaje AIS) o, si no dio ninguna, la del momento de la actualizacion (UTC).
+ */
+struct TargetTrackPoint
+{
+    QGeoCoordinate position;
+    QDateTime time;
 
     bool isValid() const { return position.isValid(); }
 };

@@ -6,9 +6,12 @@
 #include "libmapa/MapTypes.h"
 #include "tiles/TileService.h"
 #include "widget/CoverageLayer.h"
+#include "widget/GraticuleLayer.h"
+#include "widget/ScaleBarLayer.h"
 #include "widget/HillshadeLayer.h"
 #include "widget/FeatureLayer.h"
 #include "widget/OverlayModel.h"
+#include "widget/RangeLayer.h"
 #include "widget/TargetLayer.h"
 #include "widget/TargetModel.h"
 #include "widget/TileLayer.h"
@@ -48,6 +51,9 @@ public:
     TargetModel *targetModel() const { return m_targetModel; }
     TargetLayer *targetLayer() const { return m_targetLayer; }
     CoverageLayer *coverageLayer() const { return m_coverageLayer; }
+    GraticuleLayer *graticuleLayer() const { return m_graticuleLayer; }
+    ScaleBarLayer *scaleBarLayer() const { return m_scaleBarLayer; }
+    RangeLayer *rangeLayer() const { return m_rangeLayer; }
     HillshadeLayer *hillshadeLayer() const { return m_hillshadeLayer; }
 
     QGeoCoordinate center() const;
@@ -125,7 +131,7 @@ public:
     //! Pide al servicio las teselas del viewport actual.
     void requestVisibleTiles();
 
-    //! Oculta el recuadro de SelectArea, si lo hay.
+    //! Oculta la marca de SelectArea / SelectPolygon, si la hay.
     void clearAreaSelection();
 
     //! Capa donde se crean las entidades nuevas.
@@ -209,6 +215,9 @@ private:
     TargetModel *m_targetModel = nullptr;
     TargetLayer *m_targetLayer = nullptr;
     CoverageLayer *m_coverageLayer = nullptr;
+    GraticuleLayer *m_graticuleLayer = nullptr;
+    ScaleBarLayer *m_scaleBarLayer = nullptr;
+    RangeLayer *m_rangeLayer = nullptr;       //!< Anillos y marcaciones (capa "targets").
     HillshadeLayer *m_hillshadeLayer = nullptr;
 
     int m_zoom = 10;

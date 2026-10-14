@@ -22,6 +22,11 @@ SOURCES += \
     $$ROOT/src/core/Logging.cpp \
     $$ROOT/src/geo/WebMercator.cpp \
     $$ROOT/src/geo/TileMatrix.cpp \
+    $$ROOT/src/geo/Coordinates.cpp \
+    $$ROOT/src/geo/MapDecor.cpp \
+    $$ROOT/src/geo/ZoneMonitor.cpp \
+    $$ROOT/src/geo/Proximity.cpp \
+    $$ROOT/src/geo/ProximityMonitor.cpp \
     $$ROOT/src/db/SqliteConnectionPool.cpp \
     $$ROOT/src/db/Schema.cpp \
     $$ROOT/src/db/VectorRepository.cpp \
@@ -33,6 +38,8 @@ SOURCES += \
     $$ROOT/src/tiles/TileLoader.cpp \
     $$ROOT/src/tiles/TileService.cpp \
     $$ROOT/src/io/GeoFile.cpp \
+    $$ROOT/src/io/VectorFormats.cpp \
+    $$ROOT/src/geo/TrackReplay.cpp \
     $$ROOT/src/io/DataPackage.cpp \
     $$ROOT/src/io/PackageCheck.cpp \
     $$ROOT/src/dem/GridElevation.cpp \

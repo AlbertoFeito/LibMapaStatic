@@ -91,6 +91,16 @@ add_library(libmapa_core STATIC
     src/geo/WebMercator.h
     src/geo/TileMatrix.cpp
     src/geo/TileMatrix.h
+    src/geo/Coordinates.cpp
+    include/libmapa/Coordinates.h
+    src/geo/MapDecor.cpp
+    src/geo/MapDecor.h
+    src/geo/ZoneMonitor.cpp
+    src/geo/ZoneMonitor.h
+    src/geo/Proximity.cpp
+    include/libmapa/Proximity.h
+    src/geo/ProximityMonitor.cpp
+    src/geo/ProximityMonitor.h
 
     src/db/SqliteConnectionPool.cpp
     src/db/SqliteConnectionPool.h
@@ -119,6 +129,10 @@ add_library(libmapa_core STATIC
 
     src/io/GeoFile.cpp
     include/libmapa/GeoFile.h
+    src/io/VectorFormats.cpp
+    include/libmapa/VectorFormats.h
+    src/geo/TrackReplay.cpp
+    include/libmapa/TrackReplay.h
     src/io/DataPackage.cpp
     src/io/DataPackage.h
     include/libmapa/DataPackage.h
@@ -179,12 +193,20 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/TargetLayer.h
         src/widget/CoverageLayer.cpp
         src/widget/CoverageLayer.h
+        src/widget/GraticuleLayer.cpp
+        src/widget/GraticuleLayer.h
+        src/widget/ScaleBarLayer.cpp
+        src/widget/RangeLayer.cpp
+        src/widget/ScaleBarLayer.h
+        src/widget/RangeLayer.h
         src/widget/HillshadeLayer.cpp
         src/widget/HillshadeLayer.h
         src/widget/MapView.cpp
         src/widget/MapView.h
         src/widget/MapWidget.cpp
         include/libmapa/MapWidget.h
+        src/widget/TrackPlayer.cpp
+        include/libmapa/TrackPlayer.h
         include/libmapa/MapTypes.h
         include/libmapa/MapFeature.h
         include/libmapa/MapTarget.h
@@ -358,6 +380,11 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_sqliteelevation)
     libmapa_add_test(tst_elevationanalysis)
     libmapa_add_test(tst_contours)
+    libmapa_add_test(tst_zonemonitor)
+    libmapa_add_test(tst_proximity)
+    libmapa_add_test(tst_mapdecor)
+    libmapa_add_test(tst_vectorformats)
+    libmapa_add_test(tst_coordinates)
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 

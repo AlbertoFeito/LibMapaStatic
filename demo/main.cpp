@@ -15,6 +15,7 @@
  */
 
 #include "libmapa/MapWidget.h"
+#include "libmapa/TrackPlayer.h"
 
 #include "qcustomplot.h"      // ya compilado dentro de libmapa_widget; aquí solo se usa
 
@@ -61,6 +62,7 @@
 #include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QSet>
 #include <QStatusBar>
 #include <QTableWidget>
 #include <QTabWidget>
@@ -68,6 +70,8 @@
 #include <QPalette>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSlider>
+#include <QStyle>
 #include <QToolBar>
 #include <QToolButton>
 #include <QToolTip>
@@ -321,7 +325,7 @@ class Ventana : public QMainWindow
     Q_OBJECT
 
     //! Punto que se está capturando del mapa (pestaña Elevación).
-    enum class Pick { Ninguno, A, B };
+    enum class Pick { Ninguno, A, B, Anillos, OrigenEbl, DestinoEbl };
 
 public:
     //! \a origen es un datasets.json o, si \a esPaquete, la carpeta de un
@@ -500,6 +504,29 @@ private:
         m_accRejilla = new QAction(tr("Rejilla"), this);
         m_accRejilla->setCheckable(true);
         connect(m_accRejilla, &QAction::toggled, m_mapa, &MapWidget::setDebugGridVisible);
+        // Escala gráfica y cuadrícula de coordenadas (capas de la librería). La
+        // escala arranca encendida; la cuadrícula, a petición.
+        m_accEscala = new QAction(tr("Escala gráfica"), this);
+        m_accEscala->setCheckable(true);
+        connect(m_accEscala, &QAction::toggled, m_mapa, &MapWidget::setScaleBarVisible);
+        m_accEscala->setChecked(true);
+        m_accEscalaNm = new QAction(tr("Escala en millas náuticas"), this);
+        m_accEscalaNm->setCheckable(true);
+        connect(m_accEscalaNm, &QAction::toggled, this, [this](bool nm) {
+            m_mapa->setScaleBarUnits(nm ? ScaleUnits::Nautical : ScaleUnits::Metric);
+        });
+        m_accCuadricula = new QAction(tr("Cuadrícula de coordenadas"), this);
+        m_accCuadricula->setCheckable(true);
+        connect(m_accCuadricula, &QAction::toggled, m_mapa, &MapWidget::setGraticuleVisible);
+        // Sobre la capa satelital (oscura) la cuadrícula va en blanco.
+        auto colorCuadricula = [this](const QString &capa) {
+            const bool oscura = capa.contains(QLatin1String("sat"), Qt::CaseInsensitive);
+            m_mapa->setGraticuleColor(oscura ? QColor(255, 255, 255, 200)
+                                             : QColor(20, 40, 60, 150));
+        };
+        colorCuadricula(m_mapa->baseLayerId());
+        connect(m_mapa, &MapWidget::baseLayerChanged, this, colorCuadricula);
+
         m_accCobertura = new QAction(tr("Cobertura"), this);
         m_accCobertura->setCheckable(true);
         m_accCobertura->setToolTip(tr("Mancha de zonas con teselas del zoom elegido."));
@@ -534,6 +561,11 @@ private:
 
         auto *accGeo = new QAction(tr("Cargar .geo..."), this);
         connect(accGeo, &QAction::triggered, this, &Ventana::cargarGeo);
+        // Intercambio con otras herramientas: GeoJSON / KML / GPX.
+        auto *accImportar = new QAction(tr("Importar GeoJSON/KML/GPX..."), this);
+        connect(accImportar, &QAction::triggered, this, &Ventana::importarVectorial);
+        auto *accExportar = new QAction(tr("Exportar capa activa a GeoJSON/KML/GPX..."), this);
+        connect(accExportar, &QAction::triggered, this, &Ventana::exportarVectorial);
 
         m_numObjetivos = new QSpinBox(this);
         m_numObjetivos->setRange(1, 5000);
@@ -577,8 +609,27 @@ private:
         // aquí se informa de la zona en la barra de estado.
         m_accSelArea = accHerr(tr("Seleccionar área"), MapTool::SelectArea);
         m_accSelPoli = accHerr(tr("Seleccionar polígono (zona)"), MapTool::SelectPolygon);
-        m_accSelArea->setStatusTip(tr("Arrastra un rectángulo: informa de su bbox."));
-        m_accSelPoli->setStatusTip(tr("Marca un polígono clic a clic (doble clic cierra)."));
+        m_accSelArea->setStatusTip(
+            tr("Marca una zona rectangular (clic en una esquina y clic en la opuesta) "
+               "sin hacer zoom: dice qué hay dentro y deja crear con ella un área, "
+               "vigilarla o exportarla."));
+        m_accSelPoli->setStatusTip(
+            tr("Marca una zona de cualquier forma, clic a clic (doble clic, clic "
+               "derecho o Intro la cierran; Esc cancela): dice qué hay dentro y deja "
+               "crear con ella un área, vigilarla o exportarla."));
+
+        // Exportaciones nuevas: historial de objetivos (GPX con horas) y la
+        // vista tal cual se ve (imagen o PDF con título, pie y escala).
+        auto *accHistorialGpx = new QAction(tr("Exportar historial de objetivos (GPX)..."), this);
+        accHistorialGpx->setStatusTip(
+            tr("Guarda la traza completa de cada objetivo, desde su origen, con la hora "
+               "de cada punto (se reproduce en QGIS o GPXSee)."));
+        connect(accHistorialGpx, &QAction::triggered, this, &Ventana::exportarHistorialGpx);
+        auto *accExportarVista = new QAction(tr("Exportar vista a imagen o PDF..."), this);
+        accExportarVista->setShortcut(QKeySequence(QStringLiteral("Ctrl+P")));
+        accExportarVista->setStatusTip(
+            tr("Guarda el mapa tal cual se ve (PNG/JPG o PDF con título, pie y escala)."));
+        connect(accExportarVista, &QAction::triggered, this, [this] { exportarVista(); });
 
         // Mostrar/ocultar los objetivos simulados (capacidad setTargetsVisible).
         m_accVerObjetivos = new QAction(tr("Mostrar objetivos"), this);
@@ -586,6 +637,23 @@ private:
         m_accVerObjetivos->setChecked(true);
         connect(m_accVerObjetivos, &QAction::toggled, this,
                 [this](bool on) { m_mapa->setTargetsVisible(on); });
+
+        // Alertas de zona (watchZone): vigila / deja de vigilar el polígono
+        // seleccionado; las entradas y salidas se avisan en la barra de estado.
+        m_accVigilarZona = new QAction(tr("Vigilar zona seleccionada"), this);
+        m_accVigilarZona->setStatusTip(
+            tr("Avisa cuando un objetivo entra o sale del polígono seleccionado "
+               "(otra vez = dejar de vigilar)."));
+        connect(m_accVigilarZona, &QAction::triggered, this, &Ventana::alternarVigilancia);
+
+        // Alertas de proximidad (CPA/TCPA) entre objetivos: al marcarla pide la
+        // distancia y el horizonte; la librería avisa y dibuja por dónde se cruzan.
+        m_accProximidad = new QAction(tr("Alertas de proximidad (CPA)..."), this);
+        m_accProximidad->setCheckable(true);
+        m_accProximidad->setStatusTip(
+            tr("Avisa cuando dos objetivos van a pasar a menos de una distancia "
+               "dentro de un tiempo (punto de máximo acercamiento)."));
+        connect(m_accProximidad, &QAction::triggered, this, &Ventana::configurarProximidad);
 
         // Glifos del resto de acciones de barra (los de dibujo ya los puso
         // accHerr). aplicarIconos() los pinta con el color del tema.
@@ -628,6 +696,73 @@ private:
         mVer->addAction(accAmpliar);
         mVer->addAction(accReducir);
         mVer->addAction(accCuba);
+        mVer->addSeparator();
+        mVer->addAction(m_accEscala);
+        mVer->addAction(m_accEscalaNm);
+        mVer->addAction(m_accCuadricula);
+        // Cuadrícula UTM en vez de la geográfica (las dos van por la misma acción).
+        auto *accCuadriculaUtm = mVer->addAction(tr("Cuadrícula UTM"));
+        accCuadriculaUtm->setCheckable(true);
+        connect(accCuadriculaUtm, &QAction::toggled, this, [this](bool utm) {
+            m_mapa->setGraticuleMode(utm ? GraticuleMode::Utm : GraticuleMode::Geographic);
+            if (utm && !m_accCuadricula->isChecked())
+                m_accCuadricula->setChecked(true);    // pedir UTM implica verla
+        });
+        // Formato de la coordenada bajo el cursor (barra de estado).
+        QMenu *mFormato = mVer->addMenu(tr("Formato de coordenadas"));
+        auto *gFormato = new QActionGroup(this);
+        const QList<QPair<QString, CoordinateFormat>> formatos = {
+            { tr("Decimal (23.11360, -82.36660)"), CoordinateFormat::Decimal },
+            { tr("Grados, minutos, segundos"), CoordinateFormat::DMS },
+            { tr("Grados y minutos decimales"), CoordinateFormat::DDM },
+            { tr("UTM (17Q 360057 2556751)"), CoordinateFormat::UTM },
+            { tr("MGRS (17Q LF 60056 56750)"), CoordinateFormat::MGRS },
+        };
+        for (const auto &f : formatos) {
+            QAction *a = mFormato->addAction(f.first);
+            a->setCheckable(true);
+            a->setChecked(f.second == m_formatoCoord);
+            gFormato->addAction(a);
+            const CoordinateFormat fmt = f.second;
+            connect(a, &QAction::triggered, this, [this, fmt] { m_formatoCoord = fmt; });
+        }
+        // Ir a una coordenada escrita en cualquier formato.
+        connect(mVer->addAction(tr("Ir a coordenada...")), &QAction::triggered,
+                this, &Ventana::irACoordenada);
+        mVer->addSeparator();
+        // Medidas que se quedan en el mapa: anillos de distancia (VRM) y
+        // líneas de marcación (EBL), fijas o colgadas de objetivos.
+        auto *accAnillos = mVer->addAction(tr("Anillos de distancia..."));
+        accAnillos->setStatusTip(tr("Anillos alrededor del objetivo seleccionado (lo siguen) "
+                                    "o de un punto que pinches."));
+        connect(accAnillos, &QAction::triggered, this, &Ventana::ponerAnillos);
+        auto *accEbl = mVer->addAction(tr("Marcación (rumbo y distancia)"));
+        accEbl->setStatusTip(tr("Línea con rumbo y distancia desde el objetivo seleccionado "
+                                "(o un punto) hasta otro objetivo o punto que pinches."));
+        connect(accEbl, &QAction::triggered, this, &Ventana::ponerMarcacion);
+        // Inicio (verde) y fin (rojo) de las líneas: siempre en las rutas GPX
+        // (p. ej. un historial importado), y en cualquier línea seleccionada.
+        QMenu *mExtremos = mVer->addMenu(tr("Inicio y fin de rutas"));
+        auto *gExtremos = new QActionGroup(this);
+        const QList<QPair<QString, RouteEndpoints>> extremos = {
+            { tr("Ocultos"), RouteEndpoints::Hidden },
+            { tr("Solo la línea seleccionada"), RouteEndpoints::Selected },
+            { tr("Rutas GPX y la seleccionada"), RouteEndpoints::Routes },
+            { tr("Todas las líneas"), RouteEndpoints::AllLines },
+        };
+        for (const auto &e : extremos) {
+            QAction *a = mExtremos->addAction(e.first);
+            a->setCheckable(true);
+            a->setChecked(e.second == m_mapa->routeEndpoints());
+            gExtremos->addAction(a);
+            const RouteEndpoints modo = e.second;
+            connect(a, &QAction::triggered, this, [this, modo] { m_mapa->setRouteEndpoints(modo); });
+        }
+        connect(mVer->addAction(tr("Quitar anillos y marcaciones")), &QAction::triggered,
+                this, [this] {
+                    m_mapa->clearRangeMarks();
+                    statusBar()->showMessage(tr("Anillos y marcaciones quitados"), 3000);
+                });
         mVer->addSeparator();
         mVer->addAction(m_accRejilla);
         mVer->addAction(m_accCobertura);
@@ -675,12 +810,34 @@ private:
 
         QMenu *mDatos = mb->addMenu(tr("&Datos"));
         mDatos->addAction(accGeo);
+        mDatos->addAction(accImportar);
+        mDatos->addAction(accExportar);
+        mDatos->addAction(accExportarVista);
         mDatos->addSeparator();
+        mDatos->addSection(tr("Consultar una zona"));
         mDatos->addAction(m_accSelArea);
         mDatos->addAction(m_accSelPoli);
         mDatos->addSeparator();
         mDatos->addAction(m_accSimular);
         mDatos->addAction(m_accVerObjetivos);
+        mDatos->addAction(m_accVigilarZona);
+        mDatos->addAction(m_accProximidad);
+        mDatos->addAction(accHistorialGpx);
+        auto *accReproducir = mDatos->addAction(tr("Reproducir historial (GPX)..."));
+        accReproducir->setStatusTip(tr("Vuelve a ver cómo se movieron los objetivos de un "
+                                       "historial exportado, con su hora."));
+        connect(accReproducir, &QAction::triggered, this, &Ventana::abrirReproduccion);
+        // Salir del modo reproducción: quita sus objetivos y rutas y cierra la
+        // barra. Esc solo mientras se reproduce (fuera de ese modo, Esc es de
+        // las herramientas del mapa: cancelar un dibujo, una medida...).
+        m_accSalirRep = mDatos->addAction(style()->standardIcon(QStyle::SP_DialogCloseButton),
+                                          tr("Salir de la reproducción"));
+        m_accSalirRep->setShortcut(QKeySequence(Qt::Key_Escape));
+        m_accSalirRep->setShortcutContext(Qt::WindowShortcut);
+        m_accSalirRep->setStatusTip(tr("Quita del mapa los objetivos y rutas de la "
+                                       "reproducción y cierra su barra."));
+        m_accSalirRep->setEnabled(false);
+        connect(m_accSalirRep, &QAction::triggered, this, &Ventana::salirReproduccion);
 
         QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
         connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
@@ -1407,9 +1564,10 @@ private:
 
         connect(m_mapa, &MapWidget::mouseMoved, this,
                 [this](const QGeoCoordinate &p) {
-                    m_coords->setText(QStringLiteral("  %1, %2  ")
-                        .arg(p.latitude(), 0, 'f', 5)
-                        .arg(p.longitude(), 0, 'f', 5));
+                    // En el formato elegido en Ver → Formato de coordenadas.
+                    const QString txt = formatCoordinate(p, m_formatoCoord);
+                    m_coords->setText(QStringLiteral("  %1  ").arg(
+                        txt.isEmpty() ? tr("(fuera de UTM)") : txt));
                     mostrarCota(p);
                 });
 
@@ -1435,23 +1593,21 @@ private:
                 });
 
         // Selección de zona: la librería deja el recuadro/contorno visible y
-        // emite la geometría; aquí se informa (fill_map la usaría para descargar).
+        // emite la geometría. Antes aquí se volvía a Navegar en el acto, y eso
+        // BORRABA la marca: parecía que la herramienta no hacía nada. Ahora la
+        // marca sigue a la vista mientras se muestra qué hay dentro y qué se
+        // puede hacer con la zona (fuera del evento de ratón, con un
+        // singleShot, para que el mapa se repinte con la marca antes).
         connect(m_mapa, &MapWidget::areaSelected, this,
                 [this](const QGeoCoordinate &nw, const QGeoCoordinate &se) {
-                    statusBar()->showMessage(
-                        tr("Área: NO %1,%2  →  SE %3,%4")
-                            .arg(nw.latitude(), 0, 'f', 4).arg(nw.longitude(), 0, 'f', 4)
-                            .arg(se.latitude(), 0, 'f', 4).arg(se.longitude(), 0, 'f', 4),
-                        10000);
-                    m_accNavegar->setChecked(true);
-                    m_mapa->setActiveTool(MapTool::None);
+                    const QVector<QGeoCoordinate> rect = {
+                        nw, QGeoCoordinate(nw.latitude(), se.longitude()),
+                        se, QGeoCoordinate(se.latitude(), nw.longitude()) };
+                    QTimer::singleShot(0, this, [this, rect] { zonaSeleccionada(rect, true); });
                 });
         connect(m_mapa, &MapWidget::polygonSelected, this,
                 [this](const QVector<QGeoCoordinate> &pol) {
-                    statusBar()->showMessage(
-                        tr("Polígono de zona: %1 vértices").arg(pol.size()), 10000);
-                    m_accNavegar->setChecked(true);
-                    m_mapa->setActiveTool(MapTool::None);
+                    QTimer::singleShot(0, this, [this, pol] { zonaSeleccionada(pol, false); });
                 });
 
         connect(m_grupo, &QActionGroup::triggered, this, [this](QAction *a) {
@@ -1472,6 +1628,11 @@ private:
         connect(m_mapa, &MapWidget::featureRemoved, this, &Ventana::pedirReconstruir);
         connect(m_mapa, &MapWidget::featureUpdated, this, &Ventana::pedirReconstruir);
         connect(m_mapa, &MapWidget::featureLayersChanged, this, &Ventana::pedirReconstruir);
+        // Toda «Área objetivo» queda vigilada sola (creada, cargada o restaurada).
+        connect(m_mapa, &MapWidget::featureLayersChanged, this, &Ventana::vigilarAreasObjetivo);
+        connect(m_mapa, &MapWidget::featureRemoved, this, [this](qint64) {
+            actualizarIndicadorAlertas();
+        });
 
         connect(m_mapa, &MapWidget::featureSelected, this, &Ventana::seleccionEnMapa);
 
@@ -1526,6 +1687,22 @@ private:
         statusBar()->addPermanentWidget(m_coords);
         statusBar()->addPermanentWidget(m_cota);
         statusBar()->addPermanentWidget(m_info);
+        m_alertas = new QLabel(this);
+        m_alertas->setToolTip(tr("Objetivos dentro de zonas vigiladas (las «Área objetivo» "
+                                 "se vigilan solas; cualquier polígono, con Datos → "
+                                 "Vigilar zona seleccionada)."));
+        statusBar()->addPermanentWidget(m_alertas);
+        // Indicador del MODO reproducción: se ve mientras dura, y un clic sale.
+        m_modoRep = new QPushButton(tr("▶ Reproducción · Esc para salir"), this);
+        m_modoRep->setFlat(true);
+        m_modoRep->setCursor(Qt::PointingHandCursor);
+        m_modoRep->setToolTip(tr("Estás viendo un historial grabado, no objetivos en vivo. "
+                                 "Pulsa aquí o Esc para salir."));
+        m_modoRep->setStyleSheet(QStringLiteral("QPushButton { color:#fff; background:#1565c0;"
+                                                " font-weight:bold; padding:0 8px; border:none; }"));
+        m_modoRep->hide();
+        connect(m_modoRep, &QPushButton::clicked, this, &Ventana::salirReproduccion);
+        statusBar()->addPermanentWidget(m_modoRep);
     }
 
     // Muestra la cota del terreno bajo el cursor (o "—" si no hay DEM/dato).
@@ -2158,6 +2335,11 @@ private:
     void onPointPicked(const QGeoCoordinate &p)
     {
         if (m_picking == Pick::Ninguno) return;
+        if (m_picking == Pick::Anillos || m_picking == Pick::OrigenEbl
+            || m_picking == Pick::DestinoEbl) {
+            puntoDeMedida(p);
+            return;
+        }
         QDoubleSpinBox *lat = (m_picking == Pick::A) ? m_latA : m_latB;
         QDoubleSpinBox *lon = (m_picking == Pick::A) ? m_lonA : m_lonB;
         lat->setValue(p.latitude());
@@ -3415,6 +3597,74 @@ private:
             .arg(QFileInfo(ruta).fileName(), id), 5000);
     }
 
+    // Pide una coordenada (decimal, GMS, UTM o MGRS), centra el mapa en ella y
+    // la muestra en todos los formatos, como comprobación cruzada.
+    void irACoordenada()
+    {
+        bool aceptado = false;
+        const QString txt = QInputDialog::getText(this, tr("Ir a coordenada"),
+            tr("Coordenada (p. ej. 23.1136, -82.3666 · 17Q LF 60056 56750 · "
+               "17Q 360057 2556751 · 23°06'49\"N 82°22'00\"W):"),
+            QLineEdit::Normal, QString(), &aceptado);
+        if (!aceptado || txt.trimmed().isEmpty())
+            return;
+        bool ok = false;
+        const QGeoCoordinate c = parseCoordinate(txt, &ok);
+        if (!ok) {
+            QMessageBox::warning(this, tr("Ir a coordenada"),
+                                 tr("No se reconoce «%1» como coordenada.").arg(txt));
+            return;
+        }
+        m_mapa->setCenter(c);
+        statusBar()->showMessage(tr("%1  ·  %2  ·  %3")
+            .arg(formatCoordinate(c, CoordinateFormat::DMS),
+                 formatCoordinate(c, CoordinateFormat::UTM),
+                 formatCoordinate(c, CoordinateFormat::MGRS)), 15000);
+    }
+
+    // Importa un GeoJSON/KML/GPX como capa nueva (id = nombre del fichero). Cada
+    // entidad del fichero entra con su nombre, atributos y estilo.
+    void importarVectorial()
+    {
+        const QString ruta = QFileDialog::getOpenFileName(this,
+            tr("Importar entidades"), dirTrabajo(),
+            tr("Vectorial (*.geojson *.json *.kml *.gpx);;Todos (*)"));
+        if (ruta.isEmpty())
+            return;
+        const QString id = QFileInfo(ruta).completeBaseName().toLower();
+        QString error;
+        const qint64 fid = m_mapa->importVectorFile(ruta, id,
+            QFileInfo(ruta).completeBaseName(), &error);
+        if (fid < 0) {
+            QMessageBox::warning(this, tr("Importar"), tr("No se pudo importar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        m_mapa->setActiveFeatureLayer(id);
+        marcarSucio();
+        statusBar()->showMessage(tr("Importadas %1 entidades en la capa '%2'")
+            .arg(m_mapa->featuresInLayer(id).size()).arg(id), 5000);
+    }
+
+    // Exporta la capa activa; el formato lo decide la extension elegida.
+    void exportarVectorial()
+    {
+        const QString capa = m_mapa->activeFeatureLayer();
+        const QString ruta = QFileDialog::getSaveFileName(this,
+            tr("Exportar capa '%1'").arg(capa), dirTrabajo() + QLatin1Char('/') + capa + QStringLiteral(".geojson"),
+            tr("GeoJSON (*.geojson);;KML (*.kml);;GPX (*.gpx)"));
+        if (ruta.isEmpty())
+            return;
+        QString error;
+        if (!m_mapa->exportVectorFile(ruta, capa, &error)) {
+            QMessageBox::warning(this, tr("Exportar"), tr("No se pudo exportar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        statusBar()->showMessage(tr("Capa '%1' exportada a %2")
+            .arg(capa, QFileInfo(ruta).fileName()), 5000);
+    }
+
     // Prepara el seguimiento de objetivos: dibuja el juego de iconos (una vez) y
     // registra la simbologia de la app. Demuestra el contrato de la libreria:
     // ella es agnostica del dominio; la app elige el icono por 'kind' y por
@@ -3426,16 +3676,26 @@ private:
         m_icoAereo   = iconoAereo(QColor(0x0c, 0x97, 0x8a));
         m_icoUav     = iconoUav(QColor(0x3c, 0xb0, 0x4a));
         m_icoUavBajo = iconoUav(QColor(0xd0, 0x3a, 0x2a));
+        // Variantes de ALERTA: objetivo dentro de una zona vigilada.
+        const QColor alerta(0xff, 0x17, 0x44);
+        m_icoBuqueZona = iconoBuque(alerta);
+        m_icoAereoZona = iconoAereo(alerta);
+        m_icoUavZona   = iconoUav(alerta);
 
         m_mapa->setTargetSymbolProvider([this](const MapTarget &t) {
             TargetSymbol s;                         // icono nulo => galon
+            // Dentro de una zona vigilada: icono rojo y algo mayor (la alerta
+            // se VE en el mapa, no solo en la barra de estado).
+            const bool enZona = !m_mapa->zonesOfTarget(t.id).isEmpty();
             if (t.kind == QLatin1String("buque"))
-                s.icon = m_icoBuque;
+                s.icon = enZona ? m_icoBuqueZona : m_icoBuque;
             else if (t.kind == QLatin1String("aeronave"))
-                s.icon = m_icoAereo;
+                s.icon = enZona ? m_icoAereoZona : m_icoAereo;
             else if (t.kind == QLatin1String("uav"))
-                s.icon = t.attributes.value(QStringLiteral("bateria")).toInt() < 20
+                s.icon = enZona ? m_icoUavZona
+                       : t.attributes.value(QStringLiteral("bateria")).toInt() < 20
                              ? m_icoUavBajo : m_icoUav;
+            s.scale = enZona ? 1.3 : 1.0;
             s.rotateWithHeading = true;
             return s;
         });
@@ -3446,6 +3706,33 @@ private:
         // Clic sobre un objetivo -> la libreria lo resalta y emite targetClicked;
         // aqui mostramos sus datos de dominio (sus attributes) en la barra de
         // estado. Es el cierre del ciclo ver -> seleccionar -> consultar.
+        // Alertas de zona: la librería avisa al cruzar el borde de una zona vigilada.
+        connect(m_mapa, &MapWidget::targetEnteredZone, this, [this](qint64 obj, qint64 zona) {
+            statusBar()->showMessage(textoAlertaZona(obj, false, zona, true), 6000);
+            actualizarIndicadorAlertas();
+        });
+        connect(m_mapa, &MapWidget::targetLeftZone, this, [this](qint64 obj, qint64 zona) {
+            statusBar()->showMessage(textoAlertaZona(obj, false, zona, false), 6000);
+            actualizarIndicadorAlertas();
+        });
+        // Alertas de proximidad: aviso en la barra y recuento en el indicador.
+        connect(m_mapa, &MapWidget::proximityAlertRaised, this,
+                [this](qint64 a, qint64 b, double cpa, double tcpa) {
+                    statusBar()->showMessage(textoProximidad(a, b, cpa, tcpa), 8000);
+                    actualizarIndicadorAlertas();
+                });
+        connect(m_mapa, &MapWidget::proximityAlertCleared, this,
+                [this](qint64, qint64) { actualizarIndicadorAlertas(); });
+        // Los «Objetivo» que coloca el operador son ENTIDADES punto: su propia señal.
+        connect(m_mapa, &MapWidget::featureEnteredZone, this, [this](qint64 ent, qint64 zona) {
+            statusBar()->showMessage(textoAlertaZona(ent, true, zona, true), 8000);
+            actualizarIndicadorAlertas();
+        });
+        connect(m_mapa, &MapWidget::featureLeftZone, this, [this](qint64 ent, qint64 zona) {
+            statusBar()->showMessage(textoAlertaZona(ent, true, zona, false), 8000);
+            actualizarIndicadorAlertas();
+        });
+
         connect(m_mapa, &MapWidget::targetClicked, this,
                 [this](qint64 id, const QGeoCoordinate &) {
                     const auto t = m_mapa->target(id);
@@ -3456,16 +3743,577 @@ private:
                          it != t->attributes.constEnd(); ++it)
                         datos << QStringLiteral("%1=%2")
                                      .arg(it.key(), it.value().toString());
+                    // Origen: donde y cuando se vio por primera vez (la
+                    // librería guarda el historial entero y, al estar
+                    // seleccionado, lo dibuja desde ese punto).
+                    const TargetTrackPoint o = m_mapa->targetOrigin(id);
+                    const QString origen = o.isValid()
+                        ? tr("   origen %1 a las %2 (%3 puntos)")
+                              .arg(formatCoordinate(o.position, m_formatoCoord),
+                                   o.time.toLocalTime().toString(QStringLiteral("HH:mm:ss")))
+                              .arg(m_mapa->targetHistory(id).size())
+                        : QString();
                     statusBar()->showMessage(
-                        tr("Objetivo %1 [%2]  %3")
-                            .arg(id).arg(t->kind, datos.join(QStringLiteral("   "))),
-                        8000);
+                        tr("Objetivo %1 [%2]  %3%4")
+                            .arg(id).arg(t->kind, datos.join(QStringLiteral("   ")), origen),
+                        12000);
                 });
+    }
+
+    // Respuesta a «Seleccionar área» / «Seleccionar polígono»: informa de la
+    // zona marcada (tamaño, extensión y qué objetivos y entidades hay dentro)
+    // y ofrece lo que se puede hacer con ella. Al cerrar, quita la marca y
+    // vuelve a Navegar.
+    void zonaSeleccionada(const QVector<QGeoCoordinate> &zona, bool rectangulo)
+    {
+        double s = 90, n = -90, w = 180, e = -180;
+        for (const QGeoCoordinate &c : zona) {
+            s = qMin(s, c.latitude());  n = qMax(n, c.latitude());
+            w = qMin(w, c.longitude()); e = qMax(e, c.longitude());
+        }
+        const QGeoCoordinate nw(n, w), se(s, e);
+        const double m2 = polygonArea(zona);
+        const QString superficie = m2 >= 1e6
+            ? tr("%1 km²").arg(m2 / 1e6, 0, 'f', m2 >= 1e8 ? 0 : 2)
+            : tr("%1 ha").arg(m2 / 1e4, 0, 'f', 2);
+        const double per = pathLength(zona, true);
+        const QString perimetro = per >= 1000 ? tr("%1 km").arg(per / 1000, 0, 'f', 2)
+                                              : tr("%1 m").arg(per, 0, 'f', 0);
+
+        // Qué hay dentro: nombres de los primeros objetivos y entidades.
+        const QVector<qint64> objs = m_mapa->targetsInArea(zona);
+        const QVector<qint64> ents = m_mapa->featuresInArea(zona);
+        const auto lista = [](const QStringList &l) {
+            return l.size() <= 5 ? l.join(QStringLiteral(", "))
+                                 : QStringList(l.mid(0, 5)).join(QStringLiteral(", "))
+                                       + QStringLiteral(", …");
+        };
+        QStringList nomObjs, nomEnts;
+        for (qint64 id : objs) {
+            const auto t = m_mapa->target(id);
+            nomObjs << (t && !t->label.isEmpty() ? t->label.section(QLatin1Char('\n'), 0, 0)
+                                                 : tr("objetivo %1").arg(id));
+        }
+        for (qint64 id : ents) {
+            const auto f = m_mapa->feature(id);
+            nomEnts << (f && !f->name.isEmpty() ? f->name.section(QLatin1Char('\n'), 0, 0)
+                                                : tr("entidad %1").arg(id));
+        }
+
+        QString txt = tr("<b>%1</b><br>Superficie: %2 · perímetro: %3<br>"
+                         "NO: %4<br>SE: %5<br><br>")
+            .arg(rectangulo ? tr("Área rectangular")
+                            : tr("Polígono de %1 vértices").arg(zona.size()),
+                 superficie, perimetro,
+                 formatCoordinate(nw, m_formatoCoord).toHtmlEscaped(),
+                 formatCoordinate(se, m_formatoCoord).toHtmlEscaped());
+        txt += tr("Objetivos dentro: <b>%1</b>").arg(objs.size());
+        if (!nomObjs.isEmpty())
+            txt += QStringLiteral(" (") + lista(nomObjs).toHtmlEscaped() + QStringLiteral(")");
+        txt += tr("<br>Entidades dentro: <b>%1</b>").arg(ents.size());
+        if (!nomEnts.isEmpty())
+            txt += QStringLiteral(" (") + lista(nomEnts).toHtmlEscaped() + QStringLiteral(")");
+
+        QMessageBox box(QMessageBox::Information, tr("Zona seleccionada"), txt,
+                        QMessageBox::NoButton, this);
+        box.setTextFormat(Qt::RichText);
+        box.setInformativeText(
+            tr("La zona marcada es temporal: no se guarda. Para conservarla, "
+               "conviértela en un área de la capa activa."));
+        QPushButton *bCrear = box.addButton(tr("Crear área"), QMessageBox::ActionRole);
+        QPushButton *bVigilar = box.addButton(tr("Crear y vigilar"), QMessageBox::ActionRole);
+        QPushButton *bExportar = box.addButton(tr("Exportar zona..."), QMessageBox::ActionRole);
+        box.addButton(tr("Cerrar"), QMessageBox::RejectRole);
+        bCrear->setToolTip(tr("Crea un polígono con esta forma en la capa activa."));
+        bVigilar->setToolTip(tr("Crea el polígono y avisa cuando un objetivo entre o salga."));
+        bExportar->setToolTip(tr("Encuadra la zona y la guarda como imagen o PDF."));
+        box.exec();
+
+        m_mapa->clearAreaSelection();
+        volverANavegar();
+
+        const QAbstractButton *pulsado = box.clickedButton();
+        if (pulsado == bExportar) {
+            m_mapa->fitBounds(nw, se);
+            exportarVista(rectangulo ? tr("Área seleccionada") : tr("Zona seleccionada"));
+            return;
+        }
+        if (pulsado != bCrear && pulsado != bVigilar)
+            return;
+
+        MapFeature f;
+        f.kind = GeometryKind::Polygon;
+        f.type = QStringLiteral("zona");
+        f.name = tr("Zona %1").arg(++m_zonasCreadas);
+        f.layerId = m_mapa->activeFeatureLayer();
+        f.geometry = zona;
+        f.style.lineColor = QColor(0xff, 0x6d, 0x00);
+        f.style.lineWidth = 2.0;
+        f.style.fillColor = QColor(0xff, 0x6d, 0x00, 40);
+        const qint64 id = m_mapa->addFeature(f);
+        if (id < 0) {
+            statusBar()->showMessage(tr("No se pudo crear la zona"), 4000);
+            return;
+        }
+        m_mapa->selectFeature(id);
+        if (pulsado == bVigilar) {
+            alternarVigilancia();                 // vigila la recién seleccionada
+        } else {
+            statusBar()->showMessage(tr("«%1» creada en la capa '%2'")
+                                         .arg(f.name, f.layerId), 5000);
+        }
+    }
+
+    // Exporta la vista actual a imagen o PDF. Pide el fichero y un título
+    // opcional; el pie lleva extensión, fecha, escala (PDF) y la atribución
+    // de la base, como exige el proveedor de la imagen.
+    void exportarVista(const QString &tituloSugerido = QString())
+    {
+        QString filtro;
+        const QString ruta = QFileDialog::getSaveFileName(this, tr("Exportar vista"),
+            dirTrabajo() + QStringLiteral("/mapa.pdf"),
+            tr("PDF (*.pdf);;Imagen PNG (*.png);;Imagen JPEG (*.jpg)"), &filtro);
+        if (ruta.isEmpty())
+            return;
+        bool ok = false;
+        const QString titulo = QInputDialog::getText(this, tr("Exportar vista"),
+            tr("Título (opcional):"), QLineEdit::Normal, tituloSugerido, &ok);
+        if (!ok)
+            return;
+        MapExportOptions o;
+        o.title = titulo;
+        o.attribution = tr("Base: %1").arg(m_capasBase ? m_capasBase->currentText() : QString());
+        o.imageScale = 2.0;                       // imagen nítida para informes
+        QString error;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        const bool bien = m_mapa->exportView(ruta, o, &error);
+        QApplication::restoreOverrideCursor();
+        if (!bien) {
+            QMessageBox::warning(this, tr("Exportar vista"), tr("No se pudo exportar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        statusBar()->showMessage(tr("Vista exportada a %1").arg(QFileInfo(ruta).fileName()), 5000);
+    }
+
+    // Abre un historial GPX y lo reproduce con la barra de reproducción. La
+    // simulación se para: mezclar objetivos simulados y reproducidos confunde.
+    void abrirReproduccion()
+    {
+        const QString ruta = QFileDialog::getOpenFileName(this, tr("Reproducir historial"),
+            dirTrabajo(), tr("GPX (*.gpx)"));
+        if (ruta.isEmpty())
+            return;
+        if (m_accSimular && m_accSimular->isChecked())
+            m_accSimular->setChecked(false);
+        if (!m_player) {
+            m_player = new TrackPlayer(m_mapa, this);
+            crearBarraReproduccion();
+        }
+        QString error;
+        if (!m_player->loadFile(ruta, &error)) {
+            QMessageBox::warning(this, tr("Reproducir historial"),
+                                 tr("No se pudo cargar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        m_player->setRoutesVisible(m_repRutas->isChecked());
+        m_barraRep->show();
+        m_accSalirRep->setEnabled(true);
+        m_modoRep->show();
+        statusBar()->showMessage(tr("%1 pistas de %2 a %3. Pulsa ▶ para reproducir; "
+                                    "Esc o «Salir de la reproducción» para terminar.")
+            .arg(m_player->tracks().size())
+            .arg(m_player->startTime().toLocalTime().toString(QStringLiteral("dd/MM HH:mm:ss")),
+                 m_player->endTime().toLocalTime().toString(QStringLiteral("dd/MM HH:mm:ss"))),
+            8000);
+    }
+
+    // Barra de reproducción (abajo): reproducir/pausa, parar, deslizador de
+    // tiempo (mil pasos sobre el rango del fichero), hora actual, velocidad,
+    // rutas completas y cerrar. El deslizador manda al reproductor y el
+    // reproductor al deslizador (con las señales bloqueadas, para no rebotar).
+    void crearBarraReproduccion()
+    {
+        m_barraRep = new QToolBar(tr("Reproducción"), this);
+        m_barraRep->setObjectName(QStringLiteral("barraReproduccion"));
+        m_barraRep->setMovable(false);
+        // Que no se pueda ocultar desde el menú contextual de las barras: se
+        // quedaría la reproducción activa sin controles. Se sale con su botón.
+        m_barraRep->toggleViewAction()->setEnabled(false);
+        addToolBar(Qt::BottomToolBarArea, m_barraRep);
+
+        auto *play = m_barraRep->addAction(style()->standardIcon(QStyle::SP_MediaPlay), tr("Reproducir"));
+        play->setCheckable(true);
+        connect(play, &QAction::triggered, this,
+                [this](bool on) { on ? m_player->play() : m_player->pause(); });
+        connect(m_player, &TrackPlayer::playingChanged, this, [this, play](bool on) {
+            QSignalBlocker b(play);
+            play->setChecked(on);
+            play->setIcon(style()->standardIcon(on ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+        });
+        auto *parar = m_barraRep->addAction(style()->standardIcon(QStyle::SP_MediaStop), tr("Al principio"));
+        connect(parar, &QAction::triggered, m_player, &TrackPlayer::stop);
+
+        m_repSlider = new QSlider(Qt::Horizontal, m_barraRep);
+        m_repSlider->setRange(0, 1000);
+        m_repSlider->setMinimumWidth(300);
+        m_barraRep->addWidget(m_repSlider);
+        connect(m_repSlider, &QSlider::valueChanged, this, [this](int v) {
+            const qint64 total = m_player->startTime().msecsTo(m_player->endTime());
+            m_player->seek(m_player->startTime().addMSecs(total * v / 1000));
+        });
+
+        m_repHora = new QLabel(m_barraRep);
+        m_repHora->setMinimumWidth(170);
+        m_repHora->setAlignment(Qt::AlignCenter);
+        m_barraRep->addWidget(m_repHora);
+        connect(m_player, &TrackPlayer::timeChanged, this, [this](const QDateTime &t) {
+            m_repHora->setText(t.toLocalTime().toString(QStringLiteral("dd/MM/yyyy HH:mm:ss")));
+            const qint64 total = m_player->startTime().msecsTo(m_player->endTime());
+            QSignalBlocker b(m_repSlider);
+            m_repSlider->setValue(total > 0 ? int(m_player->startTime().msecsTo(t) * 1000 / total) : 0);
+        });
+
+        auto *vel = new QComboBox(m_barraRep);
+        for (int f : { 1, 10, 60, 300, 1800 })
+            vel->addItem(QStringLiteral("×%1").arg(f), f);
+        vel->setCurrentIndex(2);                       // ×60: un minuto por segundo
+        vel->setToolTip(tr("Velocidad respecto al tiempo real"));
+        m_barraRep->addWidget(vel);
+        connect(vel, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this, vel](int) { m_player->setSpeed(vel->currentData().toDouble()); });
+
+        m_repRutas = new QCheckBox(tr("Rutas"), m_barraRep);
+        m_repRutas->setChecked(true);
+        m_repRutas->setToolTip(tr("Recorrido completo de cada pista, con su inicio y su fin"));
+        m_barraRep->addWidget(m_repRutas);
+        connect(m_repRutas, &QCheckBox::toggled, m_player, &TrackPlayer::setRoutesVisible);
+
+        m_barraRep->addSeparator();
+        auto *salir = new QToolButton(m_barraRep);
+        salir->setDefaultAction(m_accSalirRep);
+        salir->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        m_barraRep->addWidget(salir);
+    }
+
+    // Sale del modo reproducción: el reproductor quita sus objetivos y sus
+    // rutas (el mapa queda como antes de abrir el historial), se cierra la
+    // barra y se apaga el indicador. Sin reproducción activa no hace nada.
+    void salirReproduccion()
+    {
+        if (!m_player || !m_player->isLoaded())
+            return;
+        m_player->clear();
+        m_barraRep->hide();
+        m_modoRep->hide();
+        m_accSalirRep->setEnabled(false);
+        statusBar()->showMessage(tr("Reproducción cerrada"), 4000);
+    }
+
+    // Exporta el historial completo de todos los objetivos a GPX con horas.
+    void exportarHistorialGpx()
+    {
+        if (m_mapa->targets().isEmpty()) {
+            statusBar()->showMessage(tr("No hay objetivos (Datos → Simular objetivos)"), 4000);
+            return;
+        }
+        const QString ruta = QFileDialog::getSaveFileName(this, tr("Exportar historial de objetivos"),
+            dirTrabajo() + QStringLiteral("/historial_objetivos.gpx"), tr("GPX (*.gpx)"));
+        if (ruta.isEmpty())
+            return;
+        QString error;
+        if (!m_mapa->exportTargetHistory(ruta, {}, &error)) {
+            QMessageBox::warning(this, tr("Exportar historial"), tr("No se pudo exportar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        statusBar()->showMessage(tr("Historial de %1 objetivos exportado a %2")
+            .arg(m_mapa->targets().size()).arg(QFileInfo(ruta).fileName()), 5000);
+    }
+
+    // Activa o apaga las alertas de proximidad. Al activarlas pide distancia (en
+    // millas náuticas) y horizonte (minutos); se recuerdan para la próxima vez.
+    void configurarProximidad(bool activar)
+    {
+        if (!activar) {
+            m_mapa->setProximityAlert(0.0);
+            actualizarIndicadorAlertas();
+            statusBar()->showMessage(tr("Alertas de proximidad apagadas"), 4000);
+            return;
+        }
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Alertas de proximidad (CPA/TCPA)"));
+        auto *form = new QFormLayout(&dlg);
+        auto *distancia = new QDoubleSpinBox(&dlg);
+        distancia->setRange(0.05, 50.0);
+        distancia->setDecimals(2);
+        distancia->setSingleStep(0.25);
+        distancia->setSuffix(tr(" NM"));
+        distancia->setValue(m_cpaMillas);
+        auto *horizonte = new QSpinBox(&dlg);
+        horizonte->setRange(1, 240);
+        horizonte->setSuffix(tr(" min"));
+        horizonte->setValue(m_cpaMinutos);
+        auto *explica = new QLabel(tr("Avisar si dos objetivos van a pasar a menos de una "
+                                      "distancia dentro de un tiempo, suponiendo que "
+                                      "mantienen rumbo y velocidad."), &dlg);
+        explica->setWordWrap(true);
+        form->addRow(explica);
+        form->addRow(tr("Distancia (CPA):"), distancia);
+        form->addRow(tr("Horizonte (TCPA):"), horizonte);
+        auto *botones = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        connect(botones, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(botones, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        form->addRow(botones);
+        if (dlg.exec() != QDialog::Accepted) {
+            m_accProximidad->setChecked(m_mapa->proximityAlertDistance() > 0);
+            return;
+        }
+        m_cpaMillas = distancia->value();
+        m_cpaMinutos = horizonte->value();
+        m_mapa->setProximityAlert(m_cpaMillas * 1852.0, m_cpaMinutos * 60.0);
+        actualizarIndicadorAlertas();
+        statusBar()->showMessage(
+            tr("Alertas de proximidad: menos de %1 NM en %2 min — %3 pares en alerta")
+                .arg(m_cpaMillas, 0, 'f', 2).arg(m_cpaMinutos)
+                .arg(m_mapa->proximityAlerts().size()), 6000);
+    }
+
+    // Texto de una alerta de proximidad: los dos objetivos (primera línea de su
+    // etiqueta), a qué distancia pasarán y en cuánto tiempo.
+    QString textoProximidad(qint64 a, qint64 b, double cpa, double tcpa) const
+    {
+        const auto nombre = [this](qint64 id) {
+            const auto t = m_mapa->target(id);
+            return t && !t->label.isEmpty() ? t->label.section(QLatin1Char('\n'), 0, 0)
+                                            : tr("Objetivo %1").arg(id);
+        };
+        if (tcpa < 0)
+            return tr("⚠ Proximidad: %1 y %2 ya están a menos de %3 NM")
+                .arg(nombre(a), nombre(b)).arg(m_cpaMillas, 0, 'f', 2);
+        return tr("⚠ CPA: %1 y %2 pasarán a %3 NM dentro de %4 min")
+            .arg(nombre(a), nombre(b)).arg(cpa / 1852.0, 0, 'f', 2)
+            .arg(qRound(tcpa / 60.0));
+    }
+
+    // Pide separación, número de anillos y radiales, y los pone alrededor del
+    // objetivo seleccionado (lo siguen al moverse) o, si no hay, del punto que
+    // se pinche a continuación.
+    void ponerAnillos()
+    {
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Anillos de distancia"));
+        auto *form = new QFormLayout(&dlg);
+        auto *sep = new QDoubleSpinBox(&dlg);
+        sep->setRange(0.05, 100.0);
+        sep->setDecimals(2);
+        sep->setSuffix(tr(" NM"));
+        sep->setValue(m_anillos.spacingMeters / 1852.0);
+        auto *num = new QSpinBox(&dlg);
+        num->setRange(1, 20);
+        num->setValue(m_anillos.count);
+        auto *radiales = new QCheckBox(tr("Radiales cada 30°"), &dlg);
+        radiales->setChecked(m_anillos.spokeEveryDeg > 0);
+        const qint64 sel = m_mapa->selectedTarget();
+        auto *donde = new QLabel(sel >= 0 ? tr("Centro: el objetivo seleccionado (lo siguen).")
+                                          : tr("Centro: pincha en el mapa tras aceptar."), &dlg);
+        donde->setWordWrap(true);
+        form->addRow(donde);
+        form->addRow(tr("Separación:"), sep);
+        form->addRow(tr("Anillos:"), num);
+        form->addRow(radiales);
+        auto *botones = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        connect(botones, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(botones, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        form->addRow(botones);
+        if (dlg.exec() != QDialog::Accepted)
+            return;
+        m_anillos.spacingMeters = sep->value() * 1852.0;
+        m_anillos.count = num->value();
+        m_anillos.spokeEveryDeg = radiales->isChecked() ? 30 : 0;
+        if (sel >= 0) {
+            RangeRings r = m_anillos;
+            r.targetId = sel;
+            m_mapa->addRangeRings(r);
+            statusBar()->showMessage(tr("Anillos alrededor del objetivo %1").arg(sel), 4000);
+            return;
+        }
+        iniciarPickMedida(Pick::Anillos, tr("Pincha el centro de los anillos…"));
+    }
+
+    // Marcación: desde el objetivo seleccionado (o un punto que se pinche) hasta
+    // otro objetivo o punto que se pinche. Si el destino cae sobre un objetivo,
+    // la línea cuelga de él y se actualiza al moverse.
+    void ponerMarcacion()
+    {
+        m_ebl = BearingLine();
+        const qint64 sel = m_mapa->selectedTarget();
+        if (sel >= 0) {
+            m_ebl.fromTarget = sel;
+            iniciarPickMedida(Pick::DestinoEbl,
+                tr("Pincha el destino de la marcación (un objetivo o un punto)…"));
+        } else {
+            iniciarPickMedida(Pick::OrigenEbl,
+                tr("Pincha el origen de la marcación (un objetivo o un punto)…"));
+        }
+    }
+
+    // Arma la herramienta de elegir punto para una medida, con su aviso.
+    void iniciarPickMedida(Pick cual, const QString &aviso)
+    {
+        m_picking = cual;
+        m_mapa->setActiveTool(MapTool::PickPoint);
+        statusBar()->showMessage(aviso, 10000);
+    }
+
+    // Objetivo a menos de ~14 px del punto (con la resolución actual), o -1.
+    qint64 objetivoCerca(const QGeoCoordinate &p) const
+    {
+        const double tolerancia = 14.0 * std::max(1.0, m_mapa->metersPerPixel());
+        qint64 mejor = -1;
+        double dMejor = tolerancia;
+        for (const MapTarget &t : m_mapa->targets()) {
+            const double d = t.position.distanceTo(p);
+            if (d <= dMejor) {
+                dMejor = d;
+                mejor = t.id;
+            }
+        }
+        return mejor;
+    }
+
+    // Punto pinchado para anillos o marcación.
+    void puntoDeMedida(const QGeoCoordinate &p)
+    {
+        const Pick cual = m_picking;
+        m_picking = Pick::Ninguno;
+        m_mapa->setActiveTool(MapTool::None);
+        if (m_accNavegar)
+            m_accNavegar->setChecked(true);
+        const qint64 obj = objetivoCerca(p);
+        if (cual == Pick::Anillos) {
+            RangeRings r = m_anillos;
+            r.targetId = obj;
+            r.center = p;
+            m_mapa->addRangeRings(r);
+            statusBar()->showMessage(obj >= 0 ? tr("Anillos alrededor del objetivo %1").arg(obj)
+                                              : tr("Anillos puestos"), 4000);
+        } else if (cual == Pick::OrigenEbl) {
+            m_ebl.fromTarget = obj;
+            m_ebl.from = p;
+            iniciarPickMedida(Pick::DestinoEbl,
+                tr("Pincha el destino de la marcación (un objetivo o un punto)…"));
+        } else {
+            m_ebl.toTarget = obj;
+            m_ebl.to = p;
+            const qint64 id = m_mapa->addBearingLine(m_ebl);
+            double rumbo = 0.0, dist = 0.0;
+            if (m_mapa->bearingLineMeasure(id, &rumbo, &dist))
+                statusBar()->showMessage(tr("Marcación %1° · %2 NM")
+                    .arg(qRound(rumbo), 3, 10, QLatin1Char('0'))
+                    .arg(dist / 1852.0, 0, 'f', 2), 6000);
+        }
+    }
+
+    // Vigila (o deja de vigilar) el polígono seleccionado como zona de alerta.
+    // Al empezar, la librería ya avisa de los objetivos que estén dentro.
+    void alternarVigilancia()
+    {
+        const qint64 id = m_mapa->selectedFeature();
+        const auto f = id >= 0 ? m_mapa->feature(id) : std::nullopt;
+        if (!f || f->kind != GeometryKind::Polygon) {
+            statusBar()->showMessage(tr("Selecciona primero un polígono para vigilarlo"), 4000);
+            return;
+        }
+        const QString nombre = f->name.isEmpty() ? tr("zona %1").arg(id) : f->name;
+        if (m_mapa->isZoneWatched(id)) {
+            m_mapa->unwatchZone(id);
+            m_noVigilar.insert(id);           // no volver a vigilarla sola
+            actualizarIndicadorAlertas();
+            statusBar()->showMessage(tr("Se deja de vigilar «%1»").arg(nombre), 4000);
+            return;
+        }
+        m_noVigilar.remove(id);
+        m_mapa->watchZone(id);
+        actualizarIndicadorAlertas();
+        statusBar()->showMessage(
+            tr("Vigilando «%1»: %2 objetivos dentro")
+                .arg(nombre).arg(m_mapa->targetsInZone(id).size()), 5000);
+    }
+
+    // Texto de una alerta de zona para la barra de estado: qué objetivo (primera
+    // línea de su etiqueta), qué zona y cuántos quedan dentro.
+    // \a esEntidad: el que cruza es una entidad punto (un «Objetivo» colocado)
+    // y no un objetivo móvil. El recuento suma ambos.
+    QString textoAlertaZona(qint64 quienId, bool esEntidad, qint64 zona, bool entra) const
+    {
+        QString quien;
+        if (esEntidad) {
+            const auto e = m_mapa->feature(quienId);
+            quien = e && !e->name.isEmpty() ? e->name.section(QLatin1Char('\n'), 0, 0)
+                                            : tr("Entidad %1").arg(quienId);
+        } else {
+            const auto t = m_mapa->target(quienId);
+            quien = t && !t->label.isEmpty() ? t->label.section(QLatin1Char('\n'), 0, 0)
+                                             : tr("Objetivo %1").arg(quienId);
+        }
+        const auto f = m_mapa->feature(zona);
+        const QString donde = f && !f->name.isEmpty()
+            ? f->name.section(QLatin1Char('\n'), 0, 0) : tr("zona %1").arg(zona);
+        const int dentro = int(m_mapa->targetsInZone(zona).size()
+                               + m_mapa->featuresInZone(zona).size());
+        return (entra ? tr("⚠ %1 ENTRA en «%2» (%3 dentro)")
+                      : tr("%1 sale de «%2» (%3 dentro)"))
+            .arg(quien, donde).arg(dentro);
+    }
+
+    // Indicador fijo de la barra de estado: cuántos objetivos (móviles o
+    // colocados) hay ahora dentro de alguna zona vigilada. Rojo si hay alguno.
+    void actualizarIndicadorAlertas()
+    {
+        if (!m_alertas)
+            return;
+        QSet<qint64> moviles, puntos;
+        for (qint64 z : m_mapa->watchedZones()) {
+            for (qint64 t : m_mapa->targetsInZone(z))
+                moviles.insert(t);
+            for (qint64 p : m_mapa->featuresInZone(z))
+                puntos.insert(p);
+        }
+        const int n = int(moviles.size() + puntos.size());
+        const int zonas = int(m_mapa->watchedZones().size());
+        const int cpa = int(m_mapa->proximityAlerts().size());
+        QStringList partes;
+        if (zonas > 0)
+            partes << (n == 0 ? tr("Zonas vigiladas: %1").arg(zonas) : tr("⚠ %1 en zonas").arg(n));
+        if (m_mapa->proximityAlertDistance() > 0)
+            partes << (cpa == 0 ? tr("CPA vigilado") : tr("⚠ %1 CPA").arg(cpa));
+        m_alertas->setText(partes.join(QStringLiteral(" · ")));
+        m_alertas->setStyleSheet(n + cpa > 0 ? QStringLiteral("QLabel { color:#fff; background:#d50032;"
+                                                              " font-weight:bold; padding:0 6px; }")
+                                             : QString());
+    }
+
+    // Vigila automáticamente toda «Área objetivo» (al crearla, cargarla o
+    // deshacer), salvo las que el usuario desactivó a mano.
+    void vigilarAreasObjetivo()
+    {
+        bool alguna = false;
+        for (const MapFeature &f : m_mapa->featuresOfType(QStringLiteral("objetivo_area"))) {
+            if (f.kind != GeometryKind::Polygon || m_noVigilar.contains(f.id)
+                || m_mapa->isZoneWatched(f.id))
+                continue;
+            alguna = m_mapa->watchZone(f.id) || alguna;
+        }
+        if (alguna)
+            actualizarIndicadorAlertas();
     }
 
     void alternarSimulacion(bool on)
     {
         if (on) {
+            salirReproduccion();          // en vivo y reproducción no se mezclan
             iniciarSimulacion(m_numObjetivos->value());
             m_simReloj->start();
         } else {
@@ -3483,6 +4331,7 @@ private:
         m_mapa->clearTargets();
         m_simIds.clear();
         m_simVel.clear();
+        m_simHora = QDateTime::currentDateTimeUtc();
         m_simIds.reserve(n);
         m_simVel.reserve(n);
 
@@ -3533,7 +4382,7 @@ private:
                                    : QColor(0x3c, 0xb0, 0x4a);
             }
 
-            const qint64 id = m_mapa->addTarget(t);
+            const qint64 id = m_mapa->addTarget(t, m_simHora);
             m_simIds.append(id);
 
             const double rad = qDegreesToRadians(rumbo);
@@ -3544,9 +4393,15 @@ private:
         statusBar()->showMessage(tr("Simulando %1 objetivos").arg(n), 3000);
     }
 
+    // Un paso de la simulación. Es un «time-lapse»: cada paso (100 ms reales)
+    // son kSegundosPorPaso de tiempo simulado, y esa hora se pasa a la
+    // librería. Así la velocidad que estima por la traza (para el CPA/TCPA) es
+    // la que se ve: 0.002–0.006° por paso son 7–22 m/s, y no kilómetros por
+    // segundo de reloj de pared.
     void pasoSimulacion()
     {
         auto *r = QRandomGenerator::global();
+        m_simHora = m_simHora.addSecs(kSegundosPorPaso);
         for (int i = 0; i < m_simIds.size(); ++i) {
             QPointF &v = m_simVel[i];
             const auto t = m_mapa->target(m_simIds[i]);
@@ -3571,7 +4426,7 @@ private:
             }
 
             const double rumbo = qRadiansToDegrees(std::atan2(v.x(), v.y()));
-            m_mapa->updateTarget(m_simIds[i], QGeoCoordinate(lat, lon), rumbo);
+            m_mapa->updateTarget(m_simIds[i], QGeoCoordinate(lat, lon), rumbo, m_simHora);
         }
         actualizarEstado();
     }
@@ -3619,6 +4474,10 @@ private:
     QAction *m_accAbrir = nullptr;
     QAction *m_accRejilla = nullptr;
     QAction *m_accCobertura = nullptr;
+    QAction *m_accEscala = nullptr;        //!< escala gráfica
+    QAction *m_accEscalaNm = nullptr;      //!< escala en millas náuticas
+    QAction *m_accCuadricula = nullptr;    //!< cuadrícula de coordenadas
+    CoordinateFormat m_formatoCoord = CoordinateFormat::Decimal;   //!< coordenada bajo el cursor
     QMenu *m_menuVer = nullptr;
     QAction *m_accTemaClaro = nullptr;
     QAction *m_accTemaOscuro = nullptr;
@@ -3709,13 +4568,32 @@ private:
     QComboBox *m_traza = nullptr;
     QAction *m_accSimular = nullptr;
     QAction *m_accVerObjetivos = nullptr;   //!< mostrar/ocultar objetivos
+    QAction *m_accVigilarZona = nullptr;    //!< alertas de zona del polígono seleccionado
     QAction *m_accSelArea = nullptr;        //!< seleccionar área (bbox)
     QAction *m_accSelPoli = nullptr;        //!< seleccionar polígono (zona)
+    int m_zonasCreadas = 0;                 //!< para nombrar «Zona N» desde una selección
+    QAction *m_accProximidad = nullptr;     //!< alertas CPA/TCPA entre objetivos
+    double m_cpaMillas = 1.0;               //!< distancia de la alerta CPA (NM)
+    int m_cpaMinutos = 10;                  //!< horizonte de la alerta CPA (min)
+    RangeRings m_anillos;                   //!< últimos ajustes de anillos (1 NM x 5)
+    BearingLine m_ebl;                      //!< marcación en curso (origen ya fijado)
+    TrackPlayer *m_player = nullptr;        //!< reproducción de historiales (al abrir uno)
+    QToolBar *m_barraRep = nullptr;         //!< barra de reproducción (abajo)
+    QSlider *m_repSlider = nullptr;         //!< posición en el tiempo
+    QLabel *m_repHora = nullptr;            //!< hora de la reproducción
+    QCheckBox *m_repRutas = nullptr;        //!< mostrar rutas completas
+    QAction *m_accSalirRep = nullptr;       //!< salir del modo reproducción (Esc)
+    QPushButton *m_modoRep = nullptr;       //!< indicador "▶ Reproducción" (clic = salir)
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.
+    QDateTime m_simHora;            //!< Reloj simulado (avanza kSegundosPorPaso por paso).
+    static constexpr int kSegundosPorPaso = 30;
     // Juego de iconos de la app para la simbologia de objetivos (Fase 2).
     QPixmap m_icoBuque, m_icoAereo, m_icoUav, m_icoUavBajo;
+    QPixmap m_icoBuqueZona, m_icoAereoZona, m_icoUavZona;   //!< dentro de zona vigilada
+    QLabel *m_alertas = nullptr;            //!< indicador fijo «⚠ N en zonas»
+    QSet<qint64> m_noVigilar;               //!< áreas objetivo que el usuario desactivó
 };
 
 int main(int argc, char *argv[])

@@ -35,9 +35,31 @@ OverlayModel::Snapshot OverlayModel::snapshot() const
 // una sola tanda de senales para repintar una vez.
 void OverlayModel::restore(const Snapshot &s)
 {
-    m_features = s.features;
-    m_layers = s.layers;
-    m_nextId = s.nextId;
+    // Las capas fuera de deshacer se quedan como estan AHORA: se quitan las de
+    // la instantanea y se vuelven a poner las actuales (capa y entidades).
+    QHash<qint64, MapFeature> features = s.features;
+    QHash<QString, LayerInfo> layers = s.layers;
+    if (!m_sinDeshacer.isEmpty()) {
+        for (auto it = features.begin(); it != features.end();) {
+            if (m_sinDeshacer.contains(it->layerId))
+                it = features.erase(it);
+            else
+                ++it;
+        }
+        for (const QString &id : m_sinDeshacer) {
+            layers.remove(id);
+            if (m_layers.contains(id))
+                layers.insert(id, m_layers.value(id));
+        }
+        for (auto it = m_features.cbegin(); it != m_features.cend(); ++it)
+            if (m_sinDeshacer.contains(it->layerId))
+                features.insert(it.key(), it.value());
+    }
+    m_features = features;
+    m_layers = layers;
+    // Nunca hacia atras: una entidad temporal conservada podria tener un id
+    // mayor que el de la instantanea, y no debe repetirse.
+    m_nextId = std::max(s.nextId, m_nextId);
 
     // La seleccion puede apuntar a algo que ya no existe.
     if (m_selected >= 0 && !m_features.contains(m_selected)) {
@@ -110,6 +132,15 @@ bool OverlayModel::redo()
     const Snapshot s = m_redo.takeLast();
     restore(s);
     return true;
+}
+
+// Saca o vuelve a meter una capa en deshacer/rehacer (ver cabecera).
+void OverlayModel::setLayerUndoable(const QString &layerId, bool undoable)
+{
+    if (undoable)
+        m_sinDeshacer.remove(layerId);
+    else
+        m_sinDeshacer.insert(layerId);
 }
 
 // Vacia ambas pilas (deshacer y rehacer). Se usa tras cargar un fichero: el
@@ -324,7 +355,8 @@ qint64 OverlayModel::addFeature(MapFeature feature)
     if (!m_layers.contains(feature.layerId))
         addLayer(feature.layerId);
 
-    pushUndo();
+    if (isLayerUndoable(feature.layerId))
+        pushUndo();
     feature.id = m_nextId++;
     m_features.insert(feature.id, feature);
 
@@ -367,7 +399,8 @@ bool OverlayModel::removeFeature(qint64 id)
 {
     if (!m_features.contains(id))
         return false;
-    pushUndo();
+    if (isLayerUndoable(m_features.value(id).layerId))
+        pushUndo();
     m_features.remove(id);
     if (m_selected == id) {
         m_selected = -1;
@@ -389,7 +422,7 @@ void OverlayModel::clearLayer(const QString &layerId)
         if (it.value().layerId == layerId)
             aBorrar.append(it.key());
 
-    if (!aBorrar.isEmpty())
+    if (!aBorrar.isEmpty() && isLayerUndoable(layerId))
         pushUndo();
     for (qint64 id : aBorrar)
         m_features.remove(id);
@@ -495,6 +528,10 @@ bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
         return false;
 
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->geometry[index] = to;
     emit featureUpdated(id);
     emit changed();
@@ -509,6 +546,10 @@ bool OverlayModel::setLabelOffset(qint64 id, const QPointF &offsetPx)
     if (it == m_features.end())
         return false;
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->style.labelOffsetPx = offsetPx;
     emit featureUpdated(id);
     emit changed();
@@ -536,6 +577,10 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
         return false;
 
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->geometry.insert(index, at);
     emit featureUpdated(id);
     emit changed();
@@ -561,6 +606,10 @@ bool OverlayModel::removeVertex(qint64 id, int index)
         return false;
 
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->geometry.remove(index);
     emit featureUpdated(id);
     emit changed();
@@ -611,6 +660,10 @@ bool OverlayModel::moveFeature(qint64 id, double deltaLat, double deltaLon)
     }
 
     pushUndo();
+    // pushUndo() acaba de copiar m_features para deshacer y la copia COMPARTE
+    // los datos: escribir con el iterador de antes alteraria tambien la
+    // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
+    it = m_features.find(id);
     it->geometry = nuevaGeom;
     it->parts = nuevasPartes;
     emit featureUpdated(id);

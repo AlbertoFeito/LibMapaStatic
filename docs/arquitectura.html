@@ -135,9 +135,9 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
   <text x="30" y="286" fill="#39424e" font-weight="700">libmapa_core &nbsp;<tspan font-weight="400" font-size="9">(sin ventanas: Core · Gui · Sql · Positioning)</tspan></text>
   <g font-size="10">
     <rect x="34" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="42" y="316" fill="#145374" font-weight="700">tiles</text><text x="42" y="332" font-size="8.5">TileService·Loader·Cache·Source·Planner·Probe</text>
-    <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·TileKey</text>
+    <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·Zone/ProximityMonitor</text>
     <rect x="338" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="346" y="316" fill="#145374" font-weight="700">db</text><text x="346" y="332" font-size="8.5">ConnectionPool·Schema·VectorRepository</text>
-    <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · Elevation</text>
+    <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · VectorFormats · Elevation</text>
     <rect x="622" y="298" width="106" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="630" y="316" fill="#145374" font-weight="700">tipos</text><text x="630" y="332" font-size="8.5">MapFeature·MapTarget</text>
     <rect x="34" y="352" width="694" height="30" rx="5" fill="#f7f9fb" stroke="#c4ccd6"/><text x="42" y="371" fill="#5b6b7b">Qt: QGeoCoordinate · QImage · QSqlDatabase · QCache · QThread</text>
   </g>
@@ -183,6 +183,60 @@ Mercator. Es matemática pura, sin estado ni Qt más allá de <code>QGeoCoordina
 <tr><td class="mono">forward(coord) → QPointF</td><td>Lat/lon → metros Web Mercator (EPSG:3857).</td></tr>
 <tr><td class="mono">inverse(x,y) → QGeoCoordinate</td><td>Metros → lat/lon (la usa <code>geo_to_tiles</code> al leer <code>.xyz</code>).</td></tr>
 <tr><td class="mono">clampLatitude(lat)</td><td>Acota la latitud al máximo de Mercator (~±85,05°) para que la proyección no se dispare.</td></tr>
+</table>
+
+<h3><span class="cls">Coordinates</span> <span class="tag">include/libmapa/Coordinates.h</span></h3>
+<p>Coordenadas en los formatos de trabajo: decimal, grados-minutos-segundos,
+grados-minutos decimales, <b>UTM</b> y <b>MGRS</b> (WGS84). UTM con las series de
+Krüger de orden 6 (Karney 2011): coincide con PROJ al milímetro; MGRS idéntico a
+GeoTrans (NGA). Incluye las excepciones de zona de Noruega (32V) y Svalbard
+(31X–37X). Cobertura UTM: 80°S–84°N (los polos, UPS, no). <code>tst_coordinates</code>
+compara con referencias de PROJ 9.8 y de la librería <i>mgrs</i>.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">toUtm(coord, zonaForzada) / fromUtm</td><td>Geográfica ↔ UTM (zona, banda, hemisferio, este, norte). La zona forzada sirve para las cuadrículas que cruzan un límite.</td></tr>
+<tr><td class="mono">toMgrs(coord, precisión) / fromMgrs</td><td>MGRS de 10 km a 1 m; los dígitos se truncan (esquina suroeste de la celda), como manda la norma.</td></tr>
+<tr><td class="mono">formatCoordinate / parseCoordinate</td><td>Texto en cualquier formato, y lectura de lo que escribe una persona (MGRS, UTM, decimal o sexagesimal con hemisferio, «O» = oeste).</td></tr>
+<tr><td class="mono">polygonArea / pathLength</td><td>Superficie (m²) de un polígono en la esfera autálica con <b>latitudes autálicas</b> (un trapecio de meridianos y paralelos sale exacto en WGS84) y longitud de un trazado o perímetro (m).</td></tr>
+</table>
+
+<h3><span class="cls">MapDecor</span> <span class="tag">geo/MapDecor.h</span></h3>
+<p>Cálculos puros de la <b>escala gráfica</b> y la <b>cuadrícula</b> (sin dibujo; <code>tst_mapdecor</code>).</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">scaleBar(m/px, maxPx, unidades)</td><td>La barra más larga con valor redondo 1-2-5×10ⁿ que cabe; en metros/km o en millas náuticas (redondeo en millas).</td></tr>
+<tr><td class="mono">graticuleStep(tramo°, maxLíneas)</td><td>Paso «de carta» (90°…1°, 30'…1', 30"…1") más fino que no supera las líneas pedidas.</td></tr>
+<tr><td class="mono">formatLatitude / formatLongitude</td><td>Rótulo sexagesimal con la precisión del paso (23°N, 23°30'N, 23°30'15"N); longitud normalizada a (−180, 180].</td></tr>
+</table>
+
+<h3><span class="cls">ZoneMonitor</span> <span class="tag">geo/ZoneMonitor.h</span></h3>
+<p>Lógica de las <b>alertas de zona</b>: qué objetivos están dentro de qué polígonos
+vigilados y cuándo entran o salen. Sin widget ni señales (se prueba sin ventanas,
+<code>tst_zonemonitor</code>); <code>MapWidget</code> le pasa los cambios y convierte
+sus transiciones en señales. Prueba de pertenencia en <b>Web Mercator</b> (lados
+rectos como se dibujan: «dentro» es lo que se ve dentro), cualquier anillo de una
+zona multi-parte, con descarte previo por caja envolvente: O(zonas) por actualización.</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">setZone(id, anillos) → transiciones</td><td>Alta o cambio de forma; reevalúa todos los objetivos. Una zona nueva avisa de los que ya estaban dentro.</td></tr>
+<tr><td class="mono">updateTarget(id, pos) → transiciones</td><td>Movimiento de un objetivo; posición inválida = sale de todas.</td></tr>
+<tr><td class="mono">removeZone · removeTarget · clearTargets</td><td>Olvidan sin generar salidas (borrar no es «salir»).</td></tr>
+<tr><td class="mono">targetsIn · zonesOf · isInside</td><td>Consultas del estado actual.</td></tr>
+</table>
+
+<h3><span class="cls">ProximityMonitor</span> <span class="tag">geo/ProximityMonitor.h · público: Proximity.h</span></h3>
+<p>Lógica de las <b>alertas de proximidad (CPA/TCPA)</b>: qué pares de móviles van a
+pasar demasiado cerca. <code>computeCpa</code> (público) calcula el punto de máximo
+acercamiento en un plano tangente local suponiendo rumbo y velocidad constantes:
+CPA (distancia mínima), TCPA (tiempo hasta ella) y dónde estará cada uno. Un par está
+en alerta si <b>ya</b> está a menos de la distancia, o si el CPA cae por debajo de ella
+dentro del horizonte (0 ≤ TCPA ≤ horizonte). Antes de comparar dos móviles, el que
+informó antes se lleva <b>por estima</b> a la hora del otro. Coste O(móviles) por
+actualización, con un descarte barato: la distancia actual menos lo máximo que
+pueden acercarse en el horizonte. Sin criterios, no calcula nada
+(<code>tst_proximity</code>: 2000 móviles cuadran con la fuerza bruta).</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">setCriteria(distancia, horizonte) → transiciones</td><td>Activa, cambia o apaga (distancia 0) y reevalúa todos los pares.</td></tr>
+<tr><td class="mono">updateTrack(id, {pos, vel, rumbo, hora}) → transiciones</td><td>Reevalúa los pares de ese móvil; posición inválida = sale de sus alertas.</td></tr>
+<tr><td class="mono">removeTrack · clear</td><td>Olvidan sin transiciones (borrar no es «alejarse»).</td></tr>
+<tr><td class="mono">alerts · isAlerted · cpa · evaluate</td><td>Pares en alerta con su CPA; CPA de dos móviles cualesquiera.</td></tr>
 </table>
 
 <h3><span class="cls">TileMatrix</span> <span class="tag">geo/TileMatrix.h</span></h3>
@@ -330,17 +384,32 @@ la API que usa la aplicación:</p>
 <tr><td>Capa base</td><td class="mono">availableBaseLayers · baseLayerId · setBaseLayerId · reloadBaseLayer</td></tr>
 <tr><td>Navegación</td><td class="mono">center/setCenter · zoom/setZoom · zoomIn/Out · fitBounds · visibleNorthWest/SouthEast · <b>setMaxZoomOverride</b></td></tr>
 <tr><td>Capas de entidades</td><td class="mono">addFeatureLayer · setFeatureLayerVisible · setFeatureLayerZOrder</td></tr>
-<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer · loadFeaturesAsLayer · setFeatureLayerZoomRange · setFeatureLayerTransient</td></tr>
+<tr><td>Entidades</td><td class="mono">addFeature · updateFeature · removeFeature · features · loadGeoAsLayer · loadFeaturesAsLayer · <b>importVectorFile · exportVectorFile</b> · setFeatureLayerZoomRange · setFeatureLayerTransient</td></tr>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
-<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
-<tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
+<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
+<tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b> · consulta puntual <b>targetsInArea · featuresInArea</b></td></tr>
+<tr><td>Anillos y marcaciones</td><td class="mono"><b>addRangeRings · updateRangeRings · addBearingLine · updateBearingLine · removeRangeMark · clearRangeMarks · rangeMarks · bearingLineMeasure</b> · inicio/fin de rutas: <b>setRouteEndpoints (Hidden/Selected/Routes/AllLines)</b></td></tr>
+<tr><td>Reproducción</td><td class="mono"><b>TrackPlayer</b> (loadFile · setTracks · play · pause · stop · seek · setSpeed · setRoutesVisible · targetIdOf · isLoaded · <b>clear = salir</b> · señales timeChanged / playingChanged / finished / cleared) · núcleo: <b>sampleTrack · trackTimeRange</b> (TrackReplay.h)</td></tr>
+<tr><td>Proximidad (CPA/TCPA)</td><td class="mono"><b>setProximityAlert(distancia, horizonte) · proximityAlerts · targetCpa · setTargetVelocity · setProximityLinesVisible · setProximityColor · señales proximityAlertRaised / proximityAlertCleared</b></td></tr>
+<tr><td>Exportar</td><td class="mono"><b>renderImage(escala) · exportView(ruta, MapExportOptions)</b> (PDF vectorial con título, pie y escala 1:N, o PNG/JPG…) · <b>exportTargetHistory</b> (GPX con horas)</td></tr>
+<tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, SelectArea, SelectPolygon, Draw…, EditFeature) · clearAreaSelection (quita el recuadro o el contorno de la selección)</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
+<tr><td>Escala / cuadrícula</td><td class="mono">setScaleBarVisible · setScaleBarUnits (Metric/Nautical) · metersPerPixel · setGraticuleVisible · setGraticuleColor · <b>setGraticuleMode (Geographic/Utm)</b></td></tr>
 <tr><td>Cobertura / relieve</td><td class="mono">setCoverageVisible · setCoverageZoom · refreshCoverage · <b>setHillshadeVisible · setHillshadeSun · setHillshadeOpacity · setHillshadeExaggeration · setHillshadeColored · refreshHillshade</b></td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
 <tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
 </table>
+<p><b>Exportar la vista.</b> <code>exportView</code> elige el formato por la extensión.
+En <b>PDF</b> (<code>QPdfWriter</code>, de QtGui) dibuja el mapa con
+<code>QCustomPlot::toPainter</code> sobre un <code>QCPPainter</code> vectorial, a la
+resolución lógica de la pantalla: la hoja es una copia fiel de la vista, con
+entidades, objetivos, escala y cuadrícula como vectores y las teselas a su
+resolución nativa. La hoja (A4 por defecto) se orienta sola, y el pie da
+la extensión, la fecha UTC y la escala de impresión 1:N calculada en el centro. En
+<b>imagen</b>, <code>renderImage(escala)</code> redibuja a más píxeles y el título y el
+pie van en bandas blancas. Las dos se escriben de forma atómica (<code>QSaveFile</code>).</p>
 
 <h3><span class="cls">MapView</span> <span class="tag">widget/MapView.h · QCustomPlot</span></h3>
 <p>El lienzo real: hereda de QCustomPlot, gestiona el ratón (arrastrar, rueda,
@@ -362,6 +431,8 @@ añadió para la descarga.</p>
 <tr><td class="cls">TileLayer</td><td>Pinta las teselas del plan (con la escalera de respaldo). Lee del <code>TileCache</code>.</td></tr>
 <tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar. <b>Recorte por viewport</b>: salta (sin proyectar a píxeles) las entidades cuya caja no toca la vista, y respeta el <b>rango de zoom</b> de la capa — así una capa densa (curvas de nivel) no frena el <i>pan</i>. Un punto con icono se ancla por <code>FeatureStyle::iconAnchor</code> (normalizado; <code>(0.5,1.0)</code> = la punta del pin marca el lugar) y su <b>hit-test</b> cubre todo el pixmap, para poder agarrarlo.</td></tr>
 <tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas. El símbolo lo decide el proveedor de la app (icono + rotación por rumbo + escala); sin proveedor, un galón por defecto. Para miles de objetivos: culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza.</td></tr>
+<tr><td class="cls">GraticuleLayer</td><td>Cuadrícula de meridianos y paralelos con rótulos en el borde, o <b>UTM</b> (líneas de este/norte por zona, 100 km–100 m, curvas muestreadas y recortadas a la zona, límites de zona marcados). Paso automático según el zoom (pasos de carta), paralelos en la proyección del mapa. Encima de las entidades y debajo de los objetivos.</td></tr>
+<tr><td class="cls">ScaleBarLayer</td><td>Escala gráfica abajo a la izquierda, medida en el centro de la vista con la distancia geodésica real entre dos píxeles (en Mercator la escala cambia con la latitud). Encima de todo.</td></tr>
 <tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
 <tr><td class="cls">HillshadeLayer</td><td><b>Relieve sombreado</b> (hillshade) en vivo: capa «tonta» que pinta una imagen —calculada por <code>MapWidget</code> del DEM LOCAL (sin conexión)— estirada entre los píxeles de sus esquinas (alineada con la base, eje X=longitud, Y=grados de Mercator). Va encima de las teselas y debajo de las entidades. Gris en <i>Multiply</i> sobre la base, o tintado por altura (hipsométrico) en <i>SourceOver</i>.</td></tr>
 </table>
@@ -369,7 +440,7 @@ añadió para la descarga.</p>
 <h3>Modelos (QObject, sin dibujo)</h3>
 <table><tr><th>Clase</th><th>Rol</th></tr>
 <tr><td class="cls">OverlayModel</td><td>Guarda las entidades y capas, la selección y el historial de <b>deshacer/rehacer</b>. Separado del dibujo para poder probarlo sin ventanas.</td></tr>
-<tr><td class="cls">TargetModel</td><td>Guarda los objetivos y su traza (acotada). Operaciones O(1) por objetivo para el tiempo real; emite <code>changed()</code>.</td></tr>
+<tr><td class="cls">TargetModel</td><td>Guarda los objetivos, su traza dibujada (acotada) y su <b>historial completo</b> con hora desde el <b>origen</b> (donde se vio por primera vez), compacto (24 B/punto), con distancia mínima y aclarado al tope que nunca pierde origen ni último punto. Operaciones O(1) por objetivo para el tiempo real; emite <code>changed()</code>.</td></tr>
 </table>
 
 <!-- ===================== 8. IO ===================== -->
@@ -379,6 +450,25 @@ ficheros <code>.geo</code>/<code>.xyz</code>: listas de coordenadas donde <code>
 separa trazados. Un fichero puede traer varios trazados (aguas jurisdiccionales,
 corredores, divisiones). <code>MapWidget::loadGeoAsLayer()</code> lo carga como <b>una
 entidad multi-parte</b>. También lo usa <code>geo_to_tiles</code> para rasterizar.</p>
+
+<h3><span class="cls">VectorFormats</span> <span class="tag">include/libmapa/VectorFormats.h</span></h3>
+<p>Intercambio con otras herramientas (QGIS, Google Earth, GPS): lee y escribe
+<code>MapFeature</code> en <b>GeoJSON</b>, <b>KML</b> y <b>GPX</b>, eligiendo el formato por la
+extensión. Escritura atómica (<code>QSaveFile</code>). Sin dependencias nuevas: JSON y
+XML de Qt Core. Probado sin ventanas en <code>tst_vectorformats</code>.</p>
+<table><tr><th>Formato</th><th>Qué conserva</th></tr>
+<tr><td>GeoJSON</td><td>Todo: geometría (Point/LineString/Polygon y sus Multi*), nombre, descripción, tipo de dominio (<code>libmapa_type</code>), atributos y estilo «simplestyle» (<code>stroke</code>, <code>stroke-width</code>, <code>fill</code>…).</td></tr>
+<tr><td>KML</td><td>Geometría (MultiGeometry = partes), nombre, descripción, tipo y atributos en <code>ExtendedData</code>, estilo en línea o por <code>styleUrl</code> (colores <code>aabbggrr</code>). Carpetas aplanadas; KMZ no.</td></tr>
+<tr><td>GPX</td><td>Puntos (<code>wpt</code>, con <code>ele</code>), rutas y tracks (un <code>trkseg</code> por parte), nombre, descripción y tipo. Sin atributos ni estilo; los polígonos van como track cerrado con la extensión <code>libmapa:polygon</code> y vuelven a ser polígonos al releerlos.</td></tr>
+</table>
+<p>Los huecos de los polígonos se ignoran (el modelo no los tiene). <code>MapWidget::importVectorFile</code>
+añade las entidades de un fichero a una capa; <code>exportVectorFile</code> escribe todas o las de una capa.</p>
+<p><b>Recorridos con hora.</b> <code>GpxTrack</code> (nombre, tipo, id de objetivo y puntos
+<code>TargetTrackPoint</code>) con <code>tracksToGpx</code> / <code>writeGpxTracks</code> /
+<code>parseGpxTracks</code>: un <code>&lt;trk&gt;</code> por recorrido con <code>&lt;time&gt;</code>
+UTC (ISO 8601 con milisegundos) en cada punto y el id como extensión
+<code>libmapa:targetId</code>. Es lo que usa <code>MapWidget::exportTargetHistory</code> para
+sacar el historial de los objetivos; QGIS o GPXSee lo reproducen en el tiempo.</p>
 
 <h3><span class="cls">DataPackage</span> <span class="tag">io/DataPackage.h · público: DataPackageInfo</span></h3>
 <p>El producto final trabaja <b>sin conexión</b>: todos sus datos viajan en un
@@ -526,7 +616,46 @@ simbología por un hook; la app de ejemplo <code>demo</code> lo demuestra movien
 buques, aeronaves y UAVs con su icono orientado al rumbo. Un clic sobre un
 objetivo (sin herramienta) lo resalta y emite <code>targetClicked(id, pos)</code>
 (<code>targetAt(pixel)</code> hace el hit-test); la app lee entonces sus
-<code>attributes</code> para mostrarlos.</p>
+<code>attributes</code> para mostrarlos. Cada objetivo guarda además su <b>historial
+completo</b> (posición y hora) desde que se vio por primera vez; al seleccionarlo se dibuja
+entero, del <b>origen</b> (marcado con su hora) a la posición actual, aunque la traza que se
+dibuja para todos sea corta.</p>
+<p><b>Alertas de zona.</b> <code>watchZone(idPoligono)</code> convierte una entidad
+poligonal en zona vigilada: cada <code>addTarget</code>/<code>updateTarget</code>
+pasa por <code>ZoneMonitor</code> y, si el objetivo cruza el borde, se emite
+<code>targetEnteredZone(objetivo, zona)</code> o <code>targetLeftZone</code>. Las
+ediciones de la zona (vértices, arrastre, deshacer, cargas en bloque) la reevalúan;
+borrar el objetivo o la zona no genera salidas. También se vigilan las <b>entidades punto</b> (marcadores que el operador coloca o arrastra) con sus propias señales, y la zona ocupada se <b>resalta en el mapa</b> (borde y velo rojos, aro en los puntos). Qué significa la zona («prohibida»,
+«de interés»…) lo decide la app por su <code>type</code>: la librería solo hace la geometría.</p>
+<p><b>Anillos de distancia y marcaciones.</b> <code>RangeLayer</code> es otro
+<code>QCPLayerable</code> de la capa <i>buffered</i> «targets», creado antes que
+<code>TargetLayer</code>. Así los anillos (<code>RangeRings</code>) y las marcaciones
+(<code>BearingLine</code>) que cuelgan de un objetivo se repintan con él, sin tocar teselas ni
+entidades, y los objetivos quedan encima. Los anillos son <b>geodésicos</b>
+(<code>MapDecor::geodesicCircle</code>): en Mercator se estiran con la latitud, como la
+distancia real. Las marcaciones siguen la ortodrómica y miden rumbo y distancia al dibujar
+(«202° · 26.7 NM», en las unidades de la escala).</p>
+<p><b>Reproducción de historiales.</b> <code>TrackPlayer</code> convierte cada pista de un
+GPX con horas en un <b>objetivo normal</b> mientras existió. Usa solo la API pública:
+<code>addTarget</code>/<code>updateTarget</code> con los puntos grabados y sus horas, y la
+posición interpolada por <code>sampleTrack</code>. Así traza, origen, alertas de zona y CPA
+y anillos funcionan solos. Al ir hacia atrás rehace cada objetivo desde su origen. Las rutas
+completas van en una capa temporal que, como toda capa temporal, queda <b>fuera de
+deshacer/rehacer</b> (<code>OverlayModel::setLayerUndoable</code>).</p>
+<p><b>Inicio y fin de rutas.</b> Al leer GPX, cada ruta o track guarda <code>gpx_kind</code>
+y, si sus puntos traen hora, <code>time_start</code> y <code>time_end</code>.
+<code>FeatureLayer</code> marca su primer punto (verde) y el último (rojo). La línea
+seleccionada los rotula con la hora, hacia fuera del recorrido para que no se pisen
+(<code>setRouteEndpoints</code>).</p>
+<p><b>Alertas de proximidad.</b> Con <code>setProximityAlert(distancia, horizonte)</code>,
+cada <code>addTarget</code>/<code>updateTarget</code> pasa también por
+<code>ProximityMonitor</code>, que emite <code>proximityAlertRaised(a, b, cpa, tcpa)</code>
+o <code>proximityAlertCleared(a, b)</code>. La velocidad de cada objetivo es la que da la app
+(<code>setTargetVelocity</code>, p. ej. SOG/COG del AIS) o, si no, la que estima
+<code>TargetModel</code> por los últimos 30 s de su historial. Así
+<code>MapTarget::speed</code> sigue sin interpretarse. <code>TargetLayer</code>
+dibuja cada par en alerta encima de los objetivos: discontinuas hasta el punto de CPA de
+cada uno, la distancia mínima entre ellos y el rótulo «CPA 0.30 NM en 4 min».</p>
 
 <h3>9.3 · Entidades y ficheros .geo</h3>
 <p><code>loadGeoAsLayer(ruta)</code> → <code>GeoFile</code> lee los trazados →

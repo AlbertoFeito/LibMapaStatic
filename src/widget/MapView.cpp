@@ -74,6 +74,13 @@ MapView::MapView(TileService *service, QWidget *parent)
              QCustomPlot::limAbove);
     layer(QStringLiteral("targets"))->setMode(QCPLayer::lmBuffered);
     m_targetModel = new TargetModel(this);
+    // Anillos de distancia y marcaciones: en la MISMA capa que los objetivos
+    // (se repintan con ellos cuando cuelgan de uno) y creados antes, para que
+    // los objetivos queden dibujados encima.
+    m_rangeLayer = new RangeLayer(this, m_targetModel);
+    m_rangeLayer->setLayer(QStringLiteral("targets"));
+    m_rangeLayer->setAxisMapper(
+        [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
     m_targetLayer = new TargetLayer(this, m_targetModel);
     m_targetLayer->setLayer(QStringLiteral("targets"));
     m_targetLayer->setAxisMapper(
@@ -86,6 +93,22 @@ MapView::MapView(TileService *service, QWidget *parent)
     m_coverageLayer = new CoverageLayer(this);
     m_coverageLayer->setLayer(QStringLiteral("coverage"));
     m_coverageLayer->setVisible(false);
+
+    // CUADRICULA de coordenadas: encima de las entidades y por debajo de los
+    // objetivos (orienta sin tapar lo que se mueve). Oculta por defecto.
+    addLayer(QStringLiteral("graticule"), layer(QStringLiteral("features")),
+             QCustomPlot::limAbove);
+    m_graticuleLayer = new GraticuleLayer(this);
+    m_graticuleLayer->setLayer(QStringLiteral("graticule"));
+    m_graticuleLayer->setVisible(false);
+
+    // ESCALA GRAFICA: encima de todo, es un elemento de la pantalla. Oculta por
+    // defecto.
+    addLayer(QStringLiteral("scalebar"), layer(QStringLiteral("coverage")),
+             QCustomPlot::limAbove);
+    m_scaleBarLayer = new ScaleBarLayer(this);
+    m_scaleBarLayer->setLayer(QStringLiteral("scalebar"));
+    m_scaleBarLayer->setVisible(false);
 
     // Capa de RELIEVE SOMBREADO (hillshade): justo ENCIMA de las teselas y por
     // DEBAJO de las entidades, para que el sombreado adorne la base sin tapar los
@@ -408,14 +431,25 @@ void MapView::requestVisibleTiles()
                                m_zoom, /*marginTiles=*/1);
 }
 
-// Oculta el recuadro de "seleccionar area" si estaba visible (sin borrarlo, para
-// reutilizar el item). Lo usa MapWidget al confirmar o descartar la seleccion.
+// Oculta la marca de seleccion: el recuadro de SelectArea (sin borrarlo, para
+// reutilizar el item) y el contorno de un poligono de SelectPolygon ya cerrado.
+// Lo usa MapWidget al confirmar o descartar la seleccion.
 void MapView::clearAreaSelection()
 {
+    bool cambio = false;
     if (m_areaRect && m_areaRect->visible()) {
         m_areaRect->setVisible(false);
-        replot(QCustomPlot::rpQueuedReplot);
+        cambio = true;
     }
+    if (m_draftIsSelection && !m_drafting) {
+        m_draftIsSelection = false;
+        m_draft = MapFeature();
+        if (m_featureLayer)
+            m_featureLayer->setDraft(nullptr);
+        cambio = true;
+    }
+    if (cambio)
+        replot(QCustomPlot::rpQueuedReplot);
 }
 
 // Recalcula el plan de dibujo de teselas para el viewport actual (que pintar y
