@@ -194,7 +194,9 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/GraticuleLayer.cpp
         src/widget/GraticuleLayer.h
         src/widget/ScaleBarLayer.cpp
+        src/widget/RangeLayer.cpp
         src/widget/ScaleBarLayer.h
+        src/widget/RangeLayer.h
         src/widget/HillshadeLayer.cpp
         src/widget/HillshadeLayer.h
         src/widget/MapView.cpp

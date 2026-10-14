@@ -18,6 +18,8 @@ private slots:
     void graticuleStepUsesChartSteps();
     void formatsLatitudeByStep();
     void formatsLongitudeAndNormalizes();
+    void formatsDistanceAndBearing();
+    void geodesicCircleKeepsRadius();
 };
 
 // La barra elige 1-2-5 x 10^n sin pasarse del ancho maximo.
@@ -106,6 +108,43 @@ void TstMapDecor::formatsLongitudeAndNormalizes()
     QCOMPARE(MapDecor::formatLongitude(190.0, 10.0), QStringLiteral("170") + g + QStringLiteral("W"));
     QCOMPARE(MapDecor::formatLongitude(-180.0, 10.0), QStringLiteral("180") + g);
     QCOMPARE(MapDecor::formatLongitude(0.0, 10.0), QStringLiteral("0") + g);
+}
+
+// Distancias con los decimales justos y sin ceros de relleno; rumbos con tres
+// cifras normalizados a [0, 360).
+void TstMapDecor::formatsDistanceAndBearing()
+{
+    QCOMPARE(MapDecor::formatDistance(750.4, ScaleUnits::Metric), QStringLiteral("750 m"));
+    QCOMPARE(MapDecor::formatDistance(2500.0, ScaleUnits::Metric), QStringLiteral("2.5 km"));
+    QCOMPARE(MapDecor::formatDistance(12345.0, ScaleUnits::Metric), QStringLiteral("12.3 km"));
+    QCOMPARE(MapDecor::formatDistance(250000.0, ScaleUnits::Metric), QStringLiteral("250 km"));
+    QCOMPARE(MapDecor::formatDistance(1852.0, ScaleUnits::Nautical), QStringLiteral("1 NM"));
+    QCOMPARE(MapDecor::formatDistance(2315.0, ScaleUnits::Nautical), QStringLiteral("1.25 NM"));
+    QCOMPARE(MapDecor::formatDistance(500.0, ScaleUnits::Nautical), QStringLiteral("0.27 NM"));
+    QVERIFY(MapDecor::formatDistance(std::nan(""), ScaleUnits::Metric).isEmpty());
+
+    const QString g = QString(QChar(0x00B0));
+    QCOMPARE(MapDecor::formatBearing(45.0), QStringLiteral("045") + g);
+    QCOMPARE(MapDecor::formatBearing(-10.0), QStringLiteral("350") + g);
+    QCOMPARE(MapDecor::formatBearing(359.7), QStringLiteral("000") + g);
+    QCOMPARE(MapDecor::formatBearing(720.0 + 5.2), QStringLiteral("005") + g);
+    QVERIFY(MapDecor::formatBearing(std::numeric_limits<double>::infinity()).isEmpty());
+}
+
+// Todos los puntos del anillo estan a la distancia pedida del centro, en
+// cualquier latitud; el anillo viene cerrado. Entradas malas: vacio.
+void TstMapDecor::geodesicCircleKeepsRadius()
+{
+    for (double lat : { 0.0, 45.0, 75.0 }) {
+        const QGeoCoordinate c(lat, -30.0);
+        const QVector<QGeoCoordinate> anillo = MapDecor::geodesicCircle(c, 5000.0, 60);
+        QCOMPARE(anillo.size(), 61);
+        QCOMPARE(anillo.first(), anillo.last());
+        for (const QGeoCoordinate &p : anillo)
+            QVERIFY(qAbs(c.distanceTo(p) - 5000.0) < 0.5);
+    }
+    QVERIFY(MapDecor::geodesicCircle(QGeoCoordinate(), 100.0).isEmpty());
+    QVERIFY(MapDecor::geodesicCircle(QGeoCoordinate(0, 0), 0.0).isEmpty());
 }
 
 QTEST_APPLESS_MAIN(TstMapDecor)

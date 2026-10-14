@@ -1,5 +1,6 @@
 #include "geo/MapDecor.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace libmapa {
@@ -117,6 +118,67 @@ QString formatLongitude(double longitudeDeg, double stepDeg)
     if (seg == 0 || seg == 180LL * 3600LL)
         return txt;
     return txt + (lon > 0.0 ? QStringLiteral("E") : QStringLiteral("W"));
+}
+
+// Numero con los decimales pedidos y sin ceros de relleno a la derecha.
+static QString sinCeros(double v, int decimales)
+{
+    QString s = QString::number(v, 'f', decimales);
+    if (s.contains(QLatin1Char('.'))) {
+        while (s.endsWith(QLatin1Char('0')))
+            s.chop(1);
+        if (s.endsWith(QLatin1Char('.')))
+            s.chop(1);
+    }
+    return s;
+}
+
+// Decimales para un valor en su unidad: 2 hasta 10, 1 hasta 100, 0 despues.
+static int decimalesPara(double v)
+{
+    return v < 10.0 ? 2 : (v < 100.0 ? 1 : 0);
+}
+
+// Distancia legible en la unidad pedida (ver cabecera).
+QString formatDistance(double meters, ScaleUnits units)
+{
+    if (!std::isfinite(meters))
+        return QString();
+    const double m = std::abs(meters);
+    if (units == ScaleUnits::Nautical) {
+        const double nm = m / kMetersPerNauticalMile;
+        return sinCeros(nm, decimalesPara(nm)) + QStringLiteral(" NM");
+    }
+    if (m < 1000.0)
+        return QString::number(std::lround(m)) + QStringLiteral(" m");
+    const double km = m / 1000.0;
+    return sinCeros(km, decimalesPara(km)) + QStringLiteral(" km");
+}
+
+// Rumbo con tres cifras y el simbolo de grado.
+QString formatBearing(double degrees)
+{
+    if (!std::isfinite(degrees))
+        return QString();
+    long g = std::lround(std::fmod(std::fmod(degrees, 360.0) + 360.0, 360.0));
+    if (g >= 360)
+        g -= 360;
+    return QStringLiteral("%1").arg(g, 3, 10, QLatin1Char('0')) + QChar(0x00B0);
+}
+
+// Puntos a la misma distancia del centro en azimuts equiespaciados (ver cabecera).
+QVector<QGeoCoordinate> geodesicCircle(const QGeoCoordinate &center, double radiusMeters,
+                                       int segments)
+{
+    QVector<QGeoCoordinate> v;
+    if (!center.isValid() || !(radiusMeters > 0.0) || !std::isfinite(radiusMeters))
+        return v;
+    const int n = std::max(8, segments);
+    v.reserve(n + 1);
+    for (int i = 0; i < n; ++i)
+        v.append(center.atDistanceAndAzimuth(radiusMeters, 360.0 * i / n));
+    v.append(v.first());
+    return v;
 }
 
 } // namespace MapDecor

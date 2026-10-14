@@ -145,6 +145,12 @@ private slots:
     //! Alertas CPA/TCPA: dos objetivos en rumbo de colision, con velocidad dada
     //! por la app o estimada por la traza; señales, lineas y apagado.
     void proximityAlertsWarnOfCloseApproach();
+    //! Anillos de distancia que siguen a un objetivo y marcaciones entre
+    //! objetivos que se recalculan al moverse; quitar y limpiar.
+    void rangeRingsAndBearingLinesFollowTargets();
+    //! Un historial GPX importado marca su inicio y fin; la linea seleccionada
+    //! los rotula. Los modos de setRouteEndpoints cambian lo que se ve.
+    void routesShowStartAndEnd();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2459,6 +2465,124 @@ void TstMapWidget::proximityAlertsWarnOfCloseApproach()
     w.removeTarget(ida);
     QCOMPARE(terminan.size(), 2);
     QVERIFY(!w.targetCpa(ida, idb).valid);
+}
+
+// Anillos centrados en un objetivo y una marcacion de ese objetivo a otro: al
+// moverse, la medida de la marcacion cambia sola. Se dibujan, y se quitan.
+void TstMapWidget::rangeRingsAndBearingLinesFollowTargets()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    w.setCenter(QGeoCoordinate(22.0, -80.0));
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    MapTarget a;
+    a.position = QGeoCoordinate(22.0, -80.0);
+    const qint64 ida = w.addTarget(a);
+    MapTarget b;
+    b.position = a.position.atDistanceAndAzimuth(9260.0, 45.0);      // 5 NM al NE
+    const qint64 idb = w.addTarget(b);
+    const QImage sinNada = captura();
+
+    RangeRings r;
+    r.targetId = ida;
+    r.spacingMeters = 1852.0;
+    r.count = 3;
+    r.spokeEveryDeg = 30;
+    const qint64 anillos = w.addRangeRings(r);
+    QVERIFY(anillos > 0);
+    const QImage conAnillos = captura();
+    QVERIFY(conAnillos != sinNada);
+
+    BearingLine l;
+    l.fromTarget = ida;
+    l.toTarget = idb;
+    const qint64 marcacion = w.addBearingLine(l);
+    QVERIFY(marcacion > 0 && marcacion != anillos);
+    QCOMPARE(w.rangeMarks(), QVector<qint64>({ anillos, marcacion }));
+    double rumbo = 0.0, dist = 0.0;
+    QVERIFY(w.bearingLineMeasure(marcacion, &rumbo, &dist));
+    QVERIFY(qAbs(rumbo - 45.0) < 0.1);
+    QVERIFY(qAbs(dist - 9260.0) < 1.0);
+    QVERIFY(captura() != conAnillos);
+
+    // B se mueve 5 NM al sur de A: la marcacion pasa a 180.
+    w.updateTarget(idb, a.position.atDistanceAndAzimuth(9260.0, 180.0));
+    QVERIFY(w.bearingLineMeasure(marcacion, &rumbo, &dist));
+    QVERIFY(qAbs(rumbo - 180.0) < 0.1);
+
+    // Marcacion fija con rumbo y longitud, sin destino.
+    BearingLine fija;
+    fija.from = QGeoCoordinate(22.0, -80.1);
+    fija.bearingDeg = 270.0;
+    fija.lengthMeters = 3000.0;
+    const qint64 idFija = w.addBearingLine(fija);
+    QVERIFY(w.bearingLineMeasure(idFija, &rumbo, &dist));
+    QVERIFY(qAbs(rumbo - 270.0) < 0.1 && qAbs(dist - 3000.0) < 1.0);
+    QVERIFY(!w.updateRangeRings(idFija, r));                 // no es de anillos
+    QVERIFY(w.updateBearingLine(idFija, l));
+
+    // Sin el objetivo de destino, la marcacion no se puede medir (ni se dibuja).
+    w.removeTarget(idb);
+    QVERIFY(!w.bearingLineMeasure(marcacion, &rumbo, &dist));
+
+    QVERIFY(w.removeRangeMark(anillos));
+    QVERIFY(!w.removeRangeMark(anillos));
+    w.clearRangeMarks();
+    QVERIFY(w.rangeMarks().isEmpty());
+}
+
+// Importar un historial GPX: el track marca inicio y fin siempre (modo por
+// defecto), y al seleccionarlo se rotulan con su hora.
+void TstMapWidget::routesShowStartAndEnd()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    w.setCenter(QGeoCoordinate(22.05, -80.0));
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString ruta = dir.filePath(QStringLiteral("historial.gpx"));
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413000LL).toUTC();
+    GpxTrack h;
+    h.name = QStringLiteral("Buque 1");
+    h.targetId = 1;
+    for (int i = 0; i <= 10; ++i)
+        h.points.append({ QGeoCoordinate(22.0 + 0.01 * i, -80.05 + 0.01 * i), t0.addSecs(60 * i) });
+    QVERIFY(writeGpxTracks(ruta, { h }));
+
+    QCOMPARE(w.routeEndpoints(), RouteEndpoints::Routes);
+    const qint64 id = w.importVectorFile(ruta, QStringLiteral("historial"));
+    QVERIFY(id > 0);
+    const auto f = w.feature(id);
+    QVERIFY(f && f->attributes.contains(QStringLiteral("time_end")));
+
+    const QImage conMarcas = captura();
+    w.setRouteEndpoints(RouteEndpoints::Selected);         // sin seleccionar: sin marcas
+    const QImage sinMarcas = captura();
+    QVERIFY(conMarcas != sinMarcas);
+
+    w.selectFeature(id);                                   // seleccionada: marcas + rotulos
+    const QImage seleccionada = captura();
+    w.setRouteEndpoints(RouteEndpoints::Hidden);
+    QVERIFY(captura() != seleccionada);
+    w.setRouteEndpoints(RouteEndpoints::Routes);
+    QCOMPARE(w.routeEndpoints(), RouteEndpoints::Routes);
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

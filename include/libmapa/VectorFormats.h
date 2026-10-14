@@ -24,6 +24,10 @@ namespace libmapa {
  * - **GPX** (.gpx): puntos (wpt), rutas (rte) y tracks (trk). GPX no tiene
  *   poligonos ni atributos libres: un poligono se escribe como track cerrado
  *   marcado con una extension propia, que al releerlo vuelve a ser poligono.
+ *   Al leer, cada ruta o track lleva los atributos \c gpx_kind ("rte"/"trk"),
+ *   y si sus puntos traen hora, \c time_start y \c time_end (ISO 8601, UTC):
+ *   el mapa marca su inicio y su fin. Un historial de objetivo exportado
+ *   (tracksToGpx) trae ademas \c target_id.
  *
  * En los tres, los huecos de los poligonos (anillos interiores) se ignoran: el
  * modelo de MapFeature no los tiene. Coordenadas siempre WGS84 lon/lat.

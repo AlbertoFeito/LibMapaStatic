@@ -5031,3 +5031,78 @@ móviles contra fuerza bruta), `tst_targetmodel::estimatesVelocityFromTrack` y
 `tst_mapwidget::proximityAlertsWarnOfCloseApproach`.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 123. Anillos de distancia y marcaciones, e inicio y fin de las rutas
+
+**Qué se hizo.**
+- **`RangeRings` y `BearingLine`** (públicos, `MapTypes.h`):
+  - anillos de distancia (VRM) alrededor de un punto o de un objetivo, cada
+    cierta separación, con radiales opcionales;
+  - líneas de marcación (EBL) de un punto u objetivo a otro, o con un rumbo y
+    una longitud.
+- **`MapWidget`**: `addRangeRings`, `updateRangeRings`, `addBearingLine`,
+  `updateBearingLine`, `removeRangeMark`, `clearRangeMarks`, `rangeMarks` y
+  `bearingLineMeasure` (rumbo y distancia actuales).
+- **`RangeLayer`** (`src/widget`) las dibuja:
+  - anillos geodésicos con su distancia arriba (el exterior en continua, los
+    demás discontinuos);
+  - radiales con su marcación («030°») y cruz en el centro;
+  - marcaciones por la ortodrómica, con halo, flecha en el destino y el
+    rótulo «202° · 26.7 NM».
+- **`MapDecor`**: `formatDistance` (sin ceros sobrantes: «1 NM», «2.5 km»),
+  `formatBearing` («045°») y `geodesicCircle`. Los rótulos CPA usan ahora el
+  mismo formato.
+- **Inicio y fin de rutas**:
+  - al leer GPX, cada ruta o track guarda `gpx_kind` y, si sus puntos traen
+    hora, `time_start` y `time_end`; un historial exportado trae además
+    `target_id`;
+  - `FeatureLayer` marca el inicio (círculo verde) y el fin (cuadrado rojo);
+  - la línea seleccionada lleva además «inicio 13:56:42» y «fin 14:26:42», con
+    fecha si no son de hoy o la ruta cruza de día;
+  - `setRouteEndpoints`: `Hidden`, `Selected`, `Routes` (por defecto: siempre
+    las rutas GPX, y cualquier línea al seleccionarla) o `AllLines`.
+- **Demo**, en el menú *Ver*:
+  - *Anillos de distancia…*: separación en NM, número y radiales cada 30°,
+    alrededor del objetivo seleccionado o de un punto que se pinche;
+  - *Marcación (rumbo y distancia)*: del objetivo seleccionado, o de un punto,
+    a otro objetivo o punto; si se pincha cerca de un objetivo, la línea
+    cuelga de él;
+  - *Inicio y fin de rutas* (los cuatro modos) y *Quitar anillos y
+    marcaciones*.
+
+**Por qué así.**
+- **En la capa de los objetivos.** Unos anillos o una marcación que cuelgan de
+  un objetivo tienen que moverse con él. `RangeLayer` es otro `QCPLayerable` de
+  la capa *buffered* «targets», creado antes que `TargetLayer`. Cuando los
+  objetivos repintan su capa se repinta también, sin tocar teselas ni
+  entidades, y los objetivos quedan encima.
+- **Geodésicos, no círculos de pantalla.** En Mercator una distancia real se
+  estira con la latitud: un anillo de 5 NM dibujado como círculo de píxeles
+  mentiría al norte y al sur. Se trazan con `atDistanceAndAzimuth` y las
+  marcaciones largas siguen la ortodrómica. El test comprueba el radio a 0°,
+  45° y 75°.
+- **El rumbo y la distancia se miden al dibujar**, con los objetivos donde
+  estén. No se guarda ningún valor que pueda quedarse viejo, y
+  `bearingLineMeasure` da lo mismo que el rótulo.
+- **Inicio y fin solo en las rutas.** Ponerlos en todas las líneas llenaría de
+  marcas las costas y overlays de solo lectura. Lo que el usuario pidió eran
+  las rutas de los historiales: por eso por defecto van siempre en lo leído de
+  GPX y en cualquier línea al seleccionarla. Los rótulos salen solo en la
+  seleccionada y hacia fuera del recorrido (el de inicio por detrás, el de fin
+  por delante), para que no se pisen aunque la ruta sea corta. Las marcas se
+  dibujan encima de los tiradores de edición.
+- **La hora viaja en atributos.** Así la conserva también un GeoJSON exportado
+  después, y sirve para cualquier GPX con tiempos, no solo los de esta
+  librería.
+
+Comprobado en la demo bajo Xvfb: anillos de 5 NM con radiales alrededor de una
+aeronave y una marcación «202° · 26.7 NM» hasta un buque; y un historial
+exportado, reimportado y seleccionado con «inicio 13:56:42» y «fin 14:26:42».
+Tests:
+- `tst_mapdecor`: formatos, y radio del anillo a varias latitudes;
+- `tst_vectorformats::gpxRoutesKnowStartAndEnd`;
+- `tst_mapwidget`: `rangeRingsAndBearingLinesFollowTargets`, que comprueba que
+  la marcación pasa de 045° a 180° al moverse el objetivo, y
+  `routesShowStartAndEnd`.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.

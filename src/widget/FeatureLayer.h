@@ -4,6 +4,7 @@
 #include "qcustomplot.h"
 
 #include "libmapa/MapFeature.h"
+#include "libmapa/MapTypes.h"
 #include "widget/OverlayModel.h"
 
 #include <QPixmap>
@@ -87,6 +88,10 @@ public:
     void setAlertColor(const QColor &color);
     QColor alertColor() const { return m_alertColor; }
 
+    //! Que lineas marcan su inicio y su fin (ver MapWidget::setRouteEndpoints).
+    void setRouteEndpoints(RouteEndpoints mode);
+    RouteEndpoints routeEndpoints() const { return m_endpoints; }
+
     //! Entidades dibujadas en el ultimo repintado.
     int lastDrawnCount() const { return m_lastDrawn; }
     //! Veces que se reutilizo el pixmap en vez de volver a dibujar.
@@ -99,6 +104,7 @@ protected:
 private:
     void drawFeature(QPainter *painter, const MapFeature &f, bool selected) const;
     void drawAlert(QPainter *painter, const MapFeature &f) const;
+    void drawEndpoints(QPainter *painter, const MapFeature &f, bool selected) const;
     //! Dibuja UNA parte (un punto de ella) de una entidad Point.
     void drawPointPart(QPainter *painter, const MapFeature &f,
                        const QVector<QGeoCoordinate> &part, bool selected) const;
@@ -146,6 +152,7 @@ private:
     // Alertas de zona: ids a resaltar y su color.
     QSet<qint64> m_alerted;
     QColor m_alertColor = QColor(0xff, 0x17, 0x44);
+    RouteEndpoints m_endpoints = RouteEndpoints::Routes;
 
     // El trazo en curso NO va al pixmap cacheado: cambia con cada movimiento
     // del raton y obligaria a redibujar todas las entidades cada vez.

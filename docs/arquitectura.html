@@ -390,6 +390,7 @@ la API que usa la aplicación:</p>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b> · consulta puntual <b>targetsInArea · featuresInArea</b></td></tr>
+<tr><td>Anillos y marcaciones</td><td class="mono"><b>addRangeRings · updateRangeRings · addBearingLine · updateBearingLine · removeRangeMark · clearRangeMarks · rangeMarks · bearingLineMeasure</b> · inicio/fin de rutas: <b>setRouteEndpoints (Hidden/Selected/Routes/AllLines)</b></td></tr>
 <tr><td>Proximidad (CPA/TCPA)</td><td class="mono"><b>setProximityAlert(distancia, horizonte) · proximityAlerts · targetCpa · setTargetVelocity · setProximityLinesVisible · setProximityColor · señales proximityAlertRaised / proximityAlertCleared</b></td></tr>
 <tr><td>Exportar</td><td class="mono"><b>renderImage(escala) · exportView(ruta, MapExportOptions)</b> (PDF vectorial con título, pie y escala 1:N, o PNG/JPG…) · <b>exportTargetHistory</b> (GPX con horas)</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, SelectArea, SelectPolygon, Draw…, EditFeature) · clearAreaSelection (quita el recuadro o el contorno de la selección)</td></tr>
@@ -625,6 +626,19 @@ pasa por <code>ZoneMonitor</code> y, si el objetivo cruza el borde, se emite
 ediciones de la zona (vértices, arrastre, deshacer, cargas en bloque) la reevalúan;
 borrar el objetivo o la zona no genera salidas. También se vigilan las <b>entidades punto</b> (marcadores que el operador coloca o arrastra) con sus propias señales, y la zona ocupada se <b>resalta en el mapa</b> (borde y velo rojos, aro en los puntos). Qué significa la zona («prohibida»,
 «de interés»…) lo decide la app por su <code>type</code>: la librería solo hace la geometría.</p>
+<p><b>Anillos de distancia y marcaciones.</b> <code>RangeLayer</code> es otro
+<code>QCPLayerable</code> de la capa <i>buffered</i> «targets», creado antes que
+<code>TargetLayer</code>. Así los anillos (<code>RangeRings</code>) y las marcaciones
+(<code>BearingLine</code>) que cuelgan de un objetivo se repintan con él, sin tocar teselas ni
+entidades, y los objetivos quedan encima. Los anillos son <b>geodésicos</b>
+(<code>MapDecor::geodesicCircle</code>): en Mercator se estiran con la latitud, como la
+distancia real. Las marcaciones siguen la ortodrómica y miden rumbo y distancia al dibujar
+(«202° · 26.7 NM», en las unidades de la escala).</p>
+<p><b>Inicio y fin de rutas.</b> Al leer GPX, cada ruta o track guarda <code>gpx_kind</code>
+y, si sus puntos traen hora, <code>time_start</code> y <code>time_end</code>.
+<code>FeatureLayer</code> marca su primer punto (verde) y el último (rojo). La línea
+seleccionada los rotula con la hora, hacia fuera del recorrido para que no se pisen
+(<code>setRouteEndpoints</code>).</p>
 <p><b>Alertas de proximidad.</b> Con <code>setProximityAlert(distancia, horizonte)</code>,
 cada <code>addTarget</code>/<code>updateTarget</code> pasa también por
 <code>ProximityMonitor</code>, que emite <code>proximityAlertRaised(a, b, cpa, tcpa)</code>

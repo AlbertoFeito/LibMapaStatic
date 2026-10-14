@@ -74,6 +74,13 @@ MapView::MapView(TileService *service, QWidget *parent)
              QCustomPlot::limAbove);
     layer(QStringLiteral("targets"))->setMode(QCPLayer::lmBuffered);
     m_targetModel = new TargetModel(this);
+    // Anillos de distancia y marcaciones: en la MISMA capa que los objetivos
+    // (se repintan con ellos cuando cuelgan de uno) y creados antes, para que
+    // los objetivos queden dibujados encima.
+    m_rangeLayer = new RangeLayer(this, m_targetModel);
+    m_rangeLayer->setLayer(QStringLiteral("targets"));
+    m_rangeLayer->setAxisMapper(
+        [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
     m_targetLayer = new TargetLayer(this, m_targetModel);
     m_targetLayer->setLayer(QStringLiteral("targets"));
     m_targetLayer->setAxisMapper(

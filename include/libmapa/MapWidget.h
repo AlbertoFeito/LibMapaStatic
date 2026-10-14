@@ -669,6 +669,47 @@ public:
     //! Metros/kilometros (por defecto) o millas nauticas.
     void setScaleBarUnits(ScaleUnits units);
     ScaleUnits scaleBarUnits() const;
+
+    // --- Anillos de distancia y marcaciones ------------------------------
+    /*!
+     * \brief Pone anillos de distancia (VRM) alrededor de un punto o de un
+     *        objetivo (al que siguen al moverse). Ver \ref RangeRings.
+     *
+     * Rotulados en las unidades de la escala (\ref setScaleBarUnits). Si el
+     * objetivo deja de existir, los anillos no se dibujan (siguen guardados).
+     * \return su id (comun con las marcaciones), o -1 sin vista.
+     */
+    qint64 addRangeRings(const RangeRings &rings);
+    bool updateRangeRings(qint64 id, const RangeRings &rings);
+    /*!
+     * \brief Pone una linea de marcacion (EBL) entre puntos u objetivos, o desde
+     *        uno con un rumbo y una longitud. Ver \ref BearingLine.
+     *
+     * Muestra el rumbo verdadero y la distancia ("045° · 5.2 NM"), que se
+     * actualizan solos si los extremos son objetivos que se mueven.
+     */
+    qint64 addBearingLine(const BearingLine &line);
+    bool updateBearingLine(qint64 id, const BearingLine &line);
+    //! Quita unos anillos o una marcacion. false si el id no existe.
+    bool removeRangeMark(qint64 id);
+    void clearRangeMarks();
+    //! Ids de anillos y marcaciones, ordenados.
+    QVector<qint64> rangeMarks() const;
+    //! Rumbo verdadero (grados) y distancia (m) actuales de una marcacion.
+    //! false si no existe o algun extremo no se puede resolver ahora.
+    bool bearingLineMeasure(qint64 id, double *bearingDeg, double *distanceMeters) const;
+
+    /*!
+     * \brief Que lineas marcan su primer y su ultimo punto.
+     *
+     * Inicio con un circulo verde y fin con un cuadrado rojo. La linea
+     * SELECCIONADA lleva ademas los rotulos "inicio" y "fin" con su hora, si
+     * la tiene (atributos \c time_start / \c time_end, que pone la lectura de
+     * GPX). Por defecto \ref RouteEndpoints::Routes: siempre las rutas y
+     * tracks leidos de GPX, y cualquier linea al seleccionarla.
+     */
+    void setRouteEndpoints(RouteEndpoints mode);
+    RouteEndpoints routeEndpoints() const;
     //! Resolucion del mapa en el centro de la vista, en metros por pixel
     //! (0 si aun no hay vista). Es el dato con el que se dibuja la escala.
     double metersPerPixel() const;

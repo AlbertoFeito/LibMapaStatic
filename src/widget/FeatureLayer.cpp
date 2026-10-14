@@ -3,6 +3,7 @@
 #include "core/Logging.h"
 #include "widget/MapView.h"
 
+#include <QDateTime>
 #include <QPainterPath>
 #include <QStringList>
 #include <algorithm>
@@ -266,6 +267,10 @@ void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
         && f.kind != GeometryKind::Point)
         drawVertices(painter, f);
 
+    // Inicio y fin encima de los tiradores: son lo que se busca en una ruta.
+    if (f.kind == GeometryKind::Polyline)
+        drawEndpoints(painter, f, selected);
+
     if (f.style.labelVisible && !f.name.isEmpty()) {
         const QPointF base = labelAnchorScreen(f);
         if (!base.isNull())
@@ -375,6 +380,110 @@ void FeatureLayer::setAlertColor(const QColor &color)
 {
     m_alertColor = color;
     markDirty();
+}
+
+// Cambia que lineas marcan su inicio y su fin, y redibuja.
+void FeatureLayer::setRouteEndpoints(RouteEndpoints mode)
+{
+    if (mode == m_endpoints)
+        return;
+    m_endpoints = mode;
+    markDirty();
+}
+
+// Lee una hora ISO 8601 de un atributo (con o sin milisegundos y con zona),
+// como la escribe la lectura de GPX. Invalida si no hay o no se entiende.
+static QDateTime horaIso(const QVariant &v)
+{
+    const QString txt = v.toString().trimmed();
+    if (txt.isEmpty())
+        return QDateTime();
+    const QDateTime t = QDateTime::fromString(txt, Qt::ISODateWithMs);
+    return t.isValid() ? t : QDateTime::fromString(txt, Qt::ISODate);
+}
+
+// Hora de un extremo de ruta para el rotulo, en hora local; con fecha si
+// \a conFecha (no es de hoy, o la ruta cruza de dia).
+static QString textoHora(const QDateTime &t, bool conFecha)
+{
+    if (!t.isValid())
+        return QString();
+    return t.toLocalTime().toString(conFecha ? QStringLiteral("dd/MM/yyyy HH:mm:ss")
+                                             : QStringLiteral("HH:mm:ss"));
+}
+
+// Inicio (circulo verde) y fin (cuadrado rojo) de una linea, segun el modo:
+// la seleccionada siempre que no esten ocultos, las rutas GPX (atributo
+// gpx_kind) desde Routes, y todas con AllLines. La seleccionada lleva ademas
+// los rotulos "inicio"/"fin" con su hora, para saber de un vistazo por donde
+// empezo y acabo un recorrido (p. ej. un historial de objetivo importado).
+void FeatureLayer::drawEndpoints(QPainter *painter, const MapFeature &f, bool selected) const
+{
+    const bool ruta = f.attributes.contains(QStringLiteral("gpx_kind"));
+    const bool toca = m_endpoints != RouteEndpoints::Hidden
+        && (selected || m_endpoints == RouteEndpoints::AllLines
+            || (ruta && m_endpoints == RouteEndpoints::Routes));
+    if (!toca)
+        return;
+    const auto partes = f.outlines();
+    if (partes.isEmpty() || partes.first().isEmpty() || partes.last().isEmpty())
+        return;
+    const QGeoCoordinate ini = partes.first().first();
+    const QGeoCoordinate fin = partes.last().last();
+    const QPointF pi = screenPos(ini), pf = screenPos(fin);
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setPen(QPen(Qt::white, 2.0));
+    painter->setBrush(QColor(0x2e, 0x7d, 0x32));
+    painter->drawEllipse(pi, 6.0, 6.0);
+    painter->setBrush(QColor(0xc6, 0x28, 0x28));
+    painter->drawRect(QRectF(pf.x() - 5.5, pf.y() - 5.5, 11.0, 11.0));
+
+    if (selected) {
+        // Fecha completa si no es de hoy o si inicio y fin son de dias distintos.
+        const QDateTime ti = horaIso(f.attributes.value(QStringLiteral("time_start")));
+        const QDateTime tf = horaIso(f.attributes.value(QStringLiteral("time_end")));
+        const QDate hoy = QDate::currentDate();
+        const bool conFecha = (ti.isValid() && ti.toLocalTime().date() != hoy)
+                           || (tf.isValid() && tf.toLocalTime().date() != hoy);
+        const QString hi = textoHora(ti, conFecha);
+        const QString hf = textoHora(tf, conFecha);
+        const QString txtIni = hi.isEmpty() ? tr("inicio") : tr("inicio %1").arg(hi);
+        const QString txtFin = hf.isEmpty() ? tr("fin") : tr("fin %1").arg(hf);
+
+        QFont fnt = painter->font();
+        fnt.setPointSizeF(8.0);
+        fnt.setBold(true);
+        painter->setFont(fnt);
+        const QFontMetrics fm(fnt);
+        // Cada rotulo va hacia FUERA del recorrido (el de inicio por detras del
+        // inicio, el de fin por delante del fin): asi no se pisan entre si ni
+        // con la linea aunque la ruta sea corta en pantalla.
+        const QPointF dir = pf - pi;
+        const bool horizontal = std::abs(dir.x()) >= std::abs(dir.y());
+        const auto rotulo = [&](const QPointF &p, const QString &txt, const QColor &c,
+                                bool haciaAtras) {
+            const double w = fm.horizontalAdvance(txt) + 8.0, h = fm.height() + 2.0;
+            QPointF esquina;
+            if (horizontal) {
+                const bool izquierda = (dir.x() >= 0.0) == haciaAtras;
+                esquina = QPointF(izquierda ? p.x() - 10.0 - w : p.x() + 10.0, p.y() - h / 2.0);
+            } else {
+                const bool arriba = (dir.y() >= 0.0) == haciaAtras;
+                esquina = QPointF(p.x() - w / 2.0, arriba ? p.y() - 10.0 - h : p.y() + 10.0);
+            }
+            const QRectF caja(esquina, QSizeF(w, h));
+            painter->setPen(QPen(c, 1.0));
+            painter->setBrush(QColor(255, 255, 255, 225));
+            painter->drawRoundedRect(caja, 3.0, 3.0);
+            painter->setPen(c.darker(130));
+            painter->drawText(caja, Qt::AlignCenter, txt);
+        };
+        rotulo(pi, txtIni, QColor(0x2e, 0x7d, 0x32), true);
+        rotulo(pf, txtFin, QColor(0xc6, 0x28, 0x28), false);
+    }
+    painter->restore();
 }
 
 // Dibuja una parte de tipo LINEA o POLIGONO: relleno + contorno para poligonos,

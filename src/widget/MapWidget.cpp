@@ -6,6 +6,7 @@
 #include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
 #include "geo/WebMercator.h"
+#include "geo/MapDecor.h"
 #include "geo/ProximityMonitor.h"
 #include "geo/ZoneMonitor.h"
 #include "tiles/RMapsTileSource.h"
@@ -184,14 +185,9 @@ public:
     // distancia actual si ya estan dentro y se alejan. Unidades de la escala.
     QString textoCpa(const CpaResult &c) const
     {
-        const bool nauticas = view && view->scaleBarLayer()
-            && view->scaleBarLayer()->units() == ScaleUnits::Nautical;
-        const auto distancia = [nauticas](double m) {
-            if (nauticas)
-                return QStringLiteral("%1 NM").arg(m / 1852.0, 0, 'f', m < 18520.0 ? 2 : 1);
-            return m < 1000.0 ? QStringLiteral("%1 m").arg(qRound(m))
-                              : QStringLiteral("%1 km").arg(m / 1000.0, 0, 'f', 2);
-        };
+        const ScaleUnits u = view && view->scaleBarLayer() ? view->scaleBarLayer()->units()
+                                                           : ScaleUnits::Metric;
+        const auto distancia = [u](double m) { return MapDecor::formatDistance(m, u); };
         if (c.timeSeconds < 0.0)
             return QStringLiteral("%1 (se alejan)").arg(distancia(c.currentDistanceMeters));
         const double s = c.timeSeconds;
@@ -2095,7 +2091,86 @@ void MapWidget::setScaleBarUnits(ScaleUnits units)
     if (!d->view || !d->view->scaleBarLayer())
         return;
     d->view->scaleBarLayer()->setUnits(units);
+    // Las mismas unidades rotulan anillos, marcaciones y alertas CPA.
+    if (d->view->rangeLayer())
+        d->view->rangeLayer()->setUnits(units);
+    d->refreshProximityLines();
     d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// ---------------------------------------- anillos de distancia y marcaciones --
+
+// Alta de anillos de distancia; -1 sin vista. Reenvio a RangeLayer.
+qint64 MapWidget::addRangeRings(const RangeRings &rings)
+{
+    return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->addRings(rings) : -1;
+}
+
+// Cambia unos anillos (p. ej. otra separacion). false si el id no es de anillos.
+bool MapWidget::updateRangeRings(qint64 id, const RangeRings &rings)
+{
+    return d->view && d->view->rangeLayer() && d->view->rangeLayer()->updateRings(id, rings);
+}
+
+// Alta de una marcacion; -1 sin vista.
+qint64 MapWidget::addBearingLine(const BearingLine &line)
+{
+    return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->addBearing(line) : -1;
+}
+
+// Cambia una marcacion. false si el id no es de marcacion.
+bool MapWidget::updateBearingLine(qint64 id, const BearingLine &line)
+{
+    return d->view && d->view->rangeLayer() && d->view->rangeLayer()->updateBearing(id, line);
+}
+
+// Quita unos anillos o una marcacion.
+bool MapWidget::removeRangeMark(qint64 id)
+{
+    return d->view && d->view->rangeLayer() && d->view->rangeLayer()->remove(id);
+}
+
+// Quita todos los anillos y marcaciones.
+void MapWidget::clearRangeMarks()
+{
+    if (d->view && d->view->rangeLayer())
+        d->view->rangeLayer()->clear();
+}
+
+// Ids de anillos y marcaciones, ordenados.
+QVector<qint64> MapWidget::rangeMarks() const
+{
+    return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->ids() : QVector<qint64>();
+}
+
+// Rumbo verdadero y distancia actuales de una marcacion (con sus objetivos
+// donde esten ahora). false si no existe o no se puede resolver.
+bool MapWidget::bearingLineMeasure(qint64 id, double *bearingDeg, double *distanceMeters) const
+{
+    QGeoCoordinate a, b;
+    if (!d->view || !d->view->rangeLayer() || !d->view->rangeLayer()->bearingEnds(id, &a, &b))
+        return false;
+    if (bearingDeg)
+        *bearingDeg = a.azimuthTo(b);
+    if (distanceMeters)
+        *distanceMeters = a.distanceTo(b);
+    return true;
+}
+
+// Que lineas marcan su inicio y su fin. Reenvio a la capa de entidades.
+void MapWidget::setRouteEndpoints(RouteEndpoints mode)
+{
+    if (!d->view || !d->view->featureLayer())
+        return;
+    d->view->featureLayer()->setRouteEndpoints(mode);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Modo actual de las marcas de inicio/fin.
+RouteEndpoints MapWidget::routeEndpoints() const
+{
+    return d->view && d->view->featureLayer() ? d->view->featureLayer()->routeEndpoints()
+                                              : RouteEndpoints::Routes;
 }
 
 // Unidades actuales de la escala (metrico si no hay vista).

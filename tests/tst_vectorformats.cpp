@@ -21,6 +21,7 @@ private slots:
     void reportsBadInput();
     void writesAndReadsFiles();
     void gpxTracksKeepTimes();
+    void gpxRoutesKnowStartAndEnd();
 };
 
 // Tres entidades de prueba: un punto con atributos, una linea de dos partes y
@@ -335,6 +336,45 @@ void TstVectorFormats::gpxTracksKeepTimes()
 
     QVERIFY(parseGpxTracks("<gpx><wpt lat=\"1\" lon=\"2\"/></gpx>", &err).isEmpty());
     QVERIFY(!err.isEmpty());
+}
+
+// Una ruta o track leido como entidad sabe que lo es (gpx_kind) y, si sus
+// puntos traen hora, cuando empezo y acabo (time_start / time_end, UTC). Un
+// historial exportado trae ademas el id del objetivo.
+void TstVectorFormats::gpxRoutesKnowStartAndEnd()
+{
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413000LL).toUTC();
+    GpxTrack h;
+    h.name = QStringLiteral("Buque 7");
+    h.targetId = 7;
+    h.points = { { QGeoCoordinate(23.0, -82.0), t0 },
+                 { QGeoCoordinate(23.1, -82.0), t0.addSecs(600) },
+                 { QGeoCoordinate(23.2, -82.1), t0.addSecs(1800) } };
+    const QVector<MapFeature> f = parseGpx(tracksToGpx({ h }));
+    QCOMPARE(f.size(), 1);
+    QCOMPARE(f[0].kind, GeometryKind::Polyline);
+    QCOMPARE(f[0].attributes.value(QStringLiteral("gpx_kind")).toString(), QStringLiteral("trk"));
+    QCOMPARE(f[0].attributes.value(QStringLiteral("target_id")).toLongLong(), 7LL);
+    QCOMPARE(QDateTime::fromString(f[0].attributes.value(QStringLiteral("time_start")).toString(),
+                                   Qt::ISODateWithMs), t0);
+    QCOMPARE(QDateTime::fromString(f[0].attributes.value(QStringLiteral("time_end")).toString(),
+                                   Qt::ISODateWithMs), t0.addSecs(1800));
+
+    // Ruta sin horas: es ruta, pero sin inicio ni fin con hora. Los waypoints
+    // y los poligonos no se marcan como ruta.
+    const QByteArray otro =
+        "<gpx><rte><name>R</name><rtept lat=\"1\" lon=\"2\"/><rtept lat=\"1.1\" lon=\"2.1\"/></rte>"
+        "<wpt lat=\"3\" lon=\"4\"/></gpx>";
+    const QVector<MapFeature> g = parseGpx(otro);
+    QCOMPARE(g.size(), 2);
+    for (const MapFeature &e : g) {
+        if (e.kind == GeometryKind::Polyline) {
+            QCOMPARE(e.attributes.value(QStringLiteral("gpx_kind")).toString(), QStringLiteral("rte"));
+            QVERIFY(!e.attributes.contains(QStringLiteral("time_start")));
+        } else {
+            QVERIFY(!e.attributes.contains(QStringLiteral("gpx_kind")));
+        }
+    }
 }
 
 QTEST_MAIN(TstVectorFormats)

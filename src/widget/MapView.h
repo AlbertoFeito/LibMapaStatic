@@ -11,6 +11,7 @@
 #include "widget/HillshadeLayer.h"
 #include "widget/FeatureLayer.h"
 #include "widget/OverlayModel.h"
+#include "widget/RangeLayer.h"
 #include "widget/TargetLayer.h"
 #include "widget/TargetModel.h"
 #include "widget/TileLayer.h"
@@ -52,6 +53,7 @@ public:
     CoverageLayer *coverageLayer() const { return m_coverageLayer; }
     GraticuleLayer *graticuleLayer() const { return m_graticuleLayer; }
     ScaleBarLayer *scaleBarLayer() const { return m_scaleBarLayer; }
+    RangeLayer *rangeLayer() const { return m_rangeLayer; }
     HillshadeLayer *hillshadeLayer() const { return m_hillshadeLayer; }
 
     QGeoCoordinate center() const;
@@ -215,6 +217,7 @@ private:
     CoverageLayer *m_coverageLayer = nullptr;
     GraticuleLayer *m_graticuleLayer = nullptr;
     ScaleBarLayer *m_scaleBarLayer = nullptr;
+    RangeLayer *m_rangeLayer = nullptr;       //!< Anillos y marcaciones (capa "targets").
     HillshadeLayer *m_hillshadeLayer = nullptr;
 
     int m_zoom = 10;

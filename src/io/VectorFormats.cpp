@@ -488,22 +488,44 @@ void escribirDatoKml(QXmlStreamWriter &w, const QString &nombre, const QString &
 
 // ================================================================== GPX ===
 
+// Lee una hora GPX. Acepta con o sin milisegundos y con zona (Z o +hh:mm);
+// el resultado queda en UTC. Invalida si el texto no es una fecha ISO.
+QDateTime leerHoraGpx(const QString &txt)
+{
+    QDateTime t = QDateTime::fromString(txt.trimmed(), Qt::ISODateWithMs);
+    if (!t.isValid())
+        t = QDateTime::fromString(txt.trimmed(), Qt::ISODate);
+    return t.isValid() ? t.toUTC() : QDateTime();
+}
+
 // Lee los puntos de un <rte>/<trkseg> (el lector esta sobre su apertura) hasta
-// su cierre: cada rtept/trkpt con lat/lon.
+// su cierre: cada rtept/trkpt con lat/lon. Si se piden, anota la primera y la
+// ultima hora (<time>) que aparezcan: el inicio y el fin del recorrido.
 QVector<QGeoCoordinate> puntosGpx(QXmlStreamReader &xml, const QString &cierre,
-                                  const QString &punto)
+                                  const QString &punto, QDateTime *primera = nullptr,
+                                  QDateTime *ultima = nullptr)
 {
     QVector<QGeoCoordinate> pts;
     while (!xml.atEnd()) {
         xml.readNext();
         if (xml.isEndElement() && xml.name() == cierre)
             break;
-        if (xml.isStartElement() && xml.name() == punto) {
+        if (!xml.isStartElement())
+            continue;
+        if (xml.name() == punto) {
             bool okLat = false, okLon = false;
             const double lat = xml.attributes().value(QLatin1String("lat")).toDouble(&okLat);
             const double lon = xml.attributes().value(QLatin1String("lon")).toDouble(&okLon);
             if (okLat && okLon)
                 pts.append(QGeoCoordinate(lat, lon));
+        } else if (xml.name() == QLatin1String("time") && (primera || ultima)) {
+            const QDateTime t = leerHoraGpx(xml.readElementText());
+            if (t.isValid()) {
+                if (primera && !primera->isValid())
+                    *primera = t;
+                if (ultima)
+                    *ultima = t;
+            }
         }
     }
     return pts;
@@ -519,6 +541,7 @@ void leerElementoGpx(QXmlStreamReader &xml, QVector<MapFeature> &out)
     QVector<QVector<QGeoCoordinate>> partes;
     QVector<QGeoCoordinate> ruta;    // puntos de un <rte>
     bool poligono = false;
+    QDateTime inicio, fin;           // primera y ultima hora de un <trk>
 
     if (raiz == QLatin1String("wpt")) {
         bool okLat = false, okLon = false;
@@ -561,6 +584,13 @@ void leerElementoGpx(QXmlStreamReader &xml, QVector<MapFeature> &out)
         } else if (n == QLatin1String("polygon")) {
             poligono = xml.readElementText().trimmed() == QLatin1String("true");
             --nivel;
+        } else if (n == QLatin1String("targetId")) {
+            // Historial exportado por exportTargetHistory: el id del objetivo.
+            bool ok = false;
+            const qint64 id = xml.readElementText().trimmed().toLongLong(&ok);
+            if (ok)
+                base.attributes.insert(QStringLiteral("target_id"), id);
+            --nivel;
         } else if (directo && n == QLatin1String("rtept") && raiz == QLatin1String("rte")) {
             bool okLat = false, okLon = false;
             const double lat = xml.attributes().value(QLatin1String("lat")).toDouble(&okLat);
@@ -568,7 +598,8 @@ void leerElementoGpx(QXmlStreamReader &xml, QVector<MapFeature> &out)
             if (okLat && okLon)
                 ruta.append(QGeoCoordinate(lat, lon));
         } else if (directo && n == QLatin1String("trkseg")) {
-            partes.append(puntosGpx(xml, QStringLiteral("trkseg"), QStringLiteral("trkpt")));
+            partes.append(puntosGpx(xml, QStringLiteral("trkseg"), QStringLiteral("trkpt"),
+                                    &inicio, &fin));
             --nivel;
         }
     }
@@ -582,6 +613,15 @@ void leerElementoGpx(QXmlStreamReader &xml, QVector<MapFeature> &out)
             p = sinCierre(p);
         anadir(out, base, GeometryKind::Polygon, partes);
     } else {
+        // Una ruta o un track: se marca como tal (el mapa señala su inicio y
+        // su fin) y, si sus puntos traen hora, se guardan la primera y la
+        // ultima para rotularlas.
+        base.attributes.insert(QStringLiteral("gpx_kind"), raiz);
+        if (inicio.isValid())
+            base.attributes.insert(QStringLiteral("time_start"),
+                                   inicio.toString(Qt::ISODateWithMs));
+        if (fin.isValid())
+            base.attributes.insert(QStringLiteral("time_end"), fin.toString(Qt::ISODateWithMs));
         anadir(out, base, GeometryKind::Polyline, partes);
     }
 }
@@ -906,16 +946,6 @@ namespace {
 QString horaGpx(const QDateTime &t)
 {
     return t.toUTC().toString(Qt::ISODateWithMs);
-}
-
-// Lee una hora GPX. Acepta con o sin milisegundos y con zona (Z o +hh:mm);
-// el resultado queda en UTC. Invalida si el texto no es una fecha ISO.
-QDateTime leerHoraGpx(const QString &txt)
-{
-    QDateTime t = QDateTime::fromString(txt.trimmed(), Qt::ISODateWithMs);
-    if (!t.isValid())
-        t = QDateTime::fromString(txt.trimmed(), Qt::ISODate);
-    return t.isValid() ? t.toUTC() : QDateTime();
 }
 
 // Lee un <trk> (el lector esta sobre su apertura) con nombre, descripcion,

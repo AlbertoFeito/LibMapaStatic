@@ -322,7 +322,7 @@ class Ventana : public QMainWindow
     Q_OBJECT
 
     //! Punto que se está capturando del mapa (pestaña Elevación).
-    enum class Pick { Ninguno, A, B };
+    enum class Pick { Ninguno, A, B, Anillos, OrigenEbl, DestinoEbl };
 
 public:
     //! \a origen es un datasets.json o, si \a esPaquete, la carpeta de un
@@ -726,6 +726,40 @@ private:
         // Ir a una coordenada escrita en cualquier formato.
         connect(mVer->addAction(tr("Ir a coordenada...")), &QAction::triggered,
                 this, &Ventana::irACoordenada);
+        mVer->addSeparator();
+        // Medidas que se quedan en el mapa: anillos de distancia (VRM) y
+        // líneas de marcación (EBL), fijas o colgadas de objetivos.
+        auto *accAnillos = mVer->addAction(tr("Anillos de distancia..."));
+        accAnillos->setStatusTip(tr("Anillos alrededor del objetivo seleccionado (lo siguen) "
+                                    "o de un punto que pinches."));
+        connect(accAnillos, &QAction::triggered, this, &Ventana::ponerAnillos);
+        auto *accEbl = mVer->addAction(tr("Marcación (rumbo y distancia)"));
+        accEbl->setStatusTip(tr("Línea con rumbo y distancia desde el objetivo seleccionado "
+                                "(o un punto) hasta otro objetivo o punto que pinches."));
+        connect(accEbl, &QAction::triggered, this, &Ventana::ponerMarcacion);
+        // Inicio (verde) y fin (rojo) de las líneas: siempre en las rutas GPX
+        // (p. ej. un historial importado), y en cualquier línea seleccionada.
+        QMenu *mExtremos = mVer->addMenu(tr("Inicio y fin de rutas"));
+        auto *gExtremos = new QActionGroup(this);
+        const QList<QPair<QString, RouteEndpoints>> extremos = {
+            { tr("Ocultos"), RouteEndpoints::Hidden },
+            { tr("Solo la línea seleccionada"), RouteEndpoints::Selected },
+            { tr("Rutas GPX y la seleccionada"), RouteEndpoints::Routes },
+            { tr("Todas las líneas"), RouteEndpoints::AllLines },
+        };
+        for (const auto &e : extremos) {
+            QAction *a = mExtremos->addAction(e.first);
+            a->setCheckable(true);
+            a->setChecked(e.second == m_mapa->routeEndpoints());
+            gExtremos->addAction(a);
+            const RouteEndpoints modo = e.second;
+            connect(a, &QAction::triggered, this, [this, modo] { m_mapa->setRouteEndpoints(modo); });
+        }
+        connect(mVer->addAction(tr("Quitar anillos y marcaciones")), &QAction::triggered,
+                this, [this] {
+                    m_mapa->clearRangeMarks();
+                    statusBar()->showMessage(tr("Anillos y marcaciones quitados"), 3000);
+                });
         mVer->addSeparator();
         mVer->addAction(m_accRejilla);
         mVer->addAction(m_accCobertura);
@@ -2272,6 +2306,11 @@ private:
     void onPointPicked(const QGeoCoordinate &p)
     {
         if (m_picking == Pick::Ninguno) return;
+        if (m_picking == Pick::Anillos || m_picking == Pick::OrigenEbl
+            || m_picking == Pick::DestinoEbl) {
+            puntoDeMedida(p);
+            return;
+        }
         QDoubleSpinBox *lat = (m_picking == Pick::A) ? m_latA : m_latB;
         QDoubleSpinBox *lon = (m_picking == Pick::A) ? m_lonA : m_lonB;
         lat->setValue(p.latitude());
@@ -3914,6 +3953,125 @@ private:
             .arg(qRound(tcpa / 60.0));
     }
 
+    // Pide separación, número de anillos y radiales, y los pone alrededor del
+    // objetivo seleccionado (lo siguen al moverse) o, si no hay, del punto que
+    // se pinche a continuación.
+    void ponerAnillos()
+    {
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Anillos de distancia"));
+        auto *form = new QFormLayout(&dlg);
+        auto *sep = new QDoubleSpinBox(&dlg);
+        sep->setRange(0.05, 100.0);
+        sep->setDecimals(2);
+        sep->setSuffix(tr(" NM"));
+        sep->setValue(m_anillos.spacingMeters / 1852.0);
+        auto *num = new QSpinBox(&dlg);
+        num->setRange(1, 20);
+        num->setValue(m_anillos.count);
+        auto *radiales = new QCheckBox(tr("Radiales cada 30°"), &dlg);
+        radiales->setChecked(m_anillos.spokeEveryDeg > 0);
+        const qint64 sel = m_mapa->selectedTarget();
+        auto *donde = new QLabel(sel >= 0 ? tr("Centro: el objetivo seleccionado (lo siguen).")
+                                          : tr("Centro: pincha en el mapa tras aceptar."), &dlg);
+        donde->setWordWrap(true);
+        form->addRow(donde);
+        form->addRow(tr("Separación:"), sep);
+        form->addRow(tr("Anillos:"), num);
+        form->addRow(radiales);
+        auto *botones = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        connect(botones, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(botones, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        form->addRow(botones);
+        if (dlg.exec() != QDialog::Accepted)
+            return;
+        m_anillos.spacingMeters = sep->value() * 1852.0;
+        m_anillos.count = num->value();
+        m_anillos.spokeEveryDeg = radiales->isChecked() ? 30 : 0;
+        if (sel >= 0) {
+            RangeRings r = m_anillos;
+            r.targetId = sel;
+            m_mapa->addRangeRings(r);
+            statusBar()->showMessage(tr("Anillos alrededor del objetivo %1").arg(sel), 4000);
+            return;
+        }
+        iniciarPickMedida(Pick::Anillos, tr("Pincha el centro de los anillos…"));
+    }
+
+    // Marcación: desde el objetivo seleccionado (o un punto que se pinche) hasta
+    // otro objetivo o punto que se pinche. Si el destino cae sobre un objetivo,
+    // la línea cuelga de él y se actualiza al moverse.
+    void ponerMarcacion()
+    {
+        m_ebl = BearingLine();
+        const qint64 sel = m_mapa->selectedTarget();
+        if (sel >= 0) {
+            m_ebl.fromTarget = sel;
+            iniciarPickMedida(Pick::DestinoEbl,
+                tr("Pincha el destino de la marcación (un objetivo o un punto)…"));
+        } else {
+            iniciarPickMedida(Pick::OrigenEbl,
+                tr("Pincha el origen de la marcación (un objetivo o un punto)…"));
+        }
+    }
+
+    // Arma la herramienta de elegir punto para una medida, con su aviso.
+    void iniciarPickMedida(Pick cual, const QString &aviso)
+    {
+        m_picking = cual;
+        m_mapa->setActiveTool(MapTool::PickPoint);
+        statusBar()->showMessage(aviso, 10000);
+    }
+
+    // Objetivo a menos de ~14 px del punto (con la resolución actual), o -1.
+    qint64 objetivoCerca(const QGeoCoordinate &p) const
+    {
+        const double tolerancia = 14.0 * std::max(1.0, m_mapa->metersPerPixel());
+        qint64 mejor = -1;
+        double dMejor = tolerancia;
+        for (const MapTarget &t : m_mapa->targets()) {
+            const double d = t.position.distanceTo(p);
+            if (d <= dMejor) {
+                dMejor = d;
+                mejor = t.id;
+            }
+        }
+        return mejor;
+    }
+
+    // Punto pinchado para anillos o marcación.
+    void puntoDeMedida(const QGeoCoordinate &p)
+    {
+        const Pick cual = m_picking;
+        m_picking = Pick::Ninguno;
+        m_mapa->setActiveTool(MapTool::None);
+        if (m_accNavegar)
+            m_accNavegar->setChecked(true);
+        const qint64 obj = objetivoCerca(p);
+        if (cual == Pick::Anillos) {
+            RangeRings r = m_anillos;
+            r.targetId = obj;
+            r.center = p;
+            m_mapa->addRangeRings(r);
+            statusBar()->showMessage(obj >= 0 ? tr("Anillos alrededor del objetivo %1").arg(obj)
+                                              : tr("Anillos puestos"), 4000);
+        } else if (cual == Pick::OrigenEbl) {
+            m_ebl.fromTarget = obj;
+            m_ebl.from = p;
+            iniciarPickMedida(Pick::DestinoEbl,
+                tr("Pincha el destino de la marcación (un objetivo o un punto)…"));
+        } else {
+            m_ebl.toTarget = obj;
+            m_ebl.to = p;
+            const qint64 id = m_mapa->addBearingLine(m_ebl);
+            double rumbo = 0.0, dist = 0.0;
+            if (m_mapa->bearingLineMeasure(id, &rumbo, &dist))
+                statusBar()->showMessage(tr("Marcación %1° · %2 NM")
+                    .arg(qRound(rumbo), 3, 10, QLatin1Char('0'))
+                    .arg(dist / 1852.0, 0, 'f', 2), 6000);
+        }
+    }
+
     // Vigila (o deja de vigilar) el polígono seleccionado como zona de alerta.
     // Al empezar, la librería ya avisa de los objetivos que estén dentro.
     void alternarVigilancia()
@@ -4272,6 +4430,8 @@ private:
     QAction *m_accProximidad = nullptr;     //!< alertas CPA/TCPA entre objetivos
     double m_cpaMillas = 1.0;               //!< distancia de la alerta CPA (NM)
     int m_cpaMinutos = 10;                  //!< horizonte de la alerta CPA (min)
+    RangeRings m_anillos;                   //!< últimos ajustes de anillos (1 NM x 5)
+    BearingLine m_ebl;                      //!< marcación en curso (origen ya fijado)
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.
