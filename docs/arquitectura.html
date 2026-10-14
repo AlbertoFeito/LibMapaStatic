@@ -369,7 +369,7 @@ la API que usa la aplicación:</p>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
-<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
+<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · <b>targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible</b> · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b></td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
@@ -408,7 +408,7 @@ añadió para la descarga.</p>
 <h3>Modelos (QObject, sin dibujo)</h3>
 <table><tr><th>Clase</th><th>Rol</th></tr>
 <tr><td class="cls">OverlayModel</td><td>Guarda las entidades y capas, la selección y el historial de <b>deshacer/rehacer</b>. Separado del dibujo para poder probarlo sin ventanas.</td></tr>
-<tr><td class="cls">TargetModel</td><td>Guarda los objetivos y su traza (acotada). Operaciones O(1) por objetivo para el tiempo real; emite <code>changed()</code>.</td></tr>
+<tr><td class="cls">TargetModel</td><td>Guarda los objetivos, su traza dibujada (acotada) y su <b>historial completo</b> con hora desde el <b>origen</b> (donde se vio por primera vez), compacto (24 B/punto), con distancia mínima y aclarado al tope que nunca pierde origen ni último punto. Operaciones O(1) por objetivo para el tiempo real; emite <code>changed()</code>.</td></tr>
 </table>
 
 <!-- ===================== 8. IO ===================== -->
@@ -578,7 +578,10 @@ simbología por un hook; la app de ejemplo <code>demo</code> lo demuestra movien
 buques, aeronaves y UAVs con su icono orientado al rumbo. Un clic sobre un
 objetivo (sin herramienta) lo resalta y emite <code>targetClicked(id, pos)</code>
 (<code>targetAt(pixel)</code> hace el hit-test); la app lee entonces sus
-<code>attributes</code> para mostrarlos.</p>
+<code>attributes</code> para mostrarlos. Cada objetivo guarda además su <b>historial
+completo</b> (posición y hora) desde que se vio por primera vez; al seleccionarlo se dibuja
+entero, del <b>origen</b> (marcado con su hora) a la posición actual, aunque la traza que se
+dibuja para todos sea corta.</p>
 <p><b>Alertas de zona.</b> <code>watchZone(idPoligono)</code> convierte una entidad
 poligonal en zona vigilada: cada <code>addTarget</code>/<code>updateTarget</code>
 pasa por <code>ZoneMonitor</code> y, si el objetivo cruza el borde, se emite

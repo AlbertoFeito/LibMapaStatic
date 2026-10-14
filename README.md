@@ -18,6 +18,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
 - **Etiquetas ancladas y movibles**: el rótulo de una entidad o de un objetivo puede desplazarse (`setFeatureLabelOffset` / `setTargetLabelOffset`), queda unido a su punto por una línea guía y, al ser relativo, lo sigue cuando se mueve; se localiza aparte con `featureLabelAt` / `targetLabelAt` (hasta 3 líneas, por `\n`)
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
+- **Historial completo de cada objetivo**: además de la traza corta que se dibuja, se guarda todo su recorrido con hora desde que se vio por primera vez (`targetHistory`, `targetOrigin`); al seleccionarlo se dibuja entero desde el origen
 - **Alertas de zona**: cualquier polígono puede vigilarse (`watchZone`) y la librería avisa cuando un objetivo móvil o una entidad punto entra o sale (`targetEnteredZone` / `featureEnteredZone`…) y resalta en el mapa la zona ocupada
 - **Escala gráfica y cuadrícula de coordenadas**: `setScaleBarVisible` (metros/km o millas náuticas) y `setGraticuleVisible` (meridianos y paralelos rotulados, con paso automático según el zoom: 1°, 30', 5', 30"…)
 - **Coordenadas UTM y MGRS** (`Coordinates.h`): conversión y formato en decimal, GMS, UTM y MGRS (al milímetro frente a PROJ), lectura de lo que escribe una persona en cualquiera de ellos, y cuadrícula UTM (`setGraticuleMode`)
@@ -87,8 +88,13 @@ t.kind = "buque";
 t.attributes["mmsi"] = "224123000";
 qint64 id = mapa->addTarget(t);
 
-// 3) Desde tu feed, vía rápida de tiempo real (entra en la traza):
-mapa->updateTarget(id, nuevaPos, nuevoRumbo);
+// 3) Desde tu feed, vía rápida de tiempo real (entra en la traza y en el historial;
+//    la hora es opcional, p. ej. la del mensaje AIS):
+mapa->updateTarget(id, nuevaPos, nuevoRumbo, horaDelMensaje);
+
+// 4) Recorrido completo y origen (donde y cuando se vio por primera vez):
+auto origen = mapa->targetOrigin(id);          // origen.position, origen.time
+auto recorrido = mapa->targetHistory(id);      // todo, hasta que se borre el objetivo
 mapa->setTargetAttribute(id, "velocidad", 12.4);
 ```
 
@@ -633,6 +639,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 20 | Escala gráfica (métrica o náutica) y cuadrícula de coordenadas rotulada (`setScaleBarVisible`, `setGraticuleVisible`) |
 | 21 | Intercambio vectorial: importar/exportar entidades en GeoJSON, KML y GPX (`importVectorFile`, `exportVectorFile`) |
 | 22 | Coordenadas UTM/MGRS (conversión, formato, lectura) y cuadrícula UTM; alertas de zona también para entidades punto, con resalte en el mapa |
+| 23 | Historial completo de cada objetivo desde su origen (con hora), dibujado entero al seleccionarlo |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

@@ -49,6 +49,12 @@ public:
     //! etiqueta aunque el nivel de detalle las haya apagado.
     void setSelected(qint64 id);
 
+    //! Si el objetivo seleccionado dibuja su HISTORIAL COMPLETO desde el origen
+    //! (donde se vio por primera vez, marcado con un cuadro y su hora). Activo
+    //! por defecto.
+    void setSelectedHistoryVisible(bool on);
+    bool isSelectedHistoryVisible() const { return m_historyVisible; }
+
     //! Nivel de detalle para escalar a MILES de objetivos: si en un repintado
     //! hay mas objetivos visibles que \a maxLabels no se dibuja ninguna etiqueta
     //! (a esa densidad se solaparian en una mancha ilegible); igual con las
@@ -83,6 +89,8 @@ private:
     void drawTarget(QPainter *painter, const TargetModel::Entry &e,
                     const QPointF &pos, bool drawTrail, bool drawLabel,
                     bool selected, QSet<qint64> &labelCells) const;
+    // Historial completo del objetivo seleccionado y marca de su origen.
+    void drawHistory(QPainter *painter, const TargetModel::Entry &e) const;
 
     TargetModel *m_model = nullptr;
     std::function<QPointF(const QGeoCoordinate &)> m_toAxis;
@@ -92,6 +100,7 @@ private:
     int m_labelBudget = 150;         //!< Tope de etiquetas visibles (nivel detalle).
     int m_trailBudget = 400;         //!< Tope de trazas visibles (nivel detalle).
     qint64 m_selected = -1;          //!< Objetivo resaltado (-1 = ninguno).
+    bool m_historyVisible = true;    //!< El seleccionado muestra su historial.
     QTimer m_repintar;               //!< Agrupa avisos: como mucho ~30 fps.
     mutable int m_lastDrawn = 0;
     mutable int m_lastLabels = 0;

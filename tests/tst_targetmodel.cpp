@@ -19,6 +19,12 @@ private slots:
     void labelAndRemoveAndClear();
     void carriesKindAndAttributes();
     void scalesToManyTargets();
+    //! El historial guarda todo desde el ORIGEN aunque la traza dibujada sea corta.
+    void historyKeepsOriginBeyondTrail();
+    //! Al pasar del tope se aclara, pero origen y ultimo punto no se pierden.
+    void historyThinningKeepsOriginAndLast();
+    //! Distancia minima, horas dadas por la app y borrado.
+    void historyTimesMinDistanceAndRemoval();
 };
 
 static MapTarget objetivo(double lat, double lon, const QString &etq = QString())
@@ -195,6 +201,78 @@ void TstTargetModel::scalesToManyTargets()
     QCOMPARE(m.count(), N);
     for (qint64 id : ids)
         QVERIFY(m.trail(id).size() <= 200);     // traza acotada en todos
+}
+
+// Traza dibujada de 10 puntos, 500 actualizaciones: el historial las tiene todas
+// y su primer punto es donde se dio de alta el objetivo.
+void TstTargetModel::historyKeepsOriginBeyondTrail()
+{
+    TargetModel m;
+    m.setTrailMaxPoints(10);
+    const qint64 id = m.upsert(objetivo(20.0, -80.0));
+    for (int i = 1; i <= 500; ++i)
+        QVERIFY(m.update(id, QGeoCoordinate(20.0 + i * 0.001, -80.0)));
+
+    QCOMPARE(m.trail(id).size(), 10);                 // lo que se dibuja: corto
+    const QVector<TargetTrackPoint> h = m.history(id);
+    QCOMPARE(h.size(), 501);                          // el historial: todo
+    QCOMPARE(h.first().position, QGeoCoordinate(20.0, -80.0));
+    QCOMPARE(m.origin(id).position, QGeoCoordinate(20.0, -80.0));
+    QVERIFY(qAbs(h.last().position.latitude() - 20.5) < 1e-9);
+}
+
+// Tope de 100 puntos con 1000 actualizaciones: nunca pasa del tope, conserva el
+// origen y la ultima posicion, y sigue cubriendo todo el recorrido (los
+// intermedios van ordenados de sur a norte).
+void TstTargetModel::historyThinningKeepsOriginAndLast()
+{
+    TargetModel m;
+    m.setHistoryMaxPoints(100);
+    const qint64 id = m.upsert(objetivo(10.0, -70.0));
+    for (int i = 1; i <= 1000; ++i)
+        m.update(id, QGeoCoordinate(10.0 + i * 0.001, -70.0));
+
+    const QVector<TargetTrackPoint> h = m.history(id);
+    QVERIFY(h.size() <= 100);
+    QVERIFY(h.size() >= 40);
+    QCOMPARE(h.first().position, QGeoCoordinate(10.0, -70.0));
+    QVERIFY(qAbs(h.last().position.latitude() - 11.0) < 1e-9);
+    for (int i = 1; i < int(h.size()); ++i)
+        QVERIFY(h[i].position.latitude() > h[i - 1].position.latitude());
+
+    // Bajar el tope aclara en el acto, sin perder los extremos.
+    m.setHistoryMaxPoints(2);
+    QCOMPARE(m.history(id).size(), 2);
+    QCOMPARE(m.history(id).first().position, QGeoCoordinate(10.0, -70.0));
+}
+
+// Un objetivo parado (o casi) no llena el historial; la hora de la app se
+// respeta (la del ORIGEN incluida); al borrar el objetivo su historial se va.
+void TstTargetModel::historyTimesMinDistanceAndRemoval()
+{
+    TargetModel m;
+    m.setHistoryMinDistance(10.0);
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1700000000000LL).toUTC();
+    const qint64 id = m.upsert(objetivo(23.0, -82.0), t0);
+    for (int i = 0; i < 50; ++i)                      // ~1 m: por debajo de 10 m
+        m.update(id, QGeoCoordinate(23.0 + 0.00001 * (i % 2), -82.0),
+                 std::numeric_limits<double>::quiet_NaN(), t0.addSecs(i));
+    QCOMPARE(m.history(id).size(), 1);
+
+    m.update(id, QGeoCoordinate(23.01, -82.0), 90.0, t0.addSecs(60));   // ~1.1 km
+    const QVector<TargetTrackPoint> h = m.history(id);
+    QCOMPARE(h.size(), 2);
+    QCOMPARE(h.first().time, t0);
+    QCOMPARE(m.origin(id).time, t0);
+    QCOMPARE(h.last().time, t0.addSecs(60));
+
+    // Sin hora de la app: la actual.
+    const qint64 otro = m.upsert(objetivo(1.0, 1.0));
+    QVERIFY(qAbs(m.origin(otro).time.secsTo(QDateTime::currentDateTimeUtc())) < 5);
+
+    QVERIFY(m.remove(id));
+    QVERIFY(m.history(id).isEmpty());
+    QVERIFY(!m.origin(id).isValid());
 }
 
 QTEST_MAIN(TstTargetModel)

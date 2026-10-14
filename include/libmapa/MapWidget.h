@@ -337,12 +337,16 @@ public:
      * una capa propia que se repinta sola sin rehacer teselas ni entidades.
      * Si \a target.id es < 0 se asigna uno. Devuelve el identificador o -1.
      */
-    qint64 addTarget(const MapTarget &target);
+    //! \a time: hora del dato (p. ej. la del mensaje AIS); invalida = ahora.
+    //! Es la hora del ORIGEN del historial si el objetivo es nuevo.
+    qint64 addTarget(const MapTarget &target, const QDateTime &time = QDateTime());
 
     //! Via rapida del tiempo real: nueva posicion (y rumbo) de un objetivo ya
-    //! existente, anadiendola a su traza. NaN en el rumbo lo deja como estaba.
+    //! existente, anadiendola a su traza y a su historial. NaN en el rumbo lo
+    //! deja como estaba; \a time es la hora del dato (invalida = ahora).
     bool updateTarget(qint64 id, const QGeoCoordinate &position,
-                      double headingDeg = std::numeric_limits<double>::quiet_NaN());
+                      double headingDeg = std::numeric_limits<double>::quiet_NaN(),
+                      const QDateTime &time = QDateTime());
 
     bool setTargetLabel(qint64 id, const QString &text);
 
@@ -380,7 +384,33 @@ public:
 
     //! Longitud de la traza de cada objetivo: < 0 = toda (ilimitada),
     //! 0 = sin traza, > 0 = las ultimas N posiciones (p. ej. 10, 100, 500).
+    //! Es solo lo que se DIBUJA para todos; el historial completo va aparte.
     void setTargetTrailLength(int maxPoints);
+
+    /*!
+     * \brief Historial completo de un objetivo: todas sus posiciones con hora,
+     *        desde que se vio por primera vez en el sistema hasta ahora.
+     *
+     * Se guarda mientras el objetivo exista (se pierde con \ref removeTarget o
+     * \ref clearTargets: leelo antes si la app quiere archivarlo) y es
+     * independiente de la traza dibujada (\ref setTargetTrailLength). El primer
+     * punto es el ORIGEN. Al seleccionar un objetivo se dibuja entero, con el
+     * origen marcado (\ref setSelectedTargetHistoryVisible).
+     *
+     * Memoria acotada: no se anotan puntos a menos de
+     * \ref setTargetHistoryMinDistance metros del anterior (1 m por defecto) y,
+     * pasado \ref setTargetHistoryLimit puntos (5000 por defecto), se aclaran
+     * los intermedios — el origen y la ultima posicion nunca se pierden.
+     */
+    QVector<TargetTrackPoint> targetHistory(qint64 id) const;
+    //! Origen de un objetivo: donde y cuando se vio por primera vez (invalido si
+    //! no existe).
+    TargetTrackPoint targetOrigin(qint64 id) const;
+    void setTargetHistoryLimit(int maxPoints);
+    void setTargetHistoryMinDistance(double meters);
+    //! El objetivo seleccionado dibuja todo su historial desde el origen
+    //! (activo por defecto).
+    void setSelectedTargetHistoryVisible(bool on);
     //! Muestra u oculta la capa de objetivos entera.
     void setTargetsVisible(bool visible);
 

@@ -1089,11 +1089,11 @@ bool MapWidget::exportVectorFile(const QString &path, const QString &layerId,
 // documentado en TargetModel; devuelven un valor neutro sin vista.
 
 // Inserta o actualiza un objetivo movil; devuelve su id.
-qint64 MapWidget::addTarget(const MapTarget &target)
+qint64 MapWidget::addTarget(const MapTarget &target, const QDateTime &time)
 {
     if (!d->view)
         return -1;
-    const qint64 id = d->view->targetModel()->upsert(target);
+    const qint64 id = d->view->targetModel()->upsert(target, time);
     if (id >= 0)
         d->emitZoneTransitions(d->zones.updateTarget(id, target.position));
     return id;
@@ -1101,9 +1101,9 @@ qint64 MapWidget::addTarget(const MapTarget &target)
 
 // Mueve un objetivo a una nueva posicion/rumbo (camino rapido de refresco).
 bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
-                             double headingDeg)
+                             double headingDeg, const QDateTime &time)
 {
-    if (!d->view || !d->view->targetModel()->update(id, position, headingDeg))
+    if (!d->view || !d->view->targetModel()->update(id, position, headingDeg, time))
         return false;
     d->emitZoneTransitions(d->zones.updateTarget(id, position));
     return true;
@@ -1210,6 +1210,39 @@ void MapWidget::setTargetTrailLength(int maxPoints)
 {
     if (d->view)
         d->view->targetModel()->setTrailMaxPoints(maxPoints);
+}
+
+// Historial completo (desde el origen) de un objetivo; vacio si no existe.
+QVector<TargetTrackPoint> MapWidget::targetHistory(qint64 id) const
+{
+    return d->view ? d->view->targetModel()->history(id) : QVector<TargetTrackPoint>();
+}
+
+// Origen (primer punto del historial) de un objetivo.
+TargetTrackPoint MapWidget::targetOrigin(qint64 id) const
+{
+    return d->view ? d->view->targetModel()->origin(id) : TargetTrackPoint();
+}
+
+// Tope de puntos del historial por objetivo (se aclara al superarlo).
+void MapWidget::setTargetHistoryLimit(int maxPoints)
+{
+    if (d->view)
+        d->view->targetModel()->setHistoryMaxPoints(maxPoints);
+}
+
+// Distancia minima entre puntos del historial, en metros.
+void MapWidget::setTargetHistoryMinDistance(double meters)
+{
+    if (d->view)
+        d->view->targetModel()->setHistoryMinDistance(meters);
+}
+
+// Enciende/apaga el dibujo del historial del objetivo seleccionado.
+void MapWidget::setSelectedTargetHistoryVisible(bool on)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setSelectedHistoryVisible(on);
 }
 
 // Muestra u oculta la capa entera de objetivos (repinta solo esa capa).

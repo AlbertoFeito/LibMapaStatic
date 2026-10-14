@@ -122,6 +122,9 @@ private slots:
     //! targetAt encuentra el objetivo bajo el pixel; un clic lo selecciona y
     //! emite targetClicked.
     void selectsTargetByClick();
+    //! El historial guarda el recorrido completo y el seleccionado lo dibuja
+    //! desde el origen, aunque la traza dibujada para todos sea corta.
+    void selectedTargetShowsFullHistory();
     //! Alertas de zona: entradas/salidas de objetivos en un poligono vigilado,
     //! siguiendo tambien las ediciones y el deshacer de la zona.
     void zoneAlertsFollowTargetsAndZoneEdits();
@@ -1922,6 +1925,48 @@ void TstMapWidget::selectsTargetByClick()
     // Deseleccionar desde codigo.
     w.setSelectedTarget(-1);
     QCOMPARE(w.selectedTarget(), qint64(-1));
+}
+
+// Un objetivo recorre una «L» con la traza dibujada limitada a 5 puntos: el
+// historial conserva el origen y, al seleccionarlo, se dibuja entero (apagar el
+// historial del seleccionado cambia la imagen).
+void TstMapWidget::selectedTargetShowsFullHistory()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(9);
+    w.setCenter(QGeoCoordinate(22.0, -79.5));
+    w.setTargetTrailLength(5);
+
+    MapTarget t;
+    t.position = QGeoCoordinate(21.8, -79.9);
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1700000000000LL).toUTC();
+    const qint64 id = w.addTarget(t, t0);
+    for (int i = 1; i <= 40; ++i)                       // hacia el este...
+        QVERIFY(w.updateTarget(id, QGeoCoordinate(21.8, -79.9 + i * 0.01), 90.0, t0.addSecs(i)));
+    for (int i = 1; i <= 40; ++i)                       // ...y luego al norte
+        QVERIFY(w.updateTarget(id, QGeoCoordinate(21.8 + i * 0.01, -79.5), 0.0, t0.addSecs(40 + i)));
+
+    QCOMPARE(w.targetOrigin(id).position, QGeoCoordinate(21.8, -79.9));
+    QCOMPARE(w.targetOrigin(id).time, t0);
+    QCOMPARE(w.targetHistory(id).size(), 81);
+
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);                               // la capa agrupa repintados (~30 fps)
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+    w.setSelectedTarget(id);
+    const QImage conHistorial = captura();
+    w.setSelectedTargetHistoryVisible(false);
+    const QImage sinHistorial = captura();
+    QVERIFY(conHistorial != sinHistorial);
+    w.setSelectedTargetHistoryVisible(true);
+
+    w.removeTarget(id);
+    QVERIFY(w.targetHistory(id).isEmpty());
 }
 
 // Una zona vigilada avisa de quien entra y sale: al empezar (los que ya estan),

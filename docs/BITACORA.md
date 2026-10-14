@@ -4819,3 +4819,51 @@ Fuera de 80°S–84°N no hay UTM/MGRS (los polos son UPS, no soportado): las
 funciones devuelven inválido y el demo muestra «(fuera de UTM)».
 
 Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.
+
+## 120. Historial completo de cada objetivo, desde su origen
+
+**Problema (lo pidió el usuario).** La traza de un objetivo solo guardaba sus
+últimas 300 posiciones (`setTargetTrailLength`): pasado eso se perdía de dónde
+venía. Para saber el **origen** —dónde se empezó a ver en el sistema— hay que
+conservar todo el recorrido mientras el objetivo exista, y al seleccionarlo
+verlo entero desde el primer punto.
+
+**Qué se hizo.**
+- `TargetModel` guarda, aparte de la traza que se dibuja para todos, un
+  **historial** por objetivo con posición y hora. Se abre con el alta (ORIGEN),
+  crece con cada `update` y se pierde solo al borrar el objetivo.
+- `MapWidget`: `targetHistory(id)`, `targetOrigin(id)` (`TargetTrackPoint` =
+  posición + hora), `setTargetHistoryLimit`, `setTargetHistoryMinDistance` y
+  `setSelectedTargetHistoryVisible`. `addTarget`/`updateTarget` aceptan la hora
+  del dato (p. ej. la del mensaje AIS); sin ella, la actual en UTC.
+- `TargetLayer`: el objetivo **seleccionado** dibuja todo su historial del
+  origen a la posición actual (línea de su color sobre halo blanco) y marca el
+  origen con un cuadro y su hora («origen 22:13:20»).
+- `demo`: al pinchar un objetivo, la barra de estado añade su origen (en el
+  formato de coordenadas elegido), la hora y cuántos puntos tiene el historial.
+
+**Por qué así.**
+- **Historial separado de la traza dibujada.** La traza corta es para pintar
+  miles de objetivos a 30 fps; el historial es el dato. Mezclarlos obligaba a
+  elegir entre perder el origen o dibujar recorridos de horas para todos.
+- **Memoria acotada sin perder el origen.** Con miles de objetivos durante
+  horas, guardarlo todo sin límite agotaría la memoria. Tres medidas: puntos
+  compactos (lat, lon, ms: 24 bytes; `QGeoCoordinate`+`QDateTime` costarían
+  varias veces más), no anotar un punto a menos de 1 m del anterior (un objetivo
+  parado no crece) y, pasado el tope (5000 por defecto), **aclarar** quitando
+  uno de cada dos intermedios: el recorrido conserva su forma con la mitad de
+  resolución y **el origen y la última posición nunca se pierden**.
+- **Dibujado fuera del culling.** El historial del seleccionado se pinta
+  aunque el objetivo esté fuera de pantalla: su recorrido —y su origen— pueden
+  cruzar la vista.
+- **Hora del dato, no de llegada**, cuando la app la tiene: el origen debe decir
+  cuándo se vio, no cuándo se procesó el mensaje.
+- `QDateTime::fromMSecsSinceEpoch(ms).toUTC()` en vez de la variante con
+  `Qt::UTC`, obsoleta en Qt 6.9+ (avisaría en el Qt 6.11 del PC local).
+
+Comprobado en captura: un objetivo que hace una «L» con la traza dibujada
+limitada a 5 puntos muestra, seleccionado, la «L» entera y el origen con su hora.
+Tests: `tst_targetmodel` (historial más allá de la traza, aclarado que conserva
+extremos, distancia mínima, horas, borrado) y `tst_mapwidget`.
+
+Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.

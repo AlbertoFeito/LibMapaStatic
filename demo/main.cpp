@@ -3637,10 +3637,20 @@ private:
                          it != t->attributes.constEnd(); ++it)
                         datos << QStringLiteral("%1=%2")
                                      .arg(it.key(), it.value().toString());
+                    // Origen: donde y cuando se vio por primera vez (la
+                    // librería guarda el historial entero y, al estar
+                    // seleccionado, lo dibuja desde ese punto).
+                    const TargetTrackPoint o = m_mapa->targetOrigin(id);
+                    const QString origen = o.isValid()
+                        ? tr("   origen %1 a las %2 (%3 puntos)")
+                              .arg(formatCoordinate(o.position, m_formatoCoord),
+                                   o.time.toLocalTime().toString(QStringLiteral("HH:mm:ss")))
+                              .arg(m_mapa->targetHistory(id).size())
+                        : QString();
                     statusBar()->showMessage(
-                        tr("Objetivo %1 [%2]  %3")
-                            .arg(id).arg(t->kind, datos.join(QStringLiteral("   "))),
-                        8000);
+                        tr("Objetivo %1 [%2]  %3%4")
+                            .arg(id).arg(t->kind, datos.join(QStringLiteral("   ")), origen),
+                        12000);
                 });
     }
 

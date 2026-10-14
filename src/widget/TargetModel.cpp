@@ -26,11 +26,50 @@ void TargetModel::podarTraza(Entry &e)
         e.trail.remove(0, e.trail.size() - m_trailMax);
 }
 
+// Anota una posicion en el historial del objetivo, con su hora (la dada o, si
+// no es valida, la actual en UTC). Se salta si esta a menos de la distancia
+// minima del ultimo punto anotado (un objetivo parado no llena la memoria), y
+// si el historial se pasa del tope se aclara.
+void TargetModel::anotarHistoria(Entry &e, const QGeoCoordinate &pos, const QDateTime &time)
+{
+    if (!pos.isValid())
+        return;
+    if (!e.history.isEmpty()) {
+        const HistoryPoint &u = e.history.last();
+        const QGeoCoordinate ultimo(u.lat, u.lon);
+        if (ultimo.distanceTo(pos) < m_historyMinDist || ultimo == pos)
+            return;
+    }
+    HistoryPoint p;
+    p.lat = pos.latitude();
+    p.lon = pos.longitude();
+    p.msecs = time.isValid() ? time.toMSecsSinceEpoch() : QDateTime::currentMSecsSinceEpoch();
+    e.history.append(p);
+    aclararHistoria(e);
+}
+
+// Si el historial pasa del tope, quita uno de cada dos puntos INTERMEDIOS: el
+// historial conserva su forma con la mitad de resolucion, y el origen (primer
+// punto) y la posicion mas reciente (ultimo) se mantienen siempre.
+void TargetModel::aclararHistoria(Entry &e) const
+{
+    while (e.history.size() > m_historyMax && e.history.size() > 2) {
+        QVector<HistoryPoint> aclarado;
+        aclarado.reserve(e.history.size() / 2 + 2);
+        const int n = int(e.history.size());
+        aclarado.append(e.history.first());
+        for (int i = 2; i < n - 1; i += 2)
+            aclarado.append(e.history.at(i));
+        aclarado.append(e.history.last());
+        e.history = aclarado;
+    }
+}
+
 // Inserta o actualiza un objetivo. Si viene sin id (< 0) le asigna uno nuevo; si
 // trae id, mantiene el contador por encima de el. Extiende la traza con la nueva
 // posicion (si cambio) y emite changed() para que la vista repinte. Devuelve el
 // id, o -1 si la coordenada no es valida.
-qint64 TargetModel::upsert(MapTarget target)
+qint64 TargetModel::upsert(MapTarget target, const QDateTime &time)
 {
     if (!target.position.isValid())
         return -1;
@@ -48,6 +87,8 @@ qint64 TargetModel::upsert(MapTarget target)
         e.trail.append(target.position);
         podarTraza(e);
     }
+    // El historial se abre con el alta (ORIGEN) y se continua si ya existia.
+    anotarHistoria(e, target.position, time);
 
     emit changed();
     return target.id;
@@ -57,7 +98,7 @@ qint64 TargetModel::upsert(MapTarget target)
 // alargando su traza. Camino rapido para refrescar posiciones sin reconstruir el
 // objetivo entero. Devuelve false si el id no existe o la posicion no es valida.
 bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
-                         double headingDeg)
+                         double headingDeg, const QDateTime &time)
 {
     if (!position.isValid())
         return false;
@@ -73,6 +114,7 @@ bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
         it->trail.append(position);
         podarTraza(*it);
     }
+    anotarHistoria(*it, position, time);
 
     emit changed();
     return true;
@@ -189,6 +231,47 @@ QVector<QGeoCoordinate> TargetModel::trail(qint64 id) const
     if (it == m_targets.constEnd())
         return {};
     return it->trail;
+}
+
+// Historial completo (desde el origen) de un objetivo, con sus horas. Vacio si
+// el id no existe.
+QVector<TargetTrackPoint> TargetModel::history(qint64 id) const
+{
+    QVector<TargetTrackPoint> out;
+    auto it = m_targets.constFind(id);
+    if (it == m_targets.constEnd())
+        return out;
+    out.reserve(it->history.size());
+    for (const HistoryPoint &p : it->history)
+        out.append({ QGeoCoordinate(p.lat, p.lon),
+                     QDateTime::fromMSecsSinceEpoch(p.msecs).toUTC() });
+    return out;
+}
+
+// Origen: el primer punto del historial (donde se vio por primera vez).
+TargetTrackPoint TargetModel::origin(qint64 id) const
+{
+    auto it = m_targets.constFind(id);
+    if (it == m_targets.constEnd() || it->history.isEmpty())
+        return {};
+    const HistoryPoint &p = it->history.first();
+    return { QGeoCoordinate(p.lat, p.lon), QDateTime::fromMSecsSinceEpoch(p.msecs).toUTC() };
+}
+
+// Cambia el tope del historial (minimo 2: origen y posicion actual) y aclara ya
+// los historiales que lo superen.
+void TargetModel::setHistoryMaxPoints(int maxPoints)
+{
+    m_historyMax = qMax(2, maxPoints);
+    for (Entry &e : m_targets)
+        aclararHistoria(e);
+}
+
+// Cambia la distancia minima entre puntos anotados (negativa = 0). Solo afecta
+// a los puntos que lleguen a partir de ahora.
+void TargetModel::setHistoryMinDistance(double meters)
+{
+    m_historyMinDist = qMax(0.0, meters);
 }
 
 // Fija el limite de puntos de traza para TODOS los objetivos y reajusta las
