@@ -1,5 +1,6 @@
 #include "libmapa/VectorFormats.h"
 
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -894,6 +895,170 @@ QByteArray toGpx(const QVector<MapFeature> &features)
     w.writeEndElement();
     w.writeEndDocument();
     return buf;
+}
+
+// ====================================================== tracks con hora ===
+
+namespace {
+
+// Hora GPX: ISO 8601 en UTC con milisegundos ("2026-10-14T05:13:33.120Z").
+// Es lo que piden el esquema GPX 1.1 y los visores que reproducen en el tiempo.
+QString horaGpx(const QDateTime &t)
+{
+    return t.toUTC().toString(Qt::ISODateWithMs);
+}
+
+// Lee una hora GPX. Acepta con o sin milisegundos y con zona (Z o +hh:mm);
+// el resultado queda en UTC. Invalida si el texto no es una fecha ISO.
+QDateTime leerHoraGpx(const QString &txt)
+{
+    QDateTime t = QDateTime::fromString(txt.trimmed(), Qt::ISODateWithMs);
+    if (!t.isValid())
+        t = QDateTime::fromString(txt.trimmed(), Qt::ISODate);
+    return t.isValid() ? t.toUTC() : QDateTime();
+}
+
+// Lee un <trk> (el lector esta sobre su apertura) con nombre, descripcion,
+// tipo, la extension libmapa:targetId y los puntos de todos sus segmentos,
+// cada uno con su <time> si lo trae.
+GpxTrack leerTrackConHora(QXmlStreamReader &xml)
+{
+    GpxTrack t;
+    int nivel = 0;       // profundidad respecto al <trk>, como en leerElementoGpx
+    TargetTrackPoint actual;
+    bool enPunto = false;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (xml.isEndElement()) {
+            if (nivel == 0)
+                break;                              // </trk>
+            if (xml.name() == QLatin1String("trkpt") && enPunto) {
+                t.points.append(actual);
+                enPunto = false;
+            }
+            --nivel;
+            continue;
+        }
+        if (!xml.isStartElement())
+            continue;
+        ++nivel;
+        const auto n = xml.name();
+        if (nivel == 1 && n == QLatin1String("name")) {
+            t.name = xml.readElementText().trimmed();
+            --nivel;
+        } else if (nivel == 1 && n == QLatin1String("desc")) {
+            t.description = xml.readElementText().trimmed();
+            --nivel;
+        } else if (nivel == 1 && n == QLatin1String("type")) {
+            t.type = xml.readElementText().trimmed();
+            --nivel;
+        } else if (n == QLatin1String("targetId") && !enPunto) {
+            bool ok = false;
+            const qint64 id = xml.readElementText().trimmed().toLongLong(&ok);
+            if (ok)
+                t.targetId = id;
+            --nivel;
+        } else if (n == QLatin1String("trkpt")) {
+            bool okLat = false, okLon = false;
+            const double lat = xml.attributes().value(QLatin1String("lat")).toDouble(&okLat);
+            const double lon = xml.attributes().value(QLatin1String("lon")).toDouble(&okLon);
+            actual = TargetTrackPoint();
+            enPunto = okLat && okLon;
+            if (enPunto)
+                actual.position = QGeoCoordinate(lat, lon);
+        } else if (enPunto && n == QLatin1String("time")) {
+            actual.time = leerHoraGpx(xml.readElementText());
+            --nivel;
+        }
+    }
+    return t;
+}
+
+} // namespace
+
+// Un <trk> por recorrido, con nombre/descripcion/tipo, el id del objetivo como
+// extension propia y un unico <trkseg> con la hora de cada punto.
+QByteArray tracksToGpx(const QVector<GpxTrack> &tracks)
+{
+    QByteArray buf;
+    QXmlStreamWriter w(&buf);
+    w.setAutoFormatting(true);
+    w.writeStartDocument();
+    w.writeStartElement(QStringLiteral("gpx"));
+    w.writeDefaultNamespace(QStringLiteral("http://www.topografix.com/GPX/1/1"));
+    w.writeNamespace(kNsLibmapa, QStringLiteral("libmapa"));
+    w.writeAttribute(QStringLiteral("version"), QStringLiteral("1.1"));
+    w.writeAttribute(QStringLiteral("creator"), QStringLiteral("libmapa"));
+
+    for (const GpxTrack &t : tracks) {
+        w.writeStartElement(QStringLiteral("trk"));
+        // El esquema GPX fija el orden: name, desc, ..., type, extensions, trkseg.
+        if (!t.name.isEmpty())
+            w.writeTextElement(QStringLiteral("name"), t.name);
+        if (!t.description.isEmpty())
+            w.writeTextElement(QStringLiteral("desc"), t.description);
+        if (!t.type.isEmpty())
+            w.writeTextElement(QStringLiteral("type"), t.type);
+        if (t.targetId >= 0) {
+            w.writeStartElement(QStringLiteral("extensions"));
+            w.writeTextElement(kNsLibmapa, QStringLiteral("targetId"),
+                               QString::number(t.targetId));
+            w.writeEndElement();
+        }
+        w.writeStartElement(QStringLiteral("trkseg"));
+        for (const TargetTrackPoint &p : t.points) {
+            if (!p.isValid())
+                continue;
+            w.writeStartElement(QStringLiteral("trkpt"));
+            w.writeAttribute(QStringLiteral("lat"), coord(p.position.latitude()));
+            w.writeAttribute(QStringLiteral("lon"), coord(p.position.longitude()));
+            if (p.time.isValid())
+                w.writeTextElement(QStringLiteral("time"), horaGpx(p.time));
+            w.writeEndElement();
+        }
+        w.writeEndElement();    // trkseg
+        w.writeEndElement();    // trk
+    }
+    w.writeEndElement();
+    w.writeEndDocument();
+    return buf;
+}
+
+// Recorre el GPX y devuelve cada <trk> con puntos, horas incluidas.
+QVector<GpxTrack> parseGpxTracks(const QByteArray &data, QString *error)
+{
+    QXmlStreamReader xml(data);
+    QVector<GpxTrack> out;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (xml.isStartElement() && xml.name() == QLatin1String("trk")) {
+            GpxTrack t = leerTrackConHora(xml);
+            if (!t.points.isEmpty())
+                out.append(t);
+        }
+    }
+    if (xml.hasError()) {
+        if (error)
+            *error = QStringLiteral("GPX no valido (linea %1): %2")
+                         .arg(xml.lineNumber()).arg(xml.errorString());
+        return {};
+    }
+    if (out.isEmpty() && error)
+        *error = QStringLiteral("no hay tracks con puntos");
+    return out;
+}
+
+// Escribe el GPX de recorridos con QSaveFile: o queda completo o no se toca.
+bool writeGpxTracks(const QString &path, const QVector<GpxTrack> &tracks, QString *error)
+{
+    const QByteArray datos = tracksToGpx(tracks);
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write(datos) != datos.size() || !f.commit()) {
+        if (error)
+            *error = QStringLiteral("No se pudo escribir %1: %2").arg(path, f.errorString());
+        return false;
+    }
+    return true;
 }
 
 } // namespace libmapa

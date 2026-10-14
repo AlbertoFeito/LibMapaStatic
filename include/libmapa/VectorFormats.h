@@ -2,6 +2,7 @@
 #define LIBMAPA_VECTORFORMATS_H_
 
 #include "libmapa/MapFeature.h"
+#include "libmapa/MapTarget.h"
 #include "libmapa/libmapa_export.h"
 
 #include <QByteArray>
@@ -69,6 +70,41 @@ LIBMAPA_EXPORT QVector<MapFeature> parseGpx(const QByteArray &data,
 LIBMAPA_EXPORT QByteArray toGeoJson(const QVector<MapFeature> &features);
 LIBMAPA_EXPORT QByteArray toKml(const QVector<MapFeature> &features);
 LIBMAPA_EXPORT QByteArray toGpx(const QVector<MapFeature> &features);
+
+/*!
+ * \brief Un recorrido con hora en cada punto: el historial de un objetivo.
+ *
+ * Es lo que GPX llama track (trk). A diferencia de una entidad linea, cada
+ * punto lleva su hora, que se escribe como <time> en UTC (ISO 8601 con
+ * milisegundos): QGIS, Google Earth o GPXSee lo pueden reproducir en el tiempo.
+ */
+struct GpxTrack
+{
+    QString name;                        //!< <name> (p. ej. la etiqueta del objetivo).
+    QString description;                 //!< <desc>.
+    QString type;                        //!< <type> (p. ej. el kind del objetivo).
+    qint64 targetId = -1;                //!< Se guarda como extension libmapa:targetId.
+    QVector<TargetTrackPoint> points;    //!< En orden; los invalidos se omiten.
+};
+
+//! Escribe recorridos con hora a GPX (un <trk> con un <trkseg> por recorrido).
+//! Un punto sin hora valida se escribe sin <time>.
+LIBMAPA_EXPORT QByteArray tracksToGpx(const QVector<GpxTrack> &tracks);
+
+/*!
+ * \brief Lee los <trk> de un GPX conservando la hora de cada punto.
+ *
+ * Complemento de parseGpx (que da entidades y descarta las horas): sirve para
+ * volver a cargar un historial exportado y reproducirlo. Los segmentos de un
+ * mismo track se concatenan. Vacio (con el motivo en \a error) si no hay
+ * ningun track con puntos.
+ */
+LIBMAPA_EXPORT QVector<GpxTrack> parseGpxTracks(const QByteArray &data,
+                                                QString *error = nullptr);
+
+//! Escribe recorridos con hora a un fichero GPX, de forma atomica (QSaveFile).
+LIBMAPA_EXPORT bool writeGpxTracks(const QString &path, const QVector<GpxTrack> &tracks,
+                                   QString *error = nullptr);
 
 } // namespace libmapa
 

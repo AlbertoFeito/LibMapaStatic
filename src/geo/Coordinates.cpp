@@ -1,6 +1,7 @@
 #include "libmapa/Coordinates.h"
 
 #include <QRegularExpression>
+#include <QtMath>
 #include <QStringList>
 #include <QVector>
 
@@ -428,6 +429,75 @@ QGeoCoordinate parseCoordinate(const QString &text, bool *ok)
         return c;
     }
     return QGeoCoordinate();
+}
+
+namespace {
+
+// Funcion q(lat) de la latitud autalica (Snyder, "Map Projections - A Working
+// Manual", ec. 3-12) para el elipsoide WGS84.
+double qAutalica(double latRad)
+{
+    constexpr double kE2 = kF * (2.0 - kF);      // primera excentricidad al cuadrado
+    const double e = std::sqrt(kE2);
+    const double s = std::sin(latRad);
+    return (1.0 - kE2) * (s / (1.0 - kE2 * s * s)
+                          - std::log((1.0 - e * s) / (1.0 + e * s)) / (2.0 * e));
+}
+
+// Seno de la latitud autalica: la latitud de la esfera de igual superficie que
+// deja entre el ecuador y ese paralelo la misma area que el elipsoide.
+double senoAutalico(double latDeg)
+{
+    static const double qPolo = qAutalica(kPi / 2.0);
+    return qAutalica(qDegreesToRadians(latDeg)) / qPolo;
+}
+
+} // namespace
+
+// Area de Chamberlain y Duquette (JPL, 2007) sobre la esfera autalica: suma
+// por lados de (lon2 - lon1) * (2 + sin b1 + sin b2), por R^2/2, con b la
+// latitud AUTALICA. Asi un trapecio de meridianos y paralelos sale exacto en
+// el elipsoide, y cualquier otro poligono queda muy cerca.
+double polygonArea(const QVector<QGeoCoordinate> &ring)
+{
+    // Radio autalico de WGS84: R^2 = a^2 * qPolo / 2.
+    static const double kR2 = kA * kA * qAutalica(kPi / 2.0) / 2.0;
+    QVector<QGeoCoordinate> v;
+    v.reserve(ring.size());
+    for (const QGeoCoordinate &c : ring)
+        if (c.isValid())
+            v.append(c);
+    if (v.size() > 1 && v.first().latitude() == v.last().latitude()
+        && v.first().longitude() == v.last().longitude())
+        v.removeLast();                       // anillo cerrado: sin repetir
+    if (v.size() < 3)
+        return 0.0;
+
+    double suma = 0.0;
+    for (int i = 0, n = int(v.size()); i < n; ++i) {
+        const QGeoCoordinate &a = v[i];
+        const QGeoCoordinate &b = v[(i + 1) % n];
+        suma += qDegreesToRadians(b.longitude() - a.longitude())
+              * (2.0 + senoAutalico(a.latitude()) + senoAutalico(b.latitude()));
+    }
+    return std::abs(suma) * kR2 / 2.0;
+}
+
+// Suma de distancias ortodromicas (las de QGeoCoordinate) entre vertices
+// validos consecutivos; \a closed anade el lado de cierre.
+double pathLength(const QVector<QGeoCoordinate> &path, bool closed)
+{
+    QVector<QGeoCoordinate> v;
+    v.reserve(path.size());
+    for (const QGeoCoordinate &c : path)
+        if (c.isValid())
+            v.append(c);
+    double total = 0.0;
+    for (int i = 1; i < v.size(); ++i)
+        total += v[i - 1].distanceTo(v[i]);
+    if (closed && v.size() > 2)
+        total += v.last().distanceTo(v.first());
+    return total;
 }
 
 } // namespace libmapa

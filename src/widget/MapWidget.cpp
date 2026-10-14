@@ -16,8 +16,17 @@
 #include "widget/HillshadeLayer.h"
 #include "widget/MapView.h"
 
+#include <QDateTime>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
+#include <QFontMetricsF>
+#include <QImageWriter>
+#include <QPageLayout>
+#include <QPageSize>
+#include <QPainter>
+#include <QPdfWriter>
+#include <QSaveFile>
 #include <QtMath>
 #include <cmath>
 #include <vector>
@@ -568,10 +577,247 @@ void MapWidget::reloadBaseLayer()
     d->view->refreshPlan();
 }
 
-// Oculta el recuadro de "seleccionar area" (herramienta SelectArea).
+// Quita la marca de "seleccionar area" o "seleccionar poligono" que queda
+// visible tras emitir la seleccion.
 void MapWidget::clearAreaSelection()
 {
-    d->view->clearAreaSelection();
+    if (d->view)
+        d->view->clearAreaSelection();
+}
+
+// ------------------------------------------------------ exportar la vista --
+
+namespace {
+
+// Texto de una coordenada para el pie: decimal con 5 cifras (~1 m), corto y
+// sin ambiguedad para cualquiera que lo lea.
+QString textoPie(const QGeoCoordinate &c)
+{
+    return c.isValid() ? QStringLiteral("%1, %2").arg(c.latitude(), 0, 'f', 5)
+                                                 .arg(c.longitude(), 0, 'f', 5)
+                       : QStringLiteral("?");
+}
+
+// Redondea el denominador de escala a dos o tres cifras significativas
+// (1:23 456 -> 1:23 500): la escala de una hoja Mercator ya es aproximada.
+qint64 escalaRedonda(double denominador)
+{
+    if (!(denominador > 0.0) || !std::isfinite(denominador))
+        return 0;
+    const double p = std::pow(10.0, std::floor(std::log10(denominador)) - 2.0);
+    return qint64(std::llround(std::round(denominador / p) * p));
+}
+
+// Entero con los miles separados por espacios (1 570 000), como en las cartas;
+// no depende del idioma del sistema.
+QString conMiles(qint64 n)
+{
+    QString s = QString::number(n);
+    for (int i = int(s.size()) - 3; i > 0; i -= 3)
+        s.insert(i, QLatin1Char(' '));
+    return s;
+}
+
+// Lineas del pie: extension de la vista y zoom (y la escala, si se conoce), la
+// fecha UTC de la exportacion, y las notas y la atribucion si las hay.
+QStringList lineasPie(const QGeoCoordinate &nw, const QGeoCoordinate &se, int zoom,
+                      qint64 escala, const MapExportOptions &o)
+{
+    QString l1 = QStringLiteral("NO %1  \u2014  SE %2   \u00b7   zoom %3")
+                     .arg(textoPie(nw), textoPie(se)).arg(zoom);
+    if (escala > 0)
+        l1 += QStringLiteral("   \u00b7   escala aprox. 1:%1 (en el centro)")
+                  .arg(conMiles(escala));
+    QStringList l2;
+    l2 << QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyy-MM-dd HH:mm 'UTC'"));
+    if (!o.notes.isEmpty())
+        l2 << o.notes;
+    if (!o.attribution.isEmpty())
+        l2 << o.attribution;
+    return { l1, l2.join(QStringLiteral("   \u00b7   ")) };
+}
+
+} // namespace
+
+// Dibuja la vista con QCustomPlot::toPixmap al tamaño del widget por \a scale.
+// Antes se fuerza un replot inmediato: si el widget no se ha pintado aun, la
+// disposicion de los ejes (y con ella la posicion de todo) estaria sin calcular.
+QImage MapWidget::renderImage(double scale) const
+{
+    if (!d->view)
+        return QImage();
+    d->syncGeometry();
+    const double s = (scale > 0.0 && std::isfinite(scale)) ? scale : 1.0;
+    d->view->replot(QCustomPlot::rpImmediateRefresh);
+    return d->view->toPixmap(d->view->width(), d->view->height(), s).toImage();
+}
+
+// Guarda la vista: PDF (vectorial, con escala de impresion en el pie) o imagen
+// (titulo y pie como bandas encima y debajo). Siempre a traves de QSaveFile.
+bool MapWidget::exportView(const QString &path, const MapExportOptions &o, QString *error)
+{
+    const auto fallo = [&](const QString &motivo) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return false;
+    };
+    if (!d->view)
+        return fallo(QStringLiteral("No hay mapa que exportar"));
+    d->syncGeometry();
+    const int vw = d->view->width(), vh = d->view->height();
+    if (vw < 2 || vh < 2)
+        return fallo(QStringLiteral("La vista no tiene tamaño"));
+
+    const QString ext = QFileInfo(path).suffix().toLower();
+    const bool pdf = ext == QLatin1String("pdf");
+    if (!pdf && !QImageWriter::supportedImageFormats().contains(ext.toLatin1()))
+        return fallo(QStringLiteral("%1: formato no reconocido (usa .pdf, .png, .jpg...)").arg(path));
+
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
+        return fallo(QStringLiteral("No se pudo escribir %1: %2").arg(path, f.errorString()));
+
+    const QGeoCoordinate nw = visibleNorthWest(), se = visibleSouthEast();
+    const QColor tinta(0x20, 0x20, 0x20);
+
+    if (pdf) {
+        // Resolucion = la logica de la pantalla: asi los tamaños de letra y de
+        // linea de las capas guardan la misma proporcion que en pantalla. No
+        // resta calidad: vectores y texto son vectores, y las teselas van a su
+        // resolucion nativa.
+        const int dpi = qMax(72, d->view->logicalDpiX());
+        QPdfWriter pdfw(&f);
+        pdfw.setResolution(dpi);
+        pdfw.setCreator(QStringLiteral("libmapa"));
+        pdfw.setTitle(o.title);
+        const double ancho = qMax(50.0, o.pageWidthMm), alto = qMax(50.0, o.pageHeightMm);
+        const bool apaisada = vw > vh;
+        pdfw.setPageLayout(QPageLayout(QPageSize(QSizeF(qMin(ancho, alto), qMax(ancho, alto)),
+                                                 QPageSize::Millimeter),
+                                       apaisada ? QPageLayout::Landscape : QPageLayout::Portrait,
+                                       QMarginsF(o.marginMm, o.marginMm, o.marginMm, o.marginMm),
+                                       QPageLayout::Millimeter));
+
+        QCPPainter p;
+        if (!p.begin(&pdfw))
+            return fallo(QStringLiteral("No se pudo crear el PDF %1").arg(path));
+        p.setMode(QCPPainter::pmVectorized);
+        p.setMode(QCPPainter::pmNoCaching);
+        p.setPen(tinta);
+        const QRectF hoja(0, 0, pdfw.width(), pdfw.height());
+        double y = 0.0;
+        QRectF titulo;      // se escribe al final, alineado con el mapa ya centrado
+        if (!o.title.isEmpty()) {
+            QFont ft = font();
+            ft.setPointSizeF(15.0);
+            ft.setBold(true);
+            const double h = QFontMetricsF(ft, &pdfw).height() * 1.4;
+            titulo = QRectF(0, 0, hoja.width(), h);
+            y = h;
+        }
+        QFont fp = font();
+        fp.setPointSizeF(7.5);
+        const double hLinea = QFontMetricsF(fp, &pdfw).height();
+        const double hPie = o.footer ? hLinea * 2.6 : 0.0;
+
+        // El mapa, encajado sin deformar en lo que queda de hoja.
+        const QRectF hueco(0, y, hoja.width(), hoja.height() - y - hPie);
+        const double k = qMin(hueco.width() / vw, hueco.height() / vh);
+        const QRectF mapa(hueco.left() + (hueco.width() - vw * k) / 2.0, hueco.top(),
+                          vw * k, vh * k);
+        d->view->replot(QCustomPlot::rpImmediateRefresh);
+        p.save();
+        p.translate(mapa.topLeft());
+        p.scale(k, k);
+        p.setClipRect(QRectF(0, 0, vw, vh));
+        d->view->toPainter(&p, vw, vh);
+        p.restore();
+        p.setPen(QPen(tinta, 0.8));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(mapa);
+        if (!titulo.isNull()) {
+            QFont ft = font();
+            ft.setPointSizeF(15.0);
+            ft.setBold(true);
+            p.setFont(ft);
+            p.drawText(QRectF(mapa.left(), titulo.top(), mapa.width(), titulo.height()),
+                       Qt::AlignLeft | Qt::AlignVCenter, o.title);
+        }
+
+        if (o.footer) {
+            // Escala de impresion: metros de terreno que cubre el ancho del
+            // mapa entre lo que mide ese ancho en la hoja.
+            const double mmHoja = mapa.width() / dpi * 25.4;
+            const double terreno = metersPerPixel() * vw;
+            const QStringList lineas = lineasPie(nw, se, zoom(),
+                                                 escalaRedonda(terreno / (mmHoja / 1000.0)), o);
+            p.setFont(fp);
+            p.setPen(tinta);
+            double yl = mapa.bottom() + hLinea * 0.4;
+            for (const QString &l : lineas) {
+                p.drawText(QRectF(mapa.left(), yl, hoja.width() - mapa.left(), hLinea),
+                           Qt::AlignLeft | Qt::AlignVCenter, l);
+                yl += hLinea * 1.1;
+            }
+        }
+        p.end();
+    } else {
+        const double s = (o.imageScale > 0.0 && std::isfinite(o.imageScale)) ? o.imageScale : 1.0;
+        QImage img = renderImage(s);
+        if (img.isNull())
+            return fallo(QStringLiteral("No se pudo dibujar la vista"));
+        if (!o.title.isEmpty() || o.footer) {
+            // Bandas blancas: titulo encima y pie debajo, en pixeles de la
+            // imagen (escalados con ella).
+            QFont ft = font();
+            ft.setPixelSize(qRound(17 * s));
+            ft.setBold(true);
+            QFont fp = font();
+            fp.setPixelSize(qRound(11 * s));
+            const int hTit = o.title.isEmpty() ? 0 : qRound(QFontMetricsF(ft).height() * 1.6);
+            const int hLinea = qRound(QFontMetricsF(fp).height() * 1.15);
+            const QStringList lineas = o.footer ? lineasPie(nw, se, zoom(), 0, o) : QStringList();
+            const int hPie = lineas.isEmpty() ? 0 : hLinea * int(lineas.size()) + qRound(8 * s);
+            QImage total(img.width(), img.height() + hTit + hPie, QImage::Format_RGB32);
+            total.fill(Qt::white);
+            QPainter p(&total);
+            p.setRenderHint(QPainter::TextAntialiasing);
+            p.drawImage(0, hTit, img);
+            p.setPen(tinta);
+            const int margen = qRound(8 * s);
+            if (hTit > 0) {
+                p.setFont(ft);
+                p.drawText(QRect(margen, 0, total.width() - 2 * margen, hTit),
+                           Qt::AlignLeft | Qt::AlignVCenter, o.title);
+            }
+            p.setFont(fp);
+            int yl = hTit + img.height() + qRound(4 * s);
+            for (const QString &l : lineas) {
+                p.drawText(QRect(margen, yl, total.width() - 2 * margen, hLinea),
+                           Qt::AlignLeft | Qt::AlignVCenter, l);
+                yl += hLinea;
+            }
+            p.end();
+            img = total;
+        }
+        // JPEG no tiene canal alfa: se aplana sobre blanco para que lo
+        // transparente no salga negro.
+        if (ext == QLatin1String("jpg") || ext == QLatin1String("jpeg")) {
+            QImage plano(img.size(), QImage::Format_RGB32);
+            plano.fill(Qt::white);
+            QPainter pp(&plano);
+            pp.drawImage(0, 0, img);
+            pp.end();
+            img = plano;
+        }
+        if (!img.save(&f, ext.toLatin1().constData()))
+            return fallo(QStringLiteral("No se pudo codificar la imagen %1").arg(path));
+    }
+
+    if (!f.commit())
+        return fallo(QStringLiteral("No se pudo escribir %1: %2").arg(path, f.errorString()));
+    return true;
 }
 
 // ---------------------------------------------------------- navegacion --
@@ -1218,6 +1464,48 @@ QVector<TargetTrackPoint> MapWidget::targetHistory(qint64 id) const
     return d->view ? d->view->targetModel()->history(id) : QVector<TargetTrackPoint>();
 }
 
+// Un track GPX por objetivo con historial (todos si \a ids viene vacio): la
+// etiqueta (primera linea) como nombre, el kind como tipo y el id como
+// extension, para poder volver a asociarlo al releerlo.
+bool MapWidget::exportTargetHistory(const QString &path, const QVector<qint64> &ids,
+                                    QString *error)
+{
+    QVector<qint64> lista = ids;
+    if (lista.isEmpty())
+        for (const MapTarget &t : targets())
+            lista.append(t.id);
+    std::sort(lista.begin(), lista.end());
+
+    QVector<GpxTrack> tracks;
+    for (qint64 id : lista) {
+        const auto t = target(id);
+        if (!t)
+            continue;
+        GpxTrack g;
+        g.targetId = id;
+        g.name = t->label.section(QLatin1Char('\n'), 0, 0).trimmed();
+        if (g.name.isEmpty())
+            g.name = QStringLiteral("Objetivo %1").arg(id);
+        g.type = t->kind;
+        g.points = targetHistory(id);
+        if (!g.points.isEmpty())
+            tracks.append(g);
+    }
+    if (tracks.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("No hay historial de objetivos que exportar");
+        return false;
+    }
+    QString motivo;
+    if (!writeGpxTracks(path, tracks, &motivo)) {
+        if (error)
+            *error = motivo;
+        emit errorOccurred(motivo);
+        return false;
+    }
+    return true;
+}
+
 // Origen (primer punto del historial) de un objetivo.
 TargetTrackPoint MapWidget::targetOrigin(qint64 id) const
 {
@@ -1340,6 +1628,42 @@ QVector<qint64> MapWidget::featuresInZone(qint64 zoneFeatureId) const
 QVector<qint64> MapWidget::zonesOfFeature(qint64 featureId) const
 {
     return d->pointZones.zonesOf(featureId);
+}
+
+// Objetivos dentro de un poligono cualquiera: un ZoneMonitor de usar y tirar
+// con una sola zona, para que el criterio de "dentro" sea el de las alertas.
+QVector<qint64> MapWidget::targetsInArea(const QVector<QGeoCoordinate> &polygon) const
+{
+    ZoneMonitor m;
+    m.setZone(0, { polygon });
+    if (!m.hasZone(0))
+        return {};
+    for (const MapTarget &t : targets())
+        m.updateTarget(t.id, t.position);
+    return m.targetsIn(0);
+}
+
+// Entidades con algun vertice dentro del poligono (mismo criterio que arriba).
+// Cada vertice se prueba como un "objetivo" del monitor hasta que uno cae dentro.
+QVector<qint64> MapWidget::featuresInArea(const QVector<QGeoCoordinate> &polygon) const
+{
+    ZoneMonitor m;
+    m.setZone(0, { polygon });
+    if (!m.hasZone(0))
+        return {};
+    QVector<qint64> ids;
+    for (const MapFeature &f : features()) {
+        for (const QGeoCoordinate &c : f.geometry) {
+            m.updateTarget(f.id, c);
+            if (m.isInside(f.id, 0)) {
+                ids.append(f.id);
+                break;
+            }
+        }
+        m.removeTarget(f.id);
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
 }
 
 // Id de la entidad seleccionada (o -1).

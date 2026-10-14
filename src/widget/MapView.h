@@ -129,7 +129,7 @@ public:
     //! Pide al servicio las teselas del viewport actual.
     void requestVisibleTiles();
 
-    //! Oculta el recuadro de SelectArea, si lo hay.
+    //! Oculta la marca de SelectArea / SelectPolygon, si la hay.
     void clearAreaSelection();
 
     //! Capa donde se crean las entidades nuevas.

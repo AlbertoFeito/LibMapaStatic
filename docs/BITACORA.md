@@ -4867,3 +4867,88 @@ Tests: `tst_targetmodel` (historial más allá de la traza, aclarado que conserv
 extremos, distancia mínima, horas, borrado) y `tst_mapwidget`.
 
 Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.
+
+## 121. Historial a GPX con horas, exportar la vista a imagen o PDF, y «Seleccionar área / polígono» que por fin se ven
+
+**Qué se hizo.**
+- **Historial de objetivos a GPX.** `VectorFormats` gana `GpxTrack` (nombre,
+  descripción, tipo, id del objetivo y puntos `TargetTrackPoint`),
+  `tracksToGpx`, `writeGpxTracks` y `parseGpxTracks`. `MapWidget::exportTargetHistory(path, ids)`
+  escribe un `<trk>` por objetivo con su historial completo desde el origen y la
+  hora de cada punto (`<time>` UTC ISO 8601 con milisegundos). El id va como
+  extensión `libmapa:targetId`.
+- **Exportar la vista.** `MapWidget::renderImage(scale)` devuelve la vista como
+  `QImage`; `exportView(path, MapExportOptions)` la guarda en PDF o en cualquier
+  formato de imagen de Qt según la extensión. `MapExportOptions`: título, notas,
+  atribución, pie sí/no, factor de resolución de la imagen y hoja/margen del PDF.
+  El pie lleva la extensión (NO/SE), el zoom, la fecha UTC y, en PDF, la
+  **escala de impresión** («escala aprox. 1:1 570 000 (en el centro)»).
+- **Consultar una zona.** `targetsInArea(polígono)` y `featuresInArea(polígono)`
+  dicen qué hay dentro sin vigilar nada; `polygonArea` y `pathLength`
+  (`Coordinates.h`) dan superficie y perímetro.
+- `clearAreaSelection()` quita ahora también el contorno de `SelectPolygon`.
+- **Demo.** Datos → *Exportar vista a imagen o PDF…* (Ctrl+P) y *Exportar
+  historial de objetivos (GPX)…*. Y el arreglo de *Seleccionar área* /
+  *Seleccionar polígono*: ver abajo.
+
+**El fallo de «Seleccionar área / polígono» en la demo.** La librería hacía
+su parte: deja la marca en el mapa y emite `areaSelected` / `polygonSelected`.
+Pero la demo, al recibir la señal, volvía a Navegar en el acto
+(`setActiveTool(None)`), y cambiar de herramienta **borra la marca**. Lo único
+que quedaba era un mensaje de 10 s en la barra de estado («Polígono de zona:
+4 vértices»), fácil de no ver. Parecía que no hacían nada. Además, nada
+explicaba para qué servían: en `fill_map` eligen qué teselas bajar, pero en la
+demo no hacían nada con la zona.
+Ahora, al cerrar la zona (fuera del evento de ratón, con `singleShot`, para que
+se repinte con la marca) se abre **«Zona seleccionada»** con:
+- superficie, perímetro y esquinas (en el formato de coordenadas elegido);
+- objetivos y entidades que hay dentro (cuántos y los primeros nombres);
+- *Crear área* (polígono en la capa activa), *Crear y vigilar* (lo mismo y
+  queda como zona de alerta), *Exportar zona…* (encuadra y exporta la vista),
+  *Cerrar*.
+Al cerrar se quita la marca y se vuelve a Navegar. Los textos de ayuda de
+las dos herramientas explican cómo se usan (rectángulo con dos clics; polígono
+clic a clic, cerrado con doble clic, clic derecho o Intro; Esc cancela).
+
+**Por qué así.**
+- **GPX con hora y no GeoJSON.** GPX es el formato de recorridos con tiempo que
+  entienden QGIS (capa temporal), GPXSee o Google Earth. Lo de antes,
+  `toGpx(features)`, no sirve: una entidad línea no tiene horas.
+  `parseGpxTracks` cierra el ciclo y permite releer un historial para
+  reproducirlo. Las horas se leen con o sin milisegundos y con cualquier zona
+  horaria, y se pasan a UTC.
+- **PDF vectorial a la resolución lógica de la pantalla.** Con `QPdfWriter` a
+  300 ppp, los textos de las capas (en puntos) salían el triple de grandes en
+  proporción al mapa. A la resolución de la pantalla la hoja es una copia fiel
+  de la vista, y no se pierde calidad: entidades, objetivos, escala y
+  cuadrícula van como vectores (`QCustomPlot::toPainter` sobre un `QCPPainter`
+  en modo vectorial) y las teselas a su resolución nativa. Se hace con
+  `QPdfWriter` (QtGui) y no con `savePdf` de QCustomPlot (que usa `QPrinter`)
+  porque hacían falta título, pie y una hoja con márgenes.
+- **La escala 1:N solo en PDF.** En una imagen no hay tamaño físico. En la hoja
+  sí: metros de terreno del ancho del mapa entre los milímetros que ocupa. Se
+  calcula en el centro de la vista (Mercator varía con la latitud) y se
+  redondea a tres cifras.
+- **Escritura atómica (`QSaveFile`)** como en el resto de exportaciones; con una
+  extensión desconocida no se crea fichero. JPEG se aplana sobre blanco, porque
+  no tiene canal alfa.
+- **Superficie exacta en el elipsoide para lo habitual.** La fórmula esférica
+  de Chamberlain-Duquette con radio autálico se equivocaba hasta un 0.9 % a
+  latitudes altas. Con **latitudes autálicas** (Snyder 3-12), un trapecio de
+  meridianos y paralelos sale exacto en WGS84 (12 308.46 km² para 1°×1° en el
+  ecuador, 6 123.14 km² a 60° N; comprobado en el test).
+- **`featuresInArea` por vértices**: una entidad cuenta si algún vértice cae
+  dentro. Es lo que espera quien marca una zona («qué hay aquí») y cuesta
+  O(vértices). Un polígono enorme que rodea la zona sin vértices dentro no
+  cuenta, y está documentado.
+
+Comprobado: el PNG con título y pie, el PDF (renderizado con `pdftoppm`) y la
+demo bajo Xvfb. El diálogo de una zona de 4 vértices muestra 126 284 km², 41
+objetivos y 1 entidad; *Crear y vigilar* deja «Zona 1» vigilada con sus 41
+objetivos en rojo.
+Tests: `tst_vectorformats::gpxTracksKeepTimes`,
+`tst_coordinates::measuresAreaAndLength`, y en `tst_mapwidget`:
+`exportsTargetHistoryToGpx`, `exportsViewToImageAndPdf` y
+`areaQueriesFindTargetsAndFeatures`.
+
+Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.

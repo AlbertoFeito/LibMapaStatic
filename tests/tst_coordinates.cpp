@@ -19,6 +19,7 @@ private slots:
     void mgrsRejectsGarbage();
     void formatsEveryKind();
     void parsesHumanInput();
+    void measuresAreaAndLength();
 };
 
 namespace {
@@ -193,6 +194,40 @@ void TstCoordinates::parsesHumanInput()
     QVERIFY(!ok);
     parseCoordinate(QStringLiteral("95.0, 10.0"), &ok);          // latitud imposible
     QVERIFY(!ok);
+}
+
+// Superficie y longitud. Referencias: area elipsoidica WGS84 exacta de un
+// trapecio de 1x1 grado (formula de la latitud autalica, Snyder 3-12): 12308.46
+// km2 en el ecuador y 6123.14 km2 entre 60 y 61 N.
+void TstCoordinates::measuresAreaAndLength()
+{
+    const QVector<QGeoCoordinate> ecuador = { QGeoCoordinate(0, 0), QGeoCoordinate(0, 1),
+                                              QGeoCoordinate(1, 1), QGeoCoordinate(1, 0) };
+    QVERIFY(qAbs(polygonArea(ecuador) / 1e6 - 12308.46) < 0.5);
+    // Cerrado o abierto, y en cualquier sentido de giro, da lo mismo.
+    QVector<QGeoCoordinate> cerrado = ecuador;
+    cerrado.append(ecuador.first());
+    QVERIFY(qAbs(polygonArea(cerrado) - polygonArea(ecuador)) < 1.0);
+    QVector<QGeoCoordinate> alReves(ecuador.rbegin(), ecuador.rend());
+    QVERIFY(qAbs(polygonArea(alReves) - polygonArea(ecuador)) < 1.0);
+
+    const QVector<QGeoCoordinate> norte = { QGeoCoordinate(60, 10), QGeoCoordinate(60, 11),
+                                            QGeoCoordinate(61, 11), QGeoCoordinate(61, 10) };
+    QVERIFY(qAbs(polygonArea(norte) / 1e6 - 6123.14) < 0.5);
+
+    // Degenerados: menos de 3 vertices validos.
+    QCOMPARE(polygonArea({ QGeoCoordinate(0, 0), QGeoCoordinate(1, 1) }), 0.0);
+    QCOMPARE(polygonArea({ QGeoCoordinate(0, 0), QGeoCoordinate(), QGeoCoordinate(1, 1) }), 0.0);
+
+    // Longitud: un grado de ecuador son ~111.2 km en la esfera de Qt; el
+    // perimetro del cuadrado suma los cuatro lados.
+    const double lado = QGeoCoordinate(0, 0).distanceTo(QGeoCoordinate(0, 1));
+    QVERIFY(qAbs(lado - 111195.0) < 50.0);
+    QVERIFY(qAbs(pathLength({ QGeoCoordinate(0, 0), QGeoCoordinate(0, 1) }) - lado) < 1e-6);
+    const double perimetro = pathLength(ecuador, true);
+    QVERIFY(perimetro > 4 * lado - 100.0 && perimetro < 4 * lado + 100.0);
+    QVERIFY(pathLength(ecuador, false) < perimetro);
+    QCOMPARE(pathLength({}), 0.0);
 }
 
 QTEST_APPLESS_MAIN(TstCoordinates)

@@ -5,6 +5,7 @@
 
 #include <QGeoCoordinate>
 #include <QString>
+#include <QVector>
 
 namespace libmapa {
 
@@ -90,6 +91,21 @@ LIBMAPA_EXPORT QString formatCoordinate(const QGeoCoordinate &coord,
  *        ("23°06'48.96\"N 82°21'59.76\"W"; tambien O = oeste).
  */
 LIBMAPA_EXPORT QGeoCoordinate parseCoordinate(const QString &text, bool *ok = nullptr);
+
+/*!
+ * \brief Superficie de un poligono sobre la Tierra, en metros cuadrados.
+ *
+ * Calculada en la esfera autalica de WGS84 (la de igual superficie, con
+ * latitudes autalicas): un trapecio de meridianos y paralelos sale exacto en
+ * el elipsoide y cualquier otro poligono queda muy cerca (lados cortos). El
+ * anillo puede venir cerrado o no; con menos de 3 vertices validos devuelve 0.
+ * No trata poligonos que cruzan +-180.
+ */
+LIBMAPA_EXPORT double polygonArea(const QVector<QGeoCoordinate> &ring);
+
+//! Longitud de un trazado en metros (ortodromicas entre vertices). Con
+//! \a closed = true suma tambien el lado del ultimo al primero (perimetro).
+LIBMAPA_EXPORT double pathLength(const QVector<QGeoCoordinate> &path, bool closed = false);
 
 } // namespace libmapa
 

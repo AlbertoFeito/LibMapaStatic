@@ -20,6 +20,7 @@ private slots:
     void gpxRoundTripKeepsPolygons();
     void reportsBadInput();
     void writesAndReadsFiles();
+    void gpxTracksKeepTimes();
 };
 
 // Tres entidades de prueba: un punto con atributos, una linea de dos partes y
@@ -276,6 +277,64 @@ void TstVectorFormats::writesAndReadsFiles()
     QVERIFY(!writeVectorFile(dir.filePath(QStringLiteral("x.shp")), muestra(), &err));
     QVERIFY(!err.isEmpty());
     QVERIFY(readVectorFile(dir.filePath(QStringLiteral("no_existe.kml")), &err).isEmpty());
+}
+
+// Recorridos con hora: se escriben con <time> UTC con milisegundos y se releen
+// iguales (nombre, tipo, id del objetivo, posiciones y horas). Un punto sin
+// hora sale sin <time>; uno invalido no se escribe.
+void TstVectorFormats::gpxTracksKeepTimes()
+{
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413120LL).toUTC();
+    GpxTrack a;
+    a.name = QStringLiteral("Buque <1> & co");
+    a.type = QStringLiteral("buque");
+    a.targetId = 42;
+    a.points = { { QGeoCoordinate(23.1, -82.3), t0 },
+                 { QGeoCoordinate(), t0.addSecs(5) },                // invalido: fuera
+                 { QGeoCoordinate(23.2, -82.25), t0.addMSecs(10500) },
+                 { QGeoCoordinate(23.3, -82.2), QDateTime() } };     // sin hora
+    GpxTrack b;
+    b.name = QStringLiteral("UAV");
+    b.points = { { QGeoCoordinate(-33.9, 151.2), t0.addDays(1) } };
+
+    const QByteArray gpx = tracksToGpx({ a, b });
+    QVERIFY(gpx.contains("<time>2025-10-14T05:23:33.120Z</time>"));
+    QVERIFY(gpx.contains("<time>2025-10-14T05:23:43.620Z</time>"));
+    QVERIFY(gpx.contains("targetId>42<"));
+    QCOMPARE(gpx.count("<trkpt"), 4);
+    QCOMPARE(gpx.count("<time>"), 3);
+
+    QString err;
+    const QVector<GpxTrack> leidos = parseGpxTracks(gpx, &err);
+    QVERIFY2(leidos.size() == 2, qPrintable(err));
+    QCOMPARE(leidos[0].name, a.name);
+    QCOMPARE(leidos[0].type, a.type);
+    QCOMPARE(leidos[0].targetId, qint64(42));
+    QCOMPARE(leidos[0].points.size(), 3);
+    QCOMPARE(leidos[0].points[0].position, QGeoCoordinate(23.1, -82.3));
+    QCOMPARE(leidos[0].points[0].time, t0);
+    QCOMPARE(leidos[0].points[1].time, t0.addMSecs(10500));
+    QVERIFY(!leidos[0].points[2].time.isValid());
+    QCOMPARE(leidos[1].targetId, qint64(-1));
+    QCOMPARE(leidos[1].points[0].time, t0.addDays(1));
+
+    // parseGpx lee el mismo fichero como entidades (sin horas): el track de un
+    // solo punto no es una linea valida y se queda fuera.
+    QCOMPARE(parseGpx(gpx).size(), 1);
+
+    // Hora con zona horaria distinta de Z y sin milisegundos: se pasa a UTC.
+    const QByteArray ajeno =
+        "<gpx><trk><name>x</name><trkseg>"
+        "<trkpt lat=\"1\" lon=\"2\"><ele>5</ele><time>2025-10-14T07:00:00+02:00</time></trkpt>"
+        "</trkseg><trkseg><trkpt lat=\"1.5\" lon=\"2.5\"/></trkseg></trk></gpx>";
+    const QVector<GpxTrack> otro = parseGpxTracks(ajeno);
+    QCOMPARE(otro.size(), 1);
+    QCOMPARE(otro[0].points.size(), 2);                   // segmentos concatenados
+    QCOMPARE(otro[0].points[0].time,
+             QDateTime::fromString(QStringLiteral("2025-10-14T05:00:00Z"), Qt::ISODate));
+
+    QVERIFY(parseGpxTracks("<gpx><wpt lat=\"1\" lon=\"2\"/></gpx>", &err).isEmpty());
+    QVERIFY(!err.isEmpty());
 }
 
 QTEST_MAIN(TstVectorFormats)

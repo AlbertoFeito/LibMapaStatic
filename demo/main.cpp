@@ -606,8 +606,27 @@ private:
         // aquí se informa de la zona en la barra de estado.
         m_accSelArea = accHerr(tr("Seleccionar área"), MapTool::SelectArea);
         m_accSelPoli = accHerr(tr("Seleccionar polígono (zona)"), MapTool::SelectPolygon);
-        m_accSelArea->setStatusTip(tr("Arrastra un rectángulo: informa de su bbox."));
-        m_accSelPoli->setStatusTip(tr("Marca un polígono clic a clic (doble clic cierra)."));
+        m_accSelArea->setStatusTip(
+            tr("Marca una zona rectangular (clic en una esquina y clic en la opuesta) "
+               "sin hacer zoom: dice qué hay dentro y deja crear con ella un área, "
+               "vigilarla o exportarla."));
+        m_accSelPoli->setStatusTip(
+            tr("Marca una zona de cualquier forma, clic a clic (doble clic, clic "
+               "derecho o Intro la cierran; Esc cancela): dice qué hay dentro y deja "
+               "crear con ella un área, vigilarla o exportarla."));
+
+        // Exportaciones nuevas: historial de objetivos (GPX con horas) y la
+        // vista tal cual se ve (imagen o PDF con título, pie y escala).
+        auto *accHistorialGpx = new QAction(tr("Exportar historial de objetivos (GPX)..."), this);
+        accHistorialGpx->setStatusTip(
+            tr("Guarda la traza completa de cada objetivo, desde su origen, con la hora "
+               "de cada punto (se reproduce en QGIS o GPXSee)."));
+        connect(accHistorialGpx, &QAction::triggered, this, &Ventana::exportarHistorialGpx);
+        auto *accExportarVista = new QAction(tr("Exportar vista a imagen o PDF..."), this);
+        accExportarVista->setShortcut(QKeySequence(QStringLiteral("Ctrl+P")));
+        accExportarVista->setStatusTip(
+            tr("Guarda el mapa tal cual se ve (PNG/JPG o PDF con título, pie y escala)."));
+        connect(accExportarVista, &QAction::triggered, this, [this] { exportarVista(); });
 
         // Mostrar/ocultar los objetivos simulados (capacidad setTargetsVisible).
         m_accVerObjetivos = new QAction(tr("Mostrar objetivos"), this);
@@ -747,13 +766,16 @@ private:
         mDatos->addAction(accGeo);
         mDatos->addAction(accImportar);
         mDatos->addAction(accExportar);
+        mDatos->addAction(accExportarVista);
         mDatos->addSeparator();
+        mDatos->addSection(tr("Consultar una zona"));
         mDatos->addAction(m_accSelArea);
         mDatos->addAction(m_accSelPoli);
         mDatos->addSeparator();
         mDatos->addAction(m_accSimular);
         mDatos->addAction(m_accVerObjetivos);
         mDatos->addAction(m_accVigilarZona);
+        mDatos->addAction(accHistorialGpx);
 
         QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
         connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
@@ -1509,23 +1531,21 @@ private:
                 });
 
         // Selección de zona: la librería deja el recuadro/contorno visible y
-        // emite la geometría; aquí se informa (fill_map la usaría para descargar).
+        // emite la geometría. Antes aquí se volvía a Navegar en el acto, y eso
+        // BORRABA la marca: parecía que la herramienta no hacía nada. Ahora la
+        // marca sigue a la vista mientras se muestra qué hay dentro y qué se
+        // puede hacer con la zona (fuera del evento de ratón, con un
+        // singleShot, para que el mapa se repinte con la marca antes).
         connect(m_mapa, &MapWidget::areaSelected, this,
                 [this](const QGeoCoordinate &nw, const QGeoCoordinate &se) {
-                    statusBar()->showMessage(
-                        tr("Área: NO %1,%2  →  SE %3,%4")
-                            .arg(nw.latitude(), 0, 'f', 4).arg(nw.longitude(), 0, 'f', 4)
-                            .arg(se.latitude(), 0, 'f', 4).arg(se.longitude(), 0, 'f', 4),
-                        10000);
-                    m_accNavegar->setChecked(true);
-                    m_mapa->setActiveTool(MapTool::None);
+                    const QVector<QGeoCoordinate> rect = {
+                        nw, QGeoCoordinate(nw.latitude(), se.longitude()),
+                        se, QGeoCoordinate(se.latitude(), nw.longitude()) };
+                    QTimer::singleShot(0, this, [this, rect] { zonaSeleccionada(rect, true); });
                 });
         connect(m_mapa, &MapWidget::polygonSelected, this,
                 [this](const QVector<QGeoCoordinate> &pol) {
-                    statusBar()->showMessage(
-                        tr("Polígono de zona: %1 vértices").arg(pol.size()), 10000);
-                    m_accNavegar->setChecked(true);
-                    m_mapa->setActiveTool(MapTool::None);
+                    QTimer::singleShot(0, this, [this, pol] { zonaSeleccionada(pol, false); });
                 });
 
         connect(m_grupo, &QActionGroup::triggered, this, [this](QAction *a) {
@@ -3654,6 +3674,163 @@ private:
                 });
     }
 
+    // Respuesta a «Seleccionar área» / «Seleccionar polígono»: informa de la
+    // zona marcada (tamaño, extensión y qué objetivos y entidades hay dentro)
+    // y ofrece lo que se puede hacer con ella. Al cerrar, quita la marca y
+    // vuelve a Navegar.
+    void zonaSeleccionada(const QVector<QGeoCoordinate> &zona, bool rectangulo)
+    {
+        double s = 90, n = -90, w = 180, e = -180;
+        for (const QGeoCoordinate &c : zona) {
+            s = qMin(s, c.latitude());  n = qMax(n, c.latitude());
+            w = qMin(w, c.longitude()); e = qMax(e, c.longitude());
+        }
+        const QGeoCoordinate nw(n, w), se(s, e);
+        const double m2 = polygonArea(zona);
+        const QString superficie = m2 >= 1e6
+            ? tr("%1 km²").arg(m2 / 1e6, 0, 'f', m2 >= 1e8 ? 0 : 2)
+            : tr("%1 ha").arg(m2 / 1e4, 0, 'f', 2);
+        const double per = pathLength(zona, true);
+        const QString perimetro = per >= 1000 ? tr("%1 km").arg(per / 1000, 0, 'f', 2)
+                                              : tr("%1 m").arg(per, 0, 'f', 0);
+
+        // Qué hay dentro: nombres de los primeros objetivos y entidades.
+        const QVector<qint64> objs = m_mapa->targetsInArea(zona);
+        const QVector<qint64> ents = m_mapa->featuresInArea(zona);
+        const auto lista = [](const QStringList &l) {
+            return l.size() <= 5 ? l.join(QStringLiteral(", "))
+                                 : QStringList(l.mid(0, 5)).join(QStringLiteral(", "))
+                                       + QStringLiteral(", …");
+        };
+        QStringList nomObjs, nomEnts;
+        for (qint64 id : objs) {
+            const auto t = m_mapa->target(id);
+            nomObjs << (t && !t->label.isEmpty() ? t->label.section(QLatin1Char('\n'), 0, 0)
+                                                 : tr("objetivo %1").arg(id));
+        }
+        for (qint64 id : ents) {
+            const auto f = m_mapa->feature(id);
+            nomEnts << (f && !f->name.isEmpty() ? f->name.section(QLatin1Char('\n'), 0, 0)
+                                                : tr("entidad %1").arg(id));
+        }
+
+        QString txt = tr("<b>%1</b><br>Superficie: %2 · perímetro: %3<br>"
+                         "NO: %4<br>SE: %5<br><br>")
+            .arg(rectangulo ? tr("Área rectangular")
+                            : tr("Polígono de %1 vértices").arg(zona.size()),
+                 superficie, perimetro,
+                 formatCoordinate(nw, m_formatoCoord).toHtmlEscaped(),
+                 formatCoordinate(se, m_formatoCoord).toHtmlEscaped());
+        txt += tr("Objetivos dentro: <b>%1</b>").arg(objs.size());
+        if (!nomObjs.isEmpty())
+            txt += QStringLiteral(" (") + lista(nomObjs).toHtmlEscaped() + QStringLiteral(")");
+        txt += tr("<br>Entidades dentro: <b>%1</b>").arg(ents.size());
+        if (!nomEnts.isEmpty())
+            txt += QStringLiteral(" (") + lista(nomEnts).toHtmlEscaped() + QStringLiteral(")");
+
+        QMessageBox box(QMessageBox::Information, tr("Zona seleccionada"), txt,
+                        QMessageBox::NoButton, this);
+        box.setTextFormat(Qt::RichText);
+        box.setInformativeText(
+            tr("La zona marcada es temporal: no se guarda. Para conservarla, "
+               "conviértela en un área de la capa activa."));
+        QPushButton *bCrear = box.addButton(tr("Crear área"), QMessageBox::ActionRole);
+        QPushButton *bVigilar = box.addButton(tr("Crear y vigilar"), QMessageBox::ActionRole);
+        QPushButton *bExportar = box.addButton(tr("Exportar zona..."), QMessageBox::ActionRole);
+        box.addButton(tr("Cerrar"), QMessageBox::RejectRole);
+        bCrear->setToolTip(tr("Crea un polígono con esta forma en la capa activa."));
+        bVigilar->setToolTip(tr("Crea el polígono y avisa cuando un objetivo entre o salga."));
+        bExportar->setToolTip(tr("Encuadra la zona y la guarda como imagen o PDF."));
+        box.exec();
+
+        m_mapa->clearAreaSelection();
+        volverANavegar();
+
+        const QAbstractButton *pulsado = box.clickedButton();
+        if (pulsado == bExportar) {
+            m_mapa->fitBounds(nw, se);
+            exportarVista(rectangulo ? tr("Área seleccionada") : tr("Zona seleccionada"));
+            return;
+        }
+        if (pulsado != bCrear && pulsado != bVigilar)
+            return;
+
+        MapFeature f;
+        f.kind = GeometryKind::Polygon;
+        f.type = QStringLiteral("zona");
+        f.name = tr("Zona %1").arg(++m_zonasCreadas);
+        f.layerId = m_mapa->activeFeatureLayer();
+        f.geometry = zona;
+        f.style.lineColor = QColor(0xff, 0x6d, 0x00);
+        f.style.lineWidth = 2.0;
+        f.style.fillColor = QColor(0xff, 0x6d, 0x00, 40);
+        const qint64 id = m_mapa->addFeature(f);
+        if (id < 0) {
+            statusBar()->showMessage(tr("No se pudo crear la zona"), 4000);
+            return;
+        }
+        m_mapa->selectFeature(id);
+        if (pulsado == bVigilar) {
+            alternarVigilancia();                 // vigila la recién seleccionada
+        } else {
+            statusBar()->showMessage(tr("«%1» creada en la capa '%2'")
+                                         .arg(f.name, f.layerId), 5000);
+        }
+    }
+
+    // Exporta la vista actual a imagen o PDF. Pide el fichero y un título
+    // opcional; el pie lleva extensión, fecha, escala (PDF) y la atribución
+    // de la base, como exige el proveedor de la imagen.
+    void exportarVista(const QString &tituloSugerido = QString())
+    {
+        QString filtro;
+        const QString ruta = QFileDialog::getSaveFileName(this, tr("Exportar vista"),
+            dirTrabajo() + QStringLiteral("/mapa.pdf"),
+            tr("PDF (*.pdf);;Imagen PNG (*.png);;Imagen JPEG (*.jpg)"), &filtro);
+        if (ruta.isEmpty())
+            return;
+        bool ok = false;
+        const QString titulo = QInputDialog::getText(this, tr("Exportar vista"),
+            tr("Título (opcional):"), QLineEdit::Normal, tituloSugerido, &ok);
+        if (!ok)
+            return;
+        MapExportOptions o;
+        o.title = titulo;
+        o.attribution = tr("Base: %1").arg(m_capasBase ? m_capasBase->currentText() : QString());
+        o.imageScale = 2.0;                       // imagen nítida para informes
+        QString error;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        const bool bien = m_mapa->exportView(ruta, o, &error);
+        QApplication::restoreOverrideCursor();
+        if (!bien) {
+            QMessageBox::warning(this, tr("Exportar vista"), tr("No se pudo exportar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        statusBar()->showMessage(tr("Vista exportada a %1").arg(QFileInfo(ruta).fileName()), 5000);
+    }
+
+    // Exporta el historial completo de todos los objetivos a GPX con horas.
+    void exportarHistorialGpx()
+    {
+        if (m_mapa->targets().isEmpty()) {
+            statusBar()->showMessage(tr("No hay objetivos (Datos → Simular objetivos)"), 4000);
+            return;
+        }
+        const QString ruta = QFileDialog::getSaveFileName(this, tr("Exportar historial de objetivos"),
+            dirTrabajo() + QStringLiteral("/historial_objetivos.gpx"), tr("GPX (*.gpx)"));
+        if (ruta.isEmpty())
+            return;
+        QString error;
+        if (!m_mapa->exportTargetHistory(ruta, {}, &error)) {
+            QMessageBox::warning(this, tr("Exportar historial"), tr("No se pudo exportar:\n%1").arg(error));
+            return;
+        }
+        m_ultimoDir = QFileInfo(ruta).absolutePath();
+        statusBar()->showMessage(tr("Historial de %1 objetivos exportado a %2")
+            .arg(m_mapa->targets().size()).arg(QFileInfo(ruta).fileName()), 5000);
+    }
+
     // Vigila (o deja de vigilar) el polígono seleccionado como zona de alerta.
     // Al empezar, la librería ya avisa de los objetivos que estén dentro.
     void alternarVigilancia()
@@ -3997,6 +4174,7 @@ private:
     QAction *m_accVigilarZona = nullptr;    //!< alertas de zona del polígono seleccionado
     QAction *m_accSelArea = nullptr;        //!< seleccionar área (bbox)
     QAction *m_accSelPoli = nullptr;        //!< seleccionar polígono (zona)
+    int m_zonasCreadas = 0;                 //!< para nombrar «Zona N» desde una selección
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.

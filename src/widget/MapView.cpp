@@ -424,14 +424,25 @@ void MapView::requestVisibleTiles()
                                m_zoom, /*marginTiles=*/1);
 }
 
-// Oculta el recuadro de "seleccionar area" si estaba visible (sin borrarlo, para
-// reutilizar el item). Lo usa MapWidget al confirmar o descartar la seleccion.
+// Oculta la marca de seleccion: el recuadro de SelectArea (sin borrarlo, para
+// reutilizar el item) y el contorno de un poligono de SelectPolygon ya cerrado.
+// Lo usa MapWidget al confirmar o descartar la seleccion.
 void MapView::clearAreaSelection()
 {
+    bool cambio = false;
     if (m_areaRect && m_areaRect->visible()) {
         m_areaRect->setVisible(false);
-        replot(QCustomPlot::rpQueuedReplot);
+        cambio = true;
     }
+    if (m_draftIsSelection && !m_drafting) {
+        m_draftIsSelection = false;
+        m_draft = MapFeature();
+        if (m_featureLayer)
+            m_featureLayer->setDraft(nullptr);
+        cambio = true;
+    }
+    if (cambio)
+        replot(QCustomPlot::rpQueuedReplot);
 }
 
 // Recalcula el plan de dibujo de teselas para el viewport actual (que pintar y

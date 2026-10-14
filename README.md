@@ -22,7 +22,9 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Alertas de zona**: cualquier polígono puede vigilarse (`watchZone`) y la librería avisa cuando un objetivo móvil o una entidad punto entra o sale (`targetEnteredZone` / `featureEnteredZone`…) y resalta en el mapa la zona ocupada
 - **Escala gráfica y cuadrícula de coordenadas**: `setScaleBarVisible` (metros/km o millas náuticas) y `setGraticuleVisible` (meridianos y paralelos rotulados, con paso automático según el zoom: 1°, 30', 5', 30"…)
 - **Coordenadas UTM y MGRS** (`Coordinates.h`): conversión y formato en decimal, GMS, UTM y MGRS (al milímetro frente a PROJ), lectura de lo que escribe una persona en cualquiera de ellos, y cuadrícula UTM (`setGraticuleMode`)
-- **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión
+- **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión. El historial de los objetivos sale a **GPX con la hora de cada punto** (`exportTargetHistory`, releíble con `parseGpxTracks`)
+- **Exportar la vista** a imagen o PDF (`exportView`, `renderImage`): el mapa tal cual se ve, con título, pie (extensión, fecha UTC, atribución) y, en PDF, vectorial y con la escala de impresión 1:N
+- **Consultar una zona**: `targetsInArea` / `featuresInArea` dicen qué hay dentro de cualquier polígono (p. ej. el marcado con `SelectArea` / `SelectPolygon`), y `polygonArea` / `pathLength` dan su superficie y perímetro sobre el elipsoide
 
 ## Uso
 
@@ -52,6 +54,12 @@ QGeoCoordinate c = libmapa::parseCoordinate("17Q 360057 2556751");            //
 
 mapa->importVectorFile("zonas.kml", "zonas");              // GeoJSON / KML / GPX como capa
 mapa->exportVectorFile("zonas.geojson", "zonas");          // formato según la extensión
+mapa->exportTargetHistory("historial.gpx");                // recorridos con hora, todos los objetivos
+
+libmapa::MapExportOptions o;                               // la vista tal cual se ve
+o.title = "Sector norte";
+o.attribution = "Imagen: Esri";
+mapa->exportView("sector.pdf", o);                         // o .png / .jpg (o.imageScale = 2)
 ```
 
 Con esa línea de `dataDir` salen las capas base, la elevación, las capas fijas,
@@ -332,7 +340,7 @@ tiles (MBTiles)*), que la librería consume tal cual.
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
 | `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura. Permite **sobre-zoom** del mapa de vista previa (hasta z19) para navegar y enmarcar niveles altos (z15/16…) aunque la base recomiende un máximo menor; el rango de descarga llega a z22 |
-| `demo` | Aplicación de ejemplo con **barra de menú** (Archivo/Ver/Dibujo/Elevación/Datos/Ayuda), **barras de herramientas con iconos** en dos filas por actividad (navegación+dibujo+archivo / terreno+datos) **panel lateral contextual** (solo el árbol de capas al iniciar; la ficha de la entidad —Propiedades/Coordenadas/Estilo plegables— aparece al seleccionar), **temas claro/oscuro** elegibles (Ver → Tema, recordado), y **panel de capas en tres grupos** (Base = datasets, selección exclusiva; Overlays = vectores de solo lectura; Entidades = puntos/líneas/polígonos editables): dibujo/edición con **diálogo de alta** (nombre/capa/colores al crear una entidad, y vuelta automática a Navegar al terminar el trazo), **coordenadas lat/lon editables** de la entidad seleccionada (mover/añadir/quitar vértices; solo entidades de usuario), cobertura por zoom, cota del terreno, **análisis de elevación** (perfil, visión A→B, viewshed; **temporal**, no se guarda), **Objetivo** (punto con etiqueta movible de 3 líneas) y **Área objetivo** (polígono ≤10 con etiqueta en el 1er punto) y **guardado explícito** (asterisco en el título si hay cambios; pregunta al cerrar/abrir; `--features` carga y fija el fichero de trabajo, sin autoguardado). Los **overlays arrancan ocultos** (solo mapa al iniciar) |
+| `demo` | Aplicación de ejemplo con **barra de menú** (Archivo/Ver/Dibujo/Elevación/Datos/Ayuda), **barras de herramientas con iconos** en dos filas por actividad (navegación+dibujo+archivo / terreno+datos) **panel lateral contextual** (solo el árbol de capas al iniciar; la ficha de la entidad —Propiedades/Coordenadas/Estilo plegables— aparece al seleccionar), **temas claro/oscuro** elegibles (Ver → Tema, recordado), y **panel de capas en tres grupos** (Base = datasets, selección exclusiva; Overlays = vectores de solo lectura; Entidades = puntos/líneas/polígonos editables): dibujo/edición con **diálogo de alta** (nombre/capa/colores al crear una entidad, y vuelta automática a Navegar al terminar el trazo), **coordenadas lat/lon editables** de la entidad seleccionada (mover/añadir/quitar vértices; solo entidades de usuario), cobertura por zoom, cota del terreno, **análisis de elevación** (perfil, visión A→B, viewshed; **temporal**, no se guarda), **Objetivo** (punto con etiqueta movible de 3 líneas) y **Área objetivo** (polígono ≤10 con etiqueta en el 1er punto) y **guardado explícito** (asterisco en el título si hay cambios; pregunta al cerrar/abrir; `--features` carga y fija el fichero de trabajo, sin autoguardado). **Datos → Seleccionar área / polígono** marca una zona temporal y dice qué hay dentro (superficie, perímetro, objetivos y entidades) para convertirla en área, vigilarla o exportarla; **Datos → Exportar vista** (Ctrl+P, PDF/PNG/JPG) y **Exportar historial de objetivos (GPX)**. Los **overlays arrancan ocultos** (solo mapa al iniciar) |
 
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
 tesela propia, rojo si viene de un nivel superior escalado.
@@ -640,6 +648,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 21 | Intercambio vectorial: importar/exportar entidades en GeoJSON, KML y GPX (`importVectorFile`, `exportVectorFile`) |
 | 22 | Coordenadas UTM/MGRS (conversión, formato, lectura) y cuadrícula UTM; alertas de zona también para entidades punto, con resalte en el mapa |
 | 23 | Historial completo de cada objetivo desde su origen (con hora), dibujado entero al seleccionarlo |
+| 24 | Historial de objetivos a GPX con horas; exportar la vista a imagen o PDF; consultar qué hay en una zona marcada (y la demo, arreglada, lo usa) |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

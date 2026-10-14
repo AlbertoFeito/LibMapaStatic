@@ -69,6 +69,29 @@ enum class GraticuleMode {
     Utm         //!< lineas de este/norte UTM constantes, por zona (en metros/km)
 };
 
+/*!
+ * \brief Como se exporta la vista del mapa (MapWidget::exportView).
+ *
+ * El mapa sale tal cual se ve (base, entidades, objetivos, escala,
+ * cuadricula...). Encima puede ir un TITULO y debajo un PIE con la extension
+ * de la vista, la fecha (UTC), la escala de impresion (solo PDF), las notas y
+ * la atribucion de los datos.
+ */
+struct MapExportOptions {
+    QString title;              //!< Encabezado; vacio = sin encabezado.
+    QString notes;              //!< Texto libre en el pie (p. ej. "Ejercicio 3").
+    QString attribution;        //!< Atribucion de los datos (p. ej. "Imagen: Esri").
+    bool footer = true;         //!< Pie con extension, fecha y (en PDF) escala.
+    //! Solo imagen: factor de resolucion. 2 = el doble de pixeles por lado,
+    //! con lineas y textos nitidos (las teselas se escalan).
+    double imageScale = 1.0;
+    //! Solo PDF: tamaño de la hoja en mm (A4 por defecto). La orientacion se
+    //! elige sola para que el mapa aproveche la hoja.
+    double pageWidthMm = 210.0;
+    double pageHeightMm = 297.0;
+    double marginMm = 10.0;     //!< Solo PDF: margen de la hoja.
+};
+
 //! Resultado de una medicion sobre el mapa.
 struct Measurement {
     QGeoCoordinate from;

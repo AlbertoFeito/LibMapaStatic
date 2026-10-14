@@ -13,6 +13,7 @@
 #include "libmapa/libmapa_export.h"
 
 #include <QGeoCoordinate>
+#include <QImage>
 #include <QPointF>
 #include <QString>
 #include <QStringList>
@@ -169,8 +170,35 @@ public:
      */
     void reloadBaseLayer();
 
-    //! Quita el recuadro dibujado con la herramienta SelectArea.
+    //! Quita la marca que dejan SelectArea (el recuadro) o SelectPolygon (el
+    //! contorno) tras emitir areaSelected / polygonSelected. Tambien se quitan
+    //! solas al cambiar de herramienta.
     void clearAreaSelection();
+
+    // --- Exportar la vista -----------------------------------------------
+    /*!
+     * \brief La vista actual como imagen, tal cual se ve.
+     *
+     * \a scale > 1 da mas pixeles por lado (lineas, textos y simbolos se
+     * redibujan nitidos; las teselas se escalan). Imagen nula sin vista.
+     */
+    QImage renderImage(double scale = 1.0) const;
+
+    /*!
+     * \brief Guarda la vista actual en un fichero de imagen o PDF.
+     *
+     * El formato sale de la extension: .pdf, o cualquier formato de imagen de
+     * Qt con escritura (.png, .jpg, .bmp, .tif...). En PDF las entidades, los
+     * objetivos, la escala y la cuadricula van como VECTORES (se imprimen
+     * nitidos a cualquier tamaño) y el pie indica la escala de impresion
+     * (1:N) de la hoja. Titulo, pie, notas y atribucion: \ref MapExportOptions.
+     * Escritura atomica: o queda el fichero completo, o no se toca.
+     *
+     * \return false con el motivo en \a error si no se pudo.
+     */
+    bool exportView(const QString &path,
+                    const MapExportOptions &options = MapExportOptions(),
+                    QString *error = nullptr);
 
     void zoomIn();
     void zoomOut();
@@ -411,6 +439,20 @@ public:
     //! El objetivo seleccionado dibuja todo su historial desde el origen
     //! (activo por defecto).
     void setSelectedTargetHistoryVisible(bool on);
+    /*!
+     * \brief Exporta el historial de objetivos a GPX, con la hora de cada punto.
+     *
+     * Un track por objetivo (nombre = primera linea de su etiqueta, tipo =
+     * su \c kind, y su id como extension libmapa:targetId), con el historial
+     * completo desde el origen. Con \a ids vacio exporta todos. Se puede
+     * reproducir en el tiempo en QGIS o GPXSee, o releer con parseGpxTracks.
+     *
+     * \return false si no hay ningun historial o no se pudo escribir (el motivo
+     *         queda en \a error).
+     */
+    bool exportTargetHistory(const QString &path,
+                             const QVector<qint64> &ids = QVector<qint64>(),
+                             QString *error = nullptr);
     //! Muestra u oculta la capa de objetivos entera.
     void setTargetsVisible(bool visible);
 
@@ -467,6 +509,16 @@ public:
     QVector<qint64> featuresInZone(qint64 zoneFeatureId) const;
     //! Zonas vigiladas en las que esta ahora una entidad punto, ordenadas.
     QVector<qint64> zonesOfFeature(qint64 featureId) const;
+    /*!
+     * \brief Consulta puntual: objetivos dentro de un poligono cualquiera.
+     *
+     * Para la zona que marca el usuario con SelectArea / SelectPolygon (o
+     * cualquier otra), sin vigilarla ni crear entidad. Mismo criterio de
+     * "dentro" que las alertas. Ids ordenados.
+     */
+    QVector<qint64> targetsInArea(const QVector<QGeoCoordinate> &polygon) const;
+    //! Entidades con algun vertice dentro del poligono, ordenadas por id.
+    QVector<qint64> featuresInArea(const QVector<QGeoCoordinate> &polygon) const;
     //! Resalte en el mapa (activo por defecto): una zona vigilada con algo
     //! dentro se pinta con borde ancho y velo del color de alerta, y cada
     //! entidad punto dentro de una zona lleva un aro. Los objetivos moviles los

@@ -136,6 +136,12 @@ private slots:
     void scaleBarAndGraticuleDraw();
     //! Importar GeoJSON como capa y exportarla a KML/GPX/GeoJSON ida y vuelta.
     void importsAndExportsVectorFiles();
+    //! Historial de objetivos a GPX con horas, releible con parseGpxTracks.
+    void exportsTargetHistoryToGpx();
+    //! Exportar la vista: imagen (con y sin titulo/pie, a escala) y PDF.
+    void exportsViewToImageAndPdf();
+    //! Que hay dentro de una zona marcada, y quitar la marca de la seleccion.
+    void areaQueriesFindTargetsAndFeatures();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2230,6 +2236,137 @@ void TstMapWidget::importsAndExportsVectorFiles()
     QVERIFY(!err.isEmpty());
     QVERIFY(!w.exportVectorFile(dir.filePath(QStringLiteral("vacia.kml")),
                                 QStringLiteral("capa_sin_nada"), &err));
+}
+
+static MapFeature puntoDe(const QString &nombre, double lat, double lon);
+
+// El historial completo de cada objetivo sale a GPX con su hora y vuelve igual.
+void TstMapWidget::exportsTargetHistoryToGpx()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString ruta = dir.filePath(QStringLiteral("historial.gpx"));
+    QString err;
+    QVERIFY(!w.exportTargetHistory(ruta, {}, &err));      // sin objetivos: nada
+    QVERIFY(!err.isEmpty());
+    QVERIFY(!QFile::exists(ruta));
+
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760419413000LL).toUTC();
+    MapTarget a;
+    a.label = QStringLiteral("Buque A\nrumbo 090");
+    a.kind = QStringLiteral("buque");
+    a.position = QGeoCoordinate(23.0, -82.0);
+    const qint64 ida = w.addTarget(a, t0);
+    for (int i = 1; i <= 10; ++i)
+        w.updateTarget(ida, QGeoCoordinate(23.0, -82.0 + i * 0.001), 90.0, t0.addSecs(i * 10));
+    MapTarget b;
+    b.position = QGeoCoordinate(22.0, -80.0);
+    const qint64 idb = w.addTarget(b, t0.addSecs(3));
+
+    QVERIFY2(w.exportTargetHistory(ruta, {}, &err), qPrintable(err));
+    QFile f(ruta);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    const QVector<GpxTrack> tracks = parseGpxTracks(f.readAll(), &err);
+    QCOMPARE(tracks.size(), 2);
+    QCOMPARE(tracks[0].targetId, ida);
+    QCOMPARE(tracks[0].name, QStringLiteral("Buque A"));
+    QCOMPARE(tracks[0].type, QStringLiteral("buque"));
+    QCOMPARE(tracks[0].points.size(), 11);
+    QCOMPARE(tracks[0].points.first().time, t0);           // el origen, con su hora
+    QCOMPARE(tracks[0].points.last().time, t0.addSecs(100));
+    QCOMPARE(tracks[0].points.last().position.longitude(), -81.99);
+    QCOMPARE(tracks[1].name, QStringLiteral("Objetivo %1").arg(idb));
+
+    // Solo los pedidos.
+    QVERIFY(w.exportTargetHistory(ruta, { idb }, &err));
+    QFile g(ruta);
+    QVERIFY(g.open(QIODevice::ReadOnly));
+    QCOMPARE(parseGpxTracks(g.readAll()).size(), 1);
+}
+
+// La vista sale como imagen (del tamaño del widget por la escala, mas las
+// bandas de titulo y pie) y como PDF; una extension desconocida se rechaza sin
+// dejar fichero.
+void TstMapWidget::exportsViewToImageAndPdf()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(640, 480);
+    w.setZoom(8);
+    w.setCenter(QGeoCoordinate(22.0, -79.5));
+    MapFeature zona;
+    zona.kind = GeometryKind::Polygon;
+    zona.geometry = { QGeoCoordinate(21.8, -79.8), QGeoCoordinate(21.8, -79.2),
+                      QGeoCoordinate(22.2, -79.2) };
+    w.addFeature(zona);
+    w.setScaleBarVisible(true);
+
+    const QImage img = w.renderImage();
+    QCOMPARE(img.size(), QSize(640, 480));
+    QCOMPARE(w.renderImage(2.0).size(), QSize(1280, 960));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QString err;
+    MapExportOptions sinNada;
+    sinNada.footer = false;
+    const QString png = dir.filePath(QStringLiteral("vista.png"));
+    QVERIFY2(w.exportView(png, sinNada, &err), qPrintable(err));
+    QCOMPARE(QImage(png).size(), QSize(640, 480));
+
+    MapExportOptions con;
+    con.title = QStringLiteral("Sector norte");
+    con.notes = QStringLiteral("Ejercicio 3");
+    con.attribution = QStringLiteral("Datos de prueba");
+    con.imageScale = 1.5;
+    const QString jpg = dir.filePath(QStringLiteral("vista.jpg"));
+    QVERIFY2(w.exportView(jpg, con, &err), qPrintable(err));
+    const QImage conBandas(jpg);
+    QCOMPARE(conBandas.width(), 960);
+    QVERIFY(conBandas.height() > 720);                     // titulo y pie añadidos
+
+    const QString pdf = dir.filePath(QStringLiteral("vista.pdf"));
+    QVERIFY2(w.exportView(pdf, con, &err), qPrintable(err));
+    QFile f(pdf);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    const QByteArray datos = f.readAll();
+    QVERIFY(datos.startsWith("%PDF"));
+    QVERIFY(datos.size() > 2000);
+
+    QVERIFY(!w.exportView(dir.filePath(QStringLiteral("vista.xyz")), con, &err));
+    QVERIFY(!err.isEmpty());
+    QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("vista.xyz"))));
+}
+
+// targetsInArea / featuresInArea responden sin vigilar nada, y
+// clearAreaSelection no rompe nada aunque no haya marca.
+void TstMapWidget::areaQueriesFindTargetsAndFeatures()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    const QVector<QGeoCoordinate> zona = { QGeoCoordinate(22.0, -80.0), QGeoCoordinate(22.0, -79.0),
+                                           QGeoCoordinate(23.0, -79.0), QGeoCoordinate(23.0, -80.0) };
+    MapTarget t;
+    t.position = QGeoCoordinate(22.5, -79.5);
+    const qint64 dentro = w.addTarget(t);
+    t.id = -1;
+    t.position = QGeoCoordinate(24.0, -79.5);
+    w.addTarget(t);
+    QCOMPARE(w.targetsInArea(zona), QVector<qint64>({ dentro }));
+
+    const qint64 punto = w.addFeature(puntoDe(QStringLiteral("P"), 22.2, -79.2));
+    w.addFeature(puntoDe(QStringLiteral("Lejos"), 10.0, 10.0));
+    MapFeature linea;
+    linea.kind = GeometryKind::Polyline;
+    linea.geometry = { QGeoCoordinate(21.0, -81.0), QGeoCoordinate(22.5, -79.5) };  // 1 vertice dentro
+    const qint64 idLinea = w.addFeature(linea);
+    QCOMPARE(w.featuresInArea(zona), QVector<qint64>({ punto, idLinea }));
+    QVERIFY(w.watchedZones().isEmpty());                    // no se vigila nada
+
+    QVERIFY(w.targetsInArea({ QGeoCoordinate(22.0, -80.0) }).isEmpty());   // no es poligono
+    w.clearAreaSelection();
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

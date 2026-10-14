@@ -196,6 +196,7 @@ compara con referencias de PROJ 9.8 y de la librería <i>mgrs</i>.</p>
 <tr><td class="mono">toUtm(coord, zonaForzada) / fromUtm</td><td>Geográfica ↔ UTM (zona, banda, hemisferio, este, norte). La zona forzada sirve para las cuadrículas que cruzan un límite.</td></tr>
 <tr><td class="mono">toMgrs(coord, precisión) / fromMgrs</td><td>MGRS de 10 km a 1 m; los dígitos se truncan (esquina suroeste de la celda), como manda la norma.</td></tr>
 <tr><td class="mono">formatCoordinate / parseCoordinate</td><td>Texto en cualquier formato, y lectura de lo que escribe una persona (MGRS, UTM, decimal o sexagesimal con hemisferio, «O» = oeste).</td></tr>
+<tr><td class="mono">polygonArea / pathLength</td><td>Superficie (m²) de un polígono en la esfera autálica con <b>latitudes autálicas</b> (un trapecio de meridianos y paralelos sale exacto en WGS84) y longitud de un trazado o perímetro (m).</td></tr>
 </table>
 
 <h3><span class="cls">MapDecor</span> <span class="tag">geo/MapDecor.h</span></h3>
@@ -369,15 +370,25 @@ la API que usa la aplicación:</p>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
-<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · <b>targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible</b> · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
-<tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b></td></tr>
-<tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, <b>SelectArea</b>, Draw…, EditFeature) · clearAreaSelection</td></tr>
+<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
+<tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b> · consulta puntual <b>targetsInArea · featuresInArea</b></td></tr>
+<tr><td>Exportar</td><td class="mono"><b>renderImage(escala) · exportView(ruta, MapExportOptions)</b> (PDF vectorial con título, pie y escala 1:N, o PNG/JPG…) · <b>exportTargetHistory</b> (GPX con horas)</td></tr>
+<tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, SelectArea, SelectPolygon, Draw…, EditFeature) · clearAreaSelection (quita el recuadro o el contorno de la selección)</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
 <tr><td>Escala / cuadrícula</td><td class="mono">setScaleBarVisible · setScaleBarUnits (Metric/Nautical) · metersPerPixel · setGraticuleVisible · setGraticuleColor · <b>setGraticuleMode (Geographic/Utm)</b></td></tr>
 <tr><td>Cobertura / relieve</td><td class="mono">setCoverageVisible · setCoverageZoom · refreshCoverage · <b>setHillshadeVisible · setHillshadeSun · setHillshadeOpacity · setHillshadeExaggeration · setHillshadeColored · refreshHillshade</b></td></tr>
 <tr><td>Conversión</td><td class="mono">toAxisCoords · fromAxisCoords</td></tr>
 <tr><td>Señales</td><td class="mono">zoomChanged · centerChanged · areaSelected · clicked · featureCreated…</td></tr>
 </table>
+<p><b>Exportar la vista.</b> <code>exportView</code> elige el formato por la extensión.
+En <b>PDF</b> (<code>QPdfWriter</code>, de QtGui) dibuja el mapa con
+<code>QCustomPlot::toPainter</code> sobre un <code>QCPPainter</code> vectorial, a la
+resolución lógica de la pantalla: la hoja es una copia fiel de la vista, con
+entidades, objetivos, escala y cuadrícula como vectores y las teselas a su
+resolución nativa. La hoja (A4 por defecto) se orienta sola, y el pie da
+la extensión, la fecha UTC y la escala de impresión 1:N calculada en el centro. En
+<b>imagen</b>, <code>renderImage(escala)</code> redibuja a más píxeles y el título y el
+pie van en bandas blancas. Las dos se escriben de forma atómica (<code>QSaveFile</code>).</p>
 
 <h3><span class="cls">MapView</span> <span class="tag">widget/MapView.h · QCustomPlot</span></h3>
 <p>El lienzo real: hereda de QCustomPlot, gestiona el ratón (arrastrar, rueda,
@@ -431,6 +442,12 @@ XML de Qt Core. Probado sin ventanas en <code>tst_vectorformats</code>.</p>
 </table>
 <p>Los huecos de los polígonos se ignoran (el modelo no los tiene). <code>MapWidget::importVectorFile</code>
 añade las entidades de un fichero a una capa; <code>exportVectorFile</code> escribe todas o las de una capa.</p>
+<p><b>Recorridos con hora.</b> <code>GpxTrack</code> (nombre, tipo, id de objetivo y puntos
+<code>TargetTrackPoint</code>) con <code>tracksToGpx</code> / <code>writeGpxTracks</code> /
+<code>parseGpxTracks</code>: un <code>&lt;trk&gt;</code> por recorrido con <code>&lt;time&gt;</code>
+UTC (ISO 8601 con milisegundos) en cada punto y el id como extensión
+<code>libmapa:targetId</code>. Es lo que usa <code>MapWidget::exportTargetHistory</code> para
+sacar el historial de los objetivos; QGIS o GPXSee lo reproducen en el tiempo.</p>
 
 <h3><span class="cls">DataPackage</span> <span class="tag">io/DataPackage.h · público: DataPackageInfo</span></h3>
 <p>El producto final trabaja <b>sin conexión</b>: todos sus datos viajan en un
