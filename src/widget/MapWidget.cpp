@@ -6,6 +6,7 @@
 #include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
 #include "geo/WebMercator.h"
+#include "geo/ProximityMonitor.h"
 #include "geo/ZoneMonitor.h"
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileService.h"
@@ -141,6 +142,102 @@ public:
     ZoneMonitor pointZones;
     // Resalte en el mapa de las zonas ocupadas y de los puntos dentro de ellas.
     bool zoneHighlight = true;
+
+    // Alertas de proximidad (CPA/TCPA). La logica vive en ProximityMonitor; solo
+    // se le pasan objetivos mientras las alertas esten activas (coste cero si no).
+    ProximityMonitor proximity;
+    // Velocidad (m/s) y rumbo dados por la app; mandan sobre la estima por traza.
+    QHash<qint64, QPair<double, double>> reportedVelocity;
+    bool proximityLines = true;
+    // Ventana de la estima de velocidad por la traza: lo bastante larga para
+    // promediar el ruido de posicion, y corta para seguir un cambio de rumbo.
+    static constexpr qint64 kVentanaVelocidadMs = 30000;
+
+    // Estado de un objetivo para el monitor: posicion, hora de la ultima
+    // posicion y velocidad (la de la app o la estimada; parado si no hay).
+    ProximityMonitor::Track trackOf(qint64 id) const
+    {
+        ProximityMonitor::Track t;
+        if (!view)
+            return t;
+        const TargetModel *m = view->targetModel();
+        const auto it = m->entries().constFind(id);
+        if (it == m->entries().constEnd())
+            return t;
+        t.position = it->target.position;
+        t.msecs = it->lastMsecs;
+        const auto v = reportedVelocity.constFind(id);
+        if (v != reportedVelocity.constEnd()) {
+            t.speed = v->first;
+            t.course = v->second;
+        } else {
+            double vel = 0.0, rumbo = 0.0;
+            if (m->estimateVelocity(id, kVentanaVelocidadMs, &vel, &rumbo)) {
+                t.speed = vel;
+                t.course = rumbo;
+            }
+        }
+        return t;
+    }
+
+    // Texto corto de una alerta para el mapa: "CPA 0.32 NM en 4 min", o la
+    // distancia actual si ya estan dentro y se alejan. Unidades de la escala.
+    QString textoCpa(const CpaResult &c) const
+    {
+        const bool nauticas = view && view->scaleBarLayer()
+            && view->scaleBarLayer()->units() == ScaleUnits::Nautical;
+        const auto distancia = [nauticas](double m) {
+            if (nauticas)
+                return QStringLiteral("%1 NM").arg(m / 1852.0, 0, 'f', m < 18520.0 ? 2 : 1);
+            return m < 1000.0 ? QStringLiteral("%1 m").arg(qRound(m))
+                              : QStringLiteral("%1 km").arg(m / 1000.0, 0, 'f', 2);
+        };
+        if (c.timeSeconds < 0.0)
+            return QStringLiteral("%1 (se alejan)").arg(distancia(c.currentDistanceMeters));
+        const double s = c.timeSeconds;
+        const QString cuando = s < 60.0 ? QStringLiteral("%1 s").arg(qRound(s))
+            : s < 3600.0 ? QStringLiteral("%1 min").arg(qRound(s / 60.0))
+                         : QStringLiteral("%1 h %2").arg(int(s / 3600.0))
+                               .arg(int(std::fmod(s, 3600.0) / 60.0), 2, 10, QLatin1Char('0'));
+        return QStringLiteral("CPA %1 en %2").arg(distancia(c.distanceMeters), cuando);
+    }
+
+    // Pasa a la capa de objetivos las lineas de los pares en alerta.
+    void refreshProximityLines()
+    {
+        if (!view || !view->targetLayer())
+            return;
+        QVector<TargetLayer::ProximityLine> lineas;
+        if (proximityLines) {
+            for (const ProximityMonitor::Transition &a : proximity.alerts())
+                lineas.append({ a.a, a.b, a.cpa.positionA, a.cpa.positionB, textoCpa(a.cpa) });
+        }
+        view->targetLayer()->setProximityLines(lineas);
+    }
+
+    // Emite las transiciones del monitor como señales publicas (con el estado
+    // ya al dia) y refresca las lineas del mapa.
+    void emitProximityTransitions(const QVector<ProximityMonitor::Transition> &cambios)
+    {
+        refreshProximityLines();
+        for (const ProximityMonitor::Transition &t : cambios) {
+            if (t.raised)
+                emit q->proximityAlertRaised(t.a, t.b, t.cpa.distanceMeters, t.cpa.timeSeconds);
+            else
+                emit q->proximityAlertCleared(t.a, t.b);
+        }
+    }
+
+    // Lleva un objetivo al monitor de proximidad (solo con alertas activas).
+    void syncProximity(qint64 id)
+    {
+        if (!proximity.isEnabled())
+            return;
+        const bool habiaLineas = proximity.hasAlerts();
+        const auto cambios = proximity.updateTrack(id, trackOf(id));
+        if (!cambios.isEmpty() || habiaLineas)
+            emitProximityTransitions(cambios);
+    }
 
     // Recalcula que entidades estan "en alerta" (zonas vigiladas con algo
     // dentro, y entidades punto dentro de alguna) y se lo pasa a la capa de
@@ -1340,8 +1437,10 @@ qint64 MapWidget::addTarget(const MapTarget &target, const QDateTime &time)
     if (!d->view)
         return -1;
     const qint64 id = d->view->targetModel()->upsert(target, time);
-    if (id >= 0)
+    if (id >= 0) {
         d->emitZoneTransitions(d->zones.updateTarget(id, target.position));
+        d->syncProximity(id);
+    }
     return id;
 }
 
@@ -1352,6 +1451,7 @@ bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
     if (!d->view || !d->view->targetModel()->update(id, position, headingDeg, time))
         return false;
     d->emitZoneTransitions(d->zones.updateTarget(id, position));
+    d->syncProximity(id);
     return true;
 }
 
@@ -1420,6 +1520,9 @@ bool MapWidget::removeTarget(qint64 id)
 {
     d->zones.removeTarget(id);
     d->refreshAlerts();
+    d->proximity.removeTrack(id);
+    d->reportedVelocity.remove(id);
+    d->refreshProximityLines();
     return d->view && d->view->targetModel()->remove(id);
 }
 
@@ -1428,6 +1531,9 @@ void MapWidget::clearTargets()
 {
     d->zones.clearTargets();
     d->refreshAlerts();
+    d->proximity.clear();
+    d->reportedVelocity.clear();
+    d->refreshProximityLines();
     if (d->view)
         d->view->targetModel()->clear();
 }
@@ -1616,6 +1722,92 @@ void MapWidget::setZoneAlertColor(const QColor &color)
         return;
     d->view->featureLayer()->setAlertColor(color);
     d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// ------------------------------------------------- alertas de proximidad --
+
+// Activa (o cambia, o apaga con distancia <= 0) las alertas CPA/TCPA. Al
+// activarlas se cargan todos los objetivos en el monitor; al apagarlas se emite
+// el fin de las activas y se vacia el monitor para no gastar nada.
+void MapWidget::setProximityAlert(double distanceMeters, double horizonSeconds)
+{
+    const bool estaba = d->proximity.isEnabled();
+    const bool activar = std::isfinite(distanceMeters) && distanceMeters > 0.0;
+    if (activar && !estaba && d->view) {
+        for (const MapTarget &t : targets())
+            d->proximity.updateTrack(t.id, d->trackOf(t.id));   // sin criterios: no avisa
+    }
+    d->emitProximityTransitions(d->proximity.setCriteria(activar ? distanceMeters : 0.0,
+                                                         horizonSeconds));
+    if (!activar)
+        d->proximity.clear();
+}
+
+// Distancia de alerta en metros (0 = apagadas).
+double MapWidget::proximityAlertDistance() const
+{
+    return d->proximity.distance();
+}
+
+// Horizonte de la alerta en segundos.
+double MapWidget::proximityAlertHorizon() const
+{
+    return d->proximity.horizon();
+}
+
+// Pares en alerta, ordenados, con su CPA.
+QVector<ProximityAlert> MapWidget::proximityAlerts() const
+{
+    QVector<ProximityAlert> v;
+    for (const ProximityMonitor::Transition &t : d->proximity.alerts())
+        v.append({ t.a, t.b, t.cpa });
+    return v;
+}
+
+// CPA de dos objetivos al momento, con el mismo modelo de velocidad que las
+// alertas (aunque esten apagadas).
+CpaResult MapWidget::targetCpa(qint64 targetA, qint64 targetB) const
+{
+    if (!d->view || targetA == targetB || !d->view->targetModel()->contains(targetA)
+        || !d->view->targetModel()->contains(targetB))
+        return CpaResult();
+    return ProximityMonitor::evaluate(d->trackOf(targetA), d->trackOf(targetB));
+}
+
+// Velocidad/rumbo dados por la app (NaN = volver a estimar por la traza). Se
+// reevaluan en el acto los pares del objetivo.
+bool MapWidget::setTargetVelocity(qint64 id, double speedMetersPerSecond, double courseDeg)
+{
+    if (!d->view || !d->view->targetModel()->contains(id))
+        return false;
+    if (std::isnan(speedMetersPerSecond) || !std::isfinite(courseDeg))
+        d->reportedVelocity.remove(id);
+    else
+        d->reportedVelocity.insert(id, qMakePair(std::max(0.0, speedMetersPerSecond), courseDeg));
+    d->syncProximity(id);
+    return true;
+}
+
+// Muestra u oculta las lineas de maximo acercamiento.
+void MapWidget::setProximityLinesVisible(bool on)
+{
+    d->proximityLines = on;
+    d->refreshProximityLines();
+}
+
+// ¿Se dibujan las lineas CPA?
+bool MapWidget::isProximityLinesVisible() const
+{
+    return d->proximityLines;
+}
+
+// Color de las lineas y rotulos CPA.
+void MapWidget::setProximityColor(const QColor &color)
+{
+    if (d->view && d->view->targetLayer() && color.isValid()) {
+        d->view->targetLayer()->setProximityColor(color);
+        d->refreshProximityLines();
+    }
 }
 
 // Entidades punto dentro de una zona vigilada (vacio si no se vigila).

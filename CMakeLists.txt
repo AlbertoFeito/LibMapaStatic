@@ -97,6 +97,10 @@ add_library(libmapa_core STATIC
     src/geo/MapDecor.h
     src/geo/ZoneMonitor.cpp
     src/geo/ZoneMonitor.h
+    src/geo/Proximity.cpp
+    include/libmapa/Proximity.h
+    src/geo/ProximityMonitor.cpp
+    src/geo/ProximityMonitor.h
 
     src/db/SqliteConnectionPool.cpp
     src/db/SqliteConnectionPool.h
@@ -371,6 +375,7 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_elevationanalysis)
     libmapa_add_test(tst_contours)
     libmapa_add_test(tst_zonemonitor)
+    libmapa_add_test(tst_proximity)
     libmapa_add_test(tst_mapdecor)
     libmapa_add_test(tst_vectorformats)
     libmapa_add_test(tst_coordinates)

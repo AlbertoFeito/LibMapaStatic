@@ -10,6 +10,7 @@
 #include "libmapa/MapTarget.h"
 #include "libmapa/TargetSymbol.h"
 #include "libmapa/MapTypes.h"
+#include "libmapa/Proximity.h"
 #include "libmapa/libmapa_export.h"
 
 #include <QGeoCoordinate>
@@ -527,6 +528,50 @@ public:
     bool isZoneAlertHighlight() const;
     void setZoneAlertColor(const QColor &color);
 
+    // --- Alertas de proximidad (CPA/TCPA) ----------------------------------
+    /*!
+     * \brief Avisa de los pares de objetivos que van a pasar demasiado cerca.
+     *
+     * Un par entra en alerta si ya estan a menos de \a distanceMeters, o si
+     * su punto de maximo acercamiento (CPA) cae por debajo de esa distancia en
+     * los proximos \a horizonSeconds (TCPA). Se emite
+     * \ref proximityAlertRaised al entrar y \ref proximityAlertCleared al
+     * salir, y el mapa dibuja por donde se cruzan (\ref setProximityLinesVisible).
+     *
+     * - Se reevalua cada vez que se mueve cualquiera de los dos.
+     * - Velocidad y rumbo: los que dé la app con \ref setTargetVelocity (p. ej.
+     *   SOG/COG del AIS) o, si no, los estimados por la traza de los ultimos
+     *   30 s. La libreria no interpreta MapTarget::speed (sus unidades son
+     *   cosa de la app).
+     * - Si las ultimas posiciones son de horas distintas, se compara llevando
+     *   la mas antigua a la hora de la otra por estima.
+     * - Borrar un objetivo no emite fin de alerta (ha dejado de existir).
+     *
+     * \a distanceMeters <= 0 apaga las alertas (las activas terminan con su
+     * señal) y deja de calcular: sin alertas, coste cero. Cada movimiento cuesta
+     * O(objetivos), con un descarte rapido de los que no pueden acercarse.
+     */
+    void setProximityAlert(double distanceMeters, double horizonSeconds = 600.0);
+    double proximityAlertDistance() const;
+    double proximityAlertHorizon() const;
+    //! Pares en alerta ahora, ordenados.
+    QVector<ProximityAlert> proximityAlerts() const;
+    //! CPA/TCPA de dos objetivos cualesquiera, ahora (este o no activa la
+    //! alerta). Invalido si alguno no existe.
+    CpaResult targetCpa(qint64 targetA, qint64 targetB) const;
+    /*!
+     * \brief Velocidad (m/s) y rumbo (grados) de un objetivo, dados por la app.
+     *
+     * Para las alertas de proximidad: mandan sobre la estima por la traza.
+     * Con \a speedMetersPerSecond NaN se vuelve a estimar. Se olvida al borrar
+     * el objetivo. false si no existe. (Nudos: knotsToMetersPerSecond.)
+     */
+    bool setTargetVelocity(qint64 id, double speedMetersPerSecond, double courseDeg);
+    //! Lineas de maximo acercamiento de los pares en alerta (activo por defecto).
+    void setProximityLinesVisible(bool on);
+    bool isProximityLinesVisible() const;
+    void setProximityColor(const QColor &color);
+
     // --- Seleccion -------------------------------------------------------
     qint64 selectedFeature() const;
     void selectFeature(qint64 id);
@@ -732,6 +777,13 @@ signals:
     void featureEnteredZone(qint64 featureId, qint64 zoneFeatureId);
     //! Una entidad PUNTO ha salido de una zona vigilada.
     void featureLeftZone(qint64 featureId, qint64 zoneFeatureId);
+    //! Dos objetivos van a pasar (o ya estan) a menos de la distancia de alerta
+    //! (\ref setProximityAlert). \a targetA < \a targetB. \a tcpaSeconds
+    //! negativo: ya estan dentro y se alejan.
+    void proximityAlertRaised(qint64 targetA, qint64 targetB, double cpaMeters,
+                              double tcpaSeconds);
+    //! El par deja de estar en alerta de proximidad.
+    void proximityAlertCleared(qint64 targetA, qint64 targetB);
     void featureLayersChanged();
     //! Emitida al crear una entidad con el raton.
     void featureCreated(qint64 id);

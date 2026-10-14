@@ -158,6 +158,81 @@ void TargetLayer::draw(QCPPainter *painter)
         drawTarget(painter, *v.first, v.second, conTrazas, conEtiquetas, sel,
                    m_labelCells);
     }
+
+    // Alertas de proximidad, ENCIMA de los objetivos (son el aviso que no debe
+    // quedar tapado) y fuera del culling: el punto de encuentro puede estar en
+    // pantalla aunque los dos objetivos aun no lo esten.
+    if (!m_proximity.isEmpty())
+        drawProximity(painter);
+}
+
+// Guarda las lineas CPA de los pares en alerta y pide repintar.
+void TargetLayer::setProximityLines(const QVector<ProximityLine> &lines)
+{
+    m_proximity = lines;
+    programarRepintado();
+}
+
+// Cada par en alerta: discontinua de cada objetivo a donde estara en el CPA, la
+// distancia minima entre esos dos puntos en continua (con un punto en cada
+// extremo) y el rotulo en su centro. Lo que se ve es "por donde se cruzan y a
+// cuanto", sin tener que leer numeros.
+void TargetLayer::drawProximity(QPainter *painter) const
+{
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    QFont f = painter->font();
+    f.setPointSizeF(8.0);
+    f.setBold(true);
+    painter->setFont(f);
+    const QFontMetrics fm(f);
+    const QColor c = m_proximityColor;
+    QVector<QRectF> ocupadas;          // rotulos ya puestos en este dibujado
+
+    for (const ProximityLine &l : m_proximity) {
+        const auto ia = m_model->entries().constFind(l.a);
+        const auto ib = m_model->entries().constFind(l.b);
+        if (ia == m_model->entries().constEnd() || ib == m_model->entries().constEnd())
+            continue;
+        const QPointF pa = screenPos(ia->target.position);
+        const QPointF pb = screenPos(ib->target.position);
+        const QPointF ca = l.cpaA.isValid() ? screenPos(l.cpaA) : pa;
+        const QPointF cb = l.cpaB.isValid() ? screenPos(l.cpaB) : pb;
+
+        QPen discontinua(c, 1.6, Qt::DashLine);
+        painter->setPen(discontinua);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawLine(pa, ca);
+        painter->drawLine(pb, cb);
+
+        painter->setPen(QPen(QColor(255, 255, 255, 190), 5.0, Qt::SolidLine, Qt::RoundCap));
+        painter->drawLine(ca, cb);
+        painter->setPen(QPen(c, 2.6, Qt::SolidLine, Qt::RoundCap));
+        painter->drawLine(ca, cb);
+        painter->setBrush(c);
+        painter->setPen(QPen(Qt::white, 1.2));
+        painter->drawEllipse(ca, 3.5, 3.5);
+        painter->drawEllipse(cb, 3.5, 3.5);
+
+        if (!l.label.isEmpty()) {
+            const QPointF medio = (ca + cb) / 2.0;
+            const QRectF caja(medio.x() + 6.0, medio.y() - fm.height() - 4.0,
+                              fm.horizontalAdvance(l.label) + 8.0, fm.height() + 3.0);
+            // Con muchas alertas juntas, un rotulo que pisaria a otro se omite:
+            // la linea sigue viendose y el detalle esta en proximityAlerts().
+            const QRectF holgada = caja.adjusted(-2.0, -2.0, 2.0, 2.0);
+            if (std::any_of(ocupadas.cbegin(), ocupadas.cend(),
+                            [&holgada](const QRectF &r) { return r.intersects(holgada); }))
+                continue;
+            ocupadas.append(caja);
+            painter->setPen(QPen(c, 1.0));
+            painter->setBrush(QColor(255, 255, 255, 225));
+            painter->drawRoundedRect(caja, 3.0, 3.0);
+            painter->setPen(c.darker(140));
+            painter->drawText(caja, Qt::AlignCenter, l.label);
+        }
+    }
+    painter->restore();
 }
 
 // Dibuja el historial completo de un objetivo, del ORIGEN a la posicion actual:

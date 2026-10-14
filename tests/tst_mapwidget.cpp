@@ -142,6 +142,9 @@ private slots:
     void exportsViewToImageAndPdf();
     //! Que hay dentro de una zona marcada, y quitar la marca de la seleccion.
     void areaQueriesFindTargetsAndFeatures();
+    //! Alertas CPA/TCPA: dos objetivos en rumbo de colision, con velocidad dada
+    //! por la app o estimada por la traza; señales, lineas y apagado.
+    void proximityAlertsWarnOfCloseApproach();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2367,6 +2370,95 @@ void TstMapWidget::areaQueriesFindTargetsAndFeatures()
 
     QVERIFY(w.targetsInArea({ QGeoCoordinate(22.0, -80.0) }).isEmpty());   // no es poligono
     w.clearAreaSelection();
+}
+
+// Dos objetivos a 6 km en rumbo de colision. Con velocidad dada por la app
+// (setTargetVelocity) la alerta salta al activarla; con la estimada por la
+// traza, al moverse. Las lineas se dibujan, y apagar emite el fin.
+void TstMapWidget::proximityAlertsWarnOfCloseApproach()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(11);
+    w.setCenter(QGeoCoordinate(22.0, -79.97));
+
+    QVector<std::pair<qint64, qint64>> empiezan, terminan;
+    double cpaVisto = -1.0, tcpaVisto = -1.0;
+    connect(&w, &MapWidget::proximityAlertRaised, this,
+            [&](qint64 a, qint64 b, double cpa, double tcpa) {
+                empiezan.append({ a, b });
+                cpaVisto = cpa;
+                tcpaVisto = tcpa;
+            });
+    connect(&w, &MapWidget::proximityAlertCleared, this,
+            [&](qint64 a, qint64 b) { terminan.append({ a, b }); });
+
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760000000000LL).toUTC();
+    const QGeoCoordinate pa(22.0, -80.0);
+    const QGeoCoordinate pb = pa.atDistanceAndAzimuth(6000.0, 90.0);
+    MapTarget a;
+    a.position = pa;
+    const qint64 ida = w.addTarget(a, t0);
+    MapTarget b;
+    b.position = pb;
+    const qint64 idb = w.addTarget(b, t0);
+    MapTarget lejos;
+    lejos.position = QGeoCoordinate(10.0, 10.0);
+    w.addTarget(lejos, t0);
+
+    // Velocidades dadas por la app: 5 m/s cada uno, de frente -> TCPA 600 s.
+    QVERIFY(w.setTargetVelocity(ida, 5.0, 90.0));
+    QVERIFY(w.setTargetVelocity(idb, 5.0, 270.0));
+    const CpaResult c = w.targetCpa(ida, idb);
+    QVERIFY(c.valid);
+    QVERIFY(qAbs(c.timeSeconds - 600.0) < 1.0);
+    // ~1 m: "6 km al este" por ortodromica baja ~1 m al sur a 22 grados.
+    QVERIFY(c.distanceMeters < 5.0);
+    QVERIFY(w.proximityAlerts().isEmpty());                 // apagadas: no avisa
+
+    w.setProximityAlert(1852.0, 900.0);
+    QCOMPARE(empiezan.size(), 1);
+    QCOMPARE(empiezan[0], std::make_pair(ida, idb));
+    QVERIFY(cpaVisto < 5.0 && qAbs(tcpaVisto - 600.0) < 1.0);
+    QCOMPARE(w.proximityAlerts().size(), 1);
+    QCOMPARE(w.proximityAlertDistance(), 1852.0);
+
+    // Las lineas CPA se dibujan (y desaparecen al ocultarlas).
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+    const QImage conLineas = captura();
+    w.setProximityLinesVisible(false);
+    QVERIFY(captura() != conLineas);
+    w.setProximityLinesVisible(true);
+
+    // B cae al sur: el CPA ya no baja de 1 NM y la alerta termina.
+    QVERIFY(w.setTargetVelocity(idb, 5.0, 180.0));
+    QCOMPARE(terminan.size(), 1);
+    QVERIFY(w.proximityAlerts().isEmpty());
+
+    // Sin velocidad dada: se estima por la traza. B vuelve a rumbo oeste a
+    // 5 m/s durante 20 s (y A al este): vuelve a saltar.
+    w.setTargetVelocity(ida, std::numeric_limits<double>::quiet_NaN(), 0.0);
+    w.setTargetVelocity(idb, std::numeric_limits<double>::quiet_NaN(), 0.0);
+    for (int s = 1; s <= 20; ++s) {
+        w.updateTarget(ida, pa.atDistanceAndAzimuth(5.0 * s, 90.0), 90.0, t0.addSecs(s));
+        w.updateTarget(idb, pb.atDistanceAndAzimuth(5.0 * s, 270.0), 270.0, t0.addSecs(s));
+    }
+    QCOMPARE(empiezan.size(), 2);
+    QVERIFY(qAbs(w.proximityAlerts().first().cpa.timeSeconds - 580.0) < 3.0);
+
+    // Borrar no emite fin; apagar si, para las que queden.
+    w.setProximityAlert(0.0);
+    QCOMPARE(terminan.size(), 2);
+    QVERIFY(w.proximityAlerts().isEmpty());
+    w.removeTarget(ida);
+    QCOMPARE(terminan.size(), 2);
+    QVERIFY(!w.targetCpa(ida, idb).valid);
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

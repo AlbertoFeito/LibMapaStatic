@@ -4952,3 +4952,82 @@ Tests: `tst_vectorformats::gpxTracksKeepTimes`,
 `areaQueriesFindTargetsAndFeatures`.
 
 Compila sin warnings; **23 tests** en verde (20 sin QCustomPlot), Qt 6.4.
+
+## 122. Alertas de proximidad entre objetivos (CPA/TCPA)
+
+**Qué se hizo.**
+- **`Proximity.h`** (público, núcleo): `CpaResult` (distancia en el CPA, TCPA,
+  distancia actual y dónde estará cada uno en el CPA), `computeCpa(posA,
+  velA, rumboA, posB, velB, rumboB)`, `ProximityAlert` y `knotsToMetersPerSecond`.
+- **`geo/ProximityMonitor`** (núcleo; `tst_proximity`): guarda el estado de
+  cada móvil (posición, velocidad, rumbo y hora) y devuelve qué pares entran o
+  salen de alerta, igual que `ZoneMonitor` con las zonas.
+- **`TargetModel`**: hora de la última posición (`lastUpdateMsecs`) y
+  `estimateVelocity(id, ventana)`, la velocidad y el rumbo según la propia traza.
+- **`MapWidget`**:
+  - `setProximityAlert(distancia, horizonte)` (0 apaga), `proximityAlerts`,
+    `targetCpa`, `setTargetVelocity`, `setProximityLinesVisible` y
+    `setProximityColor`;
+  - señales `proximityAlertRaised(a, b, cpaMetros, tcpaSeg)` y
+    `proximityAlertCleared(a, b)`.
+- **`TargetLayer`**: dibuja cada par en alerta con una línea discontinua de cada
+  objetivo a su punto de CPA, la distancia mínima entre esos dos puntos y el
+  rótulo («CPA 453 m en 1 min», o «… (se alejan)»). Va encima de los objetivos
+  y omite los rótulos que se pisarían.
+- **Demo**:
+  - *Datos → Alertas de proximidad (CPA)…*, con la distancia en NM y el
+    horizonte en minutos;
+  - un aviso en la barra de estado y el recuento «⚠ N CPA» en el indicador;
+  - la simulación pasa la hora a la librería: es un «time-lapse» de 30 s
+    simulados por paso.
+
+**Criterio de alerta.** Un par está en alerta si ya está a menos de la
+distancia, o si su CPA cae por debajo de ella dentro del horizonte
+(0 ≤ TCPA ≤ horizonte). Lo primero cubre a dos que ya están encima aunque se
+alejen. Lo segundo es el aviso anticipado, que es lo útil.
+
+**Por qué así.**
+- **Velocidad estimada por la traza, no por `MapTarget::speed`.** La librería
+  no interpreta `speed`: sus unidades son de la app (la demo pone nudos solo a
+  los buques). Para no cambiar ese contrato, la velocidad sale del
+  desplazamiento en los últimos 30 s del historial, que ya tiene horas (§120).
+  La app con datos mejores, como SOG/COG del AIS, los da con
+  `setTargetVelocity` en m/s, y esos mandan sobre la estima.
+- **Estima que se para.** El historial no anota movimientos de menos de 1 m;
+  un objetivo parado deja de crecer, y sin más la estima se quedaría con la
+  última velocidad. Por eso cada objetivo guarda la hora de su última posición
+  aunque no se anote, y la estima mide hasta ella. Se leyó el reloj una sola
+  vez por actualización: con dos lecturas, historial y «última hora» podían
+  diferir en 1 ms, y la estima habría tomado el punto actual como origen
+  (velocidad 0).
+- **Estima de posición entre fuentes desfasadas.** Si un móvil informó hace 60 s
+  y el otro ahora, se lleva el atrasado a la hora del reciente antes del
+  cálculo. Sin ello, un AIS cada 10 s frente a un radar cada 2 s daría TCPA
+  erróneos (comprobado en `monitorDeadReckonsOlderFixes`).
+- **Plano tangente local.** Para distancias de alerta (decenas de km) es
+  exacto. Las posiciones del CPA se calculan sobre la esfera con
+  `atDistanceAndAzimuth`. Se tratan los pares a ambos lados de ±180°.
+- **Coste.** Mover un objetivo reevalúa sus pares, O(n). Antes del cálculo
+  completo hay un descarte barato: la distancia actual menos lo máximo que
+  pueden acercarse en el horizonte. 2000 móviles en un recuadro de 2°
+  cuadran con la fuerza bruta (1022 pares) y la pasada completa tarda unos
+  230 ms en Release, es decir ~0.1 ms por actualización. Con las alertas
+  apagadas no se alimenta el monitor y el coste es cero.
+- **Borrar no es alejarse**, como en las zonas: quitar un objetivo no emite fin
+  de alerta. Apagar las alertas sí emite el fin de las activas.
+- **Demo en tiempo simulado.** La simulación movía los objetivos 0.002–0.006°
+  cada 100 ms reales, unos 4 km/s de reloj de pared. Con la estima por traza eso
+  daba 190 pares en alerta y CPA en segundos. Ahora pasa a la librería su hora
+  simulada (30 s por paso): las velocidades salen de 7 a 22 m/s, y a 1 NM /
+  10 min hay unas pocas alertas creíbles.
+
+Comprobado en la demo bajo Xvfb (con 250 objetivos, unas 3–7 alertas a
+1 NM / 10 min). De cerca, dos aeronaves casi de frente muestran su punto de
+encuentro y «CPA 453 m en 1 min».
+Tests: `tst_proximity` (de frente, rumbos que se cruzan con referencia hecha a
+mano —TCPA 100 s, CPA 707.1 m—, paralelos, alejándose, entradas inválidas,
+±180°, transiciones, estima de posición, cambio de criterios, borrados y 2000
+móviles contra fuerza bruta), `tst_targetmodel::estimatesVelocityFromTrack` y
+`tst_mapwidget::proximityAlertsWarnOfCloseApproach`.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.

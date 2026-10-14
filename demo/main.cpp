@@ -643,6 +643,15 @@ private:
                "(otra vez = dejar de vigilar)."));
         connect(m_accVigilarZona, &QAction::triggered, this, &Ventana::alternarVigilancia);
 
+        // Alertas de proximidad (CPA/TCPA) entre objetivos: al marcarla pide la
+        // distancia y el horizonte; la librería avisa y dibuja por dónde se cruzan.
+        m_accProximidad = new QAction(tr("Alertas de proximidad (CPA)..."), this);
+        m_accProximidad->setCheckable(true);
+        m_accProximidad->setStatusTip(
+            tr("Avisa cuando dos objetivos van a pasar a menos de una distancia "
+               "dentro de un tiempo (punto de máximo acercamiento)."));
+        connect(m_accProximidad, &QAction::triggered, this, &Ventana::configurarProximidad);
+
         // Glifos del resto de acciones de barra (los de dibujo ya los puso
         // accHerr). aplicarIconos() los pinta con el color del tema.
         m_accGuardar->setProperty("glifo", QStringLiteral("guardar"));
@@ -775,6 +784,7 @@ private:
         mDatos->addAction(m_accSimular);
         mDatos->addAction(m_accVerObjetivos);
         mDatos->addAction(m_accVigilarZona);
+        mDatos->addAction(m_accProximidad);
         mDatos->addAction(accHistorialGpx);
 
         QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
@@ -3637,6 +3647,14 @@ private:
             statusBar()->showMessage(textoAlertaZona(obj, false, zona, false), 6000);
             actualizarIndicadorAlertas();
         });
+        // Alertas de proximidad: aviso en la barra y recuento en el indicador.
+        connect(m_mapa, &MapWidget::proximityAlertRaised, this,
+                [this](qint64 a, qint64 b, double cpa, double tcpa) {
+                    statusBar()->showMessage(textoProximidad(a, b, cpa, tcpa), 8000);
+                    actualizarIndicadorAlertas();
+                });
+        connect(m_mapa, &MapWidget::proximityAlertCleared, this,
+                [this](qint64, qint64) { actualizarIndicadorAlertas(); });
         // Los «Objetivo» que coloca el operador son ENTIDADES punto: su propia señal.
         connect(m_mapa, &MapWidget::featureEnteredZone, this, [this](qint64 ent, qint64 zona) {
             statusBar()->showMessage(textoAlertaZona(ent, true, zona, true), 8000);
@@ -3831,6 +3849,71 @@ private:
             .arg(m_mapa->targets().size()).arg(QFileInfo(ruta).fileName()), 5000);
     }
 
+    // Activa o apaga las alertas de proximidad. Al activarlas pide distancia (en
+    // millas náuticas) y horizonte (minutos); se recuerdan para la próxima vez.
+    void configurarProximidad(bool activar)
+    {
+        if (!activar) {
+            m_mapa->setProximityAlert(0.0);
+            actualizarIndicadorAlertas();
+            statusBar()->showMessage(tr("Alertas de proximidad apagadas"), 4000);
+            return;
+        }
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Alertas de proximidad (CPA/TCPA)"));
+        auto *form = new QFormLayout(&dlg);
+        auto *distancia = new QDoubleSpinBox(&dlg);
+        distancia->setRange(0.05, 50.0);
+        distancia->setDecimals(2);
+        distancia->setSingleStep(0.25);
+        distancia->setSuffix(tr(" NM"));
+        distancia->setValue(m_cpaMillas);
+        auto *horizonte = new QSpinBox(&dlg);
+        horizonte->setRange(1, 240);
+        horizonte->setSuffix(tr(" min"));
+        horizonte->setValue(m_cpaMinutos);
+        auto *explica = new QLabel(tr("Avisar si dos objetivos van a pasar a menos de una "
+                                      "distancia dentro de un tiempo, suponiendo que "
+                                      "mantienen rumbo y velocidad."), &dlg);
+        explica->setWordWrap(true);
+        form->addRow(explica);
+        form->addRow(tr("Distancia (CPA):"), distancia);
+        form->addRow(tr("Horizonte (TCPA):"), horizonte);
+        auto *botones = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        connect(botones, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(botones, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        form->addRow(botones);
+        if (dlg.exec() != QDialog::Accepted) {
+            m_accProximidad->setChecked(m_mapa->proximityAlertDistance() > 0);
+            return;
+        }
+        m_cpaMillas = distancia->value();
+        m_cpaMinutos = horizonte->value();
+        m_mapa->setProximityAlert(m_cpaMillas * 1852.0, m_cpaMinutos * 60.0);
+        actualizarIndicadorAlertas();
+        statusBar()->showMessage(
+            tr("Alertas de proximidad: menos de %1 NM en %2 min — %3 pares en alerta")
+                .arg(m_cpaMillas, 0, 'f', 2).arg(m_cpaMinutos)
+                .arg(m_mapa->proximityAlerts().size()), 6000);
+    }
+
+    // Texto de una alerta de proximidad: los dos objetivos (primera línea de su
+    // etiqueta), a qué distancia pasarán y en cuánto tiempo.
+    QString textoProximidad(qint64 a, qint64 b, double cpa, double tcpa) const
+    {
+        const auto nombre = [this](qint64 id) {
+            const auto t = m_mapa->target(id);
+            return t && !t->label.isEmpty() ? t->label.section(QLatin1Char('\n'), 0, 0)
+                                            : tr("Objetivo %1").arg(id);
+        };
+        if (tcpa < 0)
+            return tr("⚠ Proximidad: %1 y %2 ya están a menos de %3 NM")
+                .arg(nombre(a), nombre(b)).arg(m_cpaMillas, 0, 'f', 2);
+        return tr("⚠ CPA: %1 y %2 pasarán a %3 NM dentro de %4 min")
+            .arg(nombre(a), nombre(b)).arg(cpa / 1852.0, 0, 'f', 2)
+            .arg(qRound(tcpa / 60.0));
+    }
+
     // Vigila (o deja de vigilar) el polígono seleccionado como zona de alerta.
     // Al empezar, la librería ya avisa de los objetivos que estén dentro.
     void alternarVigilancia()
@@ -3898,12 +3981,16 @@ private:
         }
         const int n = int(moviles.size() + puntos.size());
         const int zonas = int(m_mapa->watchedZones().size());
-        m_alertas->setText(zonas == 0 ? QString()
-                           : n == 0 ? tr("Zonas vigiladas: %1").arg(zonas)
-                                    : tr("⚠ %1 en zonas").arg(n));
-        m_alertas->setStyleSheet(n > 0 ? QStringLiteral("QLabel { color:#fff; background:#d50032;"
-                                                        " font-weight:bold; padding:0 6px; }")
-                                       : QString());
+        const int cpa = int(m_mapa->proximityAlerts().size());
+        QStringList partes;
+        if (zonas > 0)
+            partes << (n == 0 ? tr("Zonas vigiladas: %1").arg(zonas) : tr("⚠ %1 en zonas").arg(n));
+        if (m_mapa->proximityAlertDistance() > 0)
+            partes << (cpa == 0 ? tr("CPA vigilado") : tr("⚠ %1 CPA").arg(cpa));
+        m_alertas->setText(partes.join(QStringLiteral(" · ")));
+        m_alertas->setStyleSheet(n + cpa > 0 ? QStringLiteral("QLabel { color:#fff; background:#d50032;"
+                                                              " font-weight:bold; padding:0 6px; }")
+                                             : QString());
     }
 
     // Vigila automáticamente toda «Área objetivo» (al crearla, cargarla o
@@ -3941,6 +4028,7 @@ private:
         m_mapa->clearTargets();
         m_simIds.clear();
         m_simVel.clear();
+        m_simHora = QDateTime::currentDateTimeUtc();
         m_simIds.reserve(n);
         m_simVel.reserve(n);
 
@@ -3991,7 +4079,7 @@ private:
                                    : QColor(0x3c, 0xb0, 0x4a);
             }
 
-            const qint64 id = m_mapa->addTarget(t);
+            const qint64 id = m_mapa->addTarget(t, m_simHora);
             m_simIds.append(id);
 
             const double rad = qDegreesToRadians(rumbo);
@@ -4002,9 +4090,15 @@ private:
         statusBar()->showMessage(tr("Simulando %1 objetivos").arg(n), 3000);
     }
 
+    // Un paso de la simulación. Es un «time-lapse»: cada paso (100 ms reales)
+    // son kSegundosPorPaso de tiempo simulado, y esa hora se pasa a la
+    // librería. Así la velocidad que estima por la traza (para el CPA/TCPA) es
+    // la que se ve: 0.002–0.006° por paso son 7–22 m/s, y no kilómetros por
+    // segundo de reloj de pared.
     void pasoSimulacion()
     {
         auto *r = QRandomGenerator::global();
+        m_simHora = m_simHora.addSecs(kSegundosPorPaso);
         for (int i = 0; i < m_simIds.size(); ++i) {
             QPointF &v = m_simVel[i];
             const auto t = m_mapa->target(m_simIds[i]);
@@ -4029,7 +4123,7 @@ private:
             }
 
             const double rumbo = qRadiansToDegrees(std::atan2(v.x(), v.y()));
-            m_mapa->updateTarget(m_simIds[i], QGeoCoordinate(lat, lon), rumbo);
+            m_mapa->updateTarget(m_simIds[i], QGeoCoordinate(lat, lon), rumbo, m_simHora);
         }
         actualizarEstado();
     }
@@ -4175,9 +4269,14 @@ private:
     QAction *m_accSelArea = nullptr;        //!< seleccionar área (bbox)
     QAction *m_accSelPoli = nullptr;        //!< seleccionar polígono (zona)
     int m_zonasCreadas = 0;                 //!< para nombrar «Zona N» desde una selección
+    QAction *m_accProximidad = nullptr;     //!< alertas CPA/TCPA entre objetivos
+    double m_cpaMillas = 1.0;               //!< distancia de la alerta CPA (NM)
+    int m_cpaMinutos = 10;                  //!< horizonte de la alerta CPA (min)
     QTimer *m_simReloj = nullptr;
     QVector<qint64> m_simIds;
     QVector<QPointF> m_simVel;      //!< x = dLon, y = dLat por paso.
+    QDateTime m_simHora;            //!< Reloj simulado (avanza kSegundosPorPaso por paso).
+    static constexpr int kSegundosPorPaso = 30;
     // Juego de iconos de la app para la simbologia de objetivos (Fase 2).
     QPixmap m_icoBuque, m_icoAereo, m_icoUav, m_icoUavBajo;
     QPixmap m_icoBuqueZona, m_icoAereoZona, m_icoUavZona;   //!< dentro de zona vigilada

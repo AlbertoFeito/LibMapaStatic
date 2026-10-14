@@ -42,6 +42,7 @@ public:
         MapTarget target;
         QVector<QGeoCoordinate> trail;     //!< Traza corta que se DIBUJA (acotada)
         QVector<HistoryPoint> history;     //!< Historial completo desde el origen
+        qint64 lastMsecs = 0;              //!< Hora de la ultima posicion (ms, UTC)
     };
 
     /*!
@@ -104,6 +105,20 @@ public:
     double historyMinDistance() const { return m_historyMinDist; }
     //! Distancia minima (m) entre puntos anotados (por defecto 1 m; 0 = todos).
     void setHistoryMinDistance(double meters);
+    //! Hora (ms desde epoch, UTC) de la ultima posicion recibida; 0 si no existe.
+    qint64 lastUpdateMsecs(qint64 id) const;
+
+    /*!
+     * \brief Velocidad (m/s) y rumbo (grados) estimados por la propia traza.
+     *
+     * Desplazamiento desde el punto del historial mas antiguo dentro de los
+     * ultimos \a windowMs hasta la posicion actual, entre el tiempo
+     * transcurrido. Si no hay ningun punto en la ventana se usa el ultimo
+     * anterior; si la posicion no ha cambiado desde el, el objetivo esta
+     * parado (velocidad 0). false si aun no hay con que estimar (recien
+     * creado) o el id no existe.
+     */
+    bool estimateVelocity(qint64 id, qint64 windowMs, double *speed, double *course) const;
     bool contains(qint64 id) const { return m_targets.contains(id); }
     int count() const { return static_cast<int>(m_targets.size()); }
 

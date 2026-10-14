@@ -25,6 +25,8 @@ SOURCES += \
     $$ROOT/src/geo/Coordinates.cpp \
     $$ROOT/src/geo/MapDecor.cpp \
     $$ROOT/src/geo/ZoneMonitor.cpp \
+    $$ROOT/src/geo/Proximity.cpp \
+    $$ROOT/src/geo/ProximityMonitor.cpp \
     $$ROOT/src/db/SqliteConnectionPool.cpp \
     $$ROOT/src/db/Schema.cpp \
     $$ROOT/src/db/VectorRepository.cpp \

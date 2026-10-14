@@ -88,7 +88,11 @@ qint64 TargetModel::upsert(MapTarget target, const QDateTime &time)
         podarTraza(e);
     }
     // El historial se abre con el alta (ORIGEN) y se continua si ya existia.
-    anotarHistoria(e, target.position, time);
+    // Una sola lectura del reloj para historial y ultima hora: si no, podrian
+    // diferir en un ms y la estima de velocidad tomaria este mismo punto.
+    const QDateTime hora = time.isValid() ? time : QDateTime::currentDateTimeUtc();
+    anotarHistoria(e, target.position, hora);
+    e.lastMsecs = hora.toMSecsSinceEpoch();
 
     emit changed();
     return target.id;
@@ -114,7 +118,9 @@ bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
         it->trail.append(position);
         podarTraza(*it);
     }
-    anotarHistoria(*it, position, time);
+    const QDateTime hora = time.isValid() ? time : QDateTime::currentDateTimeUtc();
+    anotarHistoria(*it, position, hora);
+    it->lastMsecs = hora.toMSecsSinceEpoch();
 
     emit changed();
     return true;
@@ -283,6 +289,51 @@ void TargetModel::setTrailMaxPoints(int maxPoints)
     for (Entry &e : m_targets)
         podarTraza(e);
     emit changed();
+}
+
+// Hora de la ultima posicion de un objetivo (0 si no existe).
+qint64 TargetModel::lastUpdateMsecs(qint64 id) const
+{
+    const auto it = m_targets.constFind(id);
+    return it != m_targets.cend() ? it->lastMsecs : 0;
+}
+
+// Velocidad por la traza: del punto mas antiguo del historial dentro de la
+// ventana (o, si no hay, del ultimo anterior a ella) a la posicion actual. El
+// historial no anota movimientos de menos de historyMinDistance, asi que un
+// objetivo que se para deja de crecer: con la posicion actual y su hora la
+// estima baja sola a 0 en vez de quedarse con la ultima velocidad.
+bool TargetModel::estimateVelocity(qint64 id, qint64 windowMs, double *speed,
+                                   double *course) const
+{
+    const auto it = m_targets.constFind(id);
+    if (it == m_targets.cend())
+        return false;
+    const Entry &e = *it;
+    const qint64 ahora = e.lastMsecs;
+    const HistoryPoint *desde = nullptr;
+    for (int i = int(e.history.size()) - 1; i >= 0; --i) {
+        const HistoryPoint &h = e.history.at(i);
+        if (h.msecs >= ahora)
+            continue;                      // el punto de esta misma posicion
+        if (desde && h.msecs < ahora - windowMs)
+            break;                         // ya tenemos el mas antiguo de la ventana
+        desde = &h;
+        if (h.msecs < ahora - windowMs)
+            break;                         // ninguno en la ventana: el anterior
+    }
+    if (!desde)
+        return false;
+    const QGeoCoordinate origen(desde->lat, desde->lon);
+    const double dist = origen.distanceTo(e.target.position);
+    const double dt = double(ahora - desde->msecs) / 1000.0;
+    if (dt <= 0.0)
+        return false;
+    if (speed)
+        *speed = dist < m_historyMinDist ? 0.0 : dist / dt;
+    if (course)
+        *course = dist > 0.0 ? origen.azimuthTo(e.target.position) : e.target.headingDeg;
+    return true;
 }
 
 } // namespace libmapa

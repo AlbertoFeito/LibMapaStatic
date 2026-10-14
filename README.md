@@ -12,7 +12,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 23 tests (20 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 24 tests (21 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
@@ -20,6 +20,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
 - **Historial completo de cada objetivo**: además de la traza corta que se dibuja, se guarda todo su recorrido con hora desde que se vio por primera vez (`targetHistory`, `targetOrigin`); al seleccionarlo se dibuja entero desde el origen
 - **Alertas de zona**: cualquier polígono puede vigilarse (`watchZone`) y la librería avisa cuando un objetivo móvil o una entidad punto entra o sale (`targetEnteredZone` / `featureEnteredZone`…) y resalta en el mapa la zona ocupada
+- **Alertas de proximidad (CPA/TCPA)**: `setProximityAlert(distancia, horizonte)` avisa cuando dos objetivos van a pasar demasiado cerca (`proximityAlertRaised` / `proximityAlertCleared`) y dibuja por dónde se cruzan («CPA 0.30 NM en 4 min»). La velocidad se estima por la traza o la da la app (`setTargetVelocity`, p. ej. SOG/COG del AIS); `computeCpa` y `targetCpa` sirven para cálculos sueltos
 - **Escala gráfica y cuadrícula de coordenadas**: `setScaleBarVisible` (metros/km o millas náuticas) y `setGraticuleVisible` (meridianos y paralelos rotulados, con paso automático según el zoom: 1°, 30', 5', 30"…)
 - **Coordenadas UTM y MGRS** (`Coordinates.h`): conversión y formato en decimal, GMS, UTM y MGRS (al milímetro frente a PROJ), lectura de lo que escribe una persona en cualquiera de ellos, y cuadrícula UTM (`setGraticuleMode`)
 - **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión. El historial de los objetivos sale a **GPX con la hora de cada punto** (`exportTargetHistory`, releíble con `parseGpxTracks`)
@@ -100,7 +101,14 @@ qint64 id = mapa->addTarget(t);
 //    la hora es opcional, p. ej. la del mensaje AIS):
 mapa->updateTarget(id, nuevaPos, nuevoRumbo, horaDelMensaje);
 
-// 4) Recorrido completo y origen (donde y cuando se vio por primera vez):
+// 4) Alertas de proximidad: avisa si dos objetivos pasarán a menos de 1 NM
+//    en los próximos 10 min (y dibuja dónde):
+mapa->setProximityAlert(1852.0, 600.0);
+mapa->setTargetVelocity(id, libmapa::knotsToMetersPerSecond(sog), cog);  // opcional
+connect(mapa, &libmapa::MapWidget::proximityAlertRaised, this,
+        [](qint64 a, qint64 b, double cpaMetros, double tcpaSeg) { /* aviso */ });
+
+// 5) Recorrido completo y origen (donde y cuando se vio por primera vez):
 auto origen = mapa->targetOrigin(id);          // origen.position, origen.time
 auto recorrido = mapa->targetHistory(id);      // todo, hasta que se borre el objetivo
 mapa->setTargetAttribute(id, "velocidad", 12.4);
@@ -340,7 +348,7 @@ tiles (MBTiles)*), que la librería consume tal cual.
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
 | `dem_to_db` | Construye una base de datos de elevación (`.sqlitedb`) desde una carpeta de ficheros SRTM `.hgt` |
 | `fill_map` | Lo mismo pero con mapa: marca el área (rectángulo o polígono), rango de zoom, barra de progreso y mancha de cobertura. Permite **sobre-zoom** del mapa de vista previa (hasta z19) para navegar y enmarcar niveles altos (z15/16…) aunque la base recomiende un máximo menor; el rango de descarga llega a z22 |
-| `demo` | Aplicación de ejemplo con **barra de menú** (Archivo/Ver/Dibujo/Elevación/Datos/Ayuda), **barras de herramientas con iconos** en dos filas por actividad (navegación+dibujo+archivo / terreno+datos) **panel lateral contextual** (solo el árbol de capas al iniciar; la ficha de la entidad —Propiedades/Coordenadas/Estilo plegables— aparece al seleccionar), **temas claro/oscuro** elegibles (Ver → Tema, recordado), y **panel de capas en tres grupos** (Base = datasets, selección exclusiva; Overlays = vectores de solo lectura; Entidades = puntos/líneas/polígonos editables): dibujo/edición con **diálogo de alta** (nombre/capa/colores al crear una entidad, y vuelta automática a Navegar al terminar el trazo), **coordenadas lat/lon editables** de la entidad seleccionada (mover/añadir/quitar vértices; solo entidades de usuario), cobertura por zoom, cota del terreno, **análisis de elevación** (perfil, visión A→B, viewshed; **temporal**, no se guarda), **Objetivo** (punto con etiqueta movible de 3 líneas) y **Área objetivo** (polígono ≤10 con etiqueta en el 1er punto) y **guardado explícito** (asterisco en el título si hay cambios; pregunta al cerrar/abrir; `--features` carga y fija el fichero de trabajo, sin autoguardado). **Datos → Seleccionar área / polígono** marca una zona temporal y dice qué hay dentro (superficie, perímetro, objetivos y entidades) para convertirla en área, vigilarla o exportarla; **Datos → Exportar vista** (Ctrl+P, PDF/PNG/JPG) y **Exportar historial de objetivos (GPX)**. Los **overlays arrancan ocultos** (solo mapa al iniciar) |
+| `demo` | Aplicación de ejemplo con **barra de menú** (Archivo/Ver/Dibujo/Elevación/Datos/Ayuda), **barras de herramientas con iconos** en dos filas por actividad (navegación+dibujo+archivo / terreno+datos) **panel lateral contextual** (solo el árbol de capas al iniciar; la ficha de la entidad —Propiedades/Coordenadas/Estilo plegables— aparece al seleccionar), **temas claro/oscuro** elegibles (Ver → Tema, recordado), y **panel de capas en tres grupos** (Base = datasets, selección exclusiva; Overlays = vectores de solo lectura; Entidades = puntos/líneas/polígonos editables): dibujo/edición con **diálogo de alta** (nombre/capa/colores al crear una entidad, y vuelta automática a Navegar al terminar el trazo), **coordenadas lat/lon editables** de la entidad seleccionada (mover/añadir/quitar vértices; solo entidades de usuario), cobertura por zoom, cota del terreno, **análisis de elevación** (perfil, visión A→B, viewshed; **temporal**, no se guarda), **Objetivo** (punto con etiqueta movible de 3 líneas) y **Área objetivo** (polígono ≤10 con etiqueta en el 1er punto) y **guardado explícito** (asterisco en el título si hay cambios; pregunta al cerrar/abrir; `--features` carga y fija el fichero de trabajo, sin autoguardado). **Datos → Seleccionar área / polígono** marca una zona temporal y dice qué hay dentro (superficie, perímetro, objetivos y entidades) para convertirla en área, vigilarla o exportarla; **Datos → Exportar vista** (Ctrl+P, PDF/PNG/JPG), **Exportar historial de objetivos (GPX)** y **Alertas de proximidad (CPA)…** (distancia en NM y horizonte en minutos; la simulación corre a 30 s simulados por paso para que las velocidades sean reales). Los **overlays arrancan ocultos** (solo mapa al iniciar) |
 
 `render_map --grid` marca cada tesela con su `z/x/y`: borde verde si es la
 tesela propia, rojo si viene de un nivel superior escalado.
@@ -607,7 +615,7 @@ src/
   io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               23 tests (20 sin QCustomPlot)
+tests/               24 tests (21 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
@@ -649,6 +657,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 22 | Coordenadas UTM/MGRS (conversión, formato, lectura) y cuadrícula UTM; alertas de zona también para entidades punto, con resalte en el mapa |
 | 23 | Historial completo de cada objetivo desde su origen (con hora), dibujado entero al seleccionarlo |
 | 24 | Historial de objetivos a GPX con horas; exportar la vista a imagen o PDF; consultar qué hay en una zona marcada (y la demo, arreglada, lo usa) |
+| 25 | Alertas de proximidad CPA/TCPA entre objetivos (velocidad estimada por la traza o dada por la app), con líneas de máximo acercamiento en el mapa |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

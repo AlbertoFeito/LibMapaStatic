@@ -135,7 +135,7 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
   <text x="30" y="286" fill="#39424e" font-weight="700">libmapa_core &nbsp;<tspan font-weight="400" font-size="9">(sin ventanas: Core · Gui · Sql · Positioning)</tspan></text>
   <g font-size="10">
     <rect x="34" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="42" y="316" fill="#145374" font-weight="700">tiles</text><text x="42" y="332" font-size="8.5">TileService·Loader·Cache·Source·Planner·Probe</text>
-    <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·ZoneMonitor</text>
+    <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·Zone/ProximityMonitor</text>
     <rect x="338" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="346" y="316" fill="#145374" font-weight="700">db</text><text x="346" y="332" font-size="8.5">ConnectionPool·Schema·VectorRepository</text>
     <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · VectorFormats · Elevation</text>
     <rect x="622" y="298" width="106" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="630" y="316" fill="#145374" font-weight="700">tipos</text><text x="630" y="332" font-size="8.5">MapFeature·MapTarget</text>
@@ -219,6 +219,24 @@ zona multi-parte, con descarte previo por caja envolvente: O(zonas) por actualiz
 <tr><td class="mono">updateTarget(id, pos) → transiciones</td><td>Movimiento de un objetivo; posición inválida = sale de todas.</td></tr>
 <tr><td class="mono">removeZone · removeTarget · clearTargets</td><td>Olvidan sin generar salidas (borrar no es «salir»).</td></tr>
 <tr><td class="mono">targetsIn · zonesOf · isInside</td><td>Consultas del estado actual.</td></tr>
+</table>
+
+<h3><span class="cls">ProximityMonitor</span> <span class="tag">geo/ProximityMonitor.h · público: Proximity.h</span></h3>
+<p>Lógica de las <b>alertas de proximidad (CPA/TCPA)</b>: qué pares de móviles van a
+pasar demasiado cerca. <code>computeCpa</code> (público) calcula el punto de máximo
+acercamiento en un plano tangente local suponiendo rumbo y velocidad constantes:
+CPA (distancia mínima), TCPA (tiempo hasta ella) y dónde estará cada uno. Un par está
+en alerta si <b>ya</b> está a menos de la distancia, o si el CPA cae por debajo de ella
+dentro del horizonte (0 ≤ TCPA ≤ horizonte). Antes de comparar dos móviles, el que
+informó antes se lleva <b>por estima</b> a la hora del otro. Coste O(móviles) por
+actualización, con un descarte barato: la distancia actual menos lo máximo que
+pueden acercarse en el horizonte. Sin criterios, no calcula nada
+(<code>tst_proximity</code>: 2000 móviles cuadran con la fuerza bruta).</p>
+<table><tr><th>Función</th><th>Qué hace</th></tr>
+<tr><td class="mono">setCriteria(distancia, horizonte) → transiciones</td><td>Activa, cambia o apaga (distancia 0) y reevalúa todos los pares.</td></tr>
+<tr><td class="mono">updateTrack(id, {pos, vel, rumbo, hora}) → transiciones</td><td>Reevalúa los pares de ese móvil; posición inválida = sale de sus alertas.</td></tr>
+<tr><td class="mono">removeTrack · clear</td><td>Olvidan sin transiciones (borrar no es «alejarse»).</td></tr>
+<tr><td class="mono">alerts · isAlerted · cpa · evaluate</td><td>Pares en alerta con su CPA; CPA de dos móviles cualesquiera.</td></tr>
 </table>
 
 <h3><span class="cls">TileMatrix</span> <span class="tag">geo/TileMatrix.h</span></h3>
@@ -372,6 +390,7 @@ la API que usa la aplicación:</p>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b> · consulta puntual <b>targetsInArea · featuresInArea</b></td></tr>
+<tr><td>Proximidad (CPA/TCPA)</td><td class="mono"><b>setProximityAlert(distancia, horizonte) · proximityAlerts · targetCpa · setTargetVelocity · setProximityLinesVisible · setProximityColor · señales proximityAlertRaised / proximityAlertCleared</b></td></tr>
 <tr><td>Exportar</td><td class="mono"><b>renderImage(escala) · exportView(ruta, MapExportOptions)</b> (PDF vectorial con título, pie y escala 1:N, o PNG/JPG…) · <b>exportTargetHistory</b> (GPX con horas)</td></tr>
 <tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, SelectArea, SelectPolygon, Draw…, EditFeature) · clearAreaSelection (quita el recuadro o el contorno de la selección)</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
@@ -606,6 +625,15 @@ pasa por <code>ZoneMonitor</code> y, si el objetivo cruza el borde, se emite
 ediciones de la zona (vértices, arrastre, deshacer, cargas en bloque) la reevalúan;
 borrar el objetivo o la zona no genera salidas. También se vigilan las <b>entidades punto</b> (marcadores que el operador coloca o arrastra) con sus propias señales, y la zona ocupada se <b>resalta en el mapa</b> (borde y velo rojos, aro en los puntos). Qué significa la zona («prohibida»,
 «de interés»…) lo decide la app por su <code>type</code>: la librería solo hace la geometría.</p>
+<p><b>Alertas de proximidad.</b> Con <code>setProximityAlert(distancia, horizonte)</code>,
+cada <code>addTarget</code>/<code>updateTarget</code> pasa también por
+<code>ProximityMonitor</code>, que emite <code>proximityAlertRaised(a, b, cpa, tcpa)</code>
+o <code>proximityAlertCleared(a, b)</code>. La velocidad de cada objetivo es la que da la app
+(<code>setTargetVelocity</code>, p. ej. SOG/COG del AIS) o, si no, la que estima
+<code>TargetModel</code> por los últimos 30 s de su historial. Así
+<code>MapTarget::speed</code> sigue sin interpretarse. <code>TargetLayer</code>
+dibuja cada par en alerta encima de los objetivos: discontinuas hasta el punto de CPA de
+cada uno, la distancia mínima entre ellos y el rótulo «CPA 0.30 NM en 4 min».</p>
 
 <h3>9.3 · Entidades y ficheros .geo</h3>
 <p><code>loadGeoAsLayer(ruta)</code> → <code>GeoFile</code> lee los trazados →

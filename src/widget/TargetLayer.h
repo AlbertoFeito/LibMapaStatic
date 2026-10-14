@@ -53,6 +53,19 @@ public:
     //! (donde se vio por primera vez, marcado con un cuadro y su hora). Activo
     //! por defecto.
     void setSelectedHistoryVisible(bool on);
+
+    //! Una alerta de proximidad que dibujar: los dos objetivos, donde estara
+    //! cada uno en el CPA y el rotulo ("CPA 0.30 NM en 4 min").
+    struct ProximityLine {
+        qint64 a = -1;
+        qint64 b = -1;
+        QGeoCoordinate cpaA;
+        QGeoCoordinate cpaB;
+        QString label;
+    };
+    //! Lineas de maximo acercamiento de los pares en alerta (vacio = ninguna).
+    void setProximityLines(const QVector<ProximityLine> &lines);
+    void setProximityColor(const QColor &c) { m_proximityColor = c; }
     bool isSelectedHistoryVisible() const { return m_historyVisible; }
 
     //! Nivel de detalle para escalar a MILES de objetivos: si en un repintado
@@ -91,6 +104,7 @@ private:
                     bool selected, QSet<qint64> &labelCells) const;
     // Historial completo del objetivo seleccionado y marca de su origen.
     void drawHistory(QPainter *painter, const TargetModel::Entry &e) const;
+    void drawProximity(QPainter *painter) const;
 
     TargetModel *m_model = nullptr;
     std::function<QPointF(const QGeoCoordinate &)> m_toAxis;
@@ -101,6 +115,8 @@ private:
     int m_trailBudget = 400;         //!< Tope de trazas visibles (nivel detalle).
     qint64 m_selected = -1;          //!< Objetivo resaltado (-1 = ninguno).
     bool m_historyVisible = true;    //!< El seleccionado muestra su historial.
+    QVector<ProximityLine> m_proximity;              //!< Pares en alerta CPA.
+    QColor m_proximityColor = QColor(0xff, 0x3d, 0x00);
     QTimer m_repintar;               //!< Agrupa avisos: como mucho ~30 fps.
     mutable int m_lastDrawn = 0;
     mutable int m_lastLabels = 0;

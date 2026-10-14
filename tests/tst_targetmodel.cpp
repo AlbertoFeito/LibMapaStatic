@@ -25,6 +25,7 @@ private slots:
     void historyThinningKeepsOriginAndLast();
     //! Distancia minima, horas dadas por la app y borrado.
     void historyTimesMinDistanceAndRemoval();
+    void estimatesVelocityFromTrack();
 };
 
 static MapTarget objetivo(double lat, double lon, const QString &etq = QString())
@@ -273,6 +274,44 @@ void TstTargetModel::historyTimesMinDistanceAndRemoval()
     QVERIFY(m.remove(id));
     QVERIFY(m.history(id).isEmpty());
     QVERIFY(!m.origin(id).isValid());
+}
+
+// Velocidad por la traza: 10 m/s al este durante 60 s, con la ventana de 30 s
+// usa el tramo reciente; al pararse, la estima baja a 0; recien creado no hay.
+void TstTargetModel::estimatesVelocityFromTrack()
+{
+    TargetModel m;
+    MapTarget t;
+    t.position = QGeoCoordinate(20.0, -80.0);
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1760000000000LL).toUTC();
+    const qint64 id = m.upsert(t, t0);
+    double v = -1.0, rumbo = -1.0;
+    QVERIFY(!m.estimateVelocity(id, 30000, &v, &rumbo));     // un solo punto
+    QCOMPARE(m.lastUpdateMsecs(id), t0.toMSecsSinceEpoch());
+
+    for (int s = 1; s <= 60; ++s)
+        m.update(id, t.position.atDistanceAndAzimuth(10.0 * s, 90.0),
+                 std::numeric_limits<double>::quiet_NaN(), t0.addSecs(s));
+    QVERIFY(m.estimateVelocity(id, 30000, &v, &rumbo));
+    QVERIFY(qAbs(v - 10.0) < 0.05);
+    QVERIFY(qAbs(rumbo - 90.0) < 0.5);
+
+    // Gira al norte: con 30 s de ventana, a los 30 s la estima ya es el norte.
+    const QGeoCoordinate giro = m.target(id)->position;
+    for (int s = 1; s <= 30; ++s)
+        m.update(id, giro.atDistanceAndAzimuth(10.0 * s, 0.0),
+                 std::numeric_limits<double>::quiet_NaN(), t0.addSecs(60 + s));
+    QVERIFY(m.estimateVelocity(id, 30000, &v, &rumbo));
+    QVERIFY(qAbs(v - 10.0) < 0.2);
+    QVERIFY(qAbs(rumbo) < 1.0 || qAbs(rumbo - 360.0) < 1.0);
+
+    // Se para: la misma posicion 40 s mas tarde (el historial no crece).
+    const QGeoCoordinate quieto = m.target(id)->position;
+    m.update(id, quieto, std::numeric_limits<double>::quiet_NaN(), t0.addSecs(130));
+    QVERIFY(m.estimateVelocity(id, 30000, &v, &rumbo));
+    QCOMPARE(v, 0.0);
+
+    QVERIFY(!m.estimateVelocity(999, 30000, &v, &rumbo));
 }
 
 QTEST_MAIN(TstTargetModel)
