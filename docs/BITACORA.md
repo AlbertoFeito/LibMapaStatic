@@ -5398,3 +5398,30 @@ Tests:
   desactiva.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 131. Ejemplo `app_seguimiento`
+
+`examples/app_minima` se quedó en lo mínimo a propósito: es la plantilla que se
+copia para empezar un producto, y meterle objetivos, alertas y menús la haría
+peor plantilla. Por eso el API nuevo (secciones 116–130) se enseña en un ejemplo
+hermano, `examples/app_seguimiento`, con los mismos `CMakeLists.txt` y `.pro`
+(usa la librería **instalada** con `find_package` / `libmapa.pri`, nunca las
+fuentes).
+
+En unas 220 líneas, sin `Q_OBJECT` (todo con lambdas, para no necesitar moc en
+el `.pro`):
+- tres buques simulados que se mueven por estima cada segundo
+  (`updateTarget` con hora, `setTargetVelocity` en nudos);
+- una zona vigilada con aviso al entrar (`targetEnteredZone`);
+- alerta de proximidad CPA/TCPA (0,5 NM, 15 min) sobre el barco propio;
+- anillos de distancia en el propio y demora hacia otro buque;
+- agrupación al alejar el zoom y un filtro «solo a más de 9 kn» atenuado;
+- medir superficie; exportar la vista a PDF y el historial a GPX;
+- reproducir el historial con `TrackPlayer` y salir de la reproducción.
+
+La demo sigue siendo el escaparate completo; este ejemplo es lo que hay que leer
+para saber **qué llamadas** usar en una app propia.
+
+Comprobado: instalada la librería en una carpeta temporal, el ejemplo configura
+y compila sin warnings con `-DCMAKE_PREFIX_PATH` y arranca. No añade tests (es un
+ejemplo fuera del árbol de la librería): siguen **24 tests** en verde.

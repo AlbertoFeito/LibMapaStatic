@@ -266,6 +266,10 @@ target_link_libraries(miapp PRIVATE libmapa::widget)
 [`examples/app_minima`](examples/app_minima) es la plantilla completa: una app
 que solo usa `MapConfig::dataDir`. Con `add_subdirectory` también valen los
 nombres `libmapa::core` / `libmapa::widget`.
+[`examples/app_seguimiento`](examples/app_seguimiento) se compila igual y enseña
+el API de objetivos en ~220 líneas: buques simulados, zona vigilada, alerta
+CPA/TCPA, anillos y demora, filtro, agrupación, medir superficie, exportar vista
+a PDF / historial a GPX y reproducir el historial.
 
 ### Llevarla a otro PC
 
@@ -638,6 +642,7 @@ tests/               24 tests (21 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
+examples/app_seguimiento/ ejemplo del API de objetivos con la librería instalada
 cmake/               libmapaConfig.cmake.in (para find_package)
 qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri)
 qmake/*.pro          herramientas sueltas con qmake
