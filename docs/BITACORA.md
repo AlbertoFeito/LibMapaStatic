@@ -5218,3 +5218,43 @@ cerrada y el indicador apagado. El indicador y «Simular» también salen.
 `isLoaded()`.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 126. Medir superficie en pantalla
+
+**Qué se hizo.**
+- **`MapTool::MeasureArea`**: se marca un polígono clic a clic y la librería
+  rotula en vivo, junto al cursor, la **superficie** y el **perímetro**,
+  contando el lado hasta el cursor y el de cierre. Con dos puntos rotula la
+  longitud del lado.
+- Doble clic, clic derecho o Intro cierran el polígono. Entonces se emite
+  **`areaMeasured(AreaMeasurement)`** (polígono, m² y m), y el contorno se
+  queda con su medida en el centro hasta cambiar de herramienta o llamar a
+  `clearAreaSelection`. Un clic más empieza otra medida. No crea ninguna
+  entidad.
+- `MapDecor::formatArea`: «850 m²», «12.5 ha», «3.42 km²» o «1 NM²», según
+  las unidades de la escala.
+- `FeatureLayer::setDraftLabel`: rótulo del borrador, junto al cursor
+  mientras se traza y en el centro del polígono una vez cerrado.
+- **Demo**: «Medir superficie» junto a «Medir», en la barra y en *Dibujo*. El
+  resultado sale también en la barra de estado.
+
+**Por qué así.** Reutiliza el trazado de `SelectPolygon` (borrador con línea de
+goma, cierre por doble clic, Intro o clic derecho) con un indicador más: es el
+mismo gesto, pero da un número en lugar de una zona. El cálculo es el de
+`polygonArea`/`pathLength` (§121), sobre el elipsoide: el rótulo y la señal dan
+exactamente lo mismo. El color morado distingue la medida de una selección
+(negra) y de una entidad.
+
+Comprobado en la demo bajo Xvfb (medida en vivo y polígono cerrado con su
+rótulo). `tst_mapwidget::measureAreaToolMeasuresPolygon` marca con clics reales
+un cuadrado de unos 2 km y comprueba:
+- que la medida en vivo cambia lo dibujado;
+- que `areaMeasured` sale al pulsar Intro y no antes;
+- que su superficie es exactamente `polygonArea` del polígono marcado y vale
+  unos 4 km² (con la cuantización de los píxeles a zoom 12);
+- que no se crea ninguna entidad, que cambiar de herramienta quita la marca y
+  que con dos vértices no hay medida.
+
+`tst_mapdecor` comprueba los formatos.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.

@@ -155,6 +155,27 @@ QString formatDistance(double meters, ScaleUnits units)
     return sinCeros(km, decimalesPara(km)) + QStringLiteral(" km");
 }
 
+// Superficie legible en la unidad pedida (ver cabecera).
+QString formatArea(double squareMeters, ScaleUnits units)
+{
+    if (!std::isfinite(squareMeters))
+        return QString();
+    const double m2 = std::abs(squareMeters);
+    const QString cuadrado = QString(QChar(0x00B2));
+    if (units == ScaleUnits::Nautical) {
+        const double nm2 = m2 / (kMetersPerNauticalMile * kMetersPerNauticalMile);
+        return sinCeros(nm2, decimalesPara(nm2)) + QStringLiteral(" NM") + cuadrado;
+    }
+    if (m2 < 1.0e4)
+        return QString::number(std::lround(m2)) + QStringLiteral(" m") + cuadrado;
+    if (m2 < 1.0e6) {
+        const double ha = m2 / 1.0e4;
+        return sinCeros(ha, decimalesPara(ha)) + QStringLiteral(" ha");
+    }
+    const double km2 = m2 / 1.0e6;
+    return sinCeros(km2, decimalesPara(km2)) + QStringLiteral(" km") + cuadrado;
+}
+
 // Rumbo con tres cifras y el simbolo de grado.
 QString formatBearing(double degrees)
 {

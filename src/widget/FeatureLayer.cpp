@@ -73,6 +73,16 @@ void FeatureLayer::setDraftCursor(const QPoint &pixel, bool visible)
         parentPlot()->replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Cambia el rotulo del borrador y repinta (solo el borrador: no toca la cache).
+void FeatureLayer::setDraftLabel(const QString &text)
+{
+    if (text == m_draftLabel)
+        return;
+    m_draftLabel = text;
+    if (parentPlot())
+        parentPlot()->replot(QCustomPlot::rpQueuedReplot);
+}
+
 // Invalida la cache (pixmap) de esta capa y encola un repintado. Se llama cuando
 // cambia el modelo o la proyeccion: el proximo draw() reconstruira el pixmap.
 void FeatureLayer::markDirty()
@@ -587,6 +597,36 @@ void FeatureLayer::drawDraft(QPainter *painter) const
     painter->setBrush(QBrush(Qt::white));
     for (const QPointF &v : poly)
         painter->drawRect(QRectF(v.x() - 4, v.y() - 4, 8, 8));
+
+    // Rotulo (medida en vivo): junto al cursor mientras se traza; con el
+    // poligono cerrado, en el centro de su caja. Caja clara para leerse sobre
+    // cualquier fondo.
+    if (!m_draftLabel.isEmpty()) {
+        QFont f = painter->font();
+        f.setPointSizeF(9.0);
+        f.setBold(true);
+        painter->setFont(f);
+        const QFontMetrics fm(f);
+        const QStringList lineas = m_draftLabel.split(QLatin1Char('\n'));
+        int ancho = 0;
+        for (const QString &l : lineas)
+            ancho = std::max(ancho, fm.horizontalAdvance(l));
+        const QSizeF caja(ancho + 12.0, fm.height() * double(lineas.size()) + 6.0);
+        QPointF esquina;
+        if (m_draftCursorVisible) {
+            esquina = QPointF(m_draftCursor) + QPointF(16.0, 12.0);
+        } else {
+            const QRectF r = poly.boundingRect();
+            esquina = r.center() - QPointF(caja.width() / 2.0, caja.height() / 2.0);
+        }
+        const QRectF rect(esquina, caja);
+        painter->setPen(QPen(m_draft.style.lineColor, 1.2));
+        painter->setBrush(QColor(255, 255, 255, 230));
+        painter->drawRoundedRect(rect, 4.0, 4.0);
+        painter->setPen(m_draft.style.lineColor.darker(120));
+        painter->drawText(rect.adjusted(6, 3, -6, -3), Qt::AlignLeft | Qt::AlignVCenter,
+                          m_draftLabel);
+    }
 
     painter->restore();
 }

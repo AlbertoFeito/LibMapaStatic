@@ -230,6 +230,11 @@ inline QIcon glifo(const QString &k, const QColor &c)
         p.drawRect(QRectF(3, 7, 14, 6));
         for (double x = 5; x < 17; x += 3)
             p.drawLine(QPointF(x, 7), QPointF(x, 10));
+    } else if (k == QLatin1String("medirarea")) {      // polígono con regla abajo
+        p.drawPolygon(QPolygonF({{4, 3}, {16, 5}, {14, 12}, {5, 11}}));
+        p.drawLine(QPointF(3, 16), QPointF(17, 16));
+        for (double x = 3; x <= 17; x += 3.5)
+            p.drawLine(QPointF(x, 14.5), QPointF(x, 16));
     } else if (k == QLatin1String("zoom")) {           // lupa con +
         p.drawEllipse(QPointF(8.5, 8.5), 5, 5);
         p.drawLine(QPointF(12.5, 12.5), QPointF(17, 17));
@@ -439,6 +444,8 @@ private:
         m_accNavegar  = accHerr(tr("Navegar"), MapTool::None, QString(), QStringLiteral("navegar"));
         m_accNavegar->setChecked(true);
         m_accMedir    = accHerr(tr("Medir"), MapTool::Measure, QString(), QStringLiteral("medir"));
+        m_accMedirArea = accHerr(tr("Medir superficie"), MapTool::MeasureArea, QString(),
+                                 QStringLiteral("medirarea"));
         m_accZoomArea = accHerr(tr("Zoom área"), MapTool::AreaZoom, QString(), QStringLiteral("zoom"));
         m_accPunto    = accHerr(tr("Punto"), MapTool::DrawPoint, QStringLiteral("1"), QStringLiteral("punto"));
         m_accLinea    = accHerr(tr("Línea"), MapTool::DrawPolyline, QStringLiteral("2"), QStringLiteral("linea"));
@@ -455,6 +462,9 @@ private:
         // Polígono genérico y Área objetivo, que no es obvia).
         m_accNavegar->setStatusTip(tr("Mover el mapa; arrastrar etiquetas y pines."));
         m_accMedir->setStatusTip(tr("Medir distancia y marcación entre dos puntos."));
+        m_accMedirArea->setStatusTip(tr("Medir superficie y perímetro: marca el polígono clic "
+                                        "a clic (la medida sale en vivo); doble clic, clic "
+                                        "derecho o Intro lo cierra."));
         m_accZoomArea->setStatusTip(tr("Ampliar arrastrando un rectángulo."));
         m_accPunto->setStatusTip(tr("Dibujar un punto (pide nombre, capa y colores)."));
         m_accLinea->setStatusTip(tr("Dibujar una línea; doble clic para cerrar."));
@@ -465,7 +475,7 @@ private:
                                    "y selección en el primer punto."));
         m_accEditar->setStatusTip(tr("Seleccionar y editar: mover vértices, insertar "
                                      "(doble clic en un lado) o borrar (Supr)."));
-        for (QAction *a : {m_accNavegar, m_accMedir, m_accZoomArea, m_accPunto, m_accLinea,
+        for (QAction *a : {m_accNavegar, m_accMedir, m_accMedirArea, m_accZoomArea, m_accPunto, m_accLinea,
                            m_accPoligono, m_accObjetivo, m_accArea, m_accEditar})
             a->setToolTip(a->statusTip());
 
@@ -784,6 +794,8 @@ private:
 
         QMenu *mDibujo = mb->addMenu(tr("&Dibujo"));
         mDibujo->addAction(m_accNavegar);
+        mDibujo->addAction(m_accMedir);
+        mDibujo->addAction(m_accMedirArea);
         mDibujo->addSeparator();
         mDibujo->addAction(m_accPunto);
         mDibujo->addAction(m_accLinea);
@@ -858,6 +870,7 @@ private:
         tb->addSeparator();
         tb->addAction(m_accNavegar);
         tb->addAction(m_accMedir);
+        tb->addAction(m_accMedirArea);
         tb->addAction(m_accZoomArea);
         tb->addSeparator();
         tb->addAction(m_accPunto);
@@ -1586,6 +1599,24 @@ private:
                     m_accNavegar->setChecked(true);
                     m_mapa->setActiveTool(MapTool::None);
                 });
+
+        // Medir superficie: la medida en vivo ya la rotula la librería; al
+        // cerrar se deja el polígono medido (otro clic empieza otra medida) y
+        // se repite el resultado en la barra de estado.
+        connect(m_mapa, &MapWidget::areaMeasured, this, [this](const AreaMeasurement &m) {
+            const ScaleUnits u = m_mapa->scaleBarUnits();
+            const double nm2 = 1852.0 * 1852.0;
+            const QString sup = u == ScaleUnits::Nautical
+                ? tr("%1 NM²").arg(m.areaSquareMeters / nm2, 0, 'f', 3)
+                : (m.areaSquareMeters >= 1e6 ? tr("%1 km²").arg(m.areaSquareMeters / 1e6, 0, 'f', 3)
+                                             : tr("%1 ha").arg(m.areaSquareMeters / 1e4, 0, 'f', 2));
+            const QString per = u == ScaleUnits::Nautical
+                ? tr("%1 NM").arg(m.perimeterMeters / 1852.0, 0, 'f', 2)
+                : tr("%1 km").arg(m.perimeterMeters / 1000.0, 0, 'f', 2);
+            statusBar()->showMessage(tr("Superficie %1 · perímetro %2 · %3 vértices "
+                                        "(clic para medir otra)")
+                                         .arg(sup, per).arg(m.polygon.size()), 15000);
+        });
 
         connect(m_mapa, &MapWidget::errorOccurred, this,
                 [this](const QString &e) {
@@ -4462,6 +4493,7 @@ private:
     QAction *m_accRehacer = nullptr;
     QAction *m_accBorrar = nullptr;
     QAction *m_accMedir = nullptr;
+    QAction *m_accMedirArea = nullptr;      //!< medir superficie y perímetro
     QAction *m_accZoomArea = nullptr;
     QAction *m_accPunto = nullptr;
     QAction *m_accLinea = nullptr;

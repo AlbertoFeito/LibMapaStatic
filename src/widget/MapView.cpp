@@ -2,6 +2,8 @@
 
 #include "core/Logging.h"
 #include "geo/GeoMath.h"
+#include "geo/MapDecor.h"
+#include "libmapa/Coordinates.h"
 #include "geo/TileMatrix.h"
 #include "geo/WebMercator.h"
 #include "geo/WebMercator.h"
@@ -443,9 +445,12 @@ void MapView::clearAreaSelection()
     }
     if (m_draftIsSelection && !m_drafting) {
         m_draftIsSelection = false;
+        m_selectionIsMeasure = false;
         m_draft = MapFeature();
-        if (m_featureLayer)
+        if (m_featureLayer) {
             m_featureLayer->setDraft(nullptr);
+            m_featureLayer->setDraftLabel(QString());
+        }
         cambio = true;
     }
     if (cambio)
@@ -556,6 +561,28 @@ void MapView::handleMeasureClick(const QGeoCoordinate &donde)
     replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Medida en vivo de MeasureArea: superficie y perimetro de los vertices puestos
+// mas el punto del cursor (si es valido), cerrando el poligono. Con menos de 3
+// puntos solo hay longitud. Unidades de la escala grafica.
+void MapView::updateAreaLabel(const QGeoCoordinate &cursor)
+{
+    if (!m_featureLayer)
+        return;
+    QVector<QGeoCoordinate> pts = m_draft.geometry;
+    if (cursor.isValid() && (pts.isEmpty() || pts.last() != cursor))
+        pts.append(cursor);
+    const ScaleUnits u = m_scaleBarLayer ? m_scaleBarLayer->units() : ScaleUnits::Metric;
+    QString txt;
+    if (pts.size() >= 3) {
+        txt = tr("Superficie %1\nPerímetro %2")
+                  .arg(MapDecor::formatArea(polygonArea(pts), u),
+                       MapDecor::formatDistance(pathLength(pts, true), u));
+    } else if (pts.size() == 2) {
+        txt = tr("Lado %1").arg(MapDecor::formatDistance(pathLength(pts), u));
+    }
+    m_featureLayer->setDraftLabel(txt);
+}
+
 // Cancela el trazado en curso (si lo hay): descarta el borrador y avisa. Devuelve
 // true si de verdad habia algo que cancelar. Lo llama Escape y el cambio de
 // herramienta.
@@ -565,8 +592,10 @@ bool MapView::cancelDrawing()
         return false;
     m_drafting = false;
     m_draftIsSelection = false;
+    m_selectionIsMeasure = false;
     m_draft = MapFeature();
     m_featureLayer->setDraft(nullptr);
+    m_featureLayer->setDraftLabel(QString());
     emit drawingCancelled();
     return true;
 }
@@ -587,13 +616,25 @@ qint64 MapView::finishDrawing()
         const QVector<QGeoCoordinate> poly = m_draft.geometry;
         if (poly.size() < 3) {               // poligono degenerado: se descarta
             m_draftIsSelection = false;
+            m_selectionIsMeasure = false;
             m_draft = MapFeature();
             m_featureLayer->setDraft(nullptr);
+            m_featureLayer->setDraftLabel(QString());
             emit drawingCancelled();
             return -1;
         }
         m_featureLayer->setDraftCursor(QPoint(), false);  // apaga la goma
         m_featureLayer->setDraft(&m_draft);               // deja el contorno
+        if (m_selectionIsMeasure) {
+            // Medida final (sin el lado al cursor), rotulada en el centro.
+            updateAreaLabel(QGeoCoordinate());
+            AreaMeasurement m;
+            m.polygon = poly;
+            m.areaSquareMeters = polygonArea(poly);
+            m.perimeterMeters = pathLength(poly, true);
+            emit areaMeasured(m);
+            return -1;
+        }
         emit polygonSelected(poly);
         return -1;                                        // no hay id de entidad
     }
@@ -841,20 +882,26 @@ void MapView::mousePressEvent(QMouseEvent *event)
             break;
 
         case MapTool::SelectPolygon:
+        case MapTool::MeasureArea:
             // Igual que dibujar un poligono, pero es una SELECCION transitoria:
             // no crea entidad. Reusa el borrador de FeatureLayer para la linea
             // de goma; doble clic / Enter / clic derecho lo cierra (finishDrawing
-            // detecta m_draftIsSelection y emite polygonSelected).
+            // detecta m_draftIsSelection y emite polygonSelected, o areaMeasured
+            // si es una medida). Un clic tras una medida ya cerrada empieza otra.
             if (!m_drafting) {
                 m_drafting = true;
                 m_draftIsSelection = true;
+                m_selectionIsMeasure = (m_tool == MapTool::MeasureArea);
                 m_draft = MapFeature();
                 m_draft.kind = GeometryKind::Polygon;
-                m_draft.style.lineColor = QColor(0, 0, 0);
+                m_draft.style.lineColor = m_selectionIsMeasure ? QColor(0x6a, 0x1b, 0x9a)
+                                                               : QColor(0, 0, 0);
                 m_draft.style.lineWidth = 2;
             }
             m_draft.geometry.append(coordinateAt(event->pos()));
             m_featureLayer->setDraft(&m_draft);
+            if (m_selectionIsMeasure)
+                updateAreaLabel(coordinateAt(event->pos()));
             break;
 
         case MapTool::EditFeature: {
@@ -948,6 +995,8 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
     // Mientras se traza, el lado siguiente sigue al raton.
     if (m_drafting) {
         m_featureLayer->setDraftCursor(event->pos(), true);
+        if (m_selectionIsMeasure)
+            updateAreaLabel(bajo);
     }
 
     if (m_dragging) {
@@ -1109,8 +1158,12 @@ void MapView::setActiveTool(MapTool tool)
     // herramienta, igual que el recuadro de SelectArea.
     if (m_draftIsSelection) {
         m_draftIsSelection = false;
+        m_selectionIsMeasure = false;
         m_draft = MapFeature();
-        if (m_featureLayer) m_featureLayer->setDraft(nullptr);
+        if (m_featureLayer) {
+            m_featureLayer->setDraft(nullptr);
+            m_featureLayer->setDraftLabel(QString());
+        }
     }
 
     m_tool = tool;

@@ -60,6 +60,16 @@ QString formatLongitude(double longitudeDeg, double stepDeg);
  */
 QString formatDistance(double meters, ScaleUnits units);
 
+/*!
+ * \brief Superficie para un rotulo: "850 m²", "12.5 ha", "3.42 km²" (metrico)
+ *        o "1.25 NM²" (nautico).
+ *
+ * En metrico: metros cuadrados por debajo de una hectarea, hectareas hasta
+ * 1 km² y kilometros cuadrados a partir de ahi. Mismos decimales y sin ceros
+ * sobrantes que formatDistance. Vacio si no es finita.
+ */
+QString formatArea(double squareMeters, ScaleUnits units);
+
 //! Rumbo o marcacion verdadera con tres cifras: "045°", "359°". Se normaliza
 //! a [0, 360) y se redondea al grado. Vacio si no es finito.
 QString formatBearing(double degrees);

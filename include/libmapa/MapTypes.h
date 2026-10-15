@@ -29,6 +29,9 @@ enum class MapTool {
                    //!< cierra): emite polygonSelected y deja el contorno visible,
                    //!< para rellenar solo esa zona.
     PickPoint,     //!< Devolver la coordenada del siguiente clic.
+    MeasureArea,   //!< Medir SUPERFICIE y perimetro de un poligono marcado clic a
+                   //!< clic (en vivo mientras se marca; doble clic / Enter /
+                   //!< clic derecho lo cierra y emite areaMeasured).
 
     // --- Creacion de entidades -------------------------------------------
     // Se dibujan sobre la capa activa (MapWidget::setActiveFeatureLayer) con
@@ -140,6 +143,13 @@ struct MapExportOptions {
     double marginMm = 10.0;     //!< Solo PDF: margen de la hoja.
 };
 
+//! Resultado de medir una superficie (MapTool::MeasureArea).
+struct AreaMeasurement {
+    QVector<QGeoCoordinate> polygon;   //!< Vertices marcados, sin repetir el primero.
+    double areaSquareMeters = 0.0;     //!< Sobre el elipsoide (polygonArea).
+    double perimeterMeters = 0.0;      //!< Ortodromicas, incluido el lado de cierre.
+};
+
 //! Resultado de una medicion sobre el mapa.
 struct Measurement {
     QGeoCoordinate from;
@@ -151,5 +161,6 @@ struct Measurement {
 } // namespace libmapa
 
 Q_DECLARE_METATYPE(libmapa::Measurement)
+Q_DECLARE_METATYPE(libmapa::AreaMeasurement)
 
 #endif // LIBMAPA_MAPTYPES_H_

@@ -846,6 +846,15 @@ signals:
                       const QGeoCoordinate &southEast);
     //! Poligono cerrado con la herramienta SelectPolygon.
     void polygonSelected(const QVector<QGeoCoordinate> &polygon);
+    /*!
+     * \brief Poligono cerrado con la herramienta MeasureArea, con su superficie
+     *        y su perimetro.
+     *
+     * Mientras se marca, el mapa ya rotula la medida en vivo junto al cursor; al
+     * cerrar, el contorno se queda con su medida en el centro hasta cambiar de
+     * herramienta o \ref clearAreaSelection. Un clic mas empieza otra medida.
+     */
+    void areaMeasured(const libmapa::AreaMeasurement &measurement);
     void pointPicked(const QGeoCoordinate &position);
     void errorOccurred(const QString &message);
 

@@ -123,6 +123,14 @@ void TstMapDecor::formatsDistanceAndBearing()
     QCOMPARE(MapDecor::formatDistance(500.0, ScaleUnits::Nautical), QStringLiteral("0.27 NM"));
     QVERIFY(MapDecor::formatDistance(std::nan(""), ScaleUnits::Metric).isEmpty());
 
+    const QString dos = QString(QChar(0x00B2));
+    QCOMPARE(MapDecor::formatArea(850.4, ScaleUnits::Metric), QStringLiteral("850 m") + dos);
+    QCOMPARE(MapDecor::formatArea(125000.0, ScaleUnits::Metric), QStringLiteral("12.5 ha"));
+    QCOMPARE(MapDecor::formatArea(3.42e6, ScaleUnits::Metric), QStringLiteral("3.42 km") + dos);
+    QCOMPARE(MapDecor::formatArea(1852.0 * 1852.0, ScaleUnits::Nautical),
+             QStringLiteral("1 NM") + dos);
+    QVERIFY(MapDecor::formatArea(std::nan(""), ScaleUnits::Metric).isEmpty());
+
     const QString g = QString(QChar(0x00B0));
     QCOMPARE(MapDecor::formatBearing(45.0), QStringLiteral("045") + g);
     QCOMPARE(MapDecor::formatBearing(-10.0), QStringLiteral("350") + g);

@@ -170,6 +170,8 @@ signals:
                       const QGeoCoordinate &southEast);
     //! Poligono cerrado con la herramienta SelectPolygon (vertices en orden).
     void polygonSelected(const QVector<QGeoCoordinate> &polygon);
+    //! Poligono cerrado con la herramienta MeasureArea, con su medida.
+    void areaMeasured(const libmapa::AreaMeasurement &measurement);
     void pointPicked(const QGeoCoordinate &position);
 
 protected:
@@ -258,6 +260,12 @@ private:
     //! El borrador actual es un POLIGONO DE SELECCION (SelectPolygon), no una
     //! entidad: al cerrarlo se emite polygonSelected y no se crea nada.
     bool m_draftIsSelection = false;
+    //! ...y ademas es una MEDIDA (MeasureArea): al cerrarlo se emite
+    //! areaMeasured, y mientras se traza se rotula la superficie en vivo.
+    bool m_selectionIsMeasure = false;
+    //! Recalcula el rotulo de la medida con los vertices puestos mas, si es
+    //! valido, el punto bajo el cursor (el lado que se esta por anadir).
+    void updateAreaLabel(const QGeoCoordinate &cursor);
 
     //! Vertice que se esta arrastrando, o -1.
     int m_editVertex = -1;

@@ -28,6 +28,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Coordenadas UTM y MGRS** (`Coordinates.h`): conversión y formato en decimal, GMS, UTM y MGRS (al milímetro frente a PROJ), lectura de lo que escribe una persona en cualquiera de ellos, y cuadrícula UTM (`setGraticuleMode`)
 - **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión. El historial de los objetivos sale a **GPX con la hora de cada punto** (`exportTargetHistory`, releíble con `parseGpxTracks`)
 - **Exportar la vista** a imagen o PDF (`exportView`, `renderImage`): el mapa tal cual se ve, con título, pie (extensión, fecha UTC, atribución) y, en PDF, vectorial y con la escala de impresión 1:N
+- **Medir superficie en pantalla** (`MapTool::MeasureArea`): se marca un polígono clic a clic y la superficie y el perímetro salen en vivo junto al cursor; al cerrarlo, `areaMeasured` da la medida
 - **Consultar una zona**: `targetsInArea` / `featuresInArea` dicen qué hay dentro de cualquier polígono (p. ej. el marcado con `SelectArea` / `SelectPolygon`), y `polygonArea` / `pathLength` dan su superficie y perímetro sobre el elipsoide
 
 ## Uso
@@ -676,6 +677,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 25 | Alertas de proximidad CPA/TCPA entre objetivos (velocidad estimada por la traza o dada por la app), con líneas de máximo acercamiento en el mapa |
 | 26 | Anillos de distancia y marcaciones (fijos o colgados de objetivos); inicio y fin de las rutas GPX con su hora |
 | 27 | Reproducción de historiales GPX en el tiempo (`TrackPlayer`); las capas temporales quedan fuera de deshacer |
+| 28 | Medir superficie y perímetro en pantalla (`MapTool::MeasureArea`, `areaMeasured`) |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

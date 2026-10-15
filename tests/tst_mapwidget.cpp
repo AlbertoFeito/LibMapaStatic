@@ -155,6 +155,9 @@ private slots:
     //! Reproduccion de un historial: los objetivos aparecen, se mueven y
     //! desaparecen con las horas del fichero; ir atras rehace su historial.
     void trackPlayerReplaysHistory();
+    //! Herramienta MeasureArea: rotulo en vivo, areaMeasured al cerrar con la
+    //! superficie y el perimetro del poligono, y limpieza al cambiar de herramienta.
+    void measureAreaToolMeasuresPolygon();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2675,6 +2678,81 @@ void TstMapWidget::trackPlayerReplaysHistory()
     QString err;
     QVERIFY(!player.loadFile(QStringLiteral("/no/existe.gpx"), &err));
     QVERIFY(!err.isEmpty());
+}
+
+// Se marcan 4 vertices de un cuadrado de ~2 km con clics reales sobre la vista.
+// La medida en vivo cambia lo dibujado; Intro cierra y emite areaMeasured con
+// la superficie del poligono marcado (la de polygonArea) y su perimetro; al
+// cambiar de herramienta se quita la marca. No crea ninguna entidad.
+void TstMapWidget::measureAreaToolMeasuresPolygon()
+{
+    qRegisterMetaType<libmapa::AreaMeasurement>();
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    const auto pixel = [vista](const QGeoCoordinate &c) {
+        const QPointF ax = MapView::toAxis(c);
+        return QPoint(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                      int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+    };
+    const auto clic = [vista](const QPoint &p) {
+        QMouseEvent pulsar = mouseEvent(QEvent::MouseButtonPress, p, Qt::LeftButton, Qt::LeftButton);
+        QMouseEvent soltar = mouseEvent(QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton);
+        QCoreApplication::sendEvent(vista, &pulsar);
+        QCoreApplication::sendEvent(vista, &soltar);
+    };
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    const int entidades = int(w.features().size());
+    QSignalSpy medida(&w, &MapWidget::areaMeasured);
+    w.setActiveTool(MapTool::MeasureArea);
+    const QGeoCoordinate a = centro.atDistanceAndAzimuth(1000.0, 225.0 + 0.0);
+    const QGeoCoordinate b = a.atDistanceAndAzimuth(2000.0, 90.0);
+    const QGeoCoordinate c = b.atDistanceAndAzimuth(2000.0, 0.0);
+    const QGeoCoordinate d = a.atDistanceAndAzimuth(2000.0, 0.0);
+    clic(pixel(a));
+    clic(pixel(b));
+    clic(pixel(c));
+    const QImage tresVertices = captura();
+    // Mover el raton cambia la medida en vivo (y su rotulo).
+    QMouseEvent mover = mouseEvent(QEvent::MouseMove, pixel(d), Qt::NoButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &mover);
+    QVERIFY(captura() != tresVertices);
+    clic(pixel(d));
+    QCOMPARE(medida.count(), 0);                           // aun abierto
+
+    QKeyEvent intro(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(vista, &intro);
+    QCOMPARE(medida.count(), 1);
+    const AreaMeasurement m = medida.first().at(0).value<AreaMeasurement>();
+    QCOMPARE(m.polygon.size(), 4);
+    QVERIFY(qAbs(m.areaSquareMeters - polygonArea(m.polygon)) < 1e-6);
+    // ~4 km2 y ~8 km: los clics caen en pixeles enteros (~36 m a zoom 12), y
+    // eso mueve cada lado hasta un 2 %.
+    QVERIFY(qAbs(m.areaSquareMeters - 4.0e6) < 0.16e6);
+    QVERIFY(qAbs(m.perimeterMeters - 8000.0) < 160.0);
+    QCOMPARE(int(w.features().size()), entidades);         // no crea entidad
+
+    const QImage cerrada = captura();
+    w.setActiveTool(MapTool::None);                        // quita la marca
+    QVERIFY(captura() != cerrada);
+
+    // Con menos de 3 vertices no hay medida.
+    w.setActiveTool(MapTool::MeasureArea);
+    clic(pixel(a));
+    clic(pixel(b));
+    QCoreApplication::sendEvent(vista, &intro);
+    QCOMPARE(medida.count(), 1);
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).
