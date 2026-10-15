@@ -569,6 +569,25 @@ public:
      * el objetivo. false si no existe. (Nudos: knotsToMetersPerSecond.)
      */
     bool setTargetVelocity(qint64 id, double speedMetersPerSecond, double courseDeg);
+    // --- Filtro de objetivos ----------------------------------------------
+    /*!
+     * \brief Muestra solo los objetivos que cumplen \a filter (por clase,
+     *        velocidad, zona o un criterio de la app); el resto se oculta o
+     *        se atenua. Ver \ref TargetFilter.
+     *
+     * Se reevalua cada objetivo al moverse o al cambiar su velocidad, y todos
+     * al cambiar el filtro. Un objetivo oculto no se puede pinchar
+     * (\ref targetAt), pero sigue existiendo: cuenta para las alertas de zona
+     * y de proximidad, y para \ref targets. Un filtro vacio quita el filtro.
+     */
+    void setTargetFilter(const TargetFilter &filter);
+    void clearTargetFilter();
+    bool hasTargetFilter() const;
+    //! ¿Pasa el objetivo el filtro actual? true sin filtro; false si no existe.
+    bool targetPassesFilter(qint64 id) const;
+    //! Objetivos que NO pasan el filtro (ocultos o atenuados), ordenados.
+    QVector<qint64> filteredOutTargets() const;
+
     //! Lineas de maximo acercamiento de los pares en alerta (activo por defecto).
     void setProximityLinesVisible(bool on);
     bool isProximityLinesVisible() const;

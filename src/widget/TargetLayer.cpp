@@ -128,6 +128,8 @@ void TargetLayer::draw(QCPPainter *painter)
     for (const TargetModel::Entry &e : m_model->entries()) {
         if (!e.target.position.isValid())
             continue;
+        if (!m_filterDim && m_filteredOut.contains(e.target.id))
+            continue;                          // oculto por el filtro de la app
         const QPointF pos = screenPos(e.target.position);
         if (margen.contains(pos))
             m_visibles.append({&e, pos});
@@ -155,8 +157,17 @@ void TargetLayer::draw(QCPPainter *painter)
     // --- Pasada 2: dibujo ----------------------------------------------------
     for (const auto &v : m_visibles) {
         const bool sel = (v.first->target.id == m_selected);
-        drawTarget(painter, *v.first, v.second, conTrazas, conEtiquetas, sel,
-                   m_labelCells);
+        // Atenuado por el filtro: tenue, sin traza ni rotulo (salvo si esta
+        // seleccionado, que se ve normal: lo ha elegido el usuario).
+        const bool tenue = m_filterDim && !sel && m_filteredOut.contains(v.first->target.id);
+        if (tenue) {
+            painter->save();
+            painter->setOpacity(0.25);
+        }
+        drawTarget(painter, *v.first, v.second, conTrazas && !tenue, conEtiquetas && !tenue,
+                   sel, m_labelCells);
+        if (tenue)
+            painter->restore();
     }
 
     // Alertas de proximidad, ENCIMA de los objetivos (son el aviso que no debe
@@ -164,6 +175,16 @@ void TargetLayer::draw(QCPPainter *painter)
     // pantalla aunque los dos objetivos aun no lo esten.
     if (!m_proximity.isEmpty())
         drawProximity(painter);
+}
+
+// Guarda que objetivos no pasan el filtro y como mostrarlos, y repinta si cambio.
+void TargetLayer::setFilteredOut(const QSet<qint64> &ids, bool dim)
+{
+    if (ids == m_filteredOut && dim == m_filterDim)
+        return;
+    m_filteredOut = ids;
+    m_filterDim = dim;
+    programarRepintado();
 }
 
 // Guarda las lineas CPA de los pares en alerta y pide repintar.

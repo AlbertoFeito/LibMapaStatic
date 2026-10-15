@@ -5303,3 +5303,53 @@ cargara una traducción, en lo desplegado no habría ninguna que cargar.
 
 **Comprobado** en la demo bajo Xvfb: un `QDialogButtonBox` con
 Open/Close/Cancel/Yes muestra «Abrir», «Cerrar», «Cancelar» y «Sí».
+
+## 129. Filtro de objetivos
+
+**Qué se hizo.**
+- **`TargetFilter`** (público, `MapTarget.h`). Un objetivo **pasa** si cumple
+  todos los criterios que se pongan:
+  - clases (`kinds`);
+  - velocidad mínima y máxima (m/s);
+  - solo dentro de alguna zona vigilada;
+  - un `predicate` libre de la app, por ejemplo sobre `attributes`.
+
+  Con `dim`, los que no pasan se ven **tenues** (25 %, sin rótulo ni traza);
+  sin `dim` se **ocultan** y no se pueden pinchar.
+- **`MapWidget`**: `setTargetFilter`, `clearTargetFilter`, `hasTargetFilter`,
+  `targetPassesFilter` y `filteredOutTargets`.
+- **`TargetLayer::setFilteredOut`** y `MapView::targetAt`, que se salta los
+  objetivos ocultos.
+- **Demo**: *Ver → Filtrar objetivos…* (Ctrl+F).
+  - Casillas con los tipos presentes, velocidad mínima y máxima en nudos,
+    «solo dentro de zonas vigiladas», «atenuar en vez de ocultar» y «Quitar
+    filtro».
+  - Indicador «Filtro: N de M» en la barra de estado.
+  - El rótulo «kn» de los buques simulados es ahora la velocidad a la que se
+    mueven de verdad; antes era un número al azar que no casaba con el filtro.
+
+**Por qué así.**
+- **La velocidad es la de CPA.** La velocidad dada por la app
+  (`setTargetVelocity`) o, si no hay, la estimada por la traza. Así el filtro
+  no interpreta `MapTarget::speed`, que es de la app.
+- **O(1) por actualización.** Al moverse un objetivo, o al cambiar su
+  velocidad, se reevalúa solo él. Cuando una transición de zona lo mete o lo
+  saca de una zona vigilada, también. A la capa solo se le avisa si su
+  estado cambió. Recorrer todos los objetivos ocurre solo al cambiar el
+  filtro.
+- **Ocultar no es borrar.** Los ocultos siguen en `targets()` y cuentan para
+  las alertas de zona y de proximidad: un filtro de vista no debe callar una
+  alerta.
+- **Atenuar** sirve para ver lo que interesa sin perder el contexto. El
+  objetivo seleccionado se ve siempre normal, aunque no pase.
+
+`tst_mapwidget::targetFilterHidesOrDims` comprueba:
+- clase y velocidad, y que un oculto no se puede pinchar y uno atenuado sí;
+- que la imagen cambia en cada modo;
+- la reevaluación al cambiar la velocidad y al entrar en una zona;
+- el predicado sobre atributos, el borrado y quitar el filtro.
+
+En la demo bajo Xvfb, con 60 objetivos y el filtro «buques a más de 15 kn»,
+quedan 19 visibles.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.

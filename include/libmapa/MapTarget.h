@@ -7,7 +7,12 @@
 #include <QMetaType>
 #include <QPointF>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
+
+#include <cmath>
+#include <functional>
+#include <limits>
 
 namespace libmapa {
 
@@ -69,6 +74,39 @@ struct TargetTrackPoint
     QDateTime time;
 
     bool isValid() const { return position.isValid(); }
+};
+
+/*!
+ * \brief Que objetivos mostrar (MapWidget::setTargetFilter).
+ *
+ * Un objetivo PASA si cumple todos los criterios que se fijen (los que se
+ * dejan sin poner no filtran). Los que no pasan se ocultan o, con \a dim, se
+ * dibujan tenues. La libreria no interpreta el dominio: el \c kind y los
+ * atributos los pone la app, y para lo que no cubren los criterios fijos esta
+ * \a predicate.
+ */
+struct TargetFilter
+{
+    //! Clases admitidas (MapTarget::kind). Vacio = todas.
+    QStringList kinds;
+    //! Velocidad minima y maxima en m/s (NaN = sin limite). Es la que da la app
+    //! con MapWidget::setTargetVelocity o, si no, la estimada por la traza.
+    double minSpeed = std::numeric_limits<double>::quiet_NaN();
+    double maxSpeed = std::numeric_limits<double>::quiet_NaN();
+    //! Solo los que estan dentro de alguna zona vigilada (watchZone).
+    bool onlyInWatchedZones = false;
+    //! Criterio libre de la app (p. ej. sobre attributes). Vacio = no filtra.
+    std::function<bool(const MapTarget &)> predicate;
+    //! true: los que no pasan se ven tenues (sin rotulo ni traza); false: se
+    //! ocultan y no se pueden pinchar.
+    bool dim = false;
+
+    //! ¿No filtra nada?
+    bool isEmpty() const
+    {
+        return kinds.isEmpty() && std::isnan(minSpeed) && std::isnan(maxSpeed)
+            && !onlyInWatchedZones && !predicate;
+    }
 };
 
 } // namespace libmapa

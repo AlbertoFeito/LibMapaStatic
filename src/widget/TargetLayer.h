@@ -66,6 +66,17 @@ public:
     //! Lineas de maximo acercamiento de los pares en alerta (vacio = ninguna).
     void setProximityLines(const QVector<ProximityLine> &lines);
     void setProximityColor(const QColor &c) { m_proximityColor = c; }
+
+    /*!
+     * \brief Objetivos que NO pasan el filtro de la app.
+     *
+     * Con \a dim false no se dibujan (ni se pueden pinchar: ver
+     * isFilteredOut); con \a dim true se dibujan tenues, sin rotulo ni traza,
+     * para que lo que si pasa destaque sin perder el contexto.
+     */
+    void setFilteredOut(const QSet<qint64> &ids, bool dim);
+    //! ¿Esta oculto por el filtro? (atenuado no cuenta: se ve y se puede pinchar).
+    bool isFilteredOut(qint64 id) const { return !m_filterDim && m_filteredOut.contains(id); }
     bool isSelectedHistoryVisible() const { return m_historyVisible; }
 
     //! Nivel de detalle para escalar a MILES de objetivos: si en un repintado
@@ -117,6 +128,8 @@ private:
     bool m_historyVisible = true;    //!< El seleccionado muestra su historial.
     QVector<ProximityLine> m_proximity;              //!< Pares en alerta CPA.
     QColor m_proximityColor = QColor(0xff, 0x3d, 0x00);
+    QSet<qint64> m_filteredOut;                      //!< No pasan el filtro.
+    bool m_filterDim = false;                        //!< Atenuar en vez de ocultar.
     QTimer m_repintar;               //!< Agrupa avisos: como mucho ~30 fps.
     mutable int m_lastDrawn = 0;
     mutable int m_lastLabels = 0;

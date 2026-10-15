@@ -373,6 +373,8 @@ qint64 MapView::targetAt(const QPoint &pixel, double tolPx) const
         const MapTarget &t = it->target;
         if (!t.position.isValid())
             continue;
+        if (m_targetLayer && m_targetLayer->isFilteredOut(t.id))
+            continue;                  // oculto por el filtro: no se puede pinchar
         const QPointF a = toAxis(t.position);
         const double dx = xAxis->coordToPixel(a.x()) - pixel.x();
         const double dy = yAxis->coordToPixel(a.y()) - pixel.y();

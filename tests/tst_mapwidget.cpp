@@ -161,6 +161,9 @@ private slots:
     //! Importar un fichero es UNA operacion de deshacer (capa incluida), y no
     //! cuesta O(n^2) aunque traiga cientos de entidades.
     void importIsOneUndoStep();
+    //! Filtro de objetivos: clase, velocidad, zona y criterio de la app;
+    //! ocultar (no se pueden pinchar) o atenuar; se reevalua al moverse.
+    void targetFilterHidesOrDims();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2803,6 +2806,108 @@ void TstMapWidget::importIsOneUndoStep()
 
     QVERIFY(w.redo());
     QCOMPARE(w.featuresInLayer(QStringLiteral("muchos")).size(), 300);
+}
+
+// Tres objetivos (buque rapido, aeronave, UAV lento). Filtro "buques y UAV a
+// mas de 5 m/s": solo pasa el buque. Oculto = no se pincha; atenuado = si.
+// Cambiar la velocidad del UAV lo hace pasar; "solo en zonas" y un predicado
+// sobre atributos tambien filtran; un filtro vacio lo quita.
+void TstMapWidget::targetFilterHidesOrDims()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    const auto pixel = [vista](const QGeoCoordinate &c) {
+        const QPointF ax = MapView::toAxis(c);
+        return QPoint(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                      int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+    };
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    MapTarget b;
+    b.kind = QStringLiteral("buque");
+    b.position = centro;
+    b.attributes.insert(QStringLiteral("bandera"), QStringLiteral("CU"));
+    const qint64 buque = w.addTarget(b);
+    MapTarget a;
+    a.kind = QStringLiteral("aeronave");
+    a.position = centro.atDistanceAndAzimuth(5000.0, 90.0);
+    const qint64 avion = w.addTarget(a);
+    MapTarget u;
+    u.kind = QStringLiteral("uav");
+    u.position = centro.atDistanceAndAzimuth(5000.0, 270.0);
+    const qint64 uav = w.addTarget(u);
+    w.setTargetVelocity(buque, 8.0, 0.0);
+    w.setTargetVelocity(avion, 120.0, 0.0);
+    w.setTargetVelocity(uav, 2.0, 0.0);
+    QVERIFY(!w.hasTargetFilter());
+    QVERIFY(w.targetPassesFilter(avion));
+    const QImage todos = captura();
+
+    TargetFilter f;
+    f.kinds = QStringList{ QStringLiteral("buque"), QStringLiteral("uav") };
+    f.minSpeed = 5.0;
+    w.setTargetFilter(f);
+    QVERIFY(w.hasTargetFilter());
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion, uav }));
+    QVERIFY(w.targetPassesFilter(buque));
+    QVERIFY(!w.targetPassesFilter(avion));
+    QCOMPARE(w.targetAt(pixel(a.position)), qint64(-1));    // oculto: no se pincha
+    QCOMPARE(w.targetAt(pixel(b.position)), buque);
+    const QImage oculto = captura();
+    QVERIFY(oculto != todos);
+    QCOMPARE(w.targets().size(), 3);                         // siguen existiendo
+
+    // Atenuar: se ven (distinto de ocultos) y se pueden pinchar.
+    f.dim = true;
+    w.setTargetFilter(f);
+    QCOMPARE(w.targetAt(pixel(a.position)), avion);
+    const QImage tenue = captura();
+    QVERIFY(tenue != oculto && tenue != todos);
+
+    // El UAV acelera: pasa a cumplir sin recalcular nada a mano.
+    w.setTargetVelocity(uav, 6.0, 0.0);
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion }));
+
+    // Solo dentro de zonas vigiladas: zona alrededor del buque.
+    MapFeature zona;
+    zona.kind = GeometryKind::Polygon;
+    zona.geometry = { centro.atDistanceAndAzimuth(2000.0, 45.0), centro.atDistanceAndAzimuth(2000.0, 135.0),
+                      centro.atDistanceAndAzimuth(2000.0, 225.0), centro.atDistanceAndAzimuth(2000.0, 315.0) };
+    const qint64 idZona = w.addFeature(zona);
+    QVERIFY(w.watchZone(idZona));
+    TargetFilter enZona;
+    enZona.onlyInWatchedZones = true;
+    w.setTargetFilter(enZona);
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion, uav }));
+    // El UAV entra en la zona: pasa (lo reevalua la transicion de zona).
+    w.updateTarget(uav, centro.atDistanceAndAzimuth(100.0, 0.0));
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion }));
+
+    // Criterio libre de la app sobre los atributos.
+    TargetFilter bandera;
+    bandera.predicate = [](const MapTarget &t) {
+        return t.attributes.value(QStringLiteral("bandera")).toString() == QLatin1String("CU");
+    };
+    w.setTargetFilter(bandera);
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion, uav }));
+
+    w.removeTarget(avion);
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ uav }));
+    w.clearTargetFilter();
+    QVERIFY(!w.hasTargetFilter());
+    QVERIFY(w.filteredOutTargets().isEmpty());
+    QVERIFY(!w.targetPassesFilter(avion));                   // ya no existe
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

@@ -754,6 +754,14 @@ private:
         connect(accEbl, &QAction::triggered, this, &Ventana::ponerMarcacion);
         // Inicio (verde) y fin (rojo) de las líneas: siempre en las rutas GPX
         // (p. ej. un historial importado), y en cualquier línea seleccionada.
+        // Filtro de objetivos (por tipo, velocidad o zona): ocultar o atenuar
+        // los que no interesan sin borrarlos.
+        auto *accFiltro = mVer->addAction(tr("Filtrar objetivos..."));
+        accFiltro->setShortcut(QKeySequence(QStringLiteral("Ctrl+F")));
+        accFiltro->setStatusTip(tr("Mostrar solo los objetivos de ciertos tipos, velocidades "
+                                   "o dentro de zonas vigiladas."));
+        connect(accFiltro, &QAction::triggered, this, &Ventana::filtrarObjetivos);
+        mVer->addSeparator();
         QMenu *mExtremos = mVer->addMenu(tr("Inicio y fin de rutas"));
         auto *gExtremos = new QActionGroup(this);
         const QList<QPair<QString, RouteEndpoints>> extremos = {
@@ -1736,6 +1744,13 @@ private:
         m_modoRep->hide();
         connect(m_modoRep, &QPushButton::clicked, this, &Ventana::salirReproduccion);
         statusBar()->addPermanentWidget(m_modoRep);
+        // Indicador del filtro de objetivos (solo mientras hay uno).
+        m_filtroLbl = new QLabel(this);
+        m_filtroLbl->setStyleSheet(QStringLiteral("QLabel { color:#fff; background:#00796b;"
+                                                  " font-weight:bold; padding:0 6px; }"));
+        m_filtroLbl->setToolTip(tr("Objetivos que pasan el filtro (Ver → Filtrar objetivos)."));
+        m_filtroLbl->hide();
+        statusBar()->addPermanentWidget(m_filtroLbl);
     }
 
     // Muestra la cota del terreno bajo el cursor (o "—" si no hay DEM/dato).
@@ -4389,7 +4404,12 @@ private:
 
             if (kind == QLatin1String("buque")) {
                 const int mmsi = 224000000 + r->bounded(999999);
-                const int nudos = 8 + r->bounded(14);
+                // La velocidad REAL a la que se moverá en la simulación (grados
+                // por paso de kSegundosPorPaso), no un número al azar: así el
+                // rótulo coincide con lo que estima la librería por la traza y
+                // con lo que filtra «Filtrar objetivos» por velocidad.
+                const int nudos = int(std::lround(velGrados * 111195.0 / kSegundosPorPaso
+                                                  * 3600.0 / 1852.0));
                 t.speed = nudos;
                 t.attributes.insert(QStringLiteral("mmsi"), mmsi);
                 t.attributes.insert(QStringLiteral("eslora"), 40 + r->bounded(260));
@@ -4482,6 +4502,105 @@ private:
             .arg(m_mapa->exactCoverage() * 100.0, 0, 'f', 0)
             .arg(m_mapa->featureCount())
             .arg(m_mapa->targetCount()));
+        if (m_filtroLbl) {
+            const int total = m_mapa->targetCount();
+            const int fuera = int(m_mapa->filteredOutTargets().size());
+            m_filtroLbl->setVisible(m_mapa->hasTargetFilter());
+            m_filtroLbl->setText(tr("Filtro: %1 de %2").arg(total - fuera).arg(total));
+        }
+    }
+
+    // Diálogo del filtro de objetivos: tipos presentes (casillas), velocidad
+    // mínima y máxima en nudos (0 = sin límite), «solo en zonas vigiladas» y
+    // ocultar o atenuar el resto. «Quitar filtro» vuelve a mostrarlos todos.
+    void filtrarObjetivos()
+    {
+        QStringList tipos;
+        for (const MapTarget &t : m_mapa->targets())
+            if (!t.kind.isEmpty() && !tipos.contains(t.kind))
+                tipos << t.kind;
+        for (const QString &k : m_filtro.kinds)
+            if (!tipos.contains(k))
+                tipos << k;
+        tipos.sort();
+
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Filtrar objetivos"));
+        auto *form = new QFormLayout(&dlg);
+        auto *cajaTipos = new QGroupBox(tr("Tipos"), &dlg);
+        auto *lTipos = new QVBoxLayout(cajaTipos);
+        QList<QCheckBox *> marcas;
+        for (const QString &k : tipos) {
+            auto *c = new QCheckBox(k, cajaTipos);
+            c->setChecked(m_filtro.kinds.isEmpty() || m_filtro.kinds.contains(k));
+            lTipos->addWidget(c);
+            marcas << c;
+        }
+        if (tipos.isEmpty())
+            lTipos->addWidget(new QLabel(tr("(no hay objetivos)"), cajaTipos));
+        form->addRow(cajaTipos);
+        const auto nudos = [&dlg](double ms) {
+            auto *sp = new QDoubleSpinBox(&dlg);
+            sp->setRange(0.0, 2000.0);
+            sp->setDecimals(1);
+            sp->setSuffix(tr(" kn"));
+            sp->setSpecialValueText(tr("sin límite"));
+            sp->setValue(std::isnan(ms) ? 0.0 : ms * 3600.0 / 1852.0);
+            return sp;
+        };
+        auto *vMin = nudos(m_filtro.minSpeed);
+        auto *vMax = nudos(m_filtro.maxSpeed);
+        form->addRow(tr("Velocidad mínima:"), vMin);
+        form->addRow(tr("Velocidad máxima:"), vMax);
+        auto *zonas = new QCheckBox(tr("Solo dentro de zonas vigiladas"), &dlg);
+        zonas->setChecked(m_filtro.onlyInWatchedZones);
+        form->addRow(zonas);
+        auto *atenuar = new QCheckBox(tr("Atenuar el resto en vez de ocultarlo"), &dlg);
+        atenuar->setChecked(m_filtro.dim);
+        form->addRow(atenuar);
+        auto *botones = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        auto *quitar = botones->addButton(tr("Quitar filtro"), QDialogButtonBox::ResetRole);
+        connect(botones, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(botones, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        bool quitarFiltro = false;
+        connect(quitar, &QPushButton::clicked, &dlg, [&] { quitarFiltro = true; dlg.accept(); });
+        form->addRow(botones);
+        if (dlg.exec() != QDialog::Accepted)
+            return;
+
+        if (quitarFiltro) {
+            m_filtro = TargetFilter();
+            m_mapa->clearTargetFilter();
+            statusBar()->showMessage(tr("Filtro quitado: se ven todos los objetivos"), 4000);
+            actualizarEstado();
+            return;
+        }
+        TargetFilter f;
+        bool todos = true;
+        for (QCheckBox *c : marcas) {
+            if (c->isChecked())
+                f.kinds << c->text();
+            else
+                todos = false;
+        }
+        if (todos)
+            f.kinds.clear();                       // todos marcados = no filtrar por tipo
+        else if (f.kinds.isEmpty())
+            f.kinds << QStringLiteral("\x01");    // ninguno marcado: no pasa ninguno
+        const double kn = 1852.0 / 3600.0;
+        if (vMin->value() > 0.0)
+            f.minSpeed = vMin->value() * kn;
+        if (vMax->value() > 0.0)
+            f.maxSpeed = vMax->value() * kn;
+        f.onlyInWatchedZones = zonas->isChecked();
+        f.dim = atenuar->isChecked();
+        m_filtro = f;
+        m_mapa->setTargetFilter(f);
+        actualizarEstado();
+        const int total = m_mapa->targetCount();
+        statusBar()->showMessage(m_mapa->hasTargetFilter()
+            ? tr("Filtro aplicado: %1 de %2 objetivos").arg(total - m_mapa->filteredOutTargets().size()).arg(total)
+            : tr("Sin filtro: se ven todos los objetivos"), 5000);
     }
 
     // ==================================================== miembros ========
@@ -4496,6 +4615,8 @@ private:
     QAction *m_accBorrar = nullptr;
     QAction *m_accMedir = nullptr;
     QAction *m_accMedirArea = nullptr;      //!< medir superficie y perímetro
+    TargetFilter m_filtro;                  //!< último filtro de objetivos aplicado
+    QLabel *m_filtroLbl = nullptr;          //!< indicador "Filtro: N de M"
     QAction *m_accZoomArea = nullptr;
     QAction *m_accPunto = nullptr;
     QAction *m_accLinea = nullptr;
