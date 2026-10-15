@@ -67,6 +67,8 @@
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTimer>
+#include <QTranslator>
+#include <QLibraryInfo>
 #include <QPalette>
 #include <QScrollArea>
 #include <QSettings>
@@ -4628,6 +4630,30 @@ private:
     QSet<qint64> m_noVigilar;               //!< áreas objetivo que el usuario desactivó
 };
 
+// Traduce al español los textos propios de Qt (botones «Cerrar», «Cancelar»,
+// «Sí», diálogos de fichero...): la demo está en español y sin esto salían en
+// inglés. Busca qtbase_es.qm primero en "translations" junto al ejecutable (lo
+// que deja desplegar.bat) y, si no, en la instalación de Qt. Si no lo
+// encuentra, sigue en inglés sin más.
+static void cargarTraduccionQt(QApplication &app)
+{
+    auto *qt = new QTranslator(&app);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const QString deQt = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+#else
+    const QString deQt = QLibraryInfo::location(QLibraryInfo::TranslationsPath);
+#endif
+    const QStringList dirs = { QCoreApplication::applicationDirPath() + QStringLiteral("/translations"),
+                               deQt };
+    for (const QString &dir : dirs) {
+        if (qt->load(QStringLiteral("qtbase_es"), dir)) {
+            app.installTranslator(qt);
+            return;
+        }
+    }
+    delete qt;
+}
+
 int main(int argc, char *argv[])
 {
     // Escalado de pantalla. En Windows con el zoom de pantalla al 125 % o
@@ -4641,6 +4667,7 @@ int main(int argc, char *argv[])
 #endif
 
     QApplication app(argc, argv);
+    cargarTraduccionQt(app);
     // Para QSettings (recordar el tema elegido entre sesiones).
     QCoreApplication::setOrganizationName(QStringLiteral("LibMapaStatic"));
     QCoreApplication::setApplicationName(QStringLiteral("demo"));

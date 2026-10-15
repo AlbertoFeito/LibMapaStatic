@@ -5282,3 +5282,24 @@ anterior el test falla (un deshacer solo quitaba la última entidad), y la
 importación pasa de 6 ms a 1 ms.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 128. Textos propios de Qt en español en la demo
+
+**El problema.** Los botones y diálogos estándar de Qt (`QDialogButtonBox`,
+`QMessageBox`, diálogos de fichero) salían en inglés («Close», «Cancel»,
+«Yes») dentro de una demo escrita en español. Además, los scripts de
+despliegue usan `windeployqt --no-translations`, así que aunque la demo
+cargara una traducción, en lo desplegado no habría ninguna que cargar.
+
+**Qué se hizo.**
+- La demo carga `qtbase_es.qm` al arrancar (`cargarTraduccionQt`). Lo busca
+  primero en `translations` junto al ejecutable (lo desplegado) y, si no, en la
+  instalación de Qt (`QLibraryInfo`, con la variante de Qt 5 y la de Qt 6). Si
+  no lo encuentra, sigue en inglés sin error.
+- `desplegar.bat` (Qt 6) y `desplegar_qt5.bat` (Qt 5) copian **solo**
+  `qtbase_es.qm` a `translations\`. No se quita `--no-translations`, que
+  copiaría las traducciones de todos los idiomas. Cada script toca solo el suyo,
+  como pide la guía de despliegue.
+
+**Comprobado** en la demo bajo Xvfb: un `QDialogButtonBox` con
+Open/Close/Cancel/Yes muestra «Abrir», «Cerrar», «Cancelar» y «Sí».
