@@ -640,7 +640,7 @@ src/
                      entidades, objetivos, cobertura) y sus modelos
 tests/               24 tests (21 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
-demo/                aplicación de ejemplo
+demo/                aplicación de ejemplo (clase Ventana repartida por tema en Ventana*.cpp)
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
 examples/app_seguimiento/ ejemplo del API de objetivos con la librería instalada
 cmake/               libmapaConfig.cmake.in (para find_package)

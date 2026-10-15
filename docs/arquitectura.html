@@ -890,7 +890,8 @@ find_package(libmapa REQUIRED)        # CMAKE_PREFIX_PATH = C:/libmapa;&lt;Qt&gt
 target_link_libraries(miapp PRIVATE libmapa::widget)</pre>
 <p>Bibliotecas estáticas, solo las cabeceras públicas, <code>libmapaConfig.cmake</code>
 (busca las mismas dependencias de Qt) y las herramientas. Plantilla:
-<code>examples/app_minima</code>. Una guarda en CMake impide que la librería enlace
+<code>examples/app_minima</code>; el API de objetivos (alertas, anillos, filtro, agrupación,
+reproducción y exportación) en <code>examples/app_seguimiento</code>. Una guarda en CMake impide que la librería enlace
 <code>Qt Network</code>: el producto trabaja sin conexión.</p>
 
 <h3>Llevarla a otro PC</h3>
