@@ -722,6 +722,9 @@ public:
      *
      * Muestra el rumbo verdadero y la distancia ("045° · 5.2 NM"), que se
      * actualizan solos si los extremos son objetivos que se mueven.
+     * \return su id, o -1 si no tiene longitud (el mismo objetivo o el mismo
+     * punto en los dos extremos) o no hay vista. Si mas tarde dos objetivos
+     * coinciden, la linea simplemente no se dibuja mientras tanto.
      */
     qint64 addBearingLine(const BearingLine &line);
     bool updateBearingLine(qint64 id, const BearingLine &line);
@@ -730,6 +733,18 @@ public:
     void clearRangeMarks();
     //! Ids de anillos y marcaciones, ordenados.
     QVector<qint64> rangeMarks() const;
+    //! Los anillos con ese id (vacio si no existen o es una marcacion).
+    std::optional<RangeRings> rangeRings(qint64 id) const;
+    //! La marcacion con ese id (vacio si no existe o son anillos).
+    std::optional<BearingLine> bearingLine(qint64 id) const;
+    /*!
+     * \brief Separacion (m) con la que se dibujan ahora unos anillos.
+     *
+     * La fija o, si son automaticos (\c spacingMeters = 0), la que toca al zoom
+     * actual: cambia al acercar o alejar. 0 si no existen o no se pueden
+     * resolver.
+     */
+    double rangeRingsSpacing(qint64 id) const;
     //! Rumbo verdadero (grados) y distancia (m) actuales de una marcacion.
     //! false si no existe o algun extremo no se puede resolver ahora.
     bool bearingLineMeasure(qint64 id, double *bearingDeg, double *distanceMeters) const;

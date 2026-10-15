@@ -331,8 +331,8 @@ void Ventana::construirMenuYBarra()
     // Medidas que se quedan en el mapa: anillos de distancia (VRM) y
     // líneas de marcación (EBL), fijas o colgadas de objetivos.
     auto *accAnillos = mVer->addAction(tr("Anillos de distancia..."));
-    accAnillos->setStatusTip(tr("Anillos alrededor del objetivo seleccionado (lo siguen) "
-                                "o de un punto que pinches."));
+    accAnillos->setStatusTip(tr("Anillos alrededor de un objetivo (lo siguen), de un punto "
+                                "que pinches o de unas coordenadas (radar, observador)."));
     connect(accAnillos, &QAction::triggered, this, &Ventana::ponerAnillos);
     auto *accEbl = mVer->addAction(tr("Marcación (rumbo y distancia)"));
     accEbl->setStatusTip(tr("Línea con rumbo y distancia desde el objetivo seleccionado "
@@ -377,11 +377,10 @@ void Ventana::construirMenuYBarra()
         const RouteEndpoints modo = e.second;
         connect(a, &QAction::triggered, this, [this, modo] { m_mapa->setRouteEndpoints(modo); });
     }
-    connect(mVer->addAction(tr("Quitar anillos y marcaciones")), &QAction::triggered,
-            this, [this] {
-                m_mapa->clearRangeMarks();
-                statusBar()->showMessage(tr("Anillos y marcaciones quitados"), 3000);
-            });
+    // Lista de anillos y marcaciones puestos: centrar, quitar uno o todos.
+    auto *accMarcas = mVer->addAction(tr("Anillos y marcaciones puestos..."));
+    accMarcas->setStatusTip(tr("Ver los anillos y marcaciones del mapa, ir a uno o quitarlos."));
+    connect(accMarcas, &QAction::triggered, this, &Ventana::gestionarMarcas);
     mVer->addSeparator();
     mVer->addAction(m_accRejilla);
     mVer->addAction(m_accCobertura);

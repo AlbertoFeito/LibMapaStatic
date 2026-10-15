@@ -44,6 +44,8 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <QPushButton>
+#include <QRadioButton>
+#include <QListWidget>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSignalBlocker>

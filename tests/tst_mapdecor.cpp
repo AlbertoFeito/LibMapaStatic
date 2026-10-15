@@ -20,6 +20,7 @@ private slots:
     void formatsLongitudeAndNormalizes();
     void formatsDistanceAndBearing();
     void geodesicCircleKeepsRadius();
+    void ringSpacingIsRoundAndFits();
     void clustersByWorldAnchoredCells();
 };
 
@@ -185,6 +186,23 @@ void TstMapDecor::clustersByWorldAnchoredCells()
 
     QVERIFY(MapDecor::clusterPoints(p, 0.0, 2).isEmpty());
     QVERIFY(MapDecor::clusterPoints({}, 50.0, 2).isEmpty());
+}
+
+// Separacion de anillos automatica: el mayor 1-2-2.5-5 x 10^n (en la unidad de la
+// escala) con el que los anillos caben en el radio.
+void TstMapDecor::ringSpacingIsRoundAndFits()
+{
+    QCOMPARE(MapDecor::niceRingSpacing(9000.0, 4, ScaleUnits::Metric), 2000.0);
+    QCOMPARE(MapDecor::niceRingSpacing(10000.0, 5, ScaleUnits::Metric), 2000.0);
+    QCOMPARE(MapDecor::niceRingSpacing(40000.0, 5, ScaleUnits::Metric), 5000.0);
+    QCOMPARE(MapDecor::niceRingSpacing(450.0, 5, ScaleUnits::Metric), 50.0);
+    QCOMPARE(MapDecor::niceRingSpacing(13000.0, 5, ScaleUnits::Metric), 2500.0);
+    // Nautico: 20 NM con 4 anillos -> 5 NM.
+    QCOMPARE(MapDecor::niceRingSpacing(20.0 * 1852.0, 4, ScaleUnits::Nautical), 5.0 * 1852.0);
+    QCOMPARE(MapDecor::niceRingSpacing(1.0 * 1852.0, 5, ScaleUnits::Nautical), 0.2 * 1852.0);
+    QCOMPARE(MapDecor::niceRingSpacing(0.0, 5, ScaleUnits::Metric), 0.0);
+    QCOMPARE(MapDecor::niceRingSpacing(1000.0, 0, ScaleUnits::Metric), 0.0);
+    QCOMPARE(MapDecor::niceRingSpacing(std::nan(""), 3, ScaleUnits::Metric), 0.0);
 }
 
 QTEST_APPLESS_MAIN(TstMapDecor)

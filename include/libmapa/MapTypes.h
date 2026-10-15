@@ -79,17 +79,27 @@ enum class GraticuleMode {
  *
  * \a count anillos cada \a spacingMeters, geodesicos (a la distancia real,
  * aunque en Mercator se estiren hacia los polos), con su distancia rotulada
- * en la parte de arriba de cada uno. Opcionalmente, radiales cada
+ * en la parte de arriba de cada uno (o, si esa parte queda fuera de la vista,
+ * en el punto visible mas cercano). Opcionalmente, radiales cada
  * \a spokeEveryDeg grados con su marcacion ("030°") en el extremo.
+ *
+ * El centro es un punto fijo (un radar, un observador: \a center, con su
+ * \a name rotulado al lado) o un objetivo movil (\a targetId), al que siguen.
+ *
+ * Con \a spacingMeters = 0 la separacion es AUTOMATICA: se ajusta al zoom
+ * para que los \a count anillos llenen casi la vista, con un valor redondo
+ * en las unidades de la escala (1, 2, 2.5 o 5 por potencia de 10: 500 m,
+ * 2.5 km, 5 NM...). Ver MapWidget::rangeRingsSpacing.
  */
 struct RangeRings {
     QGeoCoordinate center;          //!< Centro fijo (si \a targetId < 0).
     qint64 targetId = -1;           //!< O centrado en este objetivo, y lo sigue.
-    double spacingMeters = 1852.0;  //!< Separacion entre anillos (1 NM por defecto).
+    double spacingMeters = 1852.0;  //!< Separacion entre anillos; 0 = automatica (segun el zoom).
     int count = 5;                  //!< Numero de anillos (1..50).
     int spokeEveryDeg = 0;          //!< Radiales cada N grados; 0 = sin radiales.
     QColor color = QColor(0x00, 0x89, 0x7b);
     bool labels = true;             //!< Rotular distancias y marcaciones.
+    QString name;                   //!< Rotulo junto al centro ("Radar Mariel"); vacio = ninguno.
 };
 
 /*!

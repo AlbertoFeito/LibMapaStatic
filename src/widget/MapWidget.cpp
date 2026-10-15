@@ -2293,6 +2293,30 @@ QVector<qint64> MapWidget::rangeMarks() const
     return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->ids() : QVector<qint64>();
 }
 
+// Copia de unos anillos por id.
+std::optional<RangeRings> MapWidget::rangeRings(qint64 id) const
+{
+    RangeRings r;
+    if (d->view && d->view->rangeLayer() && d->view->rangeLayer()->rings(id, &r))
+        return r;
+    return std::nullopt;
+}
+
+// Copia de una marcacion por id.
+std::optional<BearingLine> MapWidget::bearingLine(qint64 id) const
+{
+    BearingLine l;
+    if (d->view && d->view->rangeLayer() && d->view->rangeLayer()->bearing(id, &l))
+        return l;
+    return std::nullopt;
+}
+
+// Separacion actual de unos anillos (la automatica depende del zoom).
+double MapWidget::rangeRingsSpacing(qint64 id) const
+{
+    return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->spacing(id) : 0.0;
+}
+
 // Rumbo verdadero y distancia actuales de una marcacion (con sus objetivos
 // donde esten ahora). false si no existe o no se puede resolver.
 bool MapWidget::bearingLineMeasure(qint64 id, double *bearingDeg, double *distanceMeters) const

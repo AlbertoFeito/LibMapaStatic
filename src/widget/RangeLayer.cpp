@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace libmapa {
 
@@ -76,9 +77,22 @@ bool RangeLayer::updateRings(qint64 id, const RangeRings &rings)
     return true;
 }
 
-// Alta de una marcacion; devuelve su id.
+// Marcacion sin sentido por construccion: mismo objetivo en los dos extremos,
+// o el mismo punto fijo. Se rechaza al darla de alta.
+bool RangeLayer::degenerada(const BearingLine &l)
+{
+    if (l.fromTarget >= 0 && l.fromTarget == l.toTarget)
+        return true;
+    return l.fromTarget < 0 && l.toTarget < 0 && l.from.isValid() && l.to.isValid()
+        && l.from.distanceTo(l.to) < 1.0;
+}
+
+// Alta de una marcacion; devuelve su id, o -1 si no tiene longitud (origen y
+// destino iguales).
 qint64 RangeLayer::addBearing(const BearingLine &line)
 {
+    if (degenerada(line))
+        return -1;
     const qint64 id = m_nextId++;
     m_bearings.insert(id, line);
     repintar();
@@ -88,7 +102,7 @@ qint64 RangeLayer::addBearing(const BearingLine &line)
 // Cambia una marcacion existente. false si el id no es de marcacion.
 bool RangeLayer::updateBearing(qint64 id, const BearingLine &line)
 {
-    if (!m_bearings.contains(id))
+    if (!m_bearings.contains(id) || degenerada(line))
         return false;
     m_bearings.insert(id, line);
     repintar();
@@ -124,6 +138,106 @@ QVector<qint64> RangeLayer::ids() const
         v.append(it.key());
     std::sort(v.begin(), v.end());
     return v;
+}
+
+// Copia de unos anillos por id.
+bool RangeLayer::rings(qint64 id, RangeRings *out) const
+{
+    const auto it = m_rings.constFind(id);
+    if (it == m_rings.cend())
+        return false;
+    if (out)
+        *out = *it;
+    return true;
+}
+
+// Copia de una marcacion por id.
+bool RangeLayer::bearing(qint64 id, BearingLine *out) const
+{
+    const auto it = m_bearings.constFind(id);
+    if (it == m_bearings.cend())
+        return false;
+    if (out)
+        *out = *it;
+    return true;
+}
+
+// Separacion actual de unos anillos (fija o automatica), 0 si no se puede.
+double RangeLayer::spacing(qint64 id) const
+{
+    const auto it = m_rings.constFind(id);
+    if (it == m_rings.cend())
+        return 0.0;
+    const QGeoCoordinate c = resolve(it->center, it->targetId);
+    return c.isValid() ? pasoEfectivo(*it, c) : 0.0;
+}
+
+// Rectangulo de pixeles donde se ve el mapa.
+QRectF RangeLayer::vista() const
+{
+    QCustomPlot *plot = parentPlot();
+    if (!plot)
+        return QRectF();
+    return plot->axisRect() ? QRectF(plot->axisRect()->rect()) : QRectF(plot->viewport());
+}
+
+// Separacion con la que se dibujan los anillos centrados en \a c. Fija, o
+// automatica: la escala local (pixeles por metro en el centro, Mercator es
+// conforme) dice cuantos metros caben en el 45 % del lado corto de la vista,
+// y niceRingSpacing lo redondea para que los count anillos quepan.
+double RangeLayer::pasoEfectivo(const RangeRings &r, const QGeoCoordinate &c) const
+{
+    const int n = std::clamp(r.count, 1, kMaxAnillos);
+    if (r.spacingMeters > 0.0 && std::isfinite(r.spacingMeters))
+        return std::min(r.spacingMeters, kMaxRadio / n);
+    if (r.spacingMeters != 0.0)
+        return 0.0;                          // negativa o NaN: no se dibuja
+    const QRectF v = vista();
+    const double px1km = QLineF(screenPos(c), screenPos(c.atDistanceAndAzimuth(1000.0, 90.0))).length();
+    if (v.isEmpty() || !(px1km > 0.0))
+        return 0.0;
+    const double radioM = 0.45 * std::min(v.width(), v.height()) / px1km * 1000.0;
+    return std::min(MapDecor::niceRingSpacing(radioM, n, m_units), kMaxRadio / n);
+}
+
+// Donde poner el rotulo de una curva: en \a ideal si se ve; si no, en el
+// punto visible de la curva mas cercano a el (con un margen al borde para
+// que el rotulo no quede cortado). Si no se ve nada, \a ideal (no se vera).
+QPointF RangeLayer::dentroDeVista(const QPointF &ideal, const QPolygonF &curva) const
+{
+    const QRectF v = vista().adjusted(30.0, 12.0, -30.0, -12.0);
+    if (v.isEmpty() || v.contains(ideal))
+        return ideal;
+    QPointF mejor = ideal;
+    double dMejor = std::numeric_limits<double>::max();
+    for (const QPointF &p : curva) {
+        if (!v.contains(p))
+            continue;
+        const double d = QLineF(p, ideal).length();
+        if (d < dMejor) {
+            dMejor = d;
+            mejor = p;
+        }
+    }
+    return mejor;
+}
+
+// Punto donde el segmento desde -> hasta sale de la vista (con margen), para
+// rotular un radial cuyo extremo no se ve. Si \a hasta se ve, \a hasta.
+QPointF RangeLayer::bordeDeVista(const QPointF &desde, const QPointF &hasta) const
+{
+    const QRectF v = vista().adjusted(24.0, 12.0, -24.0, -12.0);
+    if (v.isEmpty() || v.contains(hasta) || !v.contains(desde))
+        return hasta;
+    const QLineF seg(desde, hasta);
+    const QLineF lados[] = { QLineF(v.topLeft(), v.topRight()), QLineF(v.topRight(), v.bottomRight()),
+                             QLineF(v.bottomRight(), v.bottomLeft()), QLineF(v.bottomLeft(), v.topLeft()) };
+    for (const QLineF &lado : lados) {
+        QPointF corte;
+        if (seg.intersects(lado, &corte) == QLineF::BoundedIntersection)
+            return corte;
+    }
+    return hasta;
 }
 
 // Punto fijo, o la posicion actual del objetivo si se da uno (invalido si ese
@@ -219,9 +333,11 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
 {
     const QGeoCoordinate c = resolve(r.center, r.targetId);
     const int n = std::clamp(r.count, 1, kMaxAnillos);
-    if (!c.isValid() || !(r.spacingMeters > 0.0) || !std::isfinite(r.spacingMeters))
+    if (!c.isValid())
         return;
-    const double paso = std::min(r.spacingMeters, kMaxRadio / n);
+    const double paso = pasoEfectivo(r, c);
+    if (!(paso > 0.0))
+        return;
     const QPointF pc = screenPos(c);
 
     painter->setBrush(Qt::NoBrush);
@@ -234,7 +350,8 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
         painter->setPen(QPen(r.color, 1.4, i == n ? Qt::SolidLine : Qt::DashLine));
         painter->drawPolyline(anillo);
         if (r.labels)
-            label(painter, anillo.first(), MapDecor::formatDistance(paso * i, m_units), r.color);
+            label(painter, dentroDeVista(anillo.first(), anillo),
+                  MapDecor::formatDistance(paso * i, m_units), r.color);
     }
 
     if (r.spokeEveryDeg > 0) {
@@ -245,7 +362,7 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
             painter->drawLine(pc, fin);
             if (r.labels && az != 0) {       // el 000 lo tapa el rotulo del anillo
                 const QPointF fuera = screenPos(c.atDistanceAndAzimuth(paso * n * 1.08, az));
-                label(painter, fuera, MapDecor::formatBearing(az), r.color);
+                label(painter, bordeDeVista(pc, fuera), MapDecor::formatBearing(az), r.color);
             }
         }
     }
@@ -253,6 +370,13 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
     painter->setPen(QPen(r.color, 1.6));
     painter->drawLine(pc + QPointF(-6, 0), pc + QPointF(6, 0));
     painter->drawLine(pc + QPointF(0, -6), pc + QPointF(0, 6));
+    if (r.targetId < 0) {                    // punto fijo (radar, observador): un cuadrado
+        painter->drawRect(QRectF(pc - QPointF(3.5, 3.5), QSizeF(7.0, 7.0)));
+    }
+    if (!r.name.isEmpty()) {
+        const QFontMetricsF fm(painter->font());
+        label(painter, pc + QPointF(fm.horizontalAdvance(r.name) / 2.0 + 14.0, 12.0), r.name, r.color);
+    }
 }
 
 // Marcacion: trazo geodesico con halo, flecha en el destino y el rotulo
@@ -260,7 +384,7 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
 void RangeLayer::drawBearing(QCPPainter *painter, const BearingLine &l) const
 {
     QGeoCoordinate a, b;
-    if (!ends(l, &a, &b))
+    if (!ends(l, &a, &b) || a.distanceTo(b) < 1.0)
         return;
     QPolygonF linea;
     for (const QGeoCoordinate &p : geodesica(a, b))

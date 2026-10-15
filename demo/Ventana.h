@@ -252,6 +252,8 @@ private:
     void ponerAnillos();
 
     void ponerMarcacion();
+    void gestionarMarcas();
+    QString textoDistancia(double metros) const;
 
     void iniciarPickMedida(Pick cual, const QString &aviso);
 
@@ -405,7 +407,8 @@ private:
     QAction *m_accProximidad = nullptr;     //!< alertas CPA/TCPA entre objetivos
     double m_cpaMillas = 1.0;               //!< distancia de la alerta CPA (NM)
     int m_cpaMinutos = 10;                  //!< horizonte de la alerta CPA (min)
-    RangeRings m_anillos;                   //!< últimos ajustes de anillos (1 NM x 5)
+    RangeRings m_anillos = [] { RangeRings r; r.spacingMeters = 0.0; return r; }();   //!< últimos ajustes (automáticos)
+    int m_anillosUnidad = 2;                //!< unidad de la separación fija (0 m, 1 km, 2 NM)
     BearingLine m_ebl;                      //!< marcación en curso (origen ya fijado)
     TrackPlayer *m_player = nullptr;        //!< reproducción de historiales (al abrir uno)
     QToolBar *m_barraRep = nullptr;         //!< barra de reproducción (abajo)

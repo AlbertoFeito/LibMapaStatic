@@ -5458,3 +5458,53 @@ faltaba encima de 26 métodos (la norma es uno por función).
 
 La demo no está en qmake, así que solo cambia su `add_executable` en
 `CMakeLists.txt`. Compila sin warnings y arranca; **24 tests** en verde.
+
+## 133. Anillos de distancia: automáticos según el zoom, puntos fijos y gestor
+
+Probándolo en Windows, los anillos no convencían:
+- con 20 NM de separación a zoom 10 solo se veía un anillo y **ningún rótulo**:
+  las distancias iban arriba de cada anillo, fuera de la pantalla;
+- en el centro salía un **«000° · 0 m»**: una marcación con origen y destino en
+  el mismo sitio (dos clics en el mismo punto);
+- el diálogo solo admitía la separación **en NM**, y el centro solo podía ser el
+  objetivo seleccionado o un clic: no se podía poner un **radar u observador**
+  en unas coordenadas conocidas;
+- solo se podían **quitar todos** a la vez.
+
+Cambios en la librería:
+- `RangeRings::spacingMeters = 0` → **separación automática**. En cada repintado
+  se mide la escala en el centro (píxeles entre el centro y un punto a 1 km al
+  este; Mercator es conforme) y `MapDecor::niceRingSpacing` elige el mayor valor
+  1-2-2.5-5 × 10ⁿ, en la unidad de la escala, con el que los `count` anillos
+  caben en el 45 % del lado corto de la vista. Al alejar de zoom 8 a 6, unos
+  anillos de 10 NM pasan a 50 NM. Valores redondos para que el rótulo se lea
+  («2.5 km», no «2.37 km»).
+- `RangeRings::name`: rótulo junto al centro; los centros fijos llevan además un
+  cuadrado (los de un objetivo, solo la cruz bajo su icono).
+- **Rótulos siempre visibles**: si lo alto de un anillo queda fuera, su distancia
+  va al punto visible del anillo más cercano; la marcación de un radial que se
+  sale de la vista, al borde por donde sale.
+- `addBearingLine` devuelve **-1** si la marcación no tiene longitud (mismo
+  objetivo o mismo punto en los dos extremos), y `updateBearingLine` false; si
+  dos objetivos llegan a coincidir más tarde, la línea simplemente no se dibuja
+  mientras tanto.
+- Consultas: `rangeRings(id)`, `bearingLine(id)` y `rangeRingsSpacing(id)` (la
+  separación con la que se dibujan ahora, útil con la automática).
+
+Cambios en la demo:
+- **Ver → Anillos de distancia…**: nombre; centro = objetivo seleccionado, un
+  punto que se pinche (si cae en un objetivo, lo sigue) o **coordenadas escritas**
+  en cualquier formato (decimal, GMS, UTM, MGRS); separación **automática** (por
+  defecto) o fija **en m, km o NM** (al cambiar de unidad el valor se convierte);
+  radiales cada 10/15/30/45/90°; color.
+- **Ver → Anillos y marcaciones puestos…**: lista con cada uno (nombre, separación
+  —la automática con su valor actual—, centro; o rumbo y distancia), **Centrar**
+  (o doble clic), **Quitar** uno y **Quitar todos**.
+- Si el destino de una marcación coincide con el origen, se vuelve a pedir en vez
+  de dibujar «000° · 0 m».
+
+Tests: `tst_mapdecor::ringSpacingIsRoundAndFits` y, en
+`tst_mapwidget::rangeRingsAndBearingLinesFollowTargets`, marcaciones nulas
+rechazadas, consultas por id y anillos automáticos que caben y crecen al alejar.
+Comprobado con capturas a zoom 8 y 6 (radar con nombre y radiales, anillos fijos
+de 37 km en una aeronave con sus rótulos llevados a la vista). **24 tests** en verde.

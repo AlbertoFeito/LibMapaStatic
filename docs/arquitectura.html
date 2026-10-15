@@ -392,7 +392,7 @@ la API que usa la aplicación:</p>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b> · consulta puntual <b>targetsInArea · featuresInArea</b></td></tr>
 <tr><td>Agrupación de objetivos</td><td class="mono"><b>setTargetClustering(TargetClustering) · targetClustering · targetClusterAt · señal targetClusterClicked</b> · núcleo: MapDecor::clusterPoints (rejilla anclada al mundo)</td></tr>
 <tr><td>Filtro de objetivos</td><td class="mono"><b>setTargetFilter(TargetFilter) · clearTargetFilter · hasTargetFilter · targetPassesFilter · filteredOutTargets</b> (clase, velocidad, zonas vigiladas, predicado de la app; ocultar o atenuar)</td></tr>
-<tr><td>Anillos y marcaciones</td><td class="mono"><b>addRangeRings · updateRangeRings · addBearingLine · updateBearingLine · removeRangeMark · clearRangeMarks · rangeMarks · bearingLineMeasure</b> · inicio/fin de rutas: <b>setRouteEndpoints (Hidden/Selected/Routes/AllLines)</b></td></tr>
+<tr><td>Anillos y marcaciones</td><td class="mono"><b>addRangeRings · updateRangeRings · rangeRings · rangeRingsSpacing · addBearingLine · updateBearingLine · bearingLine · removeRangeMark · clearRangeMarks · rangeMarks · bearingLineMeasure</b> · inicio/fin de rutas: <b>setRouteEndpoints (Hidden/Selected/Routes/AllLines)</b></td></tr>
 <tr><td>Reproducción</td><td class="mono"><b>TrackPlayer</b> (loadFile · setTracks · play · pause · stop · seek · setSpeed · setRoutesVisible · targetIdOf · isLoaded · <b>clear = salir</b> · señales timeChanged / playingChanged / finished / cleared) · núcleo: <b>sampleTrack · trackTimeRange</b> (TrackReplay.h)</td></tr>
 <tr><td>Proximidad (CPA/TCPA)</td><td class="mono"><b>setProximityAlert(distancia, horizonte) · proximityAlerts · targetCpa · setTargetVelocity · setProximityLinesVisible · setProximityColor · señales proximityAlertRaised / proximityAlertCleared</b></td></tr>
 <tr><td>Exportar</td><td class="mono"><b>renderImage(escala) · exportView(ruta, MapExportOptions)</b> (PDF vectorial con título, pie y escala 1:N, o PNG/JPG…) · <b>exportTargetHistory</b> (GPX con horas)</td></tr>
@@ -636,7 +636,14 @@ borrar el objetivo o la zona no genera salidas. También se vigilan las <b>entid
 entidades, y los objetivos quedan encima. Los anillos son <b>geodésicos</b>
 (<code>MapDecor::geodesicCircle</code>): en Mercator se estiran con la latitud, como la
 distancia real. Las marcaciones siguen la ortodrómica y miden rumbo y distancia al dibujar
-(«202° · 26.7 NM», en las unidades de la escala).</p>
+(«202° · 26.7 NM», en las unidades de la escala). Una marcación sin longitud (mismo
+objetivo o mismo punto en los dos extremos) se rechaza. El centro de los anillos puede ser un
+objetivo o un <b>punto fijo con nombre</b> (radar, observador). Con
+<code>spacingMeters = 0</code> la separación es <b>automática</b>: en cada repintado se mide
+la escala local en el centro y <code>MapDecor::niceRingSpacing</code> elige el mayor valor
+1-2-2.5-5 × 10<sup>n</sup> (en la unidad de la escala) con el que los anillos caben en el 45 %
+del lado corto de la vista. Si la parte de arriba de un anillo, o el extremo de un radial, queda
+fuera de la vista, su rótulo se lleva al punto visible más cercano.</p>
 <p><b>Reproducción de historiales.</b> <code>TrackPlayer</code> convierte cada pista de un
 GPX con horas en un <b>objetivo normal</b> mientras existió. Usa solo la API pública:
 <code>addTarget</code>/<code>updateTarget</code> con los puntos grabados y sus horas, y la

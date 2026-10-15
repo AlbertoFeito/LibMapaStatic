@@ -142,6 +142,22 @@ static int decimalesPara(double v)
     return v < 10.0 ? 2 : (v < 100.0 ? 1 : 0);
 }
 
+// Separacion redonda de anillos (ver cabecera): se trabaja en la unidad de
+// la escala para que el rotulo salga redondo ("2 NM", no "1.08 NM").
+double niceRingSpacing(double maxRadiusMeters, int count, ScaleUnits units)
+{
+    if (!(maxRadiusMeters > 0.0) || !std::isfinite(maxRadiusMeters) || count < 1)
+        return 0.0;
+    const double unidad = units == ScaleUnits::Nautical ? 1852.0 : 1.0;
+    const double bruto = maxRadiusMeters / unidad / count;
+    const double base = std::pow(10.0, std::floor(std::log10(bruto)));
+    double paso = base;
+    for (const double k : { 2.0, 2.5, 5.0, 10.0 })
+        if (base * k <= bruto * (1.0 + 1e-9))
+            paso = base * k;
+    return paso * unidad;
+}
+
 // Distancia legible en la unidad pedida (ver cabecera).
 QString formatDistance(double meters, ScaleUnits units)
 {

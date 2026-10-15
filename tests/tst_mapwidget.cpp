@@ -2549,8 +2549,52 @@ void TstMapWidget::rangeRingsAndBearingLinesFollowTargets()
     w.removeTarget(idb);
     QVERIFY(!w.bearingLineMeasure(marcacion, &rumbo, &dist));
 
+    // Una marcacion sin longitud (mismo objetivo, o el mismo punto, en los dos
+    // extremos) se rechaza: solo dibujaria un rotulo "000° · 0 m".
+    BearingLine nula;
+    nula.fromTarget = ida;
+    nula.toTarget = ida;
+    QCOMPARE(w.addBearingLine(nula), qint64(-1));
+    nula = BearingLine();
+    nula.from = QGeoCoordinate(22.0, -80.1);
+    nula.to = nula.from;
+    QCOMPARE(w.addBearingLine(nula), qint64(-1));
+    QVERIFY(!w.updateBearingLine(idFija, nula));
+
+    // Consultas por id: cada una solo devuelve su tipo.
+    QVERIFY(w.rangeRings(anillos).has_value());
+    QCOMPARE(w.rangeRings(anillos)->targetId, ida);
+    QVERIFY(!w.rangeRings(idFija).has_value());
+    QVERIFY(w.bearingLine(idFija).has_value());
+    QVERIFY(!w.bearingLine(anillos).has_value());
+    QCOMPARE(w.rangeRingsSpacing(anillos), 1852.0);          // fija
+
+    // Anillos automaticos en un punto fijo con nombre (un radar): la
+    // separacion es redonda, los anillos caben en la vista y al alejar crece.
+    RangeRings radar;
+    radar.center = QGeoCoordinate(22.0, -80.0);
+    radar.spacingMeters = 0.0;
+    radar.count = 4;
+    radar.name = QStringLiteral("Radar");
+    const qint64 idRadar = w.addRangeRings(radar);
+    captura();
+    const double pasoCerca = w.rangeRingsSpacing(idRadar);
+    QVERIFY(pasoCerca > 0.0);
+    const double m = pasoCerca / std::pow(10.0, std::floor(std::log10(pasoCerca)));
+    QVERIFY(qAbs(m - 1.0) < 1e-6 || qAbs(m - 2.0) < 1e-6 || qAbs(m - 2.5) < 1e-6
+            || qAbs(m - 5.0) < 1e-6);
+    // A zoom 10 y lat 22 hay ~140 m/px: 4 anillos en el 45 % de 600 px.
+    const double mPorPx = 156543.03 * std::cos(qDegreesToRadians(22.0)) / std::pow(2.0, 10);
+    QVERIFY(pasoCerca * 4 <= 0.45 * 600 * mPorPx * 1.05);
+    QVERIFY(pasoCerca * 4 >= 0.45 * 600 * mPorPx / 2.5 * 0.95);
+    w.setZoom(8);
+    captura();
+    QVERIFY(w.rangeRingsSpacing(idRadar) > pasoCerca * 2.0);
+    w.setZoom(10);
+
     QVERIFY(w.removeRangeMark(anillos));
     QVERIFY(!w.removeRangeMark(anillos));
+    QCOMPARE(w.rangeRingsSpacing(anillos), 0.0);
     w.clearRangeMarks();
     QVERIFY(w.rangeMarks().isEmpty());
 }

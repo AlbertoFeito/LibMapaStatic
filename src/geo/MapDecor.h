@@ -71,6 +71,16 @@ QString formatDistance(double meters, ScaleUnits units);
  */
 QString formatArea(double squareMeters, ScaleUnits units);
 
+/*!
+ * \brief Separacion "redonda" para \a count anillos que quepan en un radio.
+ *
+ * El mayor valor 1, 2, 2.5 o 5 por potencia de 10 (en metros o en millas
+ * nauticas, segun \a units) tal que \a count anillos no pasen de
+ * \a maxRadiusMeters: 9 km con 4 anillos -> 2 km. Lo usan los anillos de
+ * separacion automatica. 0 si los datos no valen.
+ */
+double niceRingSpacing(double maxRadiusMeters, int count, ScaleUnits units);
+
 //! Rumbo o marcacion verdadera con tres cifras: "045°", "359°". Se normaliza
 //! a [0, 360) y se redondea al grado. Vacio si no es finito.
 QString formatBearing(double degrees);
