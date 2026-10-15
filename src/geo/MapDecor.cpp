@@ -1,5 +1,8 @@
 #include "geo/MapDecor.h"
 
+#include <QHash>
+#include <QPair>
+
 #include <algorithm>
 #include <cmath>
 
@@ -185,6 +188,40 @@ QString formatBearing(double degrees)
     if (g >= 360)
         g -= 360;
     return QStringLiteral("%1").arg(g, 3, 10, QLatin1Char('0')) + QChar(0x00B0);
+}
+
+// Rejilla de celdas: cada punto cae en la celda floor((p - origen) / celda); las
+// celdas con minCount puntos o mas son grupos, con su centroide.
+QVector<PointCluster> clusterPoints(const QVector<QPointF> &points, double cellSize,
+                                    int minCount, const QPointF &gridOrigin)
+{
+    QVector<PointCluster> grupos;
+    if (!(cellSize > 0.0) || points.isEmpty())
+        return grupos;
+    const int minimo = std::max(2, minCount);
+    QHash<QPair<qint64, qint64>, QVector<int>> celdas;
+    for (int i = 0; i < points.size(); ++i) {
+        const QPointF r = points.at(i) - gridOrigin;
+        const QPair<qint64, qint64> c(qint64(std::floor(r.x() / cellSize)),
+                                      qint64(std::floor(r.y() / cellSize)));
+        celdas[c].append(i);
+    }
+    for (auto it = celdas.cbegin(); it != celdas.cend(); ++it) {
+        if (it->size() < minimo)
+            continue;
+        PointCluster g;
+        g.members = *it;
+        QPointF suma;
+        for (int i : g.members)
+            suma += points.at(i);
+        g.center = suma / double(g.members.size());
+        grupos.append(g);
+    }
+    std::sort(grupos.begin(), grupos.end(), [](const PointCluster &a, const PointCluster &b) {
+        return a.members.size() != b.members.size() ? a.members.size() > b.members.size()
+                                                    : a.members.first() < b.members.first();
+    });
+    return grupos;
 }
 
 // Puntos a la misma distancia del centro en azimuts equiespaciados (ver cabecera).

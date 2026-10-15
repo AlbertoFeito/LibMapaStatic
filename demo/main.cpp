@@ -761,6 +761,19 @@ private:
         accFiltro->setStatusTip(tr("Mostrar solo los objetivos de ciertos tipos, velocidades "
                                    "o dentro de zonas vigiladas."));
         connect(accFiltro, &QAction::triggered, this, &Ventana::filtrarObjetivos);
+        // Agrupar objetivos: con cientos en pantalla, al alejar el zoom se
+        // dibujan como círculos con el número; pinchar uno lo amplía.
+        auto *accAgrupar = mVer->addAction(tr("Agrupar objetivos al alejar"));
+        accAgrupar->setCheckable(true);
+        accAgrupar->setStatusTip(tr("Hasta zoom 10, los objetivos amontonados se ven como "
+                                    "un círculo con su número (clic = ampliar)."));
+        connect(accAgrupar, &QAction::toggled, this, [this](bool on) {
+            TargetClustering c;
+            c.enabled = on;
+            c.maxZoom = 10;
+            m_mapa->setTargetClustering(c);
+        });
+        accAgrupar->setChecked(true);
         mVer->addSeparator();
         QMenu *mExtremos = mVer->addMenu(tr("Inicio y fin de rutas"));
         auto *gExtremos = new QActionGroup(this);
@@ -3781,6 +3794,28 @@ private:
             actualizarIndicadorAlertas();
         });
 
+        // Clic en un grupo de objetivos: encuadra a todos los que reúne (si
+        // están casi en el mismo punto, amplía dos niveles sobre él).
+        connect(m_mapa, &MapWidget::targetClusterClicked, this,
+                [this](const QVector<qint64> &ids, const QGeoCoordinate &donde) {
+                    double n = -90, s = 90, w = 180, e = -180;
+                    for (qint64 id : ids)
+                        if (const auto t = m_mapa->target(id)) {
+                            n = std::max(n, t->position.latitude());
+                            s = std::min(s, t->position.latitude());
+                            w = std::min(w, t->position.longitude());
+                            e = std::max(e, t->position.longitude());
+                        }
+                    if (n - s > 1e-3 || e - w > 1e-3) {
+                        const double mLat = (n - s) * 0.15 + 1e-3, mLon = (e - w) * 0.15 + 1e-3;
+                        m_mapa->fitBounds(QGeoCoordinate(n + mLat, w - mLon),
+                                          QGeoCoordinate(s - mLat, e + mLon));
+                    } else {
+                        m_mapa->setCenter(donde);
+                        m_mapa->setZoom(m_mapa->zoom() + 2);
+                    }
+                    statusBar()->showMessage(tr("Grupo de %1 objetivos").arg(ids.size()), 4000);
+                });
         connect(m_mapa, &MapWidget::targetClicked, this,
                 [this](qint64 id, const QGeoCoordinate &) {
                     const auto t = m_mapa->target(id);

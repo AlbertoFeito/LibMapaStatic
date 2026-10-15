@@ -20,6 +20,7 @@ private slots:
     void formatsLongitudeAndNormalizes();
     void formatsDistanceAndBearing();
     void geodesicCircleKeepsRadius();
+    void clustersByWorldAnchoredCells();
 };
 
 // La barra elige 1-2-5 x 10^n sin pasarse del ancho maximo.
@@ -153,6 +154,37 @@ void TstMapDecor::geodesicCircleKeepsRadius()
     }
     QVERIFY(MapDecor::geodesicCircle(QGeoCoordinate(), 100.0).isEmpty());
     QVERIFY(MapDecor::geodesicCircle(QGeoCoordinate(0, 0), 0.0).isEmpty());
+}
+
+// Puntos por celdas de 50 px: un monton de 4 forma grupo (con su centroide),
+// una pareja con minimo 3 no. Desplazar todos los puntos y el origen lo mismo
+// (desplazar el mapa) da los mismos grupos.
+void TstMapDecor::clustersByWorldAnchoredCells()
+{
+    const QVector<QPointF> p = { {10, 10}, {20, 20}, {30, 10}, {40, 40},   // celda (0,0)
+                                 {110, 10}, {120, 15},                      // celda (2,0)
+                                 {300, 300} };                              // sola
+    QVector<MapDecor::PointCluster> g = MapDecor::clusterPoints(p, 50.0, 3);
+    QCOMPARE(g.size(), 1);
+    QCOMPARE(g[0].members, QVector<int>({ 0, 1, 2, 3 }));
+    QCOMPARE(g[0].center, QPointF(25.0, 20.0));
+
+    g = MapDecor::clusterPoints(p, 50.0, 2);
+    QCOMPARE(g.size(), 2);
+    QCOMPARE(g[0].members.size(), 4);                 // de mayor a menor
+    QCOMPARE(g[1].members, QVector<int>({ 4, 5 }));
+
+    // Desplazar el mapa 37 px: mismos grupos, si la rejilla va anclada al mundo.
+    QVector<QPointF> movidos;
+    for (const QPointF &q : p)
+        movidos.append(q + QPointF(37.0, -12.0));
+    const auto g2 = MapDecor::clusterPoints(movidos, 50.0, 2, QPointF(37.0, -12.0));
+    QCOMPARE(g2.size(), 2);
+    QCOMPARE(g2[0].members, g[0].members);
+    QCOMPARE(g2[1].members, g[1].members);
+
+    QVERIFY(MapDecor::clusterPoints(p, 0.0, 2).isEmpty());
+    QVERIFY(MapDecor::clusterPoints({}, 50.0, 2).isEmpty());
 }
 
 QTEST_APPLESS_MAIN(TstMapDecor)

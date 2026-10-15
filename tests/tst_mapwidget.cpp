@@ -164,6 +164,9 @@ private slots:
     //! Filtro de objetivos: clase, velocidad, zona y criterio de la app;
     //! ocultar (no se pueden pinchar) o atenuar; se reevalua al moverse.
     void targetFilterHidesOrDims();
+    //! Agrupacion: un monton de objetivos es un grupo con su numero, que se
+    //! pincha como grupo; el seleccionado queda suelto; maxZoom la limita.
+    void targetClusteringGroupsCrowds();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2908,6 +2911,81 @@ void TstMapWidget::targetFilterHidesOrDims()
     QVERIFY(!w.hasTargetFilter());
     QVERIFY(w.filteredOutTargets().isEmpty());
     QVERIFY(!w.targetPassesFilter(avion));                   // ya no existe
+}
+
+// 20 objetivos en unos 200 m (a zoom 9, un par de pixeles) y uno lejos: con
+// la agrupacion activa hay un grupo de 20 y el lejano va suelto. Se pincha el
+// grupo (no un objetivo); seleccionar uno lo saca del grupo; por encima de
+// maxZoom no se agrupa.
+void TstMapWidget::targetClusteringGroupsCrowds()
+{
+    qRegisterMetaType<QVector<qint64>>();
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(9);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    const auto pixel = [vista](const QGeoCoordinate &c) {
+        const QPointF ax = MapView::toAxis(c);
+        return QPoint(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                      int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+    };
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(60);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    QVector<qint64> monton;
+    for (int i = 0; i < 20; ++i) {
+        MapTarget t;
+        t.position = centro.atDistanceAndAzimuth(10.0 * i, 18.0 * i);
+        monton.append(w.addTarget(t));
+    }
+    MapTarget lejos;
+    lejos.position = centro.atDistanceAndAzimuth(60000.0, 90.0);
+    const qint64 idLejos = w.addTarget(lejos);
+    const QImage sueltos = captura();
+    QVERIFY(w.targetClusterAt(pixel(centro)).isEmpty());   // desactivada
+
+    TargetClustering c;
+    c.enabled = true;
+    w.setTargetClustering(c);
+    QVERIFY(w.targetClustering().enabled);
+    const QImage agrupados = captura();
+    QVERIFY(agrupados != sueltos);
+    QVector<qint64> grupo = w.targetClusterAt(pixel(centro));
+    std::sort(grupo.begin(), grupo.end());
+    QCOMPARE(grupo, monton);
+    QCOMPARE(w.targetAt(pixel(centro)), qint64(-1));        // dentro de un grupo
+    QCOMPARE(w.targetAt(pixel(lejos.position)), idLejos);   // suelto
+
+    // Clic sobre el grupo: targetClusterClicked con sus 20 ids.
+    QSignalSpy clicGrupo(&w, &MapWidget::targetClusterClicked);
+    w.setActiveTool(MapTool::None);
+    QMouseEvent pulsar = mouseEvent(QEvent::MouseButtonPress, pixel(centro), Qt::LeftButton, Qt::LeftButton);
+    QMouseEvent soltar = mouseEvent(QEvent::MouseButtonRelease, pixel(centro), Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &pulsar);
+    QCoreApplication::sendEvent(vista, &soltar);
+    QCOMPARE(clicGrupo.count(), 1);
+    QCOMPARE(clicGrupo.first().at(0).value<QVector<qint64>>().size(), 20);
+
+    // El seleccionado sale del grupo.
+    w.setSelectedTarget(monton.first());
+    captura();
+    QCOMPARE(w.targetClusterAt(pixel(centro)).size(), 19);
+    w.setSelectedTarget(-1);
+
+    // Por encima de maxZoom, sin grupos.
+    c.maxZoom = 8;
+    w.setTargetClustering(c);
+    captura();
+    QVERIFY(w.targetClusterAt(pixel(centro)).isEmpty());
+    QCOMPARE(w.targets().size(), 21);                        // solo cambia el dibujo
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

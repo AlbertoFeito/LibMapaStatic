@@ -654,6 +654,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             d->syncZone(id);
     });
     connect(d->view, &MapView::targetClicked, this, &MapWidget::targetClicked);
+    connect(d->view, &MapView::targetClusterClicked, this, &MapWidget::targetClusterClicked);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
     connect(d->view, &MapView::featureDragStarted, this, &MapWidget::featureDragStarted);
     connect(d->view, &MapView::featureDragMovedTo, this, &MapWidget::featureDragMovedTo);
@@ -1866,6 +1867,30 @@ bool MapWidget::setTargetVelocity(qint64 id, double speedMetersPerSecond, double
     d->syncProximity(id);
     d->syncFiltro(id);
     return true;
+}
+
+// ---------------------------------------------- agrupacion de objetivos --
+
+// Activa, cambia o apaga la agrupacion (la dibuja TargetLayer).
+void MapWidget::setTargetClustering(const TargetClustering &clustering)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setClustering(clustering);
+}
+
+// Agrupacion actual (desactivada si no hay vista).
+TargetClustering MapWidget::targetClustering() const
+{
+    return d->view && d->view->targetLayer() ? d->view->targetLayer()->clustering()
+                                             : TargetClustering();
+}
+
+// Grupo bajo un pixel del widget, segun el ultimo repintado.
+QVector<qint64> MapWidget::targetClusterAt(const QPoint &pixelPos) const
+{
+    if (!d->view || !d->view->targetLayer())
+        return {};
+    return d->view->targetLayer()->clusterAt(pixelPos);   // la vista ocupa todo el widget, como en targetAt
 }
 
 // --------------------------------------------------- filtro de objetivos --

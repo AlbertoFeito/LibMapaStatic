@@ -156,6 +156,8 @@ signals:
     void featureCreated(qint64 id);
     void featureClicked(qint64 id, const QGeoCoordinate &position);
     void targetClicked(qint64 id, const QGeoCoordinate &position);
+    //! Clic sobre un grupo de objetivos (TargetClustering): sus ids.
+    void targetClusterClicked(const QVector<qint64> &ids, const QGeoCoordinate &position);
     //! Arrastre (herramienta Navegar) de una entidad marcada \c draggable: al
     //! empezar, en cada movimiento (con la coordenada bajo el cursor) y al soltar.
     void featureDragStarted(qint64 id);

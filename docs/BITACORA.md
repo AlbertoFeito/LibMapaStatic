@@ -5353,3 +5353,48 @@ En la demo bajo Xvfb, con 60 objetivos y el filtro «buques a más de 15 kn»,
 quedan 19 visibles.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 130. Agrupar objetivos al alejar el zoom
+
+**Qué se hizo.**
+- **`MapDecor::clusterPoints`** (núcleo): agrupa puntos de pantalla por celdas.
+  Una celda con al menos N puntos es un grupo, con su centroide. O(n).
+- **`TargetClustering`** (público, `MapTarget.h`): `enabled`, `cellPixels`,
+  `minTargets`, `maxZoom` (por encima no se agrupa) y `color`.
+- **`TargetLayer`** dibuja cada grupo como un círculo con el número de
+  objetivos que reúne. El radio crece con el logaritmo del número, para que 10
+  y 1000 se distingan sin que los grandes tapen el mapa. Los grupos van encima
+  de los objetivos sueltos.
+- **`MapWidget`**: `setTargetClustering`, `targetClustering`,
+  `targetClusterAt` y la señal **`targetClusterClicked(ids, posición)`**.
+- **Demo**: *Ver → Agrupar objetivos al alejar*, activo por defecto hasta
+  zoom 10. Pinchar un grupo encuadra a sus objetivos, o amplía dos niveles si
+  están casi en el mismo punto.
+
+**Por qué así.**
+- **Rejilla anclada al mundo.** Las celdas se cuentan desde un punto fijo (0°,
+  0°) pasado a píxeles, no desde la esquina de la pantalla. Con una rejilla de
+  pantalla, al desplazar el mapa los objetivos cambiarían de celda y los grupos
+  «bailarían». Así solo cambian al cambiar de zoom (comprobado en el test).
+- **Solo cambia el dibujo.** Los objetivos agrupados siguen existiendo y
+  cuentan para las alertas y los filtros. Lo que no se puede es pinchar uno
+  suelto dentro de un grupo: `targetAt` lo salta y el clic va al grupo.
+- **Nunca se agrupan** el objetivo seleccionado (el usuario lo está mirando) ni
+  los atenuados por el filtro (se ven tenues a propósito).
+- **Rejilla y no distancias.** Agrupar por distancias entre todos los pares
+  (DBSCAN o k-medias) cuesta O(n²) o tiene parámetros difíciles de elegir. La
+  rejilla es O(n) por fotograma con miles de objetivos y da grupos estables y
+  predecibles. A cambio, los grupos se alinean en una cuadrícula, cosa que a
+  zoom bajo se lee como «densidad por zona».
+
+Comprobado en la demo bajo Xvfb: 1000 objetivos a zoom 6 se ven como unos 35
+grupos con su número. Pinchar el de 47 encuadra y deja grupos pequeños y
+objetivos sueltos a zoom 8.
+Tests:
+- `tst_mapdecor::clustersByWorldAnchoredCells`: grupos, centroide, mínimo,
+  orden y estabilidad al desplazar;
+- `tst_mapwidget::targetClusteringGroupsCrowds`: un grupo de 20 frente a un
+  objetivo suelto, el clic al grupo, que el seleccionado sale y que `maxZoom`
+  desactiva.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.

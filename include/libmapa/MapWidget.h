@@ -569,6 +569,20 @@ public:
      * el objetivo. false si no existe. (Nudos: knotsToMetersPerSecond.)
      */
     bool setTargetVelocity(qint64 id, double speedMetersPerSecond, double courseDeg);
+    // --- Agrupacion de objetivos ------------------------------------------
+    /*!
+     * \brief Agrupa los objetivos cercanos en pantalla en un circulo con su
+     *        numero (ver \ref TargetClustering). Desactivada por defecto.
+     *
+     * Solo cambia como se dibujan: los objetivos siguen existiendo y contando
+     * para alertas y filtros. Un objetivo dentro de un grupo no se puede
+     * pinchar suelto (\ref targetAt); el grupo emite \ref targetClusterClicked.
+     */
+    void setTargetClustering(const TargetClustering &clustering);
+    TargetClustering targetClustering() const;
+    //! Ids del grupo dibujado bajo \a pixelPos (coordenadas del widget), o vacio.
+    QVector<qint64> targetClusterAt(const QPoint &pixelPos) const;
+
     // --- Filtro de objetivos ----------------------------------------------
     /*!
      * \brief Muestra solo los objetivos que cumplen \a filter (por clase,
@@ -830,6 +844,9 @@ signals:
     void featureSelected(qint64 id);      //!< -1 al deseleccionar
     //! Clic sobre un objetivo movil sin herramienta activa (ya queda resaltado).
     void targetClicked(qint64 id, const QGeoCoordinate &position);
+    //! Clic (sin herramienta) sobre un GRUPO de objetivos (\ref setTargetClustering):
+    //! los ids que reune. Lo habitual es ampliar para separarlos.
+    void targetClusterClicked(const QVector<qint64> &ids, const QGeoCoordinate &position);
     //! Un objetivo movil ha entrado en una zona vigilada (ver \ref watchZone).
     void targetEnteredZone(qint64 targetId, qint64 zoneFeatureId);
     //! Un objetivo movil ha salido de una zona vigilada (ver \ref watchZone).

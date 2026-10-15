@@ -109,6 +109,26 @@ struct TargetFilter
     }
 };
 
+/*!
+ * \brief Agrupar objetivos cercanos en pantalla (MapWidget::setTargetClustering).
+ *
+ * Con miles de objetivos, al alejar el zoom los iconos se amontonan en una
+ * mancha. Agrupados, cada monton se dibuja como un circulo con el NUMERO de
+ * objetivos que reune. Se agrupa por celdas de \a cellPixels pixeles; una celda
+ * con al menos \a minTargets forma grupo. El objetivo seleccionado y los
+ * atenuados por el filtro no se agrupan nunca.
+ */
+struct TargetClustering
+{
+    bool enabled = false;
+    int cellPixels = 64;            //!< Tamaño de la celda (16..512 px).
+    int minTargets = 3;             //!< Minimo por grupo (2 o mas).
+    //! Solo se agrupa hasta este zoom (incluido); por encima, todos sueltos.
+    //! -1 = a cualquier zoom.
+    int maxZoom = -1;
+    QColor color = QColor(0x15, 0x65, 0xc0);
+};
+
 } // namespace libmapa
 
 Q_DECLARE_METATYPE(libmapa::MapTarget)

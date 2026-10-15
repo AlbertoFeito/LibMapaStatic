@@ -373,8 +373,9 @@ qint64 MapView::targetAt(const QPoint &pixel, double tolPx) const
         const MapTarget &t = it->target;
         if (!t.position.isValid())
             continue;
-        if (m_targetLayer && m_targetLayer->isFilteredOut(t.id))
-            continue;                  // oculto por el filtro: no se puede pinchar
+        if (m_targetLayer && (m_targetLayer->isFilteredOut(t.id)
+                              || m_targetLayer->isClustered(t.id)))
+            continue;                  // oculto por el filtro o dentro de un grupo
         const QPointF a = toAxis(t.position);
         const double dx = xAxis->coordToPixel(a.x()) - pixel.x();
         const double dy = yAxis->coordToPixel(a.y()) - pixel.y();
@@ -800,8 +801,16 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 }
             }
 
-            // Prioridad 3: un clic sobre un objetivo lo SELECCIONA (no inicia
-            // arrastre); sobre el mapa vacio, arrastra para desplazar.
+            // Prioridad 3: un clic sobre un GRUPO de objetivos avisa con sus
+            // ids (la app suele ampliar); sobre un objetivo suelto lo
+            // SELECCIONA (no inicia arrastre); sobre el mapa vacio, arrastra.
+            if (m_targetLayer) {
+                const QVector<qint64> grupo = m_targetLayer->clusterAt(event->pos());
+                if (!grupo.isEmpty()) {
+                    emit targetClusterClicked(grupo, coordinateAt(event->pos()));
+                    break;
+                }
+            }
             const qint64 tid = targetAt(event->pos());
             if (tid >= 0) {
                 setSelectedTarget(tid);

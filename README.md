@@ -20,6 +20,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
 - **Historial completo de cada objetivo**: además de la traza corta que se dibuja, se guarda todo su recorrido con hora desde que se vio por primera vez (`targetHistory`, `targetOrigin`); al seleccionarlo se dibuja entero desde el origen
 - **Alertas de zona**: cualquier polígono puede vigilarse (`watchZone`) y la librería avisa cuando un objetivo móvil o una entidad punto entra o sale (`targetEnteredZone` / `featureEnteredZone`…) y resalta en el mapa la zona ocupada
+- **Agrupar objetivos** (`setTargetClustering`): al alejar el zoom, los objetivos amontonados se dibujan como un círculo con su número; pinchar uno emite `targetClusterClicked` con sus ids (la demo amplía)
 - **Filtro de objetivos** (`setTargetFilter`): mostrar solo los de ciertos tipos, velocidades o dentro de zonas vigiladas (o con un criterio propio de la app); el resto se oculta o se atenúa sin dejar de existir
 - **Alertas de proximidad (CPA/TCPA)**: `setProximityAlert(distancia, horizonte)` avisa cuando dos objetivos van a pasar demasiado cerca (`proximityAlertRaised` / `proximityAlertCleared`) y dibuja por dónde se cruzan («CPA 0.30 NM en 4 min»). La velocidad se estima por la traza o la da la app (`setTargetVelocity`, p. ej. SOG/COG del AIS); `computeCpa` y `targetCpa` sirven para cálculos sueltos
 - **Anillos de distancia y marcaciones**: `addRangeRings` pone anillos geodésicos (con radiales opcionales) alrededor de un punto o de un objetivo, al que siguen; `addBearingLine` traza una línea con rumbo y distancia («045° · 5.2 NM») entre puntos u objetivos, que se recalcula al moverse
@@ -680,6 +681,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 27 | Reproducción de historiales GPX en el tiempo (`TrackPlayer`); las capas temporales quedan fuera de deshacer |
 | 28 | Medir superficie y perímetro en pantalla (`MapTool::MeasureArea`, `areaMeasured`) |
 | 29 | Importar un fichero = una sola operación de deshacer; textos de Qt en español en la demo; filtro de objetivos (`setTargetFilter`) |
+| 30 | Agrupar objetivos al alejar el zoom (`setTargetClustering`, `targetClusterClicked`) |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en
