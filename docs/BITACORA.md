@@ -5425,3 +5425,36 @@ para saber **qué llamadas** usar en una app propia.
 Comprobado: instalada la librería en una carpeta temporal, el ejemplo configura
 y compila sin warnings con `-DCMAKE_PREFIX_PATH` y arranca. No añade tests (es un
 ejemplo fuera del árbol de la librería): siguen **24 tests** en verde.
+
+## 132. `demo/main.cpp` partido en ficheros
+
+La demo había crecido hasta 4864 líneas en un solo `main.cpp`, con toda la
+clase `Ventana` escrita dentro de su declaración. Era difícil de leer y cada
+cambio recompilaba todo. Se ha repartido **sin cambiar ni una línea de lógica**:
+
+| Fichero | Contenido |
+|---|---|
+| `main.cpp` | `main()` y la traducción de Qt |
+| `Comun.h` / `Comun.cpp` | includes, roles del árbol, `SeccionPlegable`, iconos y glifos dibujados en código |
+| `Ventana.h` | la declaración de la clase (métodos y miembros) |
+| `Ventana.cpp` | constructor, señales del mapa, barra de estado |
+| `VentanaMenus.cpp` | menús, barras y temas claro/oscuro |
+| `VentanaPanel.cpp` | árbol de capas/entidades, ficha, estilo, coordenadas |
+| `VentanaDibujo.cpp` | alta de entidades y vuelta a Navegar |
+| `VentanaElevacion.cpp` | pestaña Elevación (perfil, visión, viewshed, picos) |
+| `VentanaFicheros.cpp` | guardar/abrir, importar/exportar, vista a imagen/PDF, GPX |
+| `VentanaObjetivos.cpp` | seguimiento, zonas, CPA, anillos, medidas, reproducción, simulación, filtro |
+
+Sigue siendo **una clase**: partirla en varias habría cambiado el diseño y
+habría hecho falta pasar punteros entre ellas, todo para una demo. Así cada
+fichero se lee de una vez y lo que se toca en uno no recompila los demás.
+
+Se hizo con un script (no a mano) para no introducir errores: mueve cada cuerpo
+de método fuera de la clase como `Ventana::metodo`, quitando de la definición
+los argumentos por defecto, `override` y `static`, y deja en `Ventana.h` la
+firma original. `qcustomplot.h` solo lo incluye `VentanaElevacion.cpp` (la
+cabecera adelanta `class QCustomPlot;`). De paso se escribió el comentario que
+faltaba encima de 26 métodos (la norma es uno por función).
+
+La demo no está en qmake, así que solo cambia su `add_executable` en
+`CMakeLists.txt`. Compila sin warnings y arranca; **24 tests** en verde.
