@@ -5258,3 +5258,27 @@ un cuadrado de unos 2 km y comprueba:
 `tst_mapdecor` comprueba los formatos.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 127. Importar un fichero es una sola operación de deshacer
+
+**El problema.** `importVectorFile` (GeoJSON/KML/GPX) y `loadFeaturesAsLayer`
+añadían las entidades una a una con `addFeature`, y cada alta apilaba una
+instantánea para deshacer. Eso tenía dos efectos:
+- Para quitar una importación de 300 entidades había que deshacer 300 veces.
+  Como la pila guarda 50 pasos, era imposible volver a lo de antes.
+- Cada instantánea copia el estado (al modificarlo, la copia compartida de Qt
+  se separa), así que la importación costaba O(n²).
+
+**Qué se hizo.** `MapWidget::Impl::addFeaturesAsOneUndo` añade un lote de
+entidades dentro de un grupo de deshacer (`beginUndoGroup`/`endUndoGroup`, el
+mismo mecanismo que agrupa el arrastre de un vértice). Lo usan las dos
+funciones. El grupo se abre **antes** de crear la capa, así que deshacer la
+importación quita también la capa nueva, y rehacer la devuelve entera.
+
+**Comprobado.** `tst_mapwidget::importIsOneUndoStep` importa 300 puntos.
+Comprueba que un deshacer los quita todos y también la capa, que la entidad
+previa del usuario sigue y que un rehacer los devuelve. Contra el código
+anterior el test falla (un deshacer solo quitaba la última entidad), y la
+importación pasa de 6 ms a 1 ms.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.

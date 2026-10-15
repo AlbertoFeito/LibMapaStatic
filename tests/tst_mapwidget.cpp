@@ -158,6 +158,9 @@ private slots:
     //! Herramienta MeasureArea: rotulo en vivo, areaMeasured al cerrar con la
     //! superficie y el perimetro del poligono, y limpieza al cambiar de herramienta.
     void measureAreaToolMeasuresPolygon();
+    //! Importar un fichero es UNA operacion de deshacer (capa incluida), y no
+    //! cuesta O(n^2) aunque traiga cientos de entidades.
+    void importIsOneUndoStep();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2753,6 +2756,53 @@ void TstMapWidget::measureAreaToolMeasuresPolygon()
     clic(pixel(b));
     QCoreApplication::sendEvent(vista, &intro);
     QCOMPARE(medida.count(), 1);
+}
+
+// Un GeoJSON de 300 puntos: tras importarlo hay UN paso de deshacer mas, y
+// deshacerlo quita las 300 entidades y la capa nueva; rehacer las devuelve.
+// Lo que habia antes (una entidad del usuario) sigue en su sitio.
+void TstMapWidget::importIsOneUndoStep()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    const qint64 previa = w.addFeature(puntoDe(QStringLiteral("previa"), 21.0, -80.0));
+    QVERIFY(previa > 0);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString ruta = dir.filePath(QStringLiteral("muchos.geojson"));
+    {
+        QJsonArray feats;
+        for (int i = 0; i < 300; ++i) {
+            QJsonObject geom{ { QStringLiteral("type"), QStringLiteral("Point") },
+                              { QStringLiteral("coordinates"),
+                                QJsonArray{ -80.0 + 0.01 * i, 22.0 } } };
+            feats.append(QJsonObject{ { QStringLiteral("type"), QStringLiteral("Feature") },
+                                      { QStringLiteral("properties"), QJsonObject() },
+                                      { QStringLiteral("geometry"), geom } });
+        }
+        QFile f(ruta);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QJsonDocument(QJsonObject{ { QStringLiteral("type"), QStringLiteral("FeatureCollection") },
+                                           { QStringLiteral("features"), feats } }).toJson());
+    }
+
+    QElapsedTimer reloj;
+    reloj.start();
+    QVERIFY(w.importVectorFile(ruta, QStringLiteral("muchos")) > 0);
+    qInfo("importar 300 entidades: %lld ms", reloj.elapsed());
+    QCOMPARE(w.featuresInLayer(QStringLiteral("muchos")).size(), 300);
+
+    QVERIFY(w.undo());                                     // UN deshacer basta
+    QVERIFY(w.featuresInLayer(QStringLiteral("muchos")).isEmpty());
+    bool hayCapa = false;
+    for (const LayerInfo &c : w.featureLayers())
+        hayCapa = hayCapa || c.id == QStringLiteral("muchos");
+    QVERIFY(!hayCapa);                                     // la capa tambien se va
+    QVERIFY(w.feature(previa).has_value());                // lo de antes sigue
+
+    QVERIFY(w.redo());
+    QCOMPARE(w.featuresInLayer(QStringLiteral("muchos")).size(), 300);
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).

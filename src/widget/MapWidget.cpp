@@ -198,6 +198,31 @@ public:
         return QStringLiteral("CPA %1 en %2").arg(distancia(c.distanceMeters), cuando);
     }
 
+    // Añade un lote de entidades a una capa (creandola si no existe) como UNA
+    // sola operacion de deshacer. Sin el grupo, cada entidad apilaba una copia
+    // del estado: importar n entidades costaba O(n^2) y dejaba n pasos que
+    // deshacer uno a uno. El grupo se abre ANTES de crear la capa, asi que
+    // deshacer la importacion quita tambien la capa nueva. \a nuevosIds: las
+    // entidades vienen de un fichero y deben recibir id nuevo.
+    qint64 addFeaturesAsOneUndo(const QVector<MapFeature> &feats, const QString &layerId,
+                                const QString &displayName, bool nuevosIds)
+    {
+        OverlayModel *modelo = view->overlayModel();
+        modelo->beginUndoGroup();
+        q->addFeatureLayer(layerId, displayName, 0);
+        qint64 primero = -1;
+        for (MapFeature f : feats) {
+            if (nuevosIds)
+                f.id = -1;
+            f.layerId = layerId;
+            const qint64 id = q->addFeature(f);   // conserva estilo/etiqueta/atributos
+            if (primero < 0)
+                primero = id;
+        }
+        modelo->endUndoGroup();
+        return primero;
+    }
+
     // Pasa a la capa de objetivos las lineas de los pares en alerta.
     void refreshProximityLines()
     {
@@ -1362,15 +1387,8 @@ qint64 MapWidget::loadFeaturesAsLayer(const QString &databasePath,
         return -1;
     }
 
-    addFeatureLayer(layerId, displayName.isEmpty() ? layerId : displayName, 0);
-    qint64 primero = -1;
-    for (MapFeature f : feats) {
-        f.layerId = layerId;                 // todas bajo la capa del overlay
-        const qint64 id = addFeature(f);     // conserva estilo/etiqueta/atributos
-        if (primero < 0)
-            primero = id;
-    }
-    return primero;
+    return d->addFeaturesAsOneUndo(feats, layerId,
+                                   displayName.isEmpty() ? layerId : displayName, false);
 }
 
 // Importa GeoJSON/KML/GPX: lee con VectorFormats y AÑADE cada entidad a la
@@ -1391,16 +1409,8 @@ qint64 MapWidget::importVectorFile(const QString &path, const QString &layerId,
         return -1;
     }
 
-    addFeatureLayer(layerId, displayName.isEmpty() ? layerId : displayName, 0);
-    qint64 primero = -1;
-    for (MapFeature f : feats) {
-        f.id = -1;
-        f.layerId = layerId;
-        const qint64 id = addFeature(f);
-        if (primero < 0)
-            primero = id;
-    }
-    return primero;
+    return d->addFeaturesAsOneUndo(feats, layerId,
+                                   displayName.isEmpty() ? layerId : displayName, true);
 }
 
 // Exporta las entidades (todas, o las de una capa) al formato que diga la
