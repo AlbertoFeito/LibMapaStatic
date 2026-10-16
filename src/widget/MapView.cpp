@@ -1147,6 +1147,14 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
         finishDrawing();
     } else {
         emit mapClicked(donde, event->button());
+        if (event->button() == Qt::RightButton) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            const QPoint global = event->globalPosition().toPoint();
+#else
+            const QPoint global = event->globalPos();
+#endif
+            emit contextMenuRequested(event->pos(), global);
+        }
     }
 
     event->accept();

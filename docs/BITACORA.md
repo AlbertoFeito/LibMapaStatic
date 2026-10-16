@@ -5508,3 +5508,49 @@ Tests: `tst_mapdecor::ringSpacingIsRoundAndFits` y, en
 rechazadas, consultas por id y anillos automáticos que caben y crecen al alejar.
 Comprobado con capturas a zoom 8 y 6 (radar con nombre y radiales, anillos fijos
 de 37 km en una aeronave con sus rótulos llevados a la vista). **24 tests** en verde.
+
+## 134. Menú del clic derecho según lo que haya debajo
+
+El usuario pidió acciones en el clic derecho «en dependencia de dónde se hace»:
+sobre un objetivo, las suyas; sobre otros elementos, las de cada uno.
+
+**Librería** (la parte reutilizable, sin imponer un menú):
+- `MapHit`: lo que hay bajo un pixel, **cada cosa por separado** (coordenada,
+  objetivo suelto, miembros del grupo, entidad, anillos o marcación). Un objetivo
+  puede estar encima de un polígono y dentro de unos anillos a la vez: la app
+  decide la prioridad.
+- `MapWidget::hitTest(pixel)` lo calcula (reúne `targetAt`, `targetClusterAt`,
+  `featureAt` y el nuevo `RangeLayer::markAt`).
+- `RangeLayer::markAt`: a menos de 6 px de una marcación, de un anillo o del
+  centro (10 px), con la misma geometría que el dibujo (la separación automática
+  incluida). Las marcaciones, que van encima, ganan a los anillos.
+- Señal `contextMenuRequested(MapHit, globalPos)`: la emite el clic derecho
+  salvo mientras se dibuja (ahí sigue cerrando el trazado). `clicked(…, Right)`
+  se sigue emitiendo como antes.
+
+**Demo** (`demo/VentanaContexto.cpp`), un apartado por cada cosa bajo el cursor
+y, al final, las del punto del mapa (en un submenú si ya hay otras):
+- **Objetivo**: seleccionar (ver su traza), centrar, anillos en él (rápidos o con
+  diálogo), marcación desde él, y con otro seleccionado marcación hasta él y
+  **CPA/TCPA**; mostrar solo los de su tipo / quitar el filtro; exportar su
+  historial a GPX; copiar su posición; quitarlo.
+- **Grupo de objetivos**: ampliar el grupo o ir a uno de ellos (hasta 25).
+- **Anillos**: separación automática sí/no (al fijarla se queda la que se ve),
+  radiales, quitarlos; **marcación**: quitarla; y la lista de todos.
+- **Entidad**: seleccionar y ver propiedades, encuadrar, editar vértices (si la
+  capa se edita), medir (superficie y perímetro, o longitud), vigilar como zona
+  (polígonos), anillos en un punto (radar u observador, con su nombre), borrar.
+- **Mapa**: cabecera con la coordenada y la cota (si hay DEM); copiar
+  coordenadas en decimal, GMS, UTM o MGRS; centrar; anillos aquí (rápidos o con
+  el diálogo ya con estas coordenadas); marcación desde aquí o del seleccionado
+  hasta aquí; nuevo punto aquí; fijar el punto A o B de Elevación.
+
+La cabecera de cada apartado es una acción desactivada en negrita, no
+`addSection`, que en el estilo de Windows no pinta el texto. Del rótulo de un
+objetivo se usa la primera línea («UAV 9», no «UAV 9 Bat 79%»).
+
+Test `tst_mapwidget::hitTestAndContextMenu`: objetivo y entidad a la vez, solo
+la entidad, centro y anillo (y nada entre ellos), marcación, mapa vacío, y un
+clic derecho real que emite la señal con lo de debajo (el izquierdo no).
+Comprobado en la demo bajo Xvfb con capturas de los cuatro menús. **24 tests**
+en verde.

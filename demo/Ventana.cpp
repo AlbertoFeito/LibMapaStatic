@@ -90,6 +90,9 @@ Ventana::Ventana(const QString &origen, bool esPaquete,
 // Conecta las señales del mapa con el panel, la barra de estado y los indicadores.
 void Ventana::conectarSenales()
 {
+    // Clic derecho: menú según lo que haya debajo (objetivo, entidad...).
+    connect(m_mapa, &MapWidget::contextMenuRequested, this, &Ventana::menuContextual);
+
     connect(m_capasBase, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int i) {
                 m_mapa->setBaseLayerId(m_capasBase->itemData(i).toString());

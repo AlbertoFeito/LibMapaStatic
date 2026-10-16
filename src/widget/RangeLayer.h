@@ -52,6 +52,14 @@ public:
      * 0 si no existen o no se pueden resolver (sin vista, objetivo perdido).
      */
     double spacing(qint64 id) const;
+    /*!
+     * \brief Anillos o marcacion bajo el pixel (a menos de \a tolPx de un
+     *        anillo, de su centro o de la linea), -1 si nada.
+     *
+     * Las marcaciones, que se dibujan encima, ganan a los anillos; entre
+     * iguales, la ultima anadida.
+     */
+    qint64 markAt(const QPointF &pixel, double tolPx = 6.0) const;
     bool isEmpty() const { return m_rings.isEmpty() && m_bearings.isEmpty(); }
 
     /*!

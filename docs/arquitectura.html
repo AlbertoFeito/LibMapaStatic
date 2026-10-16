@@ -392,7 +392,7 @@ la API que usa la aplicación:</p>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b> · consulta puntual <b>targetsInArea · featuresInArea</b></td></tr>
 <tr><td>Agrupación de objetivos</td><td class="mono"><b>setTargetClustering(TargetClustering) · targetClustering · targetClusterAt · señal targetClusterClicked</b> · núcleo: MapDecor::clusterPoints (rejilla anclada al mundo)</td></tr>
 <tr><td>Filtro de objetivos</td><td class="mono"><b>setTargetFilter(TargetFilter) · clearTargetFilter · hasTargetFilter · targetPassesFilter · filteredOutTargets</b> (clase, velocidad, zonas vigiladas, predicado de la app; ocultar o atenuar)</td></tr>
-<tr><td>Anillos y marcaciones</td><td class="mono"><b>addRangeRings · updateRangeRings · rangeRings · rangeRingsSpacing · addBearingLine · updateBearingLine · bearingLine · removeRangeMark · clearRangeMarks · rangeMarks · bearingLineMeasure</b> · inicio/fin de rutas: <b>setRouteEndpoints (Hidden/Selected/Routes/AllLines)</b></td></tr>
+<tr><td>Anillos y marcaciones</td><td class="mono"><b>hitTest · contextMenuRequested (MapHit)</b> · <b>addRangeRings · updateRangeRings · rangeRings · rangeRingsSpacing · addBearingLine · updateBearingLine · bearingLine · removeRangeMark · clearRangeMarks · rangeMarks · bearingLineMeasure</b> · inicio/fin de rutas: <b>setRouteEndpoints (Hidden/Selected/Routes/AllLines)</b></td></tr>
 <tr><td>Reproducción</td><td class="mono"><b>TrackPlayer</b> (loadFile · setTracks · play · pause · stop · seek · setSpeed · setRoutesVisible · targetIdOf · isLoaded · <b>clear = salir</b> · señales timeChanged / playingChanged / finished / cleared) · núcleo: <b>sampleTrack · trackTimeRange</b> (TrackReplay.h)</td></tr>
 <tr><td>Proximidad (CPA/TCPA)</td><td class="mono"><b>setProximityAlert(distancia, horizonte) · proximityAlerts · targetCpa · setTargetVelocity · setProximityLinesVisible · setProximityColor · señales proximityAlertRaised / proximityAlertCleared</b></td></tr>
 <tr><td>Exportar</td><td class="mono"><b>renderImage(escala) · exportView(ruta, MapExportOptions)</b> (PDF vectorial con título, pie y escala 1:N, o PNG/JPG…) · <b>exportTargetHistory</b> (GPX con horas)</td></tr>
@@ -644,6 +644,12 @@ la escala local en el centro y <code>MapDecor::niceRingSpacing</code> elige el m
 1-2-2.5-5 × 10<sup>n</sup> (en la unidad de la escala) con el que los anillos caben en el 45 %
 del lado corto de la vista. Si la parte de arriba de un anillo, o el extremo de un radial, queda
 fuera de la vista, su rótulo se lleva al punto visible más cercano.</p>
+<p><b>Clic derecho.</b> <code>MapView</code> emite el clic derecho (salvo mientras se dibuja,
+que lo cierra) y <code>MapWidget</code> lo convierte en <code>contextMenuRequested(MapHit,
+globalPos)</code>: <code>MapHit</code> trae la coordenada y, por separado, el objetivo suelto,
+el grupo, la entidad y los anillos o la marcación que haya bajo el pixel (las marcaciones,
+encima, ganan a los anillos; se prueba con la misma geometría que el dibujo). La librería no
+muestra menú propio: cada app decide qué acciones tienen sentido para cada cosa.</p>
 <p><b>Reproducción de historiales.</b> <code>TrackPlayer</code> convierte cada pista de un
 GPX con horas en un <b>objetivo normal</b> mientras existió. Usa solo la API pública:
 <code>addTarget</code>/<code>updateTarget</code> con los puntos grabados y sus horas, y la

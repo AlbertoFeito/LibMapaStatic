@@ -3,6 +3,7 @@
 
 #include <QColor>
 #include <QGeoCoordinate>
+#include <QPoint>
 #include <QMetaType>
 #include <QPixmap>
 #include <QString>
@@ -103,6 +104,28 @@ struct RangeRings {
 };
 
 /*!
+ * \brief Lo que hay bajo un punto de la pantalla (MapWidget::hitTest).
+ *
+ * Cada campo se rellena por separado (un objetivo puede estar ENCIMA de una
+ * entidad y dentro de unos anillos a la vez); la app decide la prioridad. Es
+ * lo que lleva MapWidget::contextMenuRequested para montar un menu segun lo
+ * que haya bajo el clic derecho.
+ */
+struct MapHit {
+    QPoint pixel;                       //!< En coordenadas del MapWidget.
+    QGeoCoordinate coordinate;          //!< Geografica bajo el pixel.
+    qint64 targetId = -1;               //!< Objetivo suelto (visible, no agrupado).
+    QVector<qint64> clusterTargets;     //!< Miembros, si cae en un grupo de objetivos.
+    qint64 featureId = -1;              //!< Entidad de arriba bajo el cursor.
+    qint64 rangeMarkId = -1;            //!< Anillos (centro o un anillo) o marcacion.
+    //! Nada bajo el cursor: solo el mapa.
+    bool isEmpty() const
+    {
+        return targetId < 0 && clusterTargets.isEmpty() && featureId < 0 && rangeMarkId < 0;
+    }
+};
+
+/*!
  * \brief Linea de marcacion (EBL) con su rumbo verdadero y distancia rotulados.
  *
  * El origen es un punto fijo o un objetivo (\a fromTarget, al que sigue). El
@@ -172,5 +195,6 @@ struct Measurement {
 
 Q_DECLARE_METATYPE(libmapa::Measurement)
 Q_DECLARE_METATYPE(libmapa::AreaMeasurement)
+Q_DECLARE_METATYPE(libmapa::MapHit)
 
 #endif // LIBMAPA_MAPTYPES_H_

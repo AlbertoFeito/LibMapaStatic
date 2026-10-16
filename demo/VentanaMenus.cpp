@@ -333,7 +333,7 @@ void Ventana::construirMenuYBarra()
     auto *accAnillos = mVer->addAction(tr("Anillos de distancia..."));
     accAnillos->setStatusTip(tr("Anillos alrededor de un objetivo (lo siguen), de un punto "
                                 "que pinches o de unas coordenadas (radar, observador)."));
-    connect(accAnillos, &QAction::triggered, this, &Ventana::ponerAnillos);
+    connect(accAnillos, &QAction::triggered, this, [this] { ponerAnillos(); });
     auto *accEbl = mVer->addAction(tr("Marcación (rumbo y distancia)"));
     accEbl->setStatusTip(tr("Línea con rumbo y distancia desde el objetivo seleccionado "
                             "(o un punto) hasta otro objetivo o punto que pinches."));

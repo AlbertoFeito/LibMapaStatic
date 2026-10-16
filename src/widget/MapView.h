@@ -167,6 +167,8 @@ signals:
     void centerChanged(const QGeoCoordinate &center);
     void mouseMovedTo(const QGeoCoordinate &position);
     void mapClicked(const QGeoCoordinate &position, Qt::MouseButton button);
+    //! Clic derecho fuera de un trazado: la app monta su menu contextual.
+    void contextMenuRequested(const QPoint &pixel, const QPoint &globalPos);
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);

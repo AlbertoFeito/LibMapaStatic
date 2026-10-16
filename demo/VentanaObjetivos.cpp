@@ -410,8 +410,9 @@ QString Ventana::textoProximidad(qint64 a, qint64 b, double cpa, double tcpa) co
 // punto que se pinche (si cae en un objetivo, lo siguen) o unas coordenadas
 // escritas a mano, para un punto fijo como un radar o un observador, con su
 // nombre. La separación es automática (se ajusta al zoom) o fija, en m, km o
-// NM. Se recuerdan los últimos ajustes.
-void Ventana::ponerAnillos()
+// NM. Se recuerdan los últimos ajustes. Con \a centro válido (clic derecho
+// en el mapa) el diálogo propone esas coordenadas.
+void Ventana::ponerAnillos(const QGeoCoordinate &centro)
 {
     QDialog dlg(this);
     dlg.setWindowTitle(tr("Anillos de distancia"));
@@ -433,16 +434,16 @@ void Ventana::ponerAnillos()
                                         "(si es un objetivo, lo siguen)"), cajaCentro);
     auto *enCoords = new QRadioButton(tr("Estas coordenadas (punto fijo: radar, observador…):"),
                                       cajaCentro);
-    auto *coords = new QLineEdit(formatCoordinate(m_mapa->center(), CoordinateFormat::Decimal),
-                                 cajaCentro);
+    auto *coords = new QLineEdit(formatCoordinate(centro.isValid() ? centro : m_mapa->center(),
+                                                  CoordinateFormat::Decimal), cajaCentro);
     coords->setToolTip(tr("Cualquier formato: 23.1136, -82.3666 · 23°06'49\"N 82°22'00\"W · "
                           "17Q LF 60056 56750 (UTM o MGRS)"));
     vc->addWidget(enObjetivo);
     vc->addWidget(enPunto);
     vc->addWidget(enCoords);
     vc->addWidget(coords);
-    (sel >= 0 ? enObjetivo : enPunto)->setChecked(true);
-    coords->setEnabled(false);
+    (centro.isValid() ? enCoords : (sel >= 0 ? enObjetivo : enPunto))->setChecked(true);
+    coords->setEnabled(enCoords->isChecked());
     connect(enCoords, &QRadioButton::toggled, coords, &QLineEdit::setEnabled);
     form->addRow(cajaCentro);
 

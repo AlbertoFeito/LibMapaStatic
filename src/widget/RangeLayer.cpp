@@ -172,6 +172,55 @@ double RangeLayer::spacing(qint64 id) const
     return c.isValid() ? pasoEfectivo(*it, c) : 0.0;
 }
 
+// Distancia de un punto a una polilinea de pantalla (infinita si esta vacia).
+static double distanciaA(const QPointF &p, const QPolygonF &linea)
+{
+    double mejor = std::numeric_limits<double>::max();
+    for (int i = 1; i < linea.size(); ++i) {
+        const QPointF a = linea.at(i - 1), b = linea.at(i);
+        const QPointF ab = b - a;
+        const double l2 = ab.x() * ab.x() + ab.y() * ab.y();
+        double t = l2 > 0.0 ? ((p.x() - a.x()) * ab.x() + (p.y() - a.y()) * ab.y()) / l2 : 0.0;
+        t = std::clamp(t, 0.0, 1.0);
+        mejor = std::min(mejor, QLineF(p, a + ab * t).length());
+    }
+    return mejor;
+}
+
+// Hit-test de anillos y marcaciones con la misma geometria que el dibujo.
+qint64 RangeLayer::markAt(const QPointF &pixel, double tolPx) const
+{
+    for (auto it = m_bearings.cend(); it != m_bearings.cbegin();) {
+        --it;
+        QGeoCoordinate a, b;
+        if (!ends(*it, &a, &b) || a.distanceTo(b) < 1.0)
+            continue;
+        QPolygonF linea;
+        for (const QGeoCoordinate &p : geodesica(a, b))
+            linea.append(screenPos(p));
+        if (distanciaA(pixel, linea) <= tolPx)
+            return it.key();
+    }
+    for (auto it = m_rings.cend(); it != m_rings.cbegin();) {
+        --it;
+        const QGeoCoordinate c = resolve(it->center, it->targetId);
+        const double paso = c.isValid() ? pasoEfectivo(*it, c) : 0.0;
+        if (!(paso > 0.0))
+            continue;
+        if (QLineF(pixel, screenPos(c)).length() <= tolPx + 4.0)
+            return it.key();
+        const int n = std::clamp(it->count, 1, kMaxAnillos);
+        for (int i = 1; i <= n; ++i) {
+            QPolygonF anillo;
+            for (const QGeoCoordinate &p : MapDecor::geodesicCircle(c, paso * i, 96))
+                anillo.append(screenPos(p));
+            if (distanciaA(pixel, anillo) <= tolPx)
+                return it.key();
+        }
+    }
+    return -1;
+}
+
 // Rectangulo de pixeles donde se ve el mapa.
 QRectF RangeLayer::vista() const
 {

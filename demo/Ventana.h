@@ -249,10 +249,18 @@ private:
 
     QString textoProximidad(qint64 a, qint64 b, double cpa, double tcpa) const;
 
-    void ponerAnillos();
+    void ponerAnillos(const QGeoCoordinate &centro = QGeoCoordinate());
 
     void ponerMarcacion();
     void gestionarMarcas();
+
+    // Menú del clic derecho (VentanaContexto.cpp).
+    void menuContextual(const MapHit &hit, const QPoint &global);
+    void menuObjetivo(QMenu *menu, qint64 id);
+    void menuGrupo(QMenu *menu, const QVector<qint64> &ids);
+    void menuMarca(QMenu *menu, qint64 id);
+    void menuEntidad(QMenu *menu, qint64 id);
+    void menuPunto(QMenu *menu, const QGeoCoordinate &p);
     QString textoDistancia(double metros) const;
 
     void iniciarPickMedida(Pick cual, const QString &aviso);

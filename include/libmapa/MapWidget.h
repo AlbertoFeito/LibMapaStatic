@@ -614,6 +614,14 @@ public:
 
     //! Entidad bajo un punto de la pantalla, o -1.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+    /*!
+     * \brief Todo lo que hay bajo un pixel: objetivo suelto, grupo de
+     *        objetivos, entidad, anillos o marcacion, y la coordenada.
+     *
+     * Lo mismo que \ref targetAt, \ref targetClusterAt, \ref featureAt y el
+     * hit-test de anillos/marcaciones en una sola llamada. Ver \ref MapHit.
+     */
+    MapHit hitTest(const QPoint &pixel) const;
 
     //! Entidad cuyo ROTULO cae bajo el pixel, o -1. Permite seleccionar/arrastrar
     //! la etiqueta por separado de la geometria.
@@ -892,6 +900,14 @@ signals:
     void centerChanged(const QGeoCoordinate &center);
     void mouseMoved(const QGeoCoordinate &position);
     void clicked(const QGeoCoordinate &position, Qt::MouseButton button);
+    /*!
+     * \brief Clic derecho sobre el mapa (no mientras se dibuja, que lo cierra).
+     *
+     * \a hit dice que hay debajo (\ref hitTest) y \a globalPos es donde abrir
+     * el menu (QMenu::exec). La libreria no muestra menu propio: la app pone
+     * las acciones que tengan sentido para un objetivo, una entidad, etc.
+     */
+    void contextMenuRequested(const libmapa::MapHit &hit, const QPoint &globalPos);
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);

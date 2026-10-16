@@ -167,6 +167,9 @@ private slots:
     //! Agrupacion: un monton de objetivos es un grupo con su numero, que se
     //! pincha como grupo; el seleccionado queda suelto; maxZoom la limita.
     void targetClusteringGroupsCrowds();
+    //! hitTest dice que hay bajo un pixel (objetivo, entidad, anillos,
+    //! marcacion, mapa), y el clic derecho lo emite en contextMenuRequested.
+    void hitTestAndContextMenu();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2597,6 +2600,94 @@ void TstMapWidget::rangeRingsAndBearingLinesFollowTargets()
     QCOMPARE(w.rangeRingsSpacing(anillos), 0.0);
     w.clearRangeMarks();
     QVERIFY(w.rangeMarks().isEmpty());
+}
+
+// Clic derecho: la libreria resuelve que hay debajo y la app monta el menu.
+void TstMapWidget::hitTestAndContextMenu()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.show();
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -80.0);
+    w.setCenter(centro);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+
+    // Un poligono, un objetivo dentro, unos anillos fijos en otro sitio y una
+    // marcacion que no cruza nada.
+    MapFeature pol;
+    pol.kind = GeometryKind::Polygon;
+    pol.layerId = w.activeFeatureLayer();
+    pol.geometry = { QGeoCoordinate(22.05, -80.05), QGeoCoordinate(22.05, -79.95),
+                     QGeoCoordinate(21.95, -79.95), QGeoCoordinate(21.95, -80.05) };
+    const qint64 idPol = w.addFeature(pol);
+    QVERIFY(idPol >= 0);
+    MapTarget t;
+    t.position = QGeoCoordinate(22.02, -80.02);
+    const qint64 idT = w.addTarget(t);
+
+    RangeRings r;
+    r.center = QGeoCoordinate(22.15, -80.25);
+    r.spacingMeters = 6000.0;            // ~43 px a zoom 10: anillo y centro bien separados
+    r.count = 2;
+    const qint64 idR = w.addRangeRings(r);
+    BearingLine l;
+    l.from = QGeoCoordinate(21.85, -80.30);
+    l.to = QGeoCoordinate(21.85, -80.20);
+    const qint64 idL = w.addBearingLine(l);
+
+    // Sobre el objetivo: objetivo Y entidad (cada cosa por separado).
+    MapHit h = w.hitTest(pixel(t.position));
+    QCOMPARE(h.targetId, idT);
+    QCOMPARE(h.featureId, idPol);
+    QCOMPARE(h.rangeMarkId, qint64(-1));
+    QVERIFY(h.coordinate.distanceTo(t.position) < 200.0);
+
+    // Dentro del poligono, lejos del objetivo: solo la entidad.
+    h = w.hitTest(pixel(QGeoCoordinate(21.97, -79.97)));
+    QCOMPARE(h.targetId, qint64(-1));
+    QCOMPARE(h.featureId, idPol);
+
+    // En el centro de los anillos y sobre el primer anillo (6 km al este).
+    QCOMPARE(w.hitTest(pixel(r.center)).rangeMarkId, idR);
+    QCOMPARE(w.hitTest(pixel(r.center.atDistanceAndAzimuth(6000.0, 90.0))).rangeMarkId, idR);
+    // Entre el centro y el anillo no hay nada.
+    QCOMPARE(w.hitTest(pixel(r.center.atDistanceAndAzimuth(3000.0, 90.0))).rangeMarkId, qint64(-1));
+    // Sobre la marcacion.
+    QCOMPARE(w.hitTest(pixel(QGeoCoordinate(21.85, -80.25))).rangeMarkId, idL);
+
+    // Mapa vacio.
+    h = w.hitTest(pixel(QGeoCoordinate(21.80, -79.80)));
+    QVERIFY(h.isEmpty());
+    QVERIFY(h.coordinate.isValid());
+
+    // Clic derecho sobre el objetivo: se emite con lo que hay debajo.
+    QSignalSpy spy(&w, &MapWidget::contextMenuRequested);
+    const QPoint donde = pixel(t.position);
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, donde, Qt::RightButton, Qt::RightButton);
+    QCoreApplication::sendEvent(plot, &pulsa);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, donde, Qt::RightButton, Qt::NoButton);
+    QCoreApplication::sendEvent(plot, &suelta);
+    QCOMPARE(spy.count(), 1);
+    const MapHit recibido = spy.at(0).at(0).value<MapHit>();
+    QCOMPARE(recibido.targetId, idT);
+    QCOMPARE(recibido.featureId, idPol);
+    QCOMPARE(recibido.pixel, donde);
+
+    // Con el boton izquierdo no hay menu.
+    QMouseEvent izq = mouseEvent(QEvent::MouseButtonPress, donde, Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(plot, &izq);
+    QMouseEvent izqS = mouseEvent(QEvent::MouseButtonRelease, donde, Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(plot, &izqS);
+    QCOMPARE(spy.count(), 1);
 }
 
 // Importar un historial GPX: el track marca inicio y fin siempre (modo por

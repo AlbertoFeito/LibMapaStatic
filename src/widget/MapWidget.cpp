@@ -609,6 +609,12 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
 
     connect(d->view, &MapView::mouseMovedTo, this, &MapWidget::mouseMoved);
     connect(d->view, &MapView::mapClicked, this, &MapWidget::clicked);
+    // Clic derecho: se resuelve aqui que hay debajo, para que la app solo
+    // tenga que montar el menu.
+    connect(d->view, &MapView::contextMenuRequested, this,
+            [this](const QPoint &pixel, const QPoint &global) {
+                emit contextMenuRequested(hitTest(pixel), global);
+            });
     connect(d->view, &MapView::measurementFinished,
             this, &MapWidget::measurementFinished);
     connect(d->view, &MapView::areaSelected, this, &MapWidget::areaSelected);
@@ -2029,6 +2035,22 @@ qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx) const
 {
     d->syncGeometry();
     return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx) : -1;
+}
+
+// Todo lo que hay bajo un pixel, cada cosa por separado (ver MapHit).
+MapHit MapWidget::hitTest(const QPoint &pixel) const
+{
+    MapHit h;
+    h.pixel = pixel;
+    if (!d->view)
+        return h;
+    h.coordinate = d->view->coordinateAt(pixel);
+    h.targetId = targetAt(pixel);
+    h.clusterTargets = targetClusterAt(pixel);
+    h.featureId = featureAt(pixel);
+    if (d->view->rangeLayer())
+        h.rangeMarkId = d->view->rangeLayer()->markAt(pixel);
+    return h;
 }
 
 // Entidad cuyo rotulo cae bajo el pixel (hit-test de la caja de etiqueta).
