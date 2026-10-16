@@ -9,14 +9,27 @@ using namespace libmapa;
 // (Era una lambda del botón «Limpiar»; ahora es un slot reutilizable.)
 void Ventana::limpiarAnalisis()
 {
+    quitarResultadosAnalisis();
+    marcarPuntosActivos();
+    statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
+}
+
+// Quita del mapa y del panel TODO lo que dejó el análisis anterior: la línea de
+// visión, la zona visible, los picos, su texto de resultado y la ventana del
+// perfil. Se llama al limpiar y al CAMBIAR de análisis: cada análisis solo
+// prepara su propia capa, así que sin esto el resultado del anterior (p. ej. la
+// recta de visibilidad de «Visión A→B») se quedaba pintado bajo el nuevo.
+void Ventana::quitarResultadosAnalisis()
+{
     m_mapa->removeFeatureLayer(kCapaVision);
     m_mapa->removeFeatureLayer(kCapaViewshed);
     m_mapa->removeFeatureLayer(kCapaPicos);
     m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
-    if (m_resultado) m_resultado->clear();
+    if (m_resultado)
+        m_resultado->clear();
+    if (m_perfilWin)
+        m_perfilWin->hide();
     m_ultimo = Analisis::Ninguno;
-    marcarPuntosActivos();
-    statusBar()->showMessage(tr("Análisis de elevación limpiado"), 3000);
 }
 
 // Al iniciar, los overlays del paquete arrancan OCULTOS (no cargan el

@@ -5,11 +5,12 @@
 //  - Elementos: objetivo móvil, punto del usuario (radar, observador…), zona o
 //    línea, y grupo de objetivos. Cada uno tiene SU menú.
 //  - Anillos y marcaciones NO son elementos aparte: cuelgan de un objetivo o de
-//    un punto y se manejan desde él. Una marcación une dos elementos; no existe
-//    hacia un lugar vacío. Un punto nuevo con anillos es un solo elemento.
+//    un punto y se manejan desde él. Una marcación PARTE de un elemento y llega
+//    a otro elemento o a cualquier lugar del mapa; no se parte de un lugar
+//    vacío. Un punto nuevo con anillos es un solo elemento.
 //  - Un lugar vacío del mapa solo ofrece lo que tiene sentido ahí: copiar sus
-//    coordenadas, centrar, crear un punto (con o sin anillos) y analizar la
-//    elevación en él.
+//    coordenadas, centrar, crear un punto (con o sin anillos), una marcación
+//    hasta él desde el elemento seleccionado y analizar la elevación en él.
 //  - Se muestra UN solo elemento, el de más prioridad bajo el cursor: objetivo,
 //    grupo, entidad (puntos del usuario, zonas, líneas), y solo si no hay nada
 //    de eso, la marca (anillos o marcación) sobre la que se hizo clic.
@@ -158,20 +159,20 @@ void Ventana::opcionesAnillos(QMenu *menu, qint64 id)
             [this, id] { m_mapa->removeRangeMark(id); });
 }
 
-// Submenú «Marcación» de un objetivo o de un punto: la marcación une DOS
-// elementos. Se puede ir hasta otro elemento que se pinche, o directamente
-// hasta el objetivo o el punto que estén seleccionados; y se pueden quitar las
-// que ya salen o llegan a este elemento.
+// Submenú «Marcación» de un objetivo o de un punto: la marcación PARTE de un
+// elemento y llega a otro elemento o a cualquier lugar del mapa que se pinche;
+// también directamente hasta el objetivo o el punto seleccionados. Se pueden
+// quitar las que ya salen o llegan a este elemento.
 void Ventana::submenuMarcacion(QMenu *menu, qint64 targetId, qint64 featureId)
 {
     QMenu *sub = menu->addMenu(tr("Marcación"));
-    connect(sub->addAction(tr("Hasta un objetivo o punto (pinchar)...")), &QAction::triggered, this,
+    connect(sub->addAction(tr("Hasta un objetivo, punto o lugar (pinchar)...")), &QAction::triggered, this,
             [this, targetId, featureId] {
                 m_ebl = BearingLine();
                 m_ebl.fromTarget = targetId;
                 m_ebl.fromFeature = targetId >= 0 ? -1 : featureId;
                 iniciarPickMedida(Pick::DestinoEbl,
-                                  tr("Pincha el destino de la marcación: un objetivo o un punto (Esc cancela)…"));
+                                  tr("Pincha el destino de la marcación: un objetivo, un punto o cualquier lugar (Esc cancela)…"));
             });
     // Otros elementos ya seleccionados: marcación directa.
     const qint64 selT = m_mapa->selectedTarget();
@@ -596,6 +597,19 @@ void Ventana::menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enElemento)
             r.center = p;                  // un punto nuevo en estas coordenadas
             ponerAnillos(r);
         });
+        // Marcación hasta este lugar: parte de un elemento ya seleccionado
+        // (no se puede partir de un lugar vacío).
+        const qint64 selT = m_mapa->selectedTarget() >= 0 && m_mapa->target(m_mapa->selectedTarget())
+                                ? m_mapa->selectedTarget() : -1;
+        const qint64 selP = puntoSeleccionado();
+        if (selT >= 0)
+            connect(menu->addAction(tr("Marcación desde %1 hasta aquí").arg(nombreObjetivo(selT))),
+                    &QAction::triggered, this, [this, selT, p] { ponerMarcacionEntre(selT, -1, -1, -1, p); });
+        if (selP >= 0)
+            connect(menu->addAction(tr("Marcación desde «%1» hasta aquí").arg(nombrePunto(selP))),
+                    &QAction::triggered, this, [this, selP, p] { ponerMarcacionEntre(-1, selP, -1, -1, p); });
+        if (selT < 0 && selP < 0)
+            menu->addAction(tr("Marcación hasta aquí (selecciona antes un objetivo o un punto)"))->setEnabled(false);
         submenuElevacion(menu, p, true);
     }
     if (m_mapa->activeTool() != MapTool::None) {

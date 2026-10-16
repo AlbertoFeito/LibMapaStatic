@@ -515,22 +515,31 @@ void Ventana::quitarMarcasDe(qint64 targetId, qint64 featureId)
         m_mapa->removeRangeMark(id);
 }
 
-// Marcación entre dos elementos (cada uno, un objetivo o un punto). Rechaza los
-// extremos repetidos. Devuelve su id o -1.
-qint64 Ventana::ponerMarcacionEntre(qint64 desdeT, qint64 desdeF, qint64 hastaT, qint64 hastaF)
+// Marcación desde un elemento (objetivo o punto: hace falta algo de lo que
+// partir) hasta otro elemento (\a hastaT / \a hastaF, al que sigue) o, si no se
+// da ninguno, hasta el lugar \a hasta del mapa. Rechaza una marcación sin
+// longitud o idéntica a otra. Devuelve su id o -1.
+qint64 Ventana::ponerMarcacionEntre(qint64 desdeT, qint64 desdeF, qint64 hastaT, qint64 hastaF,
+                                    const QGeoCoordinate &hasta)
 {
+    const bool aElemento = hastaT >= 0 || hastaF >= 0;
     BearingLine l;
     l.fromTarget = desdeT;
     l.fromFeature = desdeT >= 0 ? -1 : desdeF;
     l.toTarget = hastaT;
     l.toFeature = hastaT >= 0 ? -1 : hastaF;
+    if (!aElemento)
+        l.to = hasta;
+    const QString destino = aElemento ? nombreExtremo(hastaT, hastaF)
+                                      : formatCoordinate(hasta, m_formatoCoord);
     // Una marcación idéntica (mismo origen y mismo destino) no aporta nada.
     for (const qint64 otra : marcacionesDe(desdeT, desdeF)) {
         const auto e = m_mapa->bearingLine(otra);
         if (e && e->fromTarget == l.fromTarget && e->fromFeature == l.fromFeature
-            && e->toTarget == l.toTarget && e->toFeature == l.toFeature) {
+            && e->toTarget == l.toTarget && e->toFeature == l.toFeature
+            && (aElemento || (e->to.isValid() && e->to.distanceTo(l.to) < 1.0))) {
             statusBar()->showMessage(tr("Ya hay una marcación de %1 a %2")
-                .arg(nombreExtremo(desdeT, desdeF), nombreExtremo(hastaT, hastaF)), 4000);
+                .arg(nombreExtremo(desdeT, desdeF), destino), 4000);
             return -1;
         }
     }
@@ -538,10 +547,10 @@ qint64 Ventana::ponerMarcacionEntre(qint64 desdeT, qint64 desdeF, qint64 hastaT,
     double rumbo = 0.0, dist = 0.0;
     if (id >= 0 && m_mapa->bearingLineMeasure(id, &rumbo, &dist))
         statusBar()->showMessage(tr("Marcación de %1 a %2: %3° · %4")
-            .arg(nombreExtremo(desdeT, desdeF), nombreExtremo(hastaT, hastaF))
+            .arg(nombreExtremo(desdeT, desdeF), destino)
             .arg(qRound(rumbo) % 360, 3, 10, QLatin1Char('0')).arg(textoDistancia(dist)), 6000);
     else if (id < 0)
-        statusBar()->showMessage(tr("Una marcación necesita dos elementos distintos"), 4000);
+        statusBar()->showMessage(tr("El destino coincide con el origen: no hay marcación"), 4000);
     return id;
 }
 
@@ -886,10 +895,10 @@ void Ventana::gestionarMarcas()
     dlg.exec();
 }
 
-// Marcación (menú Ver): une DOS elementos, objetivos o puntos. El origen es el
-// objetivo o el punto seleccionado (el objetivo, si hay de los dos) o, si no hay
-// ninguno, el que se pinche; el destino se pincha siempre sobre otro elemento.
-// Sobre un lugar vacío no se puede: hace falta algo que medir.
+// Marcación (menú Ver): parte de un ELEMENTO (objetivo o punto) y llega a otro
+// elemento o a cualquier lugar del mapa. El origen es el objetivo o el punto
+// seleccionado (el objetivo, si hay de los dos) o, si no hay ninguno, el que se
+// pinche: no se puede partir de un lugar vacío, hace falta algo que medir.
 void Ventana::ponerMarcacion()
 {
     m_ebl = BearingLine();
@@ -898,14 +907,14 @@ void Ventana::ponerMarcacion()
     if (selT >= 0 && m_mapa->target(selT)) {
         m_ebl.fromTarget = selT;
         iniciarPickMedida(Pick::DestinoEbl,
-            tr("Pincha el destino de la marcación: otro objetivo o un punto…"));
+            tr("Pincha el destino de la marcación: un objetivo, un punto o cualquier lugar (Esc cancela)…"));
     } else if (selP >= 0) {
         m_ebl.fromFeature = selP;
         iniciarPickMedida(Pick::DestinoEbl,
-            tr("Pincha el destino de la marcación: un objetivo u otro punto…"));
+            tr("Pincha el destino de la marcación: un objetivo, un punto o cualquier lugar (Esc cancela)…"));
     } else {
         iniciarPickMedida(Pick::OrigenEbl,
-            tr("Pincha el origen de la marcación: un objetivo o un punto…"));
+            tr("Pincha el origen de la marcación: un objetivo o un punto (Esc cancela)…"));
     }
 }
 
@@ -952,17 +961,19 @@ qint64 Ventana::objetivoCerca(const QGeoCoordinate &p) const
 // Recibe el clic de una medida en curso (anillos o marcación).
 // - Anillos: sobre un objetivo o un punto son suyos; sobre un lugar vacío se
 //   crea ahí un punto nuevo (con el nombre pedido) y son suyos.
-// - Marcación: el origen y el destino deben ser un objetivo o un punto. Un clic
-//   en un lugar vacío, o en el mismo elemento que el origen, no vale: se avisa
-//   y se sigue esperando (la herramienta sigue armada hasta que se cancela).
+// - Marcación: el ORIGEN debe ser un objetivo o un punto (hace falta algo de lo
+//   que partir); el DESTINO puede ser otro elemento (al que sigue) o cualquier
+//   lugar del mapa. Un origen vacío, o un destino que es el propio origen, no
+//   valen: se avisa y se sigue esperando (la herramienta sigue armada hasta que
+//   se cancela con Esc).
 void Ventana::puntoDeMedida(const QGeoCoordinate &p)
 {
     const Pick cual = m_picking;
     const qint64 obj = objetivoCerca(p);
     const qint64 pto = obj >= 0 ? -1 : puntoEn(p);
 
-    if (cual != Pick::Anillos && obj < 0 && pto < 0) {
-        statusBar()->showMessage(tr("Una marcación une dos elementos: pincha sobre un objetivo o un punto "
+    if (cual == Pick::OrigenEbl && obj < 0 && pto < 0) {
+        statusBar()->showMessage(tr("La marcación parte de un objetivo o de un punto: pincha sobre uno "
                                     "(Esc cancela)"), 6000);
         return;
     }
@@ -984,10 +995,10 @@ void Ventana::puntoDeMedida(const QGeoCoordinate &p)
         m_ebl.fromTarget = obj;
         m_ebl.fromFeature = pto;
         iniciarPickMedida(Pick::DestinoEbl,
-            tr("Origen: %1. Pincha el destino: otro objetivo u otro punto…")
+            tr("Origen: %1. Pincha el destino: un objetivo, un punto o cualquier lugar (Esc cancela)…")
                 .arg(nombreExtremo(obj, pto)));
     } else {
-        ponerMarcacionEntre(m_ebl.fromTarget, m_ebl.fromFeature, obj, pto);
+        ponerMarcacionEntre(m_ebl.fromTarget, m_ebl.fromFeature, obj, pto, p);
     }
 }
 

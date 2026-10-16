@@ -42,6 +42,7 @@ private:
     static QString qssOscuro();
 
     void limpiarAnalisis();
+    void quitarResultadosAnalisis();
 
     void ocultarOverlaysAlIniciar();
 
@@ -260,7 +261,8 @@ private:
     QGeoCoordinate posicionDe(qint64 targetId, qint64 featureId) const;
     QVector<qint64> marcacionesDe(qint64 targetId, qint64 featureId) const;
     void quitarMarcasDe(qint64 targetId, qint64 featureId);
-    qint64 ponerMarcacionEntre(qint64 desdeT, qint64 desdeF, qint64 hastaT, qint64 hastaF);
+    qint64 ponerMarcacionEntre(qint64 desdeT, qint64 desdeF, qint64 hastaT, qint64 hastaF,
+                               const QGeoCoordinate &hasta = QGeoCoordinate());
     QGeoCoordinate ajustarAPunto(const QGeoCoordinate &p) const;
     qint64 anillosDe(qint64 targetId, qint64 featureId) const;
     QString nombreObjetivo(qint64 id) const;

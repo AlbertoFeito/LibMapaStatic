@@ -5677,3 +5677,33 @@ y que no se mide si el punto se borra. Comprobado bajo Xvfb: un punto con anillo
 en un lugar queda en su centro (0 m); repetir junto a él no duplica nada;
 marcaciones nulas y a lugares vacíos rechazadas; borrar un punto quita sus 3 marcas.
 **24 tests** en verde.
+
+## 138. Marcación: origen = elemento, destino = cualquier lugar; limpiar el análisis anterior
+
+Dos fallos al probar §137 en Windows:
+
+**1. La recta de visibilidad se quedaba pintada.** Con «Visión A→B» ya calculada,
+al cambiar el selector a «Viewshed» la línea de visión (con su «Obstáculo a… m»),
+el texto «BLOQUEADA…» y la ventana del perfil seguían ahí. Causa: cada análisis
+solo prepara **su** capa (`elev_vision`, `elev_viewshed`, `elev_picos`) y nadie
+quitaba las de los demás. Ahora `quitarResultadosAnalisis()` limpia las tres
+capas, el texto de resultado, los picos y esconde el perfil, y se llama al
+**cambiar de análisis** (y desde «Limpiar»). Los análisis del menú contextual
+cambian el selector antes de calcular, así que parten de una pestaña limpia.
+
+**2. La marcación no dejaba elegir un lugar del mapa.** En §137 se exigió que
+**los dos** extremos fueran elementos; lo pedido era que **para poder poner una
+marcación debe existir algo** de lo que partir. Regla corregida:
+- el **origen** es un objetivo o un punto (no se parte de un lugar vacío);
+- el **destino** es otro elemento (al que la línea sigue) **o cualquier lugar**
+  del mapa (coordenada fija).
+En la demo: «Marcación ▸ Hasta un objetivo, punto o lugar (pinchar)…» desde un
+elemento; desde el menú de un lugar vacío, «Marcación desde <objetivo o punto
+seleccionado> hasta aquí» (desactivada, con el motivo, si no hay nada
+seleccionado); y el menú Ver → Marcación. Se siguen rechazando un origen vacío,
+un destino que es el propio origen y una marcación idéntica a otra. El gestor
+nombra el destino («Radar → 23.29, -82.37 · 043° · 41.4 km»).
+
+Comprobado bajo Xvfb: una capa `elev_vision` y su texto desaparecen al cambiar el
+selector a Viewshed; marcaciones de un punto a dos lugares vacíos (rumbo y distancia
+correctos), la repetida rechazada, el origen vacío rechazado. **24 tests** en verde.

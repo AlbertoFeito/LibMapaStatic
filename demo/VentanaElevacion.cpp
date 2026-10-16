@@ -655,6 +655,7 @@ void Ventana::actualizarInfoPuntos()
 void Ventana::actualizarEntradaAnalisis(int idx)
 {
     const bool perfil = idx == 0, vision = idx == 1, viewshed = idx == 2, picos = idx == 3;
+    quitarResultadosAnalisis();          // lo del análisis anterior no sirve para éste
     if (m_rowPosA) m_rowPosA->setVisible(true);
     if (m_rowPosB) m_rowPosB->setVisible(vision);
     if (m_rowAzimut) m_rowAzimut->setVisible(perfil);
