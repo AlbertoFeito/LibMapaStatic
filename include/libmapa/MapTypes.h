@@ -133,16 +133,20 @@ struct MapHit {
 /*!
  * \brief Linea de marcacion (EBL) con su rumbo verdadero y distancia rotulados.
  *
- * El origen es un punto fijo o un objetivo (\a fromTarget, al que sigue). El
- * destino, igual: un punto o un objetivo. Sin destino, la linea sale del origen
+ * El origen es un punto fijo, un objetivo (\a fromTarget) o una entidad punto
+ * del mapa (\a fromFeature: un radar, un observador); en los dos ultimos la
+ * linea sigue a su extremo si se mueve. El destino, igual (\a toTarget,
+ * \a toFeature o \a to). Sin destino, la linea sale del origen
  * con rumbo \a bearingDeg y longitud \a lengthMeters. El rotulo dice
  * "045° · 5.2 NM" en las unidades de la escala grafica.
  */
 struct BearingLine {
-    QGeoCoordinate from;            //!< Origen fijo (si \a fromTarget < 0).
+    QGeoCoordinate from;            //!< Origen fijo (si no hay \a fromTarget ni \a fromFeature).
     qint64 fromTarget = -1;         //!< O sale de este objetivo.
-    QGeoCoordinate to;              //!< Destino fijo (si \a toTarget < 0)...
-    qint64 toTarget = -1;           //!< ...o este objetivo.
+    qint64 fromFeature = -1;        //!< O de esta entidad punto (si \a fromTarget < 0).
+    QGeoCoordinate to;              //!< Destino fijo (si no hay \a toTarget ni \a toFeature)...
+    qint64 toTarget = -1;           //!< ...o este objetivo...
+    qint64 toFeature = -1;          //!< ...o esta entidad punto (si \a toTarget < 0).
     //! Sin destino: rumbo (grados verdaderos) y longitud de la linea.
     double bearingDeg = std::numeric_limits<double>::quiet_NaN();
     double lengthMeters = 0.0;

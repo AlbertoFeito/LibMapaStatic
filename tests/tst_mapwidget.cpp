@@ -2611,8 +2611,27 @@ void TstMapWidget::rangeRingsAndBearingLinesFollowTargets()
     QCOMPARE(w.rangeRingsSpacing(idEnObs), 1000.0);
     QVERIFY(w.moveFeature(idObs, 0.01, 0.01));
     QCOMPARE(w.rangeRings(idEnObs)->featureId, idObs);
+
+    // Marcacion entre una entidad punto y un objetivo: sigue a los dos.
+    BearingLine conPunto;
+    conPunto.fromFeature = idObs;
+    conPunto.toTarget = ida;
+    const qint64 idConPunto = w.addBearingLine(conPunto);
+    QVERIFY(idConPunto > 0);
+    double rumboP = 0.0, distP = 0.0;
+    QVERIFY(w.bearingLineMeasure(idConPunto, &rumboP, &distP));
+    const double distAntes = distP;
+    QVERIFY(w.moveFeature(idObs, 0.02, 0.0));                    // el punto se mueve: la linea cambia
+    QVERIFY(w.bearingLineMeasure(idConPunto, &rumboP, &distP));
+    QVERIFY(qAbs(distP - distAntes) > 100.0);
+    BearingLine mismoPunto;                                      // el mismo punto en los dos extremos
+    mismoPunto.fromFeature = idObs;
+    mismoPunto.toFeature = idObs;
+    QCOMPARE(w.addBearingLine(mismoPunto), qint64(-1));
+
     w.removeFeature(idObs);
     QCOMPARE(w.rangeRingsSpacing(idEnObs), 0.0);                 // sin centro: no se dibuja
+    QVERIFY(!w.bearingLineMeasure(idConPunto, &rumboP, &distP)); // ni se puede medir
 
     QVERIFY(w.removeRangeMark(anillos));
     QVERIFY(!w.removeRangeMark(anillos));

@@ -5619,3 +5619,61 @@ elemento.
 Comprobado bajo Xvfb: unos anillos sueltos y un punto nuevo a 3 px de su centro
 → el punto queda en el centro (distancia 0), es el dueño y sigue habiendo un
 solo juego de anillos. **24 tests** en verde.
+
+## 137. Lógica de los menús: todo cuelga de un elemento
+
+Probando en Windows: se pusieron anillos en un lugar del mapa y, justo al lado,
+el punto observador de Elevación (perfil desde «aquí»): **no coincidían**. Y se
+podía poner una marcación hacia un lugar vacío. Había dos conceptos
+a medias —anillos «sueltos» y marcaciones «a un lugar»— que chocaban con los
+puntos. Se revisa toda la lógica con una sola regla.
+
+**Modelo (demo):**
+- **Elementos:** objetivo móvil, **punto** del usuario (radar, observador…),
+  zona o línea, y grupo de objetivos. Cada uno tiene su menú.
+- **Anillos y marcaciones no son elementos aparte: cuelgan de uno.** Los anillos
+  son de un objetivo o de un punto (como mucho unos por dueño); una marcación une
+  **dos** elementos. Un punto nuevo con anillos es un solo elemento.
+- **Un lugar vacío** solo ofrece: copiar coordenadas, centrar, **nuevo punto**, **nuevo
+  punto con anillos** y elevación en él. Ya no hay «anillos aquí» ni «marcación
+  desde aquí».
+- **Un solo elemento por clic derecho**, el de más prioridad: objetivo → grupo →
+  entidad (punto, zona, línea) → marca (línea de unos anillos o de una marcación).
+  Clic en la línea de unos anillos abre el menú de su dueño. Las acciones del lugar
+  van en «Este lugar del mapa», reducidas a copiar/centrar si el elemento es un
+  objetivo o un punto (ahí no se crea otro punto).
+
+**Librería:** `BearingLine::fromFeature` / `toFeature` (un punto del mapa en cada
+extremo, que la marcación sigue); rechaza el mismo punto en los dos extremos.
+
+**Demo:**
+- `crearPunto`: capa activa si se edita o, si no, la primera editable (nunca las
+  `elev_*` de resultados). Nombre por defecto «Punto N».
+- **Anillos:** el diálogo ofrece objetivo seleccionado, punto seleccionado, **punto
+  nuevo en unas coordenadas** o **punto nuevo donde se pinche**; el nombre solo se
+  pide para el punto nuevo. Pinchar sobre un objetivo o un punto existente los hace
+  suyos; sobre un lugar vacío, crea el punto. Poner otros anillos a un dueño que ya
+  los tiene **los cambia**.
+- **Marcación** (menú Ver o submenú «Marcación» de un objetivo/punto): origen y
+  destino deben ser un objetivo o un punto. Un clic en un lugar vacío, en el mismo
+  elemento que el origen o repetir una marcación idéntica se avisa y se rechaza; la
+  herramienta sigue armada. En el submenú: «Hasta un objetivo o punto (pinchar)…»,
+  hasta el objetivo o el punto seleccionados, y quitar las que ya tiene.
+- **Esc cancela** la captura de punto (anillos, marcación, A, B); antes la
+  herramienta de pinchar no tenía más salida que elegir «Navegar».
+- **Borrar** un punto (o quitar un objetivo) se lleva sus anillos y marcaciones.
+- **Elevación:** el punto es el observador. Desde su menú, «Usar como observador
+  (punto A)», «Usar como punto B», «Perfil / Viewshed / 10 picos desde él» y
+  «Visión desde A hasta él», con sus coordenadas exactas. Desde un lugar, las
+  mismas, que **se enganchan a un punto del usuario a menos de ~12 px** (también el
+  botón «Mapa» de la pestaña), para que análisis y anillos partan del mismo sitio.
+- Los pines A/B y los resultados de Elevación tienen un menú propio corto.
+- El gestor «Anillos y marcaciones puestos» nombra los extremos
+  («Marcación Radar → Observador · 077° · 59.2 km»).
+
+Test `rangeRingsAndBearingLinesFollowTargets`: marcación entre un punto y un
+objetivo que sigue al punto al moverlo, rechazo del mismo punto en los dos extremos
+y que no se mide si el punto se borra. Comprobado bajo Xvfb: un punto con anillos
+en un lugar queda en su centro (0 m); repetir junto a él no duplica nada;
+marcaciones nulas y a lugares vacíos rechazadas; borrar un punto quita sus 3 marcas.
+**24 tests** en verde.

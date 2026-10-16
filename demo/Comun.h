@@ -31,6 +31,7 @@
 #include <QHeaderView>
 #include <QIcon>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>

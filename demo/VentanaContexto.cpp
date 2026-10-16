@@ -1,6 +1,18 @@
-// Menú del clic derecho: acciones según lo que haya bajo el cursor (objetivo,
-// grupo de objetivos, punto o entidad, anillos o marcación, o el mapa).
+// Menú del clic derecho: acciones según lo que haya bajo el cursor.
 // Parte de la clase Ventana de la demo (declarada en Ventana.h).
+//
+// Modelo (ver también «Elementos, anillos y marcaciones» en VentanaObjetivos.cpp):
+//  - Elementos: objetivo móvil, punto del usuario (radar, observador…), zona o
+//    línea, y grupo de objetivos. Cada uno tiene SU menú.
+//  - Anillos y marcaciones NO son elementos aparte: cuelgan de un objetivo o de
+//    un punto y se manejan desde él. Una marcación une dos elementos; no existe
+//    hacia un lugar vacío. Un punto nuevo con anillos es un solo elemento.
+//  - Un lugar vacío del mapa solo ofrece lo que tiene sentido ahí: copiar sus
+//    coordenadas, centrar, crear un punto (con o sin anillos) y analizar la
+//    elevación en él.
+//  - Se muestra UN solo elemento, el de más prioridad bajo el cursor: objetivo,
+//    grupo, entidad (puntos del usuario, zonas, líneas), y solo si no hay nada
+//    de eso, la marca (anillos o marcación) sobre la que se hizo clic.
 
 #include "Ventana.h"
 
@@ -47,15 +59,22 @@ static bool recuadro(const QVector<QGeoCoordinate> &puntos, QGeoCoordinate *no, 
     return true;
 }
 
-// Punto de entrada. Se muestra UN solo elemento, el de más prioridad bajo el
-// cursor: objetivo, grupo de objetivos, entidad (los puntos que pone el
-// usuario), y solo si no hay nada de eso, unos anillos o una marcación. Los
-// anillos de un objetivo o de un punto van dentro de su menú, no aparte. Al
-// final, las acciones del lugar del mapa (en un submenú si ya hay un elemento).
+// ¿Es la entidad \a id un punto del usuario (radar, observador, hito…)? No lo
+// son los pines ni los resultados de Elevación (capas elev_*).
+static bool esPuntoDelUsuario(const MapWidget *mapa, qint64 id)
+{
+    const auto f = id >= 0 ? mapa->feature(id) : std::nullopt;
+    return f && f->kind == GeometryKind::Point && !f->layerId.startsWith(QLatin1String("elev_"));
+}
+
+// Punto de entrada. Elige el elemento de más prioridad bajo el cursor y monta
+// su menú; después, las acciones del lugar (en un submenú si hay un elemento,
+// y reducidas a copiar/centrar si el elemento es un objetivo o un punto: ahí
+// no tiene sentido crear otro punto ni analizar «el lugar»).
 void Ventana::menuContextual(const MapHit &hit, const QPoint &global)
 {
     QMenu menu(this);
-    bool algo = true;
+    bool hayElemento = true;
     if (hit.targetId >= 0)
         menuObjetivo(&menu, hit.targetId);
     else if (!hit.clusterTargets.isEmpty())
@@ -65,25 +84,23 @@ void Ventana::menuContextual(const MapHit &hit, const QPoint &global)
     else if (hit.rangeMarkId >= 0)
         menuMarca(&menu, hit.rangeMarkId);
     else
-        algo = false;
+        hayElemento = false;
 
-    // ¿El clic cae en el centro de unos anillos? Entonces no se ofrece poner
-    // otros encima.
-    const bool enAnillos = hit.rangeMarkId >= 0 && m_mapa->rangeRings(hit.rangeMarkId).has_value();
-
-    if (algo) {
+    const bool elementoPuntual = hit.targetId >= 0 || !hit.clusterTargets.isEmpty()
+                                 || esPuntoDelUsuario(m_mapa, hit.featureId);
+    if (hayElemento) {
         menu.addSeparator();
         QMenu *aqui = menu.addMenu(tr("Este lugar del mapa"));
-        menuPunto(aqui, hit.coordinate, enAnillos);
+        menuPunto(aqui, hit.coordinate, elementoPuntual);
     } else {
-        menuPunto(&menu, hit.coordinate, enAnillos);
+        menuPunto(&menu, hit.coordinate, false);
     }
     menu.exec(global);
 }
 
-// Submenú «Anillos de distancia» de un objetivo o de una entidad punto. Si
-// aún no tiene, permite ponerlos (automáticos o eligiendo las opciones); si
-// ya los tiene, solo cambiarlos o quitarlos: un dueño, unos anillos.
+// Submenú «Anillos de distancia» de un objetivo o de un punto. Si aún no tiene,
+// permite ponerlos (con los últimos ajustes o eligiéndolos); si ya los tiene,
+// solo cambiarlos o quitarlos: un dueño, unos anillos.
 void Ventana::submenuAnillos(QMenu *menu, qint64 targetId, qint64 featureId)
 {
     QMenu *sub = menu->addMenu(tr("Anillos de distancia"));
@@ -97,7 +114,7 @@ void Ventana::submenuAnillos(QMenu *menu, qint64 targetId, qint64 featureId)
     r.featureId = targetId >= 0 ? -1 : featureId;
     r.name.clear();
     const QString quien = targetId >= 0 ? tr("el objetivo %1").arg(nombreObjetivo(targetId))
-                                        : tr("el punto");
+                                        : tr("el punto «%1»").arg(nombrePunto(featureId));
     connect(sub->addAction(tr("Poner con los últimos ajustes")), &QAction::triggered, this,
             [this, r, quien] { ponerAnillosA(r, quien); });
     connect(sub->addAction(tr("Poner eligiendo las opciones...")), &QAction::triggered, this,
@@ -137,8 +154,49 @@ void Ventana::opcionesAnillos(QMenu *menu, qint64 id)
     }
     connect(menu->addAction(tr("Cambiar...")), &QAction::triggered, this,
             [this, id] { ponerAnillos(RangeRings(), id); });
-    connect(menu->addAction(tr("Quitar")), &QAction::triggered, this,
+    connect(menu->addAction(tr("Quitar los anillos")), &QAction::triggered, this,
             [this, id] { m_mapa->removeRangeMark(id); });
+}
+
+// Submenú «Marcación» de un objetivo o de un punto: la marcación une DOS
+// elementos. Se puede ir hasta otro elemento que se pinche, o directamente
+// hasta el objetivo o el punto que estén seleccionados; y se pueden quitar las
+// que ya salen o llegan a este elemento.
+void Ventana::submenuMarcacion(QMenu *menu, qint64 targetId, qint64 featureId)
+{
+    QMenu *sub = menu->addMenu(tr("Marcación"));
+    connect(sub->addAction(tr("Hasta un objetivo o punto (pinchar)...")), &QAction::triggered, this,
+            [this, targetId, featureId] {
+                m_ebl = BearingLine();
+                m_ebl.fromTarget = targetId;
+                m_ebl.fromFeature = targetId >= 0 ? -1 : featureId;
+                iniciarPickMedida(Pick::DestinoEbl,
+                                  tr("Pincha el destino de la marcación: un objetivo o un punto (Esc cancela)…"));
+            });
+    // Otros elementos ya seleccionados: marcación directa.
+    const qint64 selT = m_mapa->selectedTarget();
+    if (selT >= 0 && selT != targetId && m_mapa->target(selT))
+        connect(sub->addAction(tr("Hasta %1 (seleccionado)").arg(nombreObjetivo(selT))), &QAction::triggered,
+                this, [this, targetId, featureId, selT] { ponerMarcacionEntre(targetId, featureId, selT, -1); });
+    const qint64 selP = puntoSeleccionado();
+    if (selP >= 0 && !(targetId < 0 && selP == featureId))
+        connect(sub->addAction(tr("Hasta «%1» (seleccionado)").arg(nombrePunto(selP))), &QAction::triggered,
+                this, [this, targetId, featureId, selP] { ponerMarcacionEntre(targetId, featureId, -1, selP); });
+    // Las que ya tiene este elemento, para quitarlas.
+    const QVector<qint64> existentes = marcacionesDe(targetId, featureId);
+    if (!existentes.isEmpty())
+        sub->addSeparator();
+    for (const qint64 id : existentes) {
+        const auto l = m_mapa->bearingLine(id);
+        if (!l)
+            continue;
+        const bool salgo = targetId >= 0 ? l->fromTarget == targetId
+                                         : (l->fromTarget < 0 && l->fromFeature == featureId);
+        const QString otro = salgo ? nombreExtremo(l->toTarget, l->toFeature)
+                                   : nombreExtremo(l->fromTarget, l->fromFeature);
+        connect(sub->addAction(tr("Quitar la marcación con %1").arg(otro)), &QAction::triggered, this,
+                [this, id] { m_mapa->removeRangeMark(id); });
+    }
 }
 
 // Muestra la pestaña Elevación (y el panel) con el análisis \a analisis
@@ -156,51 +214,70 @@ void Ventana::irAElevacion(int analisis)
         m_tipoAnalisis->setCurrentIndex(analisis);
 }
 
-// Submenú «Elevación» para un punto: los análisis que salen de él (perfil,
+// Si hay un punto del usuario a menos de ~12 px de \a p, su posición exacta
+// (así un análisis hecho «aquí», junto a un radar u observador, parte de él y
+// no de un punto casi igual); si no, \a p.
+QGeoCoordinate Ventana::ajustarAPunto(const QGeoCoordinate &p) const
+{
+    const qint64 id = puntoEn(p);
+    return id >= 0 ? posicionDe(-1, id) : p;
+}
+
+// Submenú «Elevación» (solo con DEM): los análisis que salen de \a p (perfil,
 // viewshed, picos), la visión desde A hasta él, y fijarlo como A o como B.
+// \a delLugar dice si \a p es un lugar del mapa («aquí») o un elemento («él»).
 // Abre la pestaña Elevación con el análisis puesto, para que se vea qué se ha
-// calculado y con qué datos.
-void Ventana::submenuElevacion(QMenu *menu, const QGeoCoordinate &p)
+// calculado y con qué datos; y B solo se muestra en «Visión A→B», a la que se
+// pasa al fijarlo.
+void Ventana::submenuElevacion(QMenu *menu, const QGeoCoordinate &p, bool delLugar)
 {
     if (!m_demActivo || !p.isValid())
         return;
     QMenu *elev = menu->addMenu(tr("Elevación"));
-    connect(elev->addAction(tr("Perfil desde aquí")), &QAction::triggered, this, [this, p] {
-        moverPinCoord(Pick::A, p);
-        irAElevacion(0);
-        analizarPerfil();
-    });
-    connect(elev->addAction(tr("Visión desde A hasta aquí")), &QAction::triggered, this, [this, p] {
-        moverPinCoord(Pick::B, p);
-        irAElevacion(1);
-        analizarVision();
-    });
-    connect(elev->addAction(tr("Viewshed (zona visible) desde aquí")), &QAction::triggered, this,
-            [this, p] {
-                moverPinCoord(Pick::A, p);
+    connect(elev->addAction(delLugar ? tr("Perfil desde aquí") : tr("Perfil desde él")),
+            &QAction::triggered, this, [this, p] {
+                moverPinCoord(Pick::A, ajustarAPunto(p));
+                irAElevacion(0);
+                analizarPerfil();
+            });
+    connect(elev->addAction(delLugar ? tr("Visión desde A hasta aquí") : tr("Visión desde A hasta él")),
+            &QAction::triggered, this, [this, p] {
+                moverPinCoord(Pick::B, ajustarAPunto(p));
+                irAElevacion(1);
+                analizarVision();
+            });
+    connect(elev->addAction(delLugar ? tr("Viewshed (zona visible) desde aquí")
+                                     : tr("Viewshed (zona visible) desde él")),
+            &QAction::triggered, this, [this, p] {
+                moverPinCoord(Pick::A, ajustarAPunto(p));
                 irAElevacion(2);
                 analizarViewshed();
             });
-    connect(elev->addAction(tr("10 picos más altos alrededor")), &QAction::triggered, this, [this, p] {
-        moverPinCoord(Pick::A, p);
-        irAElevacion(3);
-        analizarPicosAltos();
-    });
+    connect(elev->addAction(delLugar ? tr("10 picos más altos alrededor de aquí")
+                                     : tr("10 picos más altos alrededor de él")),
+            &QAction::triggered, this, [this, p] {
+                moverPinCoord(Pick::A, ajustarAPunto(p));
+                irAElevacion(3);
+                analizarPicosAltos();
+            });
     elev->addSeparator();
-    connect(elev->addAction(tr("Fijar aquí el punto A")), &QAction::triggered, this, [this, p] {
-        moverPinCoord(Pick::A, p);
-        irAElevacion(-1);
-    });
-    connect(elev->addAction(tr("Fijar aquí el punto B (visión A→B)")), &QAction::triggered, this,
-            [this, p] {
-                moverPinCoord(Pick::B, p);
+    connect(elev->addAction(delLugar ? tr("Fijar aquí el punto A") : tr("Usar como observador (punto A)")),
+            &QAction::triggered, this, [this, p] {
+                moverPinCoord(Pick::A, ajustarAPunto(p));
+                irAElevacion(-1);
+            });
+    connect(elev->addAction(delLugar ? tr("Fijar aquí el punto B (visión A→B)")
+                                     : tr("Usar como punto B (visión A→B)")),
+            &QAction::triggered, this, [this, p] {
+                moverPinCoord(Pick::B, ajustarAPunto(p));
                 irAElevacion(1);              // B solo lo usa la visión: se pasa a ella
             });
 }
 
-// Acciones sobre un objetivo móvil: seleccionar, centrar, sus anillos, una
-// marcación, CPA con el seleccionado, filtrar por su tipo, exportar su
-// historial, elevación en su posición y quitarlo.
+// Acciones sobre un objetivo móvil: seleccionar, centrar, sus anillos y
+// marcaciones, CPA con otro objetivo seleccionado, elevación en su posición,
+// filtrar por su tipo, exportar su historial y quitarlo (con sus anillos y
+// marcaciones).
 void Ventana::menuObjetivo(QMenu *menu, qint64 id)
 {
     const auto t = m_mapa->target(id);
@@ -217,24 +294,12 @@ void Ventana::menuObjetivo(QMenu *menu, qint64 id)
     });
     menu->addSeparator();
     submenuAnillos(menu, id, -1);
-    connect(menu->addAction(tr("Marcación desde él...")), &QAction::triggered, this, [this, id] {
-        m_ebl = BearingLine();
-        m_ebl.fromTarget = id;
-        iniciarPickMedida(Pick::DestinoEbl,
-                          tr("Pincha el destino de la marcación (un objetivo o un punto)…"));
-    });
+    submenuMarcacion(menu, id, -1);
 
-    // Con otro objetivo seleccionado: marcación y CPA entre los dos.
+    // CPA/TCPA con otro objetivo seleccionado.
     const qint64 sel = m_mapa->selectedTarget();
     if (sel >= 0 && sel != id && m_mapa->target(sel)) {
         const QString otro = nombreObjetivo(sel);
-        connect(menu->addAction(tr("Marcación desde %1 hasta él").arg(otro)), &QAction::triggered,
-                this, [this, sel, id] {
-                    BearingLine l;
-                    l.fromTarget = sel;
-                    l.toTarget = id;
-                    m_mapa->addBearingLine(l);
-                });
         connect(menu->addAction(tr("CPA/TCPA con %1").arg(otro)), &QAction::triggered, this,
                 [this, sel, id, otro, nombre] {
                     const CpaResult c = m_mapa->targetCpa(sel, id);
@@ -252,7 +317,7 @@ void Ventana::menuObjetivo(QMenu *menu, qint64 id)
                                   .arg(textoDistancia(c.currentDistanceMeters)));
                 });
     }
-    submenuElevacion(menu, t->position);
+    submenuElevacion(menu, t->position, false);
     menu->addSeparator();
 
     // Filtro rápido por su tipo (y quitar el filtro si lo hay).
@@ -294,9 +359,7 @@ void Ventana::menuObjetivo(QMenu *menu, qint64 id)
             });
     menu->addSeparator();
     connect(menu->addAction(tr("Quitar el objetivo")), &QAction::triggered, this, [this, id] {
-        const qint64 anillos = anillosDe(id, -1);       // sus anillos se van con él
-        if (anillos >= 0)
-            m_mapa->removeRangeMark(anillos);
+        quitarMarcasDe(id, -1);            // sus anillos y marcaciones se van con él
         m_mapa->removeTarget(id);
     });
 }
@@ -336,34 +399,38 @@ void Ventana::menuGrupo(QMenu *menu, const QVector<qint64> &ids)
         sub->addAction(tr("… y %1 más (amplía el grupo)").arg(ids.size() - n))->setEnabled(false);
 }
 
-// Acciones sobre unos anillos sueltos (en un lugar fijo, sin dueño) o una
-// marcación, y la lista de todos. Los anillos de un objetivo o de un punto se
-// manejan desde el menú de su dueño.
+// Clic sobre una marca (la línea de un anillo o de una marcación): si son los
+// anillos de un objetivo o de un punto, el menú es el de ese elemento (ahí se
+// manejan); una marcación se puede quitar; y unos anillos sin dueño (solo vía
+// la API) tienen sus opciones y pueden darse un punto en el centro. Siempre, la
+// lista de todos.
 void Ventana::menuMarca(QMenu *menu, qint64 id)
 {
     if (const auto r = m_mapa->rangeRings(id)) {
         if (r->targetId >= 0 && m_mapa->target(r->targetId)) {
-            menuObjetivo(menu, r->targetId);     // son de un objetivo: su menú
+            menuObjetivo(menu, r->targetId);
             return;
         }
         if (r->featureId >= 0 && m_mapa->feature(r->featureId)) {
-            menuEntidad(menu, r->featureId);     // son de un punto: su menú
+            menuEntidad(menu, r->featureId);
             return;
         }
         cabecera(menu, r->name.isEmpty() ? tr("Anillos de distancia") : tr("Anillos «%1»").arg(r->name));
         opcionesAnillos(menu, id);
-        // Sin dueño: un punto en su centro (radar, observador) se los queda y
-        // pasan a ser un solo elemento.
         menu->addSeparator();
         QAction *conPunto = menu->addAction(tr("Poner un punto en su centro (radar, observador)..."));
-        conPunto->setEnabled(capaEditable(m_mapa->activeFeatureLayer()));
+        conPunto->setEnabled(!capaParaPuntos().isEmpty());
         connect(conPunto, &QAction::triggered, this, [this, c = r->center] { nuevoPunto(c); });
-    } else if (m_mapa->bearingLine(id)) {
+    } else if (const auto l = m_mapa->bearingLine(id)) {
         double rumbo = 0.0, dist = 0.0;
+        const QString de = l->fromTarget >= 0 || l->fromFeature >= 0
+            ? nombreExtremo(l->fromTarget, l->fromFeature) : formatCoordinate(l->from, m_formatoCoord);
+        const QString a = l->toTarget >= 0 || l->toFeature >= 0
+            ? nombreExtremo(l->toTarget, l->toFeature) : formatCoordinate(l->to, m_formatoCoord);
         cabecera(menu, m_mapa->bearingLineMeasure(id, &rumbo, &dist)
-                           ? tr("Marcación %1° · %2").arg(qRound(rumbo) % 360, 3, 10, QLatin1Char('0'))
-                                                    .arg(textoDistancia(dist))
-                           : tr("Marcación"));
+                           ? tr("Marcación %1 → %2 · %3° · %4").arg(de, a)
+                                 .arg(qRound(rumbo) % 360, 3, 10, QLatin1Char('0')).arg(textoDistancia(dist))
+                           : tr("Marcación %1 → %2").arg(de, a));
         connect(menu->addAction(tr("Quitar la marcación")), &QAction::triggered, this,
                 [this, id] { m_mapa->removeRangeMark(id); });
     }
@@ -372,28 +439,42 @@ void Ventana::menuMarca(QMenu *menu, qint64 id)
             this, &Ventana::gestionarMarcas);
 }
 
-// Acciones sobre una entidad: propiedades, encuadrar, editar, medir, vigilar
-// como zona (polígonos); en un punto, sus anillos y la elevación; y borrar
-// (si su capa se edita).
+// Acciones sobre una entidad. Un PUNTO del usuario (radar, observador…) es un
+// elemento como un objetivo: sus anillos, sus marcaciones, la elevación desde
+// él y borrarlo (con lo que cuelga de él). Una zona o una línea: encuadrar,
+// editar vértices, medir y vigilar como zona. Los pines A/B y los resultados de
+// Elevación tienen un menú propio, más corto.
 void Ventana::menuEntidad(QMenu *menu, qint64 id)
 {
     const auto f = m_mapa->feature(id);
     if (!f)
         return;
-    // Los pines A/B de la pestaña Elevación no son entidades del usuario: su
-    // menú es el de la elevación (se mueven arrastrándolos o desde la pestaña).
+    const QString nombre = f->name.isEmpty() ? tr("Entidad %1").arg(id) : f->name;
+
+    // Pines A/B de la pestaña Elevación: no son entidades del usuario (se
+    // mueven arrastrándolos o desde la pestaña).
     if (f->layerId == kCapaPuntos) {
         const bool esB = f->name == tr("B");
-        cabecera(menu, esB ? tr("Punto B (visión A→B)") : tr("Punto A (elevación)"));
+        cabecera(menu, esB ? tr("Punto B (visión A→B)") : tr("Punto A (observador del análisis)"));
         connect(menu->addAction(tr("Ver la pestaña Elevación")), &QAction::triggered, this,
                 [this, esB] { irAElevacion(esB ? 1 : -1); });
-        submenuElevacion(menu, f->position());
+        submenuElevacion(menu, f->position(), false);
         return;
     }
-    const bool editable = capaEditable(f->layerId);
-    const QString nombre = f->name.isEmpty() ? tr("Entidad %1").arg(id) : f->name;
-    cabecera(menu, f->type.isEmpty() ? nombre : tr("%1 (%2)").arg(nombre, f->type));
+    // Resultados de un análisis (picos, visión, viewshed): se pueden centrar y
+    // analizar desde ellos, pero no son del usuario.
+    if (f->layerId.startsWith(QLatin1String("elev_"))) {
+        cabecera(menu, nombre);
+        if (f->kind == GeometryKind::Point) {
+            connect(menu->addAction(tr("Centrar")), &QAction::triggered, this,
+                    [this, pos = f->position()] { m_mapa->setCenter(pos); });
+            submenuElevacion(menu, f->position(), false);
+        }
+        return;
+    }
 
+    const bool editable = capaEditable(f->layerId);
+    cabecera(menu, f->type.isEmpty() ? nombre : tr("%1 (%2)").arg(nombre, f->type));
     connect(menu->addAction(tr("Seleccionar y ver propiedades")), &QAction::triggered, this, [this, id] {
         m_mapa->selectFeature(id);
         if (m_dock)
@@ -417,19 +498,19 @@ void Ventana::menuEntidad(QMenu *menu, qint64 id)
                 if (recuadro(todos, &no, &se))
                     m_mapa->fitBounds(no, se);
             });
-    if (editable && f->kind != GeometryKind::Point)
-        connect(menu->addAction(tr("Editar vértices")), &QAction::triggered, this, [this, id] {
-            m_mapa->selectFeature(id);
-            if (m_accEditar)
-                m_accEditar->trigger();
-        });
 
     if (f->kind == GeometryKind::Point) {
-        // Un punto puede ser un radar u observador: sus anillos y su elevación.
         menu->addSeparator();
         submenuAnillos(menu, -1, id);
-        submenuElevacion(menu, f->position());
+        submenuMarcacion(menu, -1, id);
+        submenuElevacion(menu, f->position(), false);
     } else {
+        if (editable)
+            connect(menu->addAction(tr("Editar vértices")), &QAction::triggered, this, [this, id] {
+                m_mapa->selectFeature(id);
+                if (m_accEditar)
+                    m_accEditar->trigger();
+            });
         // Medida rápida: superficie y perímetro, o longitud.
         connect(menu->addAction(tr("Medir")), &QAction::triggered, this, [this, id] {
             const auto e = m_mapa->feature(id);
@@ -447,28 +528,33 @@ void Ventana::menuEntidad(QMenu *menu, qint64 id)
             statusBar()->showMessage(poli ? tr("Superficie %1 · perímetro %2").arg(sup, textoDistancia(largo))
                                           : tr("Longitud %1").arg(textoDistancia(largo)), 10000);
         });
-    }
-    if (f->kind == GeometryKind::Polygon) {
-        const bool vigilada = m_mapa->isZoneWatched(id);
-        connect(menu->addAction(vigilada ? tr("Dejar de vigilar la zona") : tr("Vigilar como zona")),
-                &QAction::triggered, this, [this, id] {
-                    m_mapa->selectFeature(id);
-                    alternarVigilancia();
-                });
+        if (f->kind == GeometryKind::Polygon) {
+            const bool vigilada = m_mapa->isZoneWatched(id);
+            connect(menu->addAction(vigilada ? tr("Dejar de vigilar la zona") : tr("Vigilar como zona")),
+                    &QAction::triggered, this, [this, id] {
+                        m_mapa->selectFeature(id);
+                        alternarVigilancia();
+                    });
+        }
     }
     if (editable) {
         menu->addSeparator();
-        connect(menu->addAction(tr("Borrar")), &QAction::triggered, this, [this, id] {
-            m_mapa->selectFeature(id);
-            borrarSeleccion();                   // sus anillos se quitan al borrarla
-        });
+        connect(menu->addAction(f->kind == GeometryKind::Point ? tr("Borrar el punto (con sus anillos y marcaciones)")
+                                                               : tr("Borrar")),
+                &QAction::triggered, this, [this, id] {
+                    m_mapa->selectFeature(id);
+                    borrarSeleccion();     // lo que cuelga de un punto se quita al borrarlo
+                });
     }
 }
 
-// Acciones sobre un lugar del mapa: copiar sus coordenadas, centrar, anillos
-// (salvo que ya haya unos centrados ahí: \a enAnillos), marcación, un punto
-// nuevo y la elevación. La cabecera dice la coordenada y, si hay DEM, la cota.
-void Ventana::menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enAnillos)
+// Acciones sobre un lugar del mapa: copiar sus coordenadas, centrar y, si no
+// hay ya un objetivo o un punto (\a enElemento), crear un punto (con o sin
+// anillos) y analizar la elevación. NO hay anillos ni marcación «aquí»: unos
+// anillos necesitan un dueño y una marcación, dos elementos; para un radar u
+// observador se crea primero el punto. La cabecera dice la coordenada y, si hay
+// DEM, la cota.
+void Ventana::menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enElemento)
 {
     if (!p.isValid())
         return;
@@ -494,60 +580,32 @@ void Ventana::menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enAnillos)
     }
     connect(menu->addAction(tr("Centrar aquí")), &QAction::triggered, this,
             [this, p] { m_mapa->setCenter(p); });
-    menu->addSeparator();
 
-    // Un punto con nombre: lo recomendable para un radar u observador, que
-    // luego tiene sus anillos y su elevación desde su propio menú.
-    const bool editable = capaEditable(m_mapa->activeFeatureLayer());
-    QAction *nuevo = menu->addAction(editable ? tr("Nuevo punto aquí...")
-                                              : tr("Nuevo punto aquí (la capa activa no se edita)"));
-    nuevo->setEnabled(editable);
-    connect(nuevo, &QAction::triggered, this, [this, p] { nuevoPunto(p); });
-    if (!enAnillos) {
-        QMenu *sub = menu->addMenu(tr("Anillos de distancia"));
-        connect(sub->addAction(tr("Poner aquí con los últimos ajustes")), &QAction::triggered, this,
-                [this, p] {
-                    RangeRings r = m_anillos;
-                    r.targetId = -1;
-                    r.featureId = -1;
-                    r.center = p;
-                    r.name.clear();
-                    m_mapa->addRangeRings(r);
-                });
-        connect(sub->addAction(tr("Poner aquí eligiendo las opciones...")), &QAction::triggered, this,
-                [this, p] {
-                    RangeRings r;
-                    r.center = p;
-                    ponerAnillos(r);
-                });
+    if (!enElemento) {
+        menu->addSeparator();
+        const bool hayCapa = !capaParaPuntos().isEmpty();
+        QAction *nuevo = menu->addAction(hayCapa ? tr("Nuevo punto aquí...")
+                                                 : tr("Nuevo punto aquí (no hay capa editable)"));
+        nuevo->setEnabled(hayCapa);
+        connect(nuevo, &QAction::triggered, this, [this, p] { nuevoPunto(p); });
+        QAction *conAnillos = menu->addAction(hayCapa ? tr("Nuevo punto con anillos aquí...")
+                                                      : tr("Nuevo punto con anillos aquí (no hay capa editable)"));
+        conAnillos->setEnabled(hayCapa);
+        connect(conAnillos, &QAction::triggered, this, [this, p] {
+            RangeRings r;
+            r.center = p;                  // un punto nuevo en estas coordenadas
+            ponerAnillos(r);
+        });
+        submenuElevacion(menu, p, true);
     }
-    QMenu *marc = menu->addMenu(tr("Marcación"));
-    connect(marc->addAction(tr("Desde aquí hasta otro punto u objetivo...")), &QAction::triggered,
-            this, [this, p] {
-                m_ebl = BearingLine();
-                m_ebl.from = p;
-                iniciarPickMedida(Pick::DestinoEbl,
-                                  tr("Pincha el destino de la marcación (un objetivo o un punto)…"));
-            });
-    const qint64 sel = m_mapa->selectedTarget();
-    if (sel >= 0 && m_mapa->target(sel))
-        connect(marc->addAction(tr("Desde %1 hasta aquí").arg(nombreObjetivo(sel))),
-                &QAction::triggered, this, [this, sel, p] {
-                    BearingLine l;
-                    l.fromTarget = sel;
-                    l.to = p;
-                    if (m_mapa->addBearingLine(l) < 0)
-                        statusBar()->showMessage(tr("El objetivo está justo aquí: no hay marcación"), 4000);
-                });
-    submenuElevacion(menu, p);
     if (m_mapa->activeTool() != MapTool::None) {
         menu->addSeparator();
         connect(menu->addAction(tr("Volver a navegar")), &QAction::triggered, this, &Ventana::volverANavegar);
     }
 }
 
-// Anillos SIN dueño cuyo centro está en \a p (a menos de 12 px a la escala
-// actual), o -1. Así un punto puesto ahí se queda con ellos.
+// Anillos SIN dueño (solo se crean por la API) cuyo centro está en \a p (a menos
+// de 12 px a la escala actual), o -1. Así un punto puesto ahí se queda con ellos.
 qint64 Ventana::anillosSueltosEn(const QGeoCoordinate &p) const
 {
     const double tolerancia = 12.0 * std::max(1.0, m_mapa->metersPerPixel());
@@ -566,29 +624,21 @@ qint64 Ventana::anillosSueltosEn(const QGeoCoordinate &p) const
     return mejor;
 }
 
-// Crea un punto con nombre en \a p en la capa activa. Si ahí está el centro de
-// unos anillos sueltos, el punto se pone EXACTAMENTE en ese centro y pasa a
-// ser su dueño (los anillos lo siguen y son un solo elemento con él); si no
-// se le da nombre, toma el de los anillos.
+// Crea un punto con nombre en \a p (capa activa, o la primera editable). Si ahí
+// está el centro de unos anillos sueltos, el punto se pone EXACTAMENTE en ese
+// centro y pasa a ser su dueño: es un solo elemento. Si no se da nombre, toma
+// el de los anillos o «Punto N».
 void Ventana::nuevoPunto(const QGeoCoordinate &p)
 {
     const qint64 anillos = anillosSueltosEn(p);
     const auto r = anillos >= 0 ? m_mapa->rangeRings(anillos) : std::nullopt;
     bool ok = false;
     const QString nombre = QInputDialog::getText(this, tr("Nuevo punto"),
-        r ? tr("Nombre (se queda con los anillos de este centro):") : tr("Nombre:"),
+        r ? tr("Nombre (se queda con los anillos de este centro):") : tr("Nombre (radar, observador…):"),
         QLineEdit::Normal, r ? r->name : QString(), &ok);
     if (!ok)
         return;
-    MapFeature f;
-    f.kind = GeometryKind::Point;
-    f.layerId = m_mapa->activeFeatureLayer();
-    f.name = nombre.trimmed();
-    f.geometry = { r ? r->center : p };
-    f.style = estiloActual();
-    if (r)
-        f.style.labelVisible = true;       // el nombre que rotulaban los anillos lo rotula él
-    const qint64 id = m_mapa->addFeature(f);
+    const qint64 id = crearPunto(r ? r->center : p, nombre);
     if (id < 0)
         return;
     if (r) {
@@ -596,8 +646,6 @@ void Ventana::nuevoPunto(const QGeoCoordinate &p)
         suyos.featureId = id;
         suyos.name.clear();                // el rótulo ya lo pone el punto
         m_mapa->updateRangeRings(anillos, suyos);
-        statusBar()->showMessage(tr("El punto «%1» se queda con los anillos").arg(f.name), 4000);
+        statusBar()->showMessage(tr("El punto «%1» se queda con los anillos").arg(nombrePunto(id)), 4000);
     }
-    marcarSucio();
-    m_mapa->selectFeature(id);
 }

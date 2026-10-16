@@ -57,8 +57,8 @@ void RangeLayer::setFeatureResolver(std::function<QGeoCoordinate(qint64)> resolv
     m_featurePos = std::move(resolver);
 }
 
-// Si algun anillo cuelga de esa entidad (p. ej. se esta arrastrando), se
-// repinta la capa para que la siga.
+// Si algun anillo o marcacion cuelga de esa entidad (p. ej. se esta
+// arrastrando), se repinta la capa para que la siga.
 void RangeLayer::featureChanged(qint64 id)
 {
     for (const RangeRings &r : m_rings) {
@@ -67,6 +67,22 @@ void RangeLayer::featureChanged(qint64 id)
             return;
         }
     }
+    for (const BearingLine &l : m_bearings) {
+        if ((l.fromTarget < 0 && l.fromFeature == id) || (l.toTarget < 0 && l.toFeature == id)) {
+            repintar();
+            return;
+        }
+    }
+}
+
+// Extremo de una marcacion: su objetivo, su entidad punto o el punto fijo.
+QGeoCoordinate RangeLayer::extremo(const QGeoCoordinate &fijo, qint64 targetId, qint64 featureId) const
+{
+    if (targetId >= 0)
+        return resolve(QGeoCoordinate(), targetId);
+    if (featureId >= 0)
+        return m_featurePos ? m_featurePos(featureId) : QGeoCoordinate();
+    return fijo;
 }
 
 // Centro actual de unos anillos: su objetivo, su entidad o el punto fijo.
@@ -111,8 +127,10 @@ bool RangeLayer::degenerada(const BearingLine &l)
 {
     if (l.fromTarget >= 0 && l.fromTarget == l.toTarget)
         return true;
-    return l.fromTarget < 0 && l.toTarget < 0 && l.from.isValid() && l.to.isValid()
-        && l.from.distanceTo(l.to) < 1.0;
+    if (l.fromTarget < 0 && l.toTarget < 0 && l.fromFeature >= 0 && l.fromFeature == l.toFeature)
+        return true;
+    return l.fromTarget < 0 && l.toTarget < 0 && l.fromFeature < 0 && l.toFeature < 0
+        && l.from.isValid() && l.to.isValid() && l.from.distanceTo(l.to) < 1.0;
 }
 
 // Alta de una marcacion; devuelve su id, o -1 si no tiene longitud (origen y
@@ -333,12 +351,12 @@ QGeoCoordinate RangeLayer::resolve(const QGeoCoordinate &fixed, qint64 targetId)
 // el punto a lengthMeters con el rumbo dado.
 bool RangeLayer::ends(const BearingLine &l, QGeoCoordinate *from, QGeoCoordinate *to) const
 {
-    const QGeoCoordinate a = resolve(l.from, l.fromTarget);
+    const QGeoCoordinate a = extremo(l.from, l.fromTarget, l.fromFeature);
     if (!a.isValid())
         return false;
     QGeoCoordinate b;
-    if (l.toTarget >= 0 || l.to.isValid())
-        b = resolve(l.to, l.toTarget);
+    if (l.toTarget >= 0 || l.toFeature >= 0 || l.to.isValid())
+        b = extremo(l.to, l.toTarget, l.toFeature);
     else if (std::isfinite(l.bearingDeg) && l.lengthMeters > 0.0)
         b = a.atDistanceAndAzimuth(std::min(l.lengthMeters, kMaxRadio), l.bearingDeg);
     if (!b.isValid())

@@ -406,14 +406,153 @@ QString Ventana::textoProximidad(qint64 a, qint64 b, double cpa, double tcpa) co
         .arg(qRound(tcpa / 60.0));
 }
 
-// Anillos de distancia. El centro es un objetivo (lo siguen), una entidad
-// punto (un radar u observador colocado en el mapa: la siguen y su símbolo
-// queda a la vista), un punto que se pinche o unas coordenadas escritas a
-// mano. Cada objetivo o entidad tiene COMO MUCHO unos anillos: si ya los
-// tiene, se cambian en vez de añadir otros encima. \a propuesta dice el
-// centro sugerido (su targetId, featureId o center); con \a editar >= 0 se
-// cambian esos anillos (el centro no se toca). La separación es automática
-// (se ajusta al zoom) o fija, en m, km o NM. Se recuerdan los últimos ajustes.
+// ======================= Elementos, anillos y marcaciones =======================
+// Regla de la demo: los anillos y las marcaciones cuelgan SIEMPRE de un
+// elemento real: un objetivo móvil o un punto (entidad punto del usuario, p. ej.
+// un radar u observador). Un punto nuevo con anillos es un solo elemento. Así no
+// hay anillos «sueltos» que no coincidan con nada, ni marcaciones hacia un lugar
+// cualquiera del mapa.
+
+// Capa donde crear los puntos del usuario: la activa si se puede editar, y si
+// no la primera editable. Las capas de resultados de Elevación (elev_*) no
+// cuentan. Vacío si no hay ninguna.
+QString Ventana::capaParaPuntos() const
+{
+    const auto valida = [](const LayerInfo &c) { return c.editable && !c.id.startsWith(QLatin1String("elev_")); };
+    const QString activa = m_mapa->activeFeatureLayer();
+    for (const LayerInfo &c : m_mapa->featureLayers())
+        if (c.id == activa && valida(c))
+            return activa;
+    for (const LayerInfo &c : m_mapa->featureLayers())
+        if (valida(c))
+            return c.id;
+    return QString();
+}
+
+// Crea un punto con nombre en \a p (el nombre por defecto es «Punto N») y lo
+// deja seleccionado. Devuelve su id, o -1 si no hay capa donde ponerlo.
+qint64 Ventana::crearPunto(const QGeoCoordinate &p, const QString &nombre)
+{
+    const QString capa = capaParaPuntos();
+    if (capa.isEmpty()) {
+        statusBar()->showMessage(tr("No hay ninguna capa editable donde poner el punto"), 5000);
+        return -1;
+    }
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.layerId = capa;
+    f.name = nombre.trimmed().isEmpty() ? tr("Punto %1").arg(++m_puntosNuevos) : nombre.trimmed();
+    f.geometry = { p };
+    f.style = estiloActual();
+    f.style.labelVisible = true;
+    const qint64 id = m_mapa->addFeature(f);
+    if (id >= 0) {
+        marcarSucio();
+        m_mapa->selectFeature(id);
+    }
+    return id;
+}
+
+// Punto del usuario seleccionado (no los pines ni los resultados de Elevación), o -1.
+qint64 Ventana::puntoSeleccionado() const
+{
+    const qint64 id = m_mapa->selectedFeature();
+    const auto f = id >= 0 ? m_mapa->feature(id) : std::nullopt;
+    return f && f->kind == GeometryKind::Point && !f->layerId.startsWith(QLatin1String("elev_")) ? id : -1;
+}
+
+// Nombre de un punto para menús y mensajes.
+QString Ventana::nombrePunto(qint64 id) const
+{
+    const auto f = m_mapa->feature(id);
+    return f && !f->name.isEmpty() ? f->name : tr("punto %1").arg(id);
+}
+
+// Nombre de un extremo: su objetivo o su punto.
+QString Ventana::nombreExtremo(qint64 targetId, qint64 featureId) const
+{
+    return targetId >= 0 ? nombreObjetivo(targetId) : nombrePunto(featureId);
+}
+
+// Posición actual de un extremo (su objetivo o su punto; inválida si ya no existe).
+QGeoCoordinate Ventana::posicionDe(qint64 targetId, qint64 featureId) const
+{
+    if (targetId >= 0) {
+        const auto t = m_mapa->target(targetId);
+        return t ? t->position : QGeoCoordinate();
+    }
+    const auto f = featureId >= 0 ? m_mapa->feature(featureId) : std::nullopt;
+    return f ? f->position() : QGeoCoordinate();
+}
+
+// Ids de las marcaciones que salen o llegan a un objetivo (\a targetId) o a un
+// punto (\a featureId).
+QVector<qint64> Ventana::marcacionesDe(qint64 targetId, qint64 featureId) const
+{
+    QVector<qint64> ids;
+    for (const qint64 id : m_mapa->rangeMarks()) {
+        const auto l = m_mapa->bearingLine(id);
+        if (!l)
+            continue;
+        const bool desde = targetId >= 0 ? l->fromTarget == targetId
+                                         : (l->fromTarget < 0 && featureId >= 0 && l->fromFeature == featureId);
+        const bool hasta = targetId >= 0 ? l->toTarget == targetId
+                                         : (l->toTarget < 0 && featureId >= 0 && l->toFeature == featureId);
+        if (desde || hasta)
+            ids.append(id);
+    }
+    return ids;
+}
+
+// Quita los anillos y las marcaciones que cuelgan de un objetivo o de un punto
+// (cuando éste desaparece, se van con él).
+void Ventana::quitarMarcasDe(qint64 targetId, qint64 featureId)
+{
+    const qint64 anillos = anillosDe(targetId, featureId);
+    if (anillos >= 0)
+        m_mapa->removeRangeMark(anillos);
+    for (const qint64 id : marcacionesDe(targetId, featureId))
+        m_mapa->removeRangeMark(id);
+}
+
+// Marcación entre dos elementos (cada uno, un objetivo o un punto). Rechaza los
+// extremos repetidos. Devuelve su id o -1.
+qint64 Ventana::ponerMarcacionEntre(qint64 desdeT, qint64 desdeF, qint64 hastaT, qint64 hastaF)
+{
+    BearingLine l;
+    l.fromTarget = desdeT;
+    l.fromFeature = desdeT >= 0 ? -1 : desdeF;
+    l.toTarget = hastaT;
+    l.toFeature = hastaT >= 0 ? -1 : hastaF;
+    // Una marcación idéntica (mismo origen y mismo destino) no aporta nada.
+    for (const qint64 otra : marcacionesDe(desdeT, desdeF)) {
+        const auto e = m_mapa->bearingLine(otra);
+        if (e && e->fromTarget == l.fromTarget && e->fromFeature == l.fromFeature
+            && e->toTarget == l.toTarget && e->toFeature == l.toFeature) {
+            statusBar()->showMessage(tr("Ya hay una marcación de %1 a %2")
+                .arg(nombreExtremo(desdeT, desdeF), nombreExtremo(hastaT, hastaF)), 4000);
+            return -1;
+        }
+    }
+    const qint64 id = m_mapa->addBearingLine(l);
+    double rumbo = 0.0, dist = 0.0;
+    if (id >= 0 && m_mapa->bearingLineMeasure(id, &rumbo, &dist))
+        statusBar()->showMessage(tr("Marcación de %1 a %2: %3° · %4")
+            .arg(nombreExtremo(desdeT, desdeF), nombreExtremo(hastaT, hastaF))
+            .arg(qRound(rumbo) % 360, 3, 10, QLatin1Char('0')).arg(textoDistancia(dist)), 6000);
+    else if (id < 0)
+        statusBar()->showMessage(tr("Una marcación necesita dos elementos distintos"), 4000);
+    return id;
+}
+
+// Anillos de distancia. El centro es SIEMPRE un elemento: un objetivo, un punto
+// existente o un punto nuevo (que se crea con su nombre, en unas coordenadas o
+// donde se pinche). Cada objetivo o punto tiene COMO MUCHO unos anillos: si ya
+// los tiene, se cambian en vez de añadir otros. \a propuesta dice el centro
+// sugerido (su targetId, su featureId, o un center para un punto nuevo); con
+// \a editar >= 0 se cambian esos anillos (el centro no se toca). La separación
+// es automática (se ajusta al zoom) o fija, en m, km o NM. Se recuerdan los
+// últimos ajustes.
 void Ventana::ponerAnillos(const RangeRings &propuesta, qint64 editar)
 {
     const auto existentes = editar >= 0 ? m_mapa->rangeRings(editar) : std::nullopt;
@@ -425,72 +564,58 @@ void Ventana::ponerAnillos(const RangeRings &propuesta, qint64 editar)
     dlg.setWindowTitle(existentes ? tr("Cambiar anillos de distancia") : tr("Anillos de distancia"));
     auto *form = new QFormLayout(&dlg);
 
-    // Candidatos a centro con dueño: el propuesto o, si no, lo seleccionado.
+    // Candidatos con dueño: el propuesto o, si no, lo seleccionado.
     qint64 obj = propuesta.targetId >= 0 ? propuesta.targetId : m_mapa->selectedTarget();
     if (obj >= 0 && !m_mapa->target(obj))
         obj = -1;
-    qint64 ent = propuesta.featureId >= 0 ? propuesta.featureId : m_mapa->selectedFeature();
-    const auto fEnt = ent >= 0 ? m_mapa->feature(ent) : std::nullopt;
-    if (!fEnt || fEnt->kind != GeometryKind::Point)
+    qint64 ent = propuesta.featureId >= 0 ? propuesta.featureId : puntoSeleccionado();
+    if (ent >= 0 && !m_mapa->feature(ent))
         ent = -1;
-    const QString nomObj = obj >= 0 ? nombreObjetivo(obj) : QString();
-    const QString nomEnt = ent >= 0 ? (fEnt->name.isEmpty() ? tr("entidad %1").arg(ent) : fEnt->name)
-                                    : QString();
 
-    auto *nombre = new QLineEdit(base.name, &dlg);
-    nombre->setPlaceholderText(tr("opcional: p. ej. «Radar Mariel», «Observador 2»"));
-
-    QRadioButton *enObjetivo = nullptr, *enEntidad = nullptr, *enPunto = nullptr, *enCoords = nullptr;
+    auto *nombre = new QLineEdit(&dlg);
+    nombre->setPlaceholderText(tr("p. ej. «Radar Mariel», «Observador 2»"));
+    QRadioButton *enObjetivo = nullptr, *enEntidad = nullptr, *enCoords = nullptr, *enPunto = nullptr;
     QLineEdit *coords = nullptr;
     if (existentes) {
-        // Cambiar: el centro se queda donde está.
-        QString donde = base.targetId >= 0 ? tr("el objetivo %1").arg(nombreObjetivo(base.targetId))
-                      : base.featureId >= 0 ? tr("el punto «%1»").arg(
-                            m_mapa->feature(base.featureId) ? m_mapa->feature(base.featureId)->name
-                                                            : QString::number(base.featureId))
-                      : formatCoordinate(base.center, m_formatoCoord);
+        const QString donde = base.targetId >= 0 ? tr("el objetivo %1").arg(nombreObjetivo(base.targetId))
+                            : base.featureId >= 0 ? tr("el punto «%1»").arg(nombrePunto(base.featureId))
+                                                  : formatCoordinate(base.center, m_formatoCoord);
         auto *lbl = new QLabel(tr("Centro: %1").arg(donde), &dlg);
         lbl->setWordWrap(true);
         form->addRow(lbl);
-        if (base.targetId < 0 && base.featureId < 0)
-            form->addRow(tr("Nombre:"), nombre);
     } else {
-        form->addRow(tr("Nombre:"), nombre);
         auto *cajaCentro = new QGroupBox(tr("Centro"), &dlg);
         auto *vc = new QVBoxLayout(cajaCentro);
-        enObjetivo = new QRadioButton(obj >= 0
-            ? tr("El objetivo %1 (los anillos lo siguen)").arg(nomObj)
-            : tr("Un objetivo (selecciona uno antes)"), cajaCentro);
+        enObjetivo = new QRadioButton(obj >= 0 ? tr("El objetivo %1 (los anillos lo siguen)").arg(nombreObjetivo(obj))
+                                               : tr("Un objetivo (selecciona uno antes)"), cajaCentro);
         enObjetivo->setEnabled(obj >= 0);
-        enEntidad = new QRadioButton(ent >= 0
-            ? tr("El punto «%1» (radar, observador…)").arg(nomEnt)
-            : tr("Un punto del mapa (selecciona uno antes)"), cajaCentro);
+        enEntidad = new QRadioButton(ent >= 0 ? tr("El punto «%1» (los anillos lo siguen)").arg(nombrePunto(ent))
+                                              : tr("Un punto existente (selecciona uno antes)"), cajaCentro);
         enEntidad->setEnabled(ent >= 0);
-        enPunto = new QRadioButton(tr("Un lugar que pinche en el mapa"), cajaCentro);
-        enCoords = new QRadioButton(tr("Estas coordenadas:"), cajaCentro);
+        enCoords = new QRadioButton(tr("Un punto nuevo en estas coordenadas:"), cajaCentro);
         coords = new QLineEdit(formatCoordinate(propuesta.center.isValid() ? propuesta.center
                                                                            : m_mapa->center(),
                                                 CoordinateFormat::Decimal), cajaCentro);
         coords->setToolTip(tr("Cualquier formato: 23.1136, -82.3666 · 23°06'49\"N 82°22'00\"W · "
                               "17Q LF 60056 56750 (UTM o MGRS)"));
-        for (QWidget *wdg : std::initializer_list<QWidget *>{ enObjetivo, enEntidad, enPunto, enCoords, coords })
+        enPunto = new QRadioButton(tr("Un punto nuevo donde pinche en el mapa"), cajaCentro);
+        for (QWidget *wdg : std::initializer_list<QWidget *>{ enObjetivo, enEntidad, enCoords, coords, enPunto })
             vc->addWidget(wdg);
-        // Lo propuesto manda; si no se propuso nada, lo seleccionado.
         QRadioButton *marcado = propuesta.targetId >= 0 && obj >= 0 ? enObjetivo
                               : propuesta.featureId >= 0 && ent >= 0 ? enEntidad
                               : propuesta.center.isValid() ? enCoords
-                              : obj >= 0 ? enObjetivo
-                              : ent >= 0 ? enEntidad : enPunto;
+                              : obj >= 0 ? enObjetivo : ent >= 0 ? enEntidad : enPunto;
         marcado->setChecked(true);
         coords->setEnabled(enCoords->isChecked());
         connect(enCoords, &QRadioButton::toggled, coords, &QLineEdit::setEnabled);
-        // Con dueño, el nombre es el suyo: el campo no hace falta.
-        const auto ajustarNombre = [nombre, enObjetivo, enEntidad] {
-            nombre->setEnabled(!enObjetivo->isChecked() && !enEntidad->isChecked());
+        // El nombre solo se pide para un punto nuevo: los demás ya tienen el suyo.
+        const auto ajustarNombre = [nombre, enCoords, enPunto] {
+            nombre->setEnabled(enCoords->isChecked() || enPunto->isChecked());
         };
-        connect(enObjetivo, &QRadioButton::toggled, &dlg, ajustarNombre);
-        connect(enEntidad, &QRadioButton::toggled, &dlg, ajustarNombre);
+        connect(enCoords, &QRadioButton::toggled, &dlg, ajustarNombre);
+        connect(enPunto, &QRadioButton::toggled, &dlg, ajustarNombre);
         ajustarNombre();
+        form->addRow(tr("Nombre del punto nuevo:"), nombre);
         form->addRow(cajaCentro);
     }
 
@@ -575,6 +700,7 @@ void Ventana::ponerAnillos(const RangeRings &propuesta, qint64 editar)
     r.count = num->value();
     r.spokeEveryDeg = radiales->currentData().toInt();
     r.color = color;
+    r.name.clear();                      // el rótulo lo pone el punto o el objetivo
     m_anillosUnidad = unidad->currentIndex();
     m_anillos.spacingMeters = r.spacingMeters;
     m_anillos.count = r.count;
@@ -582,35 +708,44 @@ void Ventana::ponerAnillos(const RangeRings &propuesta, qint64 editar)
     m_anillos.color = r.color;
 
     if (existentes) {
-        if (r.targetId < 0 && r.featureId < 0)
-            r.name = nombre->text().trimmed();
         m_mapa->updateRangeRings(editar, r);
         statusBar()->showMessage(tr("Anillos cambiados"), 3000);
         return;
     }
     r.targetId = -1;
     r.featureId = -1;
-    r.name.clear();
     if (enObjetivo->isChecked()) {
         r.targetId = obj;
-        ponerAnillosA(r, tr("el objetivo %1").arg(nomObj));
+        ponerAnillosA(r, tr("el objetivo %1").arg(nombreObjetivo(obj)));
     } else if (enEntidad->isChecked()) {
         r.featureId = ent;
-        ponerAnillosA(r, tr("el punto «%1»").arg(nomEnt));
-    } else if (enCoords->isChecked() && puntoEn(fijo) >= 0) {
-        // Esas coordenadas son las de un punto que ya existe: los anillos son suyos.
-        r.featureId = puntoEn(fijo);
-        ponerAnillosA(r, tr("el punto"));
+        ponerAnillosA(r, tr("el punto «%1»").arg(nombrePunto(ent)));
     } else if (enCoords->isChecked()) {
-        r.center = fijo;
-        r.name = nombre->text().trimmed();
-        m_mapa->addRangeRings(r);
+        ponerAnillosEnLugar(r, fijo, nombre->text());
         m_mapa->setCenter(fijo);
-        statusBar()->showMessage(tr("Anillos en %1").arg(formatCoordinate(fijo, m_formatoCoord)), 4000);
     } else {
-        m_anillos.name = nombre->text().trimmed();
-        iniciarPickMedida(Pick::Anillos, tr("Pincha el centro de los anillos…"));
+        m_nombrePuntoNuevo = nombre->text();
+        iniciarPickMedida(Pick::Anillos, tr("Pincha el centro de los anillos (un objetivo, un punto o un lugar)…"));
     }
+}
+
+// Anillos en un lugar del mapa: si ahí hay un objetivo o un punto, son suyos; si
+// no, se crea un punto nuevo (con \a nombre, o «Punto N») y los anillos son suyos.
+void Ventana::ponerAnillosEnLugar(RangeRings r, const QGeoCoordinate &p, const QString &nombre)
+{
+    r.name.clear();
+    const qint64 obj = objetivoCerca(p);
+    const qint64 pto = obj >= 0 ? -1 : puntoEn(p);
+    if (obj >= 0) {
+        r.targetId = obj;
+        r.featureId = -1;
+        ponerAnillosA(r, tr("el objetivo %1").arg(nombreObjetivo(obj)));
+        return;
+    }
+    r.targetId = -1;
+    r.featureId = pto >= 0 ? pto : crearPunto(p, nombre);
+    if (r.featureId >= 0)
+        ponerAnillosA(r, tr("el punto «%1»").arg(nombrePunto(r.featureId)));
 }
 
 // Pone (o cambia, si ya los tiene) los anillos de un objetivo o de un punto:
@@ -623,7 +758,7 @@ void Ventana::ponerAnillosA(const RangeRings &r, const QString &quien)
         statusBar()->showMessage(tr("Se cambian los anillos que ya tenía %1").arg(quien), 4000);
     } else {
         m_mapa->addRangeRings(r);
-        statusBar()->showMessage(tr("Anillos en %1 (lo siguen)").arg(quien), 4000);
+        statusBar()->showMessage(tr("Anillos en %1 (los sigue)").arg(quien), 4000);
     }
 }
 
@@ -680,23 +815,28 @@ void Ventana::gestionarMarcas()
         for (const qint64 id : m_mapa->rangeMarks()) {
             QString txt;
             if (const auto r = m_mapa->rangeRings(id)) {
-                const auto fe = r->featureId >= 0 ? m_mapa->feature(r->featureId) : std::nullopt;
                 const QString centro = r->targetId >= 0 ? tr("objetivo %1").arg(nombreObjetivo(r->targetId))
-                    : fe ? tr("punto «%1»").arg(fe->name.isEmpty() ? QString::number(r->featureId) : fe->name)
-                         : formatCoordinate(r->center, m_formatoCoord);
+                    : r->featureId >= 0 ? tr("punto «%1»").arg(nombrePunto(r->featureId))
+                                        : formatCoordinate(r->center, m_formatoCoord);
                 const double paso = m_mapa->rangeRingsSpacing(id);
                 const QString sep = r->spacingMeters > 0.0
                     ? textoDistancia(r->spacingMeters)
                     : tr("automática (ahora %1)").arg(textoDistancia(paso));
-                txt = tr("◎ %1 · %2 anillos cada %3 · centro: %4")
-                          .arg(r->name.isEmpty() ? tr("Anillos") : r->name)
-                          .arg(r->count).arg(sep, centro);
+                txt = tr("◎ Anillos de %1 · %2 cada %3")
+                          .arg(r->targetId >= 0 || r->featureId >= 0 ? centro : r->name.isEmpty() ? centro : r->name)
+                          .arg(r->count).arg(sep);
             } else if (m_mapa->bearingLine(id)) {
+                const auto l = m_mapa->bearingLine(id);
+                const QString de = l->fromTarget >= 0 || l->fromFeature >= 0
+                    ? nombreExtremo(l->fromTarget, l->fromFeature) : formatCoordinate(l->from, m_formatoCoord);
+                const QString a = l->toTarget >= 0 || l->toFeature >= 0
+                    ? nombreExtremo(l->toTarget, l->toFeature) : l->to.isValid()
+                        ? formatCoordinate(l->to, m_formatoCoord) : tr("rumbo fijo");
                 double rumbo = 0.0, dist = 0.0;
                 txt = m_mapa->bearingLineMeasure(id, &rumbo, &dist)
-                    ? tr("↗ Marcación %1° · %2").arg(qRound(rumbo) % 360, 3, 10, QLatin1Char('0'))
-                                                .arg(textoDistancia(dist))
-                    : tr("↗ Marcación (un extremo ya no existe)");
+                    ? tr("↗ Marcación %1 → %2 · %3° · %4").arg(de, a)
+                          .arg(qRound(rumbo) % 360, 3, 10, QLatin1Char('0')).arg(textoDistancia(dist))
+                    : tr("↗ Marcación %1 → %2 (un extremo ya no existe)").arg(de, a);
             }
             auto *it = new QListWidgetItem(txt, lista);
             it->setData(Qt::UserRole, id);
@@ -716,13 +856,10 @@ void Ventana::gestionarMarcas()
         const qint64 id = it->data(Qt::UserRole).toLongLong();
         QGeoCoordinate c;
         if (const auto r = m_mapa->rangeRings(id)) {
-            const auto fe = r->featureId >= 0 ? m_mapa->feature(r->featureId) : std::nullopt;
-            c = r->targetId >= 0 && m_mapa->target(r->targetId) ? m_mapa->target(r->targetId)->position
-                : fe ? fe->position() : r->center;
+            c = r->targetId >= 0 || r->featureId >= 0 ? posicionDe(r->targetId, r->featureId) : r->center;
+        } else if (const auto l = m_mapa->bearingLine(id)) {
+            c = l->fromTarget >= 0 || l->fromFeature >= 0 ? posicionDe(l->fromTarget, l->fromFeature) : l->from;
         }
-        else if (const auto l = m_mapa->bearingLine(id))
-            c = l->fromTarget >= 0 && m_mapa->target(l->fromTarget)
-                ? m_mapa->target(l->fromTarget)->position : l->from;
         if (c.isValid())
             m_mapa->setCenter(c);
     };
@@ -749,21 +886,43 @@ void Ventana::gestionarMarcas()
     dlg.exec();
 }
 
-// Marcación: desde el objetivo seleccionado (o un punto que se pinche) hasta
-// otro objetivo o punto que se pinche. Si el destino cae sobre un objetivo,
-// la línea cuelga de él y se actualiza al moverse.
+// Marcación (menú Ver): une DOS elementos, objetivos o puntos. El origen es el
+// objetivo o el punto seleccionado (el objetivo, si hay de los dos) o, si no hay
+// ninguno, el que se pinche; el destino se pincha siempre sobre otro elemento.
+// Sobre un lugar vacío no se puede: hace falta algo que medir.
 void Ventana::ponerMarcacion()
 {
     m_ebl = BearingLine();
-    const qint64 sel = m_mapa->selectedTarget();
-    if (sel >= 0) {
-        m_ebl.fromTarget = sel;
+    const qint64 selT = m_mapa->selectedTarget();
+    const qint64 selP = selT >= 0 ? -1 : puntoSeleccionado();
+    if (selT >= 0 && m_mapa->target(selT)) {
+        m_ebl.fromTarget = selT;
         iniciarPickMedida(Pick::DestinoEbl,
-            tr("Pincha el destino de la marcación (un objetivo o un punto)…"));
+            tr("Pincha el destino de la marcación: otro objetivo o un punto…"));
+    } else if (selP >= 0) {
+        m_ebl.fromFeature = selP;
+        iniciarPickMedida(Pick::DestinoEbl,
+            tr("Pincha el destino de la marcación: un objetivo u otro punto…"));
     } else {
         iniciarPickMedida(Pick::OrigenEbl,
-            tr("Pincha el origen de la marcación (un objetivo o un punto)…"));
+            tr("Pincha el origen de la marcación: un objetivo o un punto…"));
     }
+}
+
+// Cancela la captura de punto en curso (anillos, marcación, punto A o B) y
+// vuelve a Navegar. No hace nada si no hay ninguna.
+void Ventana::cancelarCaptura()
+{
+    if (m_picking == Pick::Ninguno)
+        return;
+    m_picking = Pick::Ninguno;
+    m_ebl = BearingLine();
+    m_nombrePuntoNuevo.clear();
+    m_mapa->setActiveTool(MapTool::None);
+    m_mapa->unsetCursor();
+    if (m_accNavegar)
+        m_accNavegar->setChecked(true);
+    statusBar()->showMessage(tr("Cancelado"), 2500);
 }
 
 // Arma la herramienta de elegir punto para una medida, con su aviso.
@@ -790,56 +949,45 @@ qint64 Ventana::objetivoCerca(const QGeoCoordinate &p) const
     return mejor;
 }
 
-// Punto pinchado para anillos o marcación.
+// Recibe el clic de una medida en curso (anillos o marcación).
+// - Anillos: sobre un objetivo o un punto son suyos; sobre un lugar vacío se
+//   crea ahí un punto nuevo (con el nombre pedido) y son suyos.
+// - Marcación: el origen y el destino deben ser un objetivo o un punto. Un clic
+//   en un lugar vacío, o en el mismo elemento que el origen, no vale: se avisa
+//   y se sigue esperando (la herramienta sigue armada hasta que se cancela).
 void Ventana::puntoDeMedida(const QGeoCoordinate &p)
 {
     const Pick cual = m_picking;
+    const qint64 obj = objetivoCerca(p);
+    const qint64 pto = obj >= 0 ? -1 : puntoEn(p);
+
+    if (cual != Pick::Anillos && obj < 0 && pto < 0) {
+        statusBar()->showMessage(tr("Una marcación une dos elementos: pincha sobre un objetivo o un punto "
+                                    "(Esc cancela)"), 6000);
+        return;
+    }
+    if (cual == Pick::DestinoEbl && ((obj >= 0 && obj == m_ebl.fromTarget)
+                                     || (pto >= 0 && pto == m_ebl.fromFeature))) {
+        statusBar()->showMessage(tr("El destino es el mismo elemento que el origen: pincha otro (Esc cancela)"), 6000);
+        return;
+    }
+
     m_picking = Pick::Ninguno;
     m_mapa->setActiveTool(MapTool::None);
     if (m_accNavegar)
         m_accNavegar->setChecked(true);
-    const qint64 obj = objetivoCerca(p);
     if (cual == Pick::Anillos) {
         RangeRings r = m_anillos;
-        r.featureId = -1;
-        const qint64 punto = obj >= 0 ? -1 : puntoEn(p);
-        if (obj >= 0) {                    // cayó en un objetivo: son suyos
-            r.targetId = obj;
-            r.name.clear();
-            ponerAnillosA(r, tr("el objetivo %1").arg(nombreObjetivo(obj)));
-        } else if (punto >= 0) {           // cayó en un punto del usuario: son suyos
-            r.targetId = -1;
-            r.featureId = punto;
-            r.name.clear();
-            ponerAnillosA(r, tr("el punto"));
-        } else {
-            r.targetId = -1;
-            r.center = p;
-            m_mapa->addRangeRings(r);
-            statusBar()->showMessage(tr("Anillos puestos"), 4000);
-        }
-        m_anillos.name.clear();
+        ponerAnillosEnLugar(r, p, m_nombrePuntoNuevo);
+        m_nombrePuntoNuevo.clear();
     } else if (cual == Pick::OrigenEbl) {
         m_ebl.fromTarget = obj;
-        m_ebl.from = p;
+        m_ebl.fromFeature = pto;
         iniciarPickMedida(Pick::DestinoEbl,
-            tr("Pincha el destino de la marcación (un objetivo o un punto)…"));
+            tr("Origen: %1. Pincha el destino: otro objetivo u otro punto…")
+                .arg(nombreExtremo(obj, pto)));
     } else {
-        m_ebl.toTarget = obj;
-        m_ebl.to = p;
-        const qint64 id = m_mapa->addBearingLine(m_ebl);
-        if (id < 0) {
-            // Mismo objetivo o mismo punto que el origen: no hay línea que
-            // medir. Se vuelve a pedir el destino en lugar de dibujar "000° · 0 m".
-            iniciarPickMedida(Pick::DestinoEbl,
-                tr("El destino coincide con el origen: pincha otro objetivo o punto…"));
-            return;
-        }
-        double rumbo = 0.0, dist = 0.0;
-        if (m_mapa->bearingLineMeasure(id, &rumbo, &dist))
-            statusBar()->showMessage(tr("Marcación %1° · %2")
-                .arg(qRound(rumbo) % 360, 3, 10, QLatin1Char('0'))
-                .arg(textoDistancia(dist)), 6000);
+        ponerMarcacionEntre(m_ebl.fromTarget, m_ebl.fromFeature, obj, pto);
     }
 }
 
@@ -1168,7 +1316,7 @@ qint64 Ventana::puntoEn(const QGeoCoordinate &p) const
     qint64 mejor = -1;
     double dMejor = tolerancia;
     for (const MapFeature &f : m_mapa->features()) {
-        if (f.kind != GeometryKind::Point || f.layerId == kCapaPuntos || !f.visible)
+        if (f.kind != GeometryKind::Point || f.layerId.startsWith(QLatin1String("elev_")) || !f.visible)
             continue;
         const double d = f.position().distanceTo(p);
         if (d <= dMejor) {

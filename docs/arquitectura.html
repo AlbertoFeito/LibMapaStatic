@@ -639,7 +639,7 @@ distancia real. Las marcaciones siguen la ortodrómica y miden rumbo y distancia
 («202° · 26.7 NM», en las unidades de la escala). Una marcación sin longitud (mismo
 objetivo o mismo punto en los dos extremos) se rechaza. El centro de los anillos puede ser un
 objetivo, una <b>entidad punto</b> (<code>featureId</code>: un radar u observador colocado por
-el usuario; los anillos la siguen y su símbolo queda a la vista, sin marca de centro) o un
+el usuario; las marcaciones también admiten una entidad punto en cada extremo, <code>fromFeature</code> y <code>toFeature</code>; los anillos la siguen y su símbolo queda a la vista, sin marca de centro) o un
 <b>punto fijo con nombre</b>. Con
 <code>spacingMeters = 0</code> la separación es <b>automática</b>: en cada repintado se mide
 la escala local en el centro y <code>MapDecor::niceRingSpacing</code> elige el mayor valor

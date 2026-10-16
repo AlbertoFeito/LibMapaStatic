@@ -541,6 +541,14 @@ bool Ventana::eventFilter(QObject *obj, QEvent *ev)
 
     const QEvent::Type t = ev->type();
 
+    // Esc cancela una captura de punto en curso (anillos, marcación, A o B):
+    // la herramienta de pinchar no tenía otra salida que elegir «Navegar».
+    if (t == QEvent::KeyPress && static_cast<QKeyEvent *>(ev)->key() == Qt::Key_Escape
+        && m_picking != Pick::Ninguno) {
+        cancelarCaptura();
+        return true;
+    }
+
     // El arrastre de los pines A/B ya NO se hace aquí: lo gestiona la librería
     // (entidad marcada draggable + señales featureDrag*, ver construirPanel).
 
@@ -597,10 +605,13 @@ void Ventana::onPointPicked(const QGeoCoordinate &p)
         puntoDeMedida(p);
         return;
     }
+    // Junto a un punto del usuario (radar, observador), el punto A/B es ese punto
+    // exacto: así el análisis y sus anillos parten del mismo sitio.
+    const QGeoCoordinate q = ajustarAPunto(p);
     QDoubleSpinBox *lat = (m_picking == Pick::A) ? m_latA : m_latB;
     QDoubleSpinBox *lon = (m_picking == Pick::A) ? m_lonA : m_lonB;
-    lat->setValue(p.latitude());
-    lon->setValue(p.longitude());
+    lat->setValue(q.latitude());
+    lon->setValue(q.longitude());
     const Pick cual = m_picking;
     m_picking = Pick::Ninguno;
     m_mapa->setActiveTool(MapTool::None);
@@ -608,7 +619,7 @@ void Ventana::onPointPicked(const QGeoCoordinate &p)
     statusBar()->showMessage(
         tr("Punto %1 fijado en %2, %3")
             .arg(cual == Pick::A ? tr("A") : tr("B"))
-            .arg(p.latitude(), 0, 'f', 5).arg(p.longitude(), 0, 'f', 5), 4000);
+            .arg(q.latitude(), 0, 'f', 5).arg(q.longitude(), 0, 'f', 5), 4000);
     reejecutar();     // refresca el análisis con el nuevo punto
 }
 

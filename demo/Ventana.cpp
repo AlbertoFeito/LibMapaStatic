@@ -92,12 +92,8 @@ void Ventana::conectarSenales()
 {
     // Clic derecho: menú según lo que haya debajo (objetivo, entidad...).
     connect(m_mapa, &MapWidget::contextMenuRequested, this, &Ventana::menuContextual);
-    // Los anillos de un punto se van con él (un punto, unos anillos).
-    connect(m_mapa, &MapWidget::featureRemoved, this, [this](qint64 id) {
-        const qint64 anillos = anillosDe(-1, id);
-        if (anillos >= 0)
-            m_mapa->removeRangeMark(anillos);
-    });
+    // Los anillos y las marcaciones de un punto se van con él (es un solo elemento).
+    connect(m_mapa, &MapWidget::featureRemoved, this, [this](qint64 id) { quitarMarcasDe(-1, id); });
 
     connect(m_capasBase, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int i) {

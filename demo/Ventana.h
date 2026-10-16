@@ -251,6 +251,17 @@ private:
 
     void ponerAnillos(const RangeRings &propuesta = RangeRings(), qint64 editar = -1);
     void ponerAnillosA(const RangeRings &r, const QString &quien);
+    void ponerAnillosEnLugar(RangeRings r, const QGeoCoordinate &p, const QString &nombre);
+    QString capaParaPuntos() const;
+    qint64 crearPunto(const QGeoCoordinate &p, const QString &nombre);
+    qint64 puntoSeleccionado() const;
+    QString nombrePunto(qint64 id) const;
+    QString nombreExtremo(qint64 targetId, qint64 featureId) const;
+    QGeoCoordinate posicionDe(qint64 targetId, qint64 featureId) const;
+    QVector<qint64> marcacionesDe(qint64 targetId, qint64 featureId) const;
+    void quitarMarcasDe(qint64 targetId, qint64 featureId);
+    qint64 ponerMarcacionEntre(qint64 desdeT, qint64 desdeF, qint64 hastaT, qint64 hastaF);
+    QGeoCoordinate ajustarAPunto(const QGeoCoordinate &p) const;
     qint64 anillosDe(qint64 targetId, qint64 featureId) const;
     QString nombreObjetivo(qint64 id) const;
 
@@ -263,10 +274,11 @@ private:
     void menuGrupo(QMenu *menu, const QVector<qint64> &ids);
     void menuMarca(QMenu *menu, qint64 id);
     void menuEntidad(QMenu *menu, qint64 id);
-    void menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enAnillos);
+    void menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enElemento);
+    void submenuMarcacion(QMenu *menu, qint64 targetId, qint64 featureId);
     void submenuAnillos(QMenu *menu, qint64 targetId, qint64 featureId);
     void opcionesAnillos(QMenu *menu, qint64 id);
-    void submenuElevacion(QMenu *menu, const QGeoCoordinate &p);
+    void submenuElevacion(QMenu *menu, const QGeoCoordinate &p, bool delLugar);
     void irAElevacion(int analisis);
     qint64 anillosSueltosEn(const QGeoCoordinate &p) const;
     qint64 puntoEn(const QGeoCoordinate &p) const;
@@ -274,6 +286,7 @@ private:
     QString textoDistancia(double metros) const;
 
     void iniciarPickMedida(Pick cual, const QString &aviso);
+    void cancelarCaptura();
 
     qint64 objetivoCerca(const QGeoCoordinate &p) const;
 
@@ -426,6 +439,8 @@ private:
     double m_cpaMillas = 1.0;               //!< distancia de la alerta CPA (NM)
     int m_cpaMinutos = 10;                  //!< horizonte de la alerta CPA (min)
     RangeRings m_anillos = [] { RangeRings r; r.spacingMeters = 0.0; return r; }();   //!< últimos ajustes (automáticos)
+    QString m_nombrePuntoNuevo;             //!< nombre del punto que crea el próximo clic de «anillos»
+    int m_puntosNuevos = 0;                 //!< para nombrar «Punto N»
     int m_anillosUnidad = 2;                //!< unidad de la separación fija (0 m, 1 km, 2 NM)
     BearingLine m_ebl;                      //!< marcación en curso (origen ya fijado)
     TrackPlayer *m_player = nullptr;        //!< reproducción de historiales (al abrir uno)

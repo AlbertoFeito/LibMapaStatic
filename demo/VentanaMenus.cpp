@@ -331,12 +331,12 @@ void Ventana::construirMenuYBarra()
     // Medidas que se quedan en el mapa: anillos de distancia (VRM) y
     // líneas de marcación (EBL), fijas o colgadas de objetivos.
     auto *accAnillos = mVer->addAction(tr("Anillos de distancia..."));
-    accAnillos->setStatusTip(tr("Anillos alrededor de un objetivo (lo siguen), de un punto "
-                                "que pinches o de unas coordenadas (radar, observador)."));
+    accAnillos->setStatusTip(tr("Anillos alrededor de un objetivo o de un punto (los siguen); "
+                                "en un lugar vacío se crea antes un punto (radar, observador)."));
     connect(accAnillos, &QAction::triggered, this, [this] { ponerAnillos(); });
     auto *accEbl = mVer->addAction(tr("Marcación (rumbo y distancia)"));
-    accEbl->setStatusTip(tr("Línea con rumbo y distancia desde el objetivo seleccionado "
-                            "(o un punto) hasta otro objetivo o punto que pinches."));
+    accEbl->setStatusTip(tr("Línea con rumbo y distancia entre dos elementos: objetivos o puntos "
+                            "(el origen es el seleccionado; el destino se pincha)."));
     connect(accEbl, &QAction::triggered, this, &Ventana::ponerMarcacion);
     // Inicio (verde) y fin (rojo) de las líneas: siempre en las rutas GPX
     // (p. ej. un historial importado), y en cualquier línea seleccionada.

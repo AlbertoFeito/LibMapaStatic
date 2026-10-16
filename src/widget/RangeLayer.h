@@ -83,6 +83,7 @@ private:
     QPointF screenPos(const QGeoCoordinate &c) const;
     QGeoCoordinate resolve(const QGeoCoordinate &fixed, qint64 targetId) const;
     QGeoCoordinate centro(const RangeRings &r) const;
+    QGeoCoordinate extremo(const QGeoCoordinate &fijo, qint64 targetId, qint64 featureId) const;
     bool ends(const BearingLine &l, QGeoCoordinate *from, QGeoCoordinate *to) const;
     static bool degenerada(const BearingLine &l);
     double pasoEfectivo(const RangeRings &r, const QGeoCoordinate &c) const;
