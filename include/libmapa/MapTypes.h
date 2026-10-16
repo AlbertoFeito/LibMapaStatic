@@ -3,6 +3,7 @@
 
 #include <QColor>
 #include <QGeoCoordinate>
+#include <QPoint>
 #include <QMetaType>
 #include <QPixmap>
 #include <QString>
@@ -29,6 +30,9 @@ enum class MapTool {
                    //!< cierra): emite polygonSelected y deja el contorno visible,
                    //!< para rellenar solo esa zona.
     PickPoint,     //!< Devolver la coordenada del siguiente clic.
+    MeasureArea,   //!< Medir SUPERFICIE y perimetro de un poligono marcado clic a
+                   //!< clic (en vivo mientras se marca; doble clic / Enter /
+                   //!< clic derecho lo cierra y emite areaMeasured).
 
     // --- Creacion de entidades -------------------------------------------
     // Se dibujan sobre la capa activa (MapWidget::setActiveFeatureLayer) con
@@ -76,32 +80,77 @@ enum class GraticuleMode {
  *
  * \a count anillos cada \a spacingMeters, geodesicos (a la distancia real,
  * aunque en Mercator se estiren hacia los polos), con su distancia rotulada
- * en la parte de arriba de cada uno. Opcionalmente, radiales cada
+ * en la parte de arriba de cada uno (o, si esa parte queda fuera de la vista,
+ * en el punto visible mas cercano). Opcionalmente, radiales cada
  * \a spokeEveryDeg grados con su marcacion ("030°") en el extremo.
+ *
+ * El centro es un punto fijo (\a center, con su \a name rotulado al lado y un
+ * cuadrado), un objetivo movil (\a targetId) o una entidad punto del mapa
+ * (\a featureId: un radar u observador colocado por el usuario). En los dos
+ * ultimos los anillos siguen a su dueño si se mueve, y no se dibuja marca de
+ * centro: el propio simbolo del objetivo o de la entidad queda a la vista
+ * (los radiales arrancan a unos pixeles del centro para no taparlo).
+ *
+ * Con \a spacingMeters = 0 la separacion es AUTOMATICA: se ajusta al zoom
+ * para que los \a count anillos llenen casi la vista, con un valor redondo
+ * en las unidades de la escala (1, 2, 2.5 o 5 por potencia de 10: 500 m,
+ * 2.5 km, 5 NM...). Ver MapWidget::rangeRingsSpacing.
  */
 struct RangeRings {
     QGeoCoordinate center;          //!< Centro fijo (si \a targetId < 0).
     qint64 targetId = -1;           //!< O centrado en este objetivo, y lo sigue.
-    double spacingMeters = 1852.0;  //!< Separacion entre anillos (1 NM por defecto).
+    qint64 featureId = -1;          //!< O en esta entidad punto (si targetId < 0), y la sigue.
+    double spacingMeters = 1852.0;  //!< Separacion entre anillos; 0 = automatica (segun el zoom).
     int count = 5;                  //!< Numero de anillos (1..50).
     int spokeEveryDeg = 0;          //!< Radiales cada N grados; 0 = sin radiales.
     QColor color = QColor(0x00, 0x89, 0x7b);
     bool labels = true;             //!< Rotular distancias y marcaciones.
+    QString name;                   //!< Rotulo junto al centro ("Radar Mariel"); vacio = ninguno.
+};
+
+/*!
+ * \brief Lo que hay bajo un punto de la pantalla (MapWidget::hitTest).
+ *
+ * Cada campo se rellena por separado (un objetivo puede estar ENCIMA de una
+ * entidad y dentro de unos anillos a la vez); la app decide la prioridad. Es
+ * lo que lleva MapWidget::contextMenuRequested para montar un menu segun lo
+ * que haya bajo el clic derecho.
+ */
+struct MapHit {
+    QPoint pixel;                       //!< En coordenadas del MapWidget.
+    QGeoCoordinate coordinate;          //!< Geografica bajo el pixel.
+    qint64 targetId = -1;               //!< Objetivo suelto (visible, no agrupado).
+    QVector<qint64> clusterTargets;     //!< Miembros, si cae en un grupo de objetivos.
+    qint64 featureId = -1;              //!< Entidad de arriba bajo el cursor.
+    qint64 rangeMarkId = -1;            //!< Anillos (centro o un anillo) o marcacion.
+    //! Tirador de vertice bajo el pixel en la entidad SELECCIONADA (\a vertexFeature),
+    //! o -1: sirve para ofrecer «borrar este vertice».
+    qint64 vertexFeature = -1;
+    int vertexIndex = -1;
+    //! Nada bajo el cursor: solo el mapa.
+    bool isEmpty() const
+    {
+        return targetId < 0 && clusterTargets.isEmpty() && featureId < 0 && rangeMarkId < 0;
+    }
 };
 
 /*!
  * \brief Linea de marcacion (EBL) con su rumbo verdadero y distancia rotulados.
  *
- * El origen es un punto fijo o un objetivo (\a fromTarget, al que sigue). El
- * destino, igual: un punto o un objetivo. Sin destino, la linea sale del origen
+ * El origen es un punto fijo, un objetivo (\a fromTarget) o una entidad punto
+ * del mapa (\a fromFeature: un radar, un observador); en los dos ultimos la
+ * linea sigue a su extremo si se mueve. El destino, igual (\a toTarget,
+ * \a toFeature o \a to). Sin destino, la linea sale del origen
  * con rumbo \a bearingDeg y longitud \a lengthMeters. El rotulo dice
  * "045° · 5.2 NM" en las unidades de la escala grafica.
  */
 struct BearingLine {
-    QGeoCoordinate from;            //!< Origen fijo (si \a fromTarget < 0).
+    QGeoCoordinate from;            //!< Origen fijo (si no hay \a fromTarget ni \a fromFeature).
     qint64 fromTarget = -1;         //!< O sale de este objetivo.
-    QGeoCoordinate to;              //!< Destino fijo (si \a toTarget < 0)...
-    qint64 toTarget = -1;           //!< ...o este objetivo.
+    qint64 fromFeature = -1;        //!< O de esta entidad punto (si \a fromTarget < 0).
+    QGeoCoordinate to;              //!< Destino fijo (si no hay \a toTarget ni \a toFeature)...
+    qint64 toTarget = -1;           //!< ...o este objetivo...
+    qint64 toFeature = -1;          //!< ...o esta entidad punto (si \a toTarget < 0).
     //! Sin destino: rumbo (grados verdaderos) y longitud de la linea.
     double bearingDeg = std::numeric_limits<double>::quiet_NaN();
     double lengthMeters = 0.0;
@@ -140,6 +189,13 @@ struct MapExportOptions {
     double marginMm = 10.0;     //!< Solo PDF: margen de la hoja.
 };
 
+//! Resultado de medir una superficie (MapTool::MeasureArea).
+struct AreaMeasurement {
+    QVector<QGeoCoordinate> polygon;   //!< Vertices marcados, sin repetir el primero.
+    double areaSquareMeters = 0.0;     //!< Sobre el elipsoide (polygonArea).
+    double perimeterMeters = 0.0;      //!< Ortodromicas, incluido el lado de cierre.
+};
+
 //! Resultado de una medicion sobre el mapa.
 struct Measurement {
     QGeoCoordinate from;
@@ -151,5 +207,7 @@ struct Measurement {
 } // namespace libmapa
 
 Q_DECLARE_METATYPE(libmapa::Measurement)
+Q_DECLARE_METATYPE(libmapa::AreaMeasurement)
+Q_DECLARE_METATYPE(libmapa::MapHit)
 
 #endif // LIBMAPA_MAPTYPES_H_

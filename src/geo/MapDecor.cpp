@@ -1,5 +1,8 @@
 #include "geo/MapDecor.h"
 
+#include <QHash>
+#include <QPair>
+
 #include <algorithm>
 #include <cmath>
 
@@ -139,6 +142,22 @@ static int decimalesPara(double v)
     return v < 10.0 ? 2 : (v < 100.0 ? 1 : 0);
 }
 
+// Separacion redonda de anillos (ver cabecera): se trabaja en la unidad de
+// la escala para que el rotulo salga redondo ("2 NM", no "1.08 NM").
+double niceRingSpacing(double maxRadiusMeters, int count, ScaleUnits units)
+{
+    if (!(maxRadiusMeters > 0.0) || !std::isfinite(maxRadiusMeters) || count < 1)
+        return 0.0;
+    const double unidad = units == ScaleUnits::Nautical ? 1852.0 : 1.0;
+    const double bruto = maxRadiusMeters / unidad / count;
+    const double base = std::pow(10.0, std::floor(std::log10(bruto)));
+    double paso = base;
+    for (const double k : { 2.0, 2.5, 5.0, 10.0 })
+        if (base * k <= bruto * (1.0 + 1e-9))
+            paso = base * k;
+    return paso * unidad;
+}
+
 // Distancia legible en la unidad pedida (ver cabecera).
 QString formatDistance(double meters, ScaleUnits units)
 {
@@ -155,6 +174,27 @@ QString formatDistance(double meters, ScaleUnits units)
     return sinCeros(km, decimalesPara(km)) + QStringLiteral(" km");
 }
 
+// Superficie legible en la unidad pedida (ver cabecera).
+QString formatArea(double squareMeters, ScaleUnits units)
+{
+    if (!std::isfinite(squareMeters))
+        return QString();
+    const double m2 = std::abs(squareMeters);
+    const QString cuadrado = QString(QChar(0x00B2));
+    if (units == ScaleUnits::Nautical) {
+        const double nm2 = m2 / (kMetersPerNauticalMile * kMetersPerNauticalMile);
+        return sinCeros(nm2, decimalesPara(nm2)) + QStringLiteral(" NM") + cuadrado;
+    }
+    if (m2 < 1.0e4)
+        return QString::number(std::lround(m2)) + QStringLiteral(" m") + cuadrado;
+    if (m2 < 1.0e6) {
+        const double ha = m2 / 1.0e4;
+        return sinCeros(ha, decimalesPara(ha)) + QStringLiteral(" ha");
+    }
+    const double km2 = m2 / 1.0e6;
+    return sinCeros(km2, decimalesPara(km2)) + QStringLiteral(" km") + cuadrado;
+}
+
 // Rumbo con tres cifras y el simbolo de grado.
 QString formatBearing(double degrees)
 {
@@ -164,6 +204,40 @@ QString formatBearing(double degrees)
     if (g >= 360)
         g -= 360;
     return QStringLiteral("%1").arg(g, 3, 10, QLatin1Char('0')) + QChar(0x00B0);
+}
+
+// Rejilla de celdas: cada punto cae en la celda floor((p - origen) / celda); las
+// celdas con minCount puntos o mas son grupos, con su centroide.
+QVector<PointCluster> clusterPoints(const QVector<QPointF> &points, double cellSize,
+                                    int minCount, const QPointF &gridOrigin)
+{
+    QVector<PointCluster> grupos;
+    if (!(cellSize > 0.0) || points.isEmpty())
+        return grupos;
+    const int minimo = std::max(2, minCount);
+    QHash<QPair<qint64, qint64>, QVector<int>> celdas;
+    for (int i = 0; i < points.size(); ++i) {
+        const QPointF r = points.at(i) - gridOrigin;
+        const QPair<qint64, qint64> c(qint64(std::floor(r.x() / cellSize)),
+                                      qint64(std::floor(r.y() / cellSize)));
+        celdas[c].append(i);
+    }
+    for (auto it = celdas.cbegin(); it != celdas.cend(); ++it) {
+        if (it->size() < minimo)
+            continue;
+        PointCluster g;
+        g.members = *it;
+        QPointF suma;
+        for (int i : g.members)
+            suma += points.at(i);
+        g.center = suma / double(g.members.size());
+        grupos.append(g);
+    }
+    std::sort(grupos.begin(), grupos.end(), [](const PointCluster &a, const PointCluster &b) {
+        return a.members.size() != b.members.size() ? a.members.size() > b.members.size()
+                                                    : a.members.first() < b.members.first();
+    });
+    return grupos;
 }
 
 // Puntos a la misma distancia del centro en azimuts equiespaciados (ver cabecera).

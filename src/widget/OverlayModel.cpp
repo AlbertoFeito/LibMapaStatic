@@ -56,6 +56,7 @@ void OverlayModel::restore(const Snapshot &s)
                 features.insert(it.key(), it.value());
     }
     m_features = features;
+    m_idxSucio = true;
     m_layers = layers;
     // Nunca hacia atras: una entidad temporal conservada podria tener un id
     // mayor que el de la instantanea, y no debe repetirse.
@@ -161,6 +162,8 @@ void OverlayModel::setContents(const QVector<MapFeature> &features,
     pushUndo();
 
     m_features.clear();
+
+    m_idxSucio = true;
     m_layers.clear();
 
     LayerInfo porDefecto;
@@ -188,6 +191,7 @@ void OverlayModel::setContents(const QVector<MapFeature> &features,
             f.id = ++maxId;
         maxId = qMax(maxId, f.id);
         m_features.insert(f.id, f);
+        m_idxSucio = true;
     }
     m_nextId = maxId + 1;
 
@@ -359,6 +363,7 @@ qint64 OverlayModel::addFeature(MapFeature feature)
         pushUndo();
     feature.id = m_nextId++;
     m_features.insert(feature.id, feature);
+    m_idxSucio = true;
 
     emit featureAdded(feature.id);
     emit layersChanged();          // el contador de su capa subio en uno
@@ -388,6 +393,8 @@ bool OverlayModel::updateFeature(const MapFeature &feature)
         addLayer(copia.layerId);
 
     m_features.insert(copia.id, copia);
+
+    m_idxSucio = true;
     emit featureUpdated(copia.id);
     emit changed();
     return true;
@@ -402,6 +409,7 @@ bool OverlayModel::removeFeature(qint64 id)
     if (isLayerUndoable(m_features.value(id).layerId))
         pushUndo();
     m_features.remove(id);
+    m_idxSucio = true;
     if (m_selected == id) {
         m_selected = -1;
         emit selectionChanged(-1);
@@ -426,6 +434,7 @@ void OverlayModel::clearLayer(const QString &layerId)
         pushUndo();
     for (qint64 id : aBorrar)
         m_features.remove(id);
+    m_idxSucio = true;
 
     if (!aBorrar.isEmpty()) {
         if (aBorrar.contains(m_selected)) {
@@ -457,6 +466,7 @@ void OverlayModel::clear()
 
     pushUndo();
     m_features.clear();
+    m_idxSucio = true;
     if (m_selected != -1) {
         m_selected = -1;
         emit selectionChanged(-1);
@@ -487,6 +497,36 @@ QVector<MapFeature> OverlayModel::features() const
     std::sort(out.begin(), out.end(),
               [](const MapFeature &a, const MapFeature &b) { return a.id < b.id; });
     return out;
+}
+
+// Reconstruye el indice capa -> ids ordenados. Solo hace falta tras un alta, una
+// baja, un cambio de capa o una carga: mover un vertice no lo invalida.
+void OverlayModel::reconstruirIndice() const
+{
+    m_idxCapa.clear();
+    for (auto it = m_features.cbegin(); it != m_features.cend(); ++it)
+        m_idxCapa[it->layerId].append(it.key());
+    for (auto it = m_idxCapa.begin(); it != m_idxCapa.end(); ++it)
+        std::sort(it->begin(), it->end());
+    m_idxSucio = false;
+}
+
+// Recorre las entidades de una capa en orden de id (el mismo de featuresInLayer)
+// SIN copiarlas. Antes cada dibujo y cada prueba de acierto copiaba y ordenaba
+// TODAS las entidades por cada capa (con 6000, unos 30 ms por llamada).
+void OverlayModel::forEachInLayer(const QString &layerId,
+                                  const std::function<bool(const MapFeature &)> &fn) const
+{
+    if (m_idxSucio)
+        reconstruirIndice();
+    const auto ids = m_idxCapa.constFind(layerId);
+    if (ids == m_idxCapa.constEnd())
+        return;
+    for (const qint64 id : *ids) {
+        const auto f = m_features.constFind(id);
+        if (f != m_features.constEnd() && !fn(*f))
+            return;
+    }
 }
 
 // Entidades de una capa concreta (mismo orden estable que features()).

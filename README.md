@@ -20,14 +20,18 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
 - **Historial completo de cada objetivo**: además de la traza corta que se dibuja, se guarda todo su recorrido con hora desde que se vio por primera vez (`targetHistory`, `targetOrigin`); al seleccionarlo se dibuja entero desde el origen
 - **Alertas de zona**: cualquier polígono puede vigilarse (`watchZone`) y la librería avisa cuando un objetivo móvil o una entidad punto entra o sale (`targetEnteredZone` / `featureEnteredZone`…) y resalta en el mapa la zona ocupada
+- **Agrupar objetivos** (`setTargetClustering`): al alejar el zoom, los objetivos amontonados se dibujan como un círculo con su número; pinchar uno emite `targetClusterClicked` con sus ids (la demo amplía)
+- **Filtro de objetivos** (`setTargetFilter`): mostrar solo los de ciertos tipos, velocidades o dentro de zonas vigiladas (o con un criterio propio de la app); el resto se oculta o se atenúa sin dejar de existir
 - **Alertas de proximidad (CPA/TCPA)**: `setProximityAlert(distancia, horizonte)` avisa cuando dos objetivos van a pasar demasiado cerca (`proximityAlertRaised` / `proximityAlertCleared`) y dibuja por dónde se cruzan («CPA 0.30 NM en 4 min»). La velocidad se estima por la traza o la da la app (`setTargetVelocity`, p. ej. SOG/COG del AIS); `computeCpa` y `targetCpa` sirven para cálculos sueltos
-- **Anillos de distancia y marcaciones**: `addRangeRings` pone anillos geodésicos (con radiales opcionales) alrededor de un punto o de un objetivo, al que siguen; `addBearingLine` traza una línea con rumbo y distancia («045° · 5.2 NM») entre puntos u objetivos, que se recalcula al moverse
+- **Anillos de distancia y marcaciones**: `addRangeRings` pone anillos geodésicos (con radiales opcionales) alrededor de un objetivo o de una entidad punto (un radar, un observador colocado en el mapa), a los que siguen; con `spacingMeters = 0` la separación se ajusta sola al zoom (valores redondos: 2.5 km, 10 NM…); `addBearingLine` traza una línea con rumbo y distancia («045° · 5.2 NM») entre objetivos, puntos del mapa (`fromFeature`/`toFeature`) o coordenadas, que se recalcula al moverse
+- **Menú del clic derecho según lo que haya debajo**: `contextMenuRequested(MapHit, pos)` dice si bajo el cursor hay un objetivo, un grupo, una entidad, unos anillos o una marcación (y la coordenada); `hitTest(pixel)` da lo mismo a demanda. La librería no impone menú: la demo monta uno por cada caso (centrar, anillos, marcación, CPA, filtrar por tipo, exportar GPX, editar, vigilar como zona, medir, copiar coordenadas…)
 - **Reproducción de historiales** (`TrackPlayer`): vuelve a ver cómo se movieron los objetivos de un GPX exportado, con play/pausa, ir a una hora y velocidad (×1…×1800). Cada pista es un objetivo del mapa mientras existió, así que funcionan su traza, su origen, las alertas de zona y CPA y los anillos; las rutas completas se ven con su inicio y su fin
 - **Inicio y fin de rutas**: las rutas y tracks leídos de GPX (p. ej. un historial exportado) marcan su primer punto (verde) y el último (rojo), y la línea seleccionada los rotula con su hora (`setRouteEndpoints`)
 - **Escala gráfica y cuadrícula de coordenadas**: `setScaleBarVisible` (metros/km o millas náuticas) y `setGraticuleVisible` (meridianos y paralelos rotulados, con paso automático según el zoom: 1°, 30', 5', 30"…)
 - **Coordenadas UTM y MGRS** (`Coordinates.h`): conversión y formato en decimal, GMS, UTM y MGRS (al milímetro frente a PROJ), lectura de lo que escribe una persona en cualquiera de ellos, y cuadrícula UTM (`setGraticuleMode`)
 - **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión. El historial de los objetivos sale a **GPX con la hora de cada punto** (`exportTargetHistory`, releíble con `parseGpxTracks`)
 - **Exportar la vista** a imagen o PDF (`exportView`, `renderImage`): el mapa tal cual se ve, con título, pie (extensión, fecha UTC, atribución) y, en PDF, vectorial y con la escala de impresión 1:N
+- **Medir superficie en pantalla** (`MapTool::MeasureArea`): se marca un polígono clic a clic y la superficie y el perímetro salen en vivo junto al cursor; al cerrarlo, `areaMeasured` da la medida
 - **Consultar una zona**: `targetsInArea` / `featuresInArea` dicen qué hay dentro de cualquier polígono (p. ej. el marcado con `SelectArea` / `SelectPolygon`), y `polygonArea` / `pathLength` dan su superficie y perímetro sobre el elipsoide
 
 ## Uso
@@ -70,6 +74,20 @@ Con esa línea de `dataDir` salen las capas base, la elevación, las capas fijas
 la BD de entidades del usuario y el punto de arranque. Lo que se rellene a mano
 en `MapConfig` (`initialZoom`, `elevationDbFile`…) **manda sobre el paquete**.
 La configuración clásica con `datasetsFile` sigue funcionando.
+
+## Ratón y teclado
+
+| Gesto | Efecto |
+|---|---|
+| Arrastrar / botón central | desplazar (el central, con cualquier herramienta) |
+| Rueda | zoom hacia el cursor (los toques finos se acumulan) |
+| Doble clic en vacío | acercar un nivel |
+| Clic sobre un elemento | selecciona y emite `elementClicked` (la demo muestra una **tarjeta** con sus datos y acciones) |
+| Clic derecho | menú contextual (`contextMenuRequested`); cancela una medida a medias |
+| Edit: arrastrar tirador / Ctrl+clic | mover vértice (margen de 4 px) / añadir vértice |
+| Esc, Intro, Retroceso, Supr, flechas, +/− | cancelar, terminar, quitar vértice, borrar, mover, zoom |
+
+La demo recoge todo en Ayuda → «Ratón y teclado…».
 
 ## Seguimiento de objetivos móviles
 
@@ -263,6 +281,10 @@ target_link_libraries(miapp PRIVATE libmapa::widget)
 [`examples/app_minima`](examples/app_minima) es la plantilla completa: una app
 que solo usa `MapConfig::dataDir`. Con `add_subdirectory` también valen los
 nombres `libmapa::core` / `libmapa::widget`.
+[`examples/app_seguimiento`](examples/app_seguimiento) se compila igual y enseña
+el API de objetivos en ~220 líneas: buques simulados, zona vigilada, alerta
+CPA/TCPA, anillos y demora, filtro, agrupación, medir superficie, exportar vista
+a PDF / historial a GPX y reproducir el historial.
 
 ### Llevarla a otro PC
 
@@ -633,8 +655,9 @@ src/
                      entidades, objetivos, cobertura) y sus modelos
 tests/               24 tests (21 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
-demo/                aplicación de ejemplo
+demo/                aplicación de ejemplo (clase Ventana repartida por tema en Ventana*.cpp)
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
+examples/app_seguimiento/ ejemplo del API de objetivos con la librería instalada
 cmake/               libmapaConfig.cmake.in (para find_package)
 qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri)
 qmake/*.pro          herramientas sueltas con qmake
@@ -676,6 +699,9 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 25 | Alertas de proximidad CPA/TCPA entre objetivos (velocidad estimada por la traza o dada por la app), con líneas de máximo acercamiento en el mapa |
 | 26 | Anillos de distancia y marcaciones (fijos o colgados de objetivos); inicio y fin de las rutas GPX con su hora |
 | 27 | Reproducción de historiales GPX en el tiempo (`TrackPlayer`); las capas temporales quedan fuera de deshacer |
+| 28 | Medir superficie y perímetro en pantalla (`MapTool::MeasureArea`, `areaMeasured`) |
+| 29 | Importar un fichero = una sola operación de deshacer; textos de Qt en español en la demo; filtro de objetivos (`setTargetFilter`) |
+| 30 | Agrupar objetivos al alejar el zoom (`setTargetClustering`, `targetClusterClicked`) |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

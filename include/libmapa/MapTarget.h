@@ -7,7 +7,12 @@
 #include <QMetaType>
 #include <QPointF>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
+
+#include <cmath>
+#include <functional>
+#include <limits>
 
 namespace libmapa {
 
@@ -69,6 +74,59 @@ struct TargetTrackPoint
     QDateTime time;
 
     bool isValid() const { return position.isValid(); }
+};
+
+/*!
+ * \brief Que objetivos mostrar (MapWidget::setTargetFilter).
+ *
+ * Un objetivo PASA si cumple todos los criterios que se fijen (los que se
+ * dejan sin poner no filtran). Los que no pasan se ocultan o, con \a dim, se
+ * dibujan tenues. La libreria no interpreta el dominio: el \c kind y los
+ * atributos los pone la app, y para lo que no cubren los criterios fijos esta
+ * \a predicate.
+ */
+struct TargetFilter
+{
+    //! Clases admitidas (MapTarget::kind). Vacio = todas.
+    QStringList kinds;
+    //! Velocidad minima y maxima en m/s (NaN = sin limite). Es la que da la app
+    //! con MapWidget::setTargetVelocity o, si no, la estimada por la traza.
+    double minSpeed = std::numeric_limits<double>::quiet_NaN();
+    double maxSpeed = std::numeric_limits<double>::quiet_NaN();
+    //! Solo los que estan dentro de alguna zona vigilada (watchZone).
+    bool onlyInWatchedZones = false;
+    //! Criterio libre de la app (p. ej. sobre attributes). Vacio = no filtra.
+    std::function<bool(const MapTarget &)> predicate;
+    //! true: los que no pasan se ven tenues (sin rotulo ni traza); false: se
+    //! ocultan y no se pueden pinchar.
+    bool dim = false;
+
+    //! ¿No filtra nada?
+    bool isEmpty() const
+    {
+        return kinds.isEmpty() && std::isnan(minSpeed) && std::isnan(maxSpeed)
+            && !onlyInWatchedZones && !predicate;
+    }
+};
+
+/*!
+ * \brief Agrupar objetivos cercanos en pantalla (MapWidget::setTargetClustering).
+ *
+ * Con miles de objetivos, al alejar el zoom los iconos se amontonan en una
+ * mancha. Agrupados, cada monton se dibuja como un circulo con el NUMERO de
+ * objetivos que reune. Se agrupa por celdas de \a cellPixels pixeles; una celda
+ * con al menos \a minTargets forma grupo. El objetivo seleccionado y los
+ * atenuados por el filtro no se agrupan nunca.
+ */
+struct TargetClustering
+{
+    bool enabled = false;
+    int cellPixels = 64;            //!< Tamaño de la celda (16..512 px).
+    int minTargets = 3;             //!< Minimo por grupo (2 o mas).
+    //! Solo se agrupa hasta este zoom (incluido); por encima, todos sueltos.
+    //! -1 = a cualquier zoom.
+    int maxZoom = -1;
+    QColor color = QColor(0x15, 0x65, 0xc0);
 };
 
 } // namespace libmapa

@@ -1,5 +1,8 @@
 #include "widget/TargetLayer.h"
 
+#include "geo/MapDecor.h"
+#include "widget/MapView.h"
+
 #include <QDateTime>
 #include <QFontMetrics>
 #include <QFontMetricsF>
@@ -128,9 +131,55 @@ void TargetLayer::draw(QCPPainter *painter)
     for (const TargetModel::Entry &e : m_model->entries()) {
         if (!e.target.position.isValid())
             continue;
+        if (!m_filterDim && m_filteredOut.contains(e.target.id))
+            continue;                          // oculto por el filtro de la app
         const QPointF pos = screenPos(e.target.position);
         if (margen.contains(pos))
             m_visibles.append({&e, pos});
+    }
+
+    // --- Agrupacion: los montones se dibujan como un circulo con el numero ---
+    // La rejilla se ancla en un punto fijo del mundo (0,0 geografico) pasado a
+    // pixeles: al desplazar el mapa los grupos no cambian, solo al cambiar de
+    // zoom. El seleccionado y los atenuados quedan siempre sueltos.
+    m_clusterHits.clear();
+    m_clustered.clear();
+    const MapView *vista = qobject_cast<const MapView *>(plot);
+    const bool agrupar = m_clustering.enabled
+        && (m_clustering.maxZoom < 0 || !vista || vista->zoom() <= m_clustering.maxZoom);
+    if (agrupar) {
+        QVector<QPointF> pts;
+        QVector<int> indices;            // posicion en m_visibles de cada punto
+        for (int i = 0; i < m_visibles.size(); ++i) {
+            const qint64 id = m_visibles.at(i).first->target.id;
+            if (id == m_selected || (m_filterDim && m_filteredOut.contains(id)))
+                continue;
+            pts.append(m_visibles.at(i).second);
+            indices.append(i);
+        }
+        const double celda = std::clamp(m_clustering.cellPixels, 16, 512);
+        const auto grupos = MapDecor::clusterPoints(pts, celda,
+                                                    std::max(2, m_clustering.minTargets),
+                                                    screenPos(QGeoCoordinate(0.0, 0.0)));
+        for (const MapDecor::PointCluster &g : grupos) {
+            ClusterHit h;
+            h.center = g.center;
+            h.radius = 11.0 + 4.0 * std::log10(double(g.members.size()));
+            for (int k : g.members) {
+                const qint64 id = m_visibles.at(indices.at(k)).first->target.id;
+                h.ids.append(id);
+                m_clustered.insert(id);
+            }
+            m_clusterHits.append(h);
+        }
+        if (!m_clustered.isEmpty()) {
+            QVector<std::pair<const TargetModel::Entry *, QPointF>> sueltos;
+            sueltos.reserve(m_visibles.size() - m_clustered.size());
+            for (const auto &v : m_visibles)
+                if (!m_clustered.contains(v.first->target.id))
+                    sueltos.append(v);
+            m_visibles = sueltos;
+        }
     }
 
     // --- Nivel de detalle segun cuantos hay visibles -------------------------
@@ -155,15 +204,85 @@ void TargetLayer::draw(QCPPainter *painter)
     // --- Pasada 2: dibujo ----------------------------------------------------
     for (const auto &v : m_visibles) {
         const bool sel = (v.first->target.id == m_selected);
-        drawTarget(painter, *v.first, v.second, conTrazas, conEtiquetas, sel,
-                   m_labelCells);
+        // Atenuado por el filtro: tenue, sin traza ni rotulo (salvo si esta
+        // seleccionado, que se ve normal: lo ha elegido el usuario).
+        const bool tenue = m_filterDim && !sel && m_filteredOut.contains(v.first->target.id);
+        if (tenue) {
+            painter->save();
+            painter->setOpacity(0.25);
+        }
+        drawTarget(painter, *v.first, v.second, conTrazas && !tenue, conEtiquetas && !tenue,
+                   sel, m_labelCells);
+        if (tenue)
+            painter->restore();
     }
+
+    // Los grupos, encima de los sueltos (son lo que resume la escena).
+    for (const ClusterHit &h : m_clusterHits)
+        drawCluster(painter, h.center, int(h.ids.size()));
 
     // Alertas de proximidad, ENCIMA de los objetivos (son el aviso que no debe
     // quedar tapado) y fuera del culling: el punto de encuentro puede estar en
     // pantalla aunque los dos objetivos aun no lo esten.
     if (!m_proximity.isEmpty())
         drawProximity(painter);
+}
+
+// Cambia la agrupacion y repinta.
+void TargetLayer::setClustering(const TargetClustering &c)
+{
+    m_clustering = c;
+    programarRepintado();
+}
+
+// Grupo bajo el pixel (el mas cercano a su centro si se solapan), o vacio.
+QVector<qint64> TargetLayer::clusterAt(const QPoint &pixel) const
+{
+    const ClusterHit *mejor = nullptr;
+    double mejorD = 0.0;
+    for (const ClusterHit &h : m_clusterHits) {
+        const double d = QLineF(h.center, QPointF(pixel)).length();
+        if (d <= h.radius + 2.0 && (!mejor || d < mejorD)) {
+            mejor = &h;
+            mejorD = d;
+        }
+    }
+    return mejor ? mejor->ids : QVector<qint64>();
+}
+
+// Un grupo: circulo del color de la agrupacion con halo claro y el numero de
+// objetivos dentro. El radio crece con el logaritmo del numero (10 o 1000 se
+// distinguen sin que los grandes tapen el mapa).
+void TargetLayer::drawCluster(QPainter *painter, const QPointF &center, int count) const
+{
+    const double r = 11.0 + 4.0 * std::log10(double(count));
+    const QColor c = m_clustering.color;
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(c.red(), c.green(), c.blue(), 70));
+    painter->drawEllipse(center, r + 5.0, r + 5.0);
+    painter->setBrush(c);
+    painter->setPen(QPen(Qt::white, 1.5));
+    painter->drawEllipse(center, r, r);
+    QFont f = painter->font();
+    f.setPointSizeF(count >= 1000 ? 7.0 : 8.5);
+    f.setBold(true);
+    painter->setFont(f);
+    painter->setPen(Qt::white);
+    painter->drawText(QRectF(center.x() - r, center.y() - r, 2 * r, 2 * r), Qt::AlignCenter,
+                      QString::number(count));
+    painter->restore();
+}
+
+// Guarda que objetivos no pasan el filtro y como mostrarlos, y repinta si cambio.
+void TargetLayer::setFilteredOut(const QSet<qint64> &ids, bool dim)
+{
+    if (ids == m_filteredOut && dim == m_filterDim)
+        return;
+    m_filteredOut = ids;
+    m_filterDim = dim;
+    programarRepintado();
 }
 
 // Guarda las lineas CPA de los pares en alerta y pide repintar.

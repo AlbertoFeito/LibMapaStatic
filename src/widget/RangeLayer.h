@@ -34,6 +34,11 @@ public:
     //! Coordenada geografica -> coordenada de eje (Mercator), la de MapView.
     void setAxisMapper(std::function<QPointF(const QGeoCoordinate &)> toAxis);
     void setUnits(ScaleUnits units) { m_units = units; }
+    //! Posicion de una entidad punto por su id (invalida si no existe), para
+    //! los anillos con RangeRings::featureId. La pone MapView.
+    void setFeatureResolver(std::function<QGeoCoordinate(qint64)> resolver);
+    //! Una entidad ha cambiado: si hay anillos en ella, se repintan.
+    void featureChanged(qint64 id);
 
     qint64 addRings(const RangeRings &rings);
     bool updateRings(qint64 id, const RangeRings &rings);
@@ -42,6 +47,24 @@ public:
     bool remove(qint64 id);
     void clear();
     QVector<qint64> ids() const;
+    //! Copia de unos anillos / una marcacion por id. false si no es de ese tipo.
+    bool rings(qint64 id, RangeRings *out) const;
+    bool bearing(qint64 id, BearingLine *out) const;
+    /*!
+     * \brief Separacion con la que se dibujan ahora unos anillos (m).
+     *
+     * La fija, o la automatica para el zoom actual si \c spacingMeters es 0.
+     * 0 si no existen o no se pueden resolver (sin vista, objetivo perdido).
+     */
+    double spacing(qint64 id) const;
+    /*!
+     * \brief Anillos o marcacion bajo el pixel (a menos de \a tolPx de un
+     *        anillo, de su centro o de la linea), -1 si nada.
+     *
+     * Las marcaciones, que se dibujan encima, ganan a los anillos; entre
+     * iguales, la ultima anadida.
+     */
+    qint64 markAt(const QPointF &pixel, double tolPx = 6.0) const;
     bool isEmpty() const { return m_rings.isEmpty() && m_bearings.isEmpty(); }
 
     /*!
@@ -59,7 +82,14 @@ protected:
 private:
     QPointF screenPos(const QGeoCoordinate &c) const;
     QGeoCoordinate resolve(const QGeoCoordinate &fixed, qint64 targetId) const;
+    QGeoCoordinate centro(const RangeRings &r) const;
+    QGeoCoordinate extremo(const QGeoCoordinate &fijo, qint64 targetId, qint64 featureId) const;
     bool ends(const BearingLine &l, QGeoCoordinate *from, QGeoCoordinate *to) const;
+    static bool degenerada(const BearingLine &l);
+    double pasoEfectivo(const RangeRings &r, const QGeoCoordinate &c) const;
+    QRectF vista() const;
+    QPointF dentroDeVista(const QPointF &ideal, const QPolygonF &curva) const;
+    QPointF bordeDeVista(const QPointF &desde, const QPointF &hasta) const;
     void drawRings(QCPPainter *painter, const RangeRings &r) const;
     void drawBearing(QCPPainter *painter, const BearingLine &l) const;
     void label(QCPPainter *painter, const QPointF &center, const QString &txt,
@@ -68,6 +98,7 @@ private:
 
     TargetModel *m_targets = nullptr;
     std::function<QPointF(const QGeoCoordinate &)> m_toAxis;
+    std::function<QGeoCoordinate(qint64)> m_featurePos;
     ScaleUnits m_units = ScaleUnits::Metric;
     qint64 m_nextId = 1;
     QMap<qint64, RangeRings> m_rings;        //!< Ordenados: dibujo estable.

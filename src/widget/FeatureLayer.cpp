@@ -73,6 +73,16 @@ void FeatureLayer::setDraftCursor(const QPoint &pixel, bool visible)
         parentPlot()->replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Cambia el rotulo del borrador y repinta (solo el borrador: no toca la cache).
+void FeatureLayer::setDraftLabel(const QString &text)
+{
+    if (text == m_draftLabel)
+        return;
+    m_draftLabel = text;
+    if (parentPlot())
+        parentPlot()->replot(QCustomPlot::rpQueuedReplot);
+}
+
 // Invalida la cache (pixmap) de esta capa y encola un repintado. Se llama cuando
 // cambia el modelo o la proyeccion: el proximo draw() reconstruira el pixmap.
 void FeatureLayer::markDirty()
@@ -224,14 +234,13 @@ void FeatureLayer::draw(QCPPainter *painter)
             continue;
         if (zoomActual >= 0 && !capaVisibleAZoom(capa, zoomActual))
             continue;               // capa de detalle fuera de su rango de zoom
-        for (const MapFeature &f : m_model->featuresInLayer(capa.id)) {
-            if (!f.visible)
-                continue;
-            if (!featureInView(f, visible))
-                continue;           // fuera de pantalla: ni se proyecta
+        m_model->forEachInLayer(capa.id, [&](const MapFeature &f) {
+            if (!f.visible || !featureInView(f, visible))
+                return true;        // oculta o fuera de pantalla: ni se proyecta
             drawFeature(&p, f, f.id == m_model->selectedId());
             ++m_lastDrawn;
-        }
+            return true;
+        });
     }
 
     p.end();
@@ -588,6 +597,36 @@ void FeatureLayer::drawDraft(QPainter *painter) const
     for (const QPointF &v : poly)
         painter->drawRect(QRectF(v.x() - 4, v.y() - 4, 8, 8));
 
+    // Rotulo (medida en vivo): junto al cursor mientras se traza; con el
+    // poligono cerrado, en el centro de su caja. Caja clara para leerse sobre
+    // cualquier fondo.
+    if (!m_draftLabel.isEmpty()) {
+        QFont f = painter->font();
+        f.setPointSizeF(9.0);
+        f.setBold(true);
+        painter->setFont(f);
+        const QFontMetrics fm(f);
+        const QStringList lineas = m_draftLabel.split(QLatin1Char('\n'));
+        int ancho = 0;
+        for (const QString &l : lineas)
+            ancho = std::max(ancho, fm.horizontalAdvance(l));
+        const QSizeF caja(ancho + 12.0, fm.height() * double(lineas.size()) + 6.0);
+        QPointF esquina;
+        if (m_draftCursorVisible) {
+            esquina = QPointF(m_draftCursor) + QPointF(16.0, 12.0);
+        } else {
+            const QRectF r = poly.boundingRect();
+            esquina = r.center() - QPointF(caja.width() / 2.0, caja.height() / 2.0);
+        }
+        const QRectF rect(esquina, caja);
+        painter->setPen(QPen(m_draft.style.lineColor, 1.2));
+        painter->setBrush(QColor(255, 255, 255, 230));
+        painter->drawRoundedRect(rect, 4.0, 4.0);
+        painter->setPen(m_draft.style.lineColor.darker(120));
+        painter->drawText(rect.adjusted(6, 3, -6, -3), Qt::AlignLeft | Qt::AlignVCenter,
+                          m_draftLabel);
+    }
+
     painter->restore();
 }
 
@@ -679,15 +718,20 @@ qint64 FeatureLayer::labelAt(const QPoint &pixel) const
             continue;
         if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
             continue;
-        for (const MapFeature &f : m_model->featuresInLayer(capas[i].id)) {
+        qint64 acierto = -1;
+        m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
             if (!f.visible || !f.selectable || !f.style.labelVisible || f.name.isEmpty())
-                continue;
+                return true;
             const QPointF base = labelAnchorScreen(f);
             if (base.isNull())
-                continue;
-            if (labelBoxFor(f, base, fm).contains(QPointF(pixel)))
-                return f.id;
-        }
+                return true;
+            if (!labelBoxFor(f, base, fm).contains(QPointF(pixel)))
+                return true;
+            acierto = f.id;
+            return false;
+        });
+        if (acierto >= 0)
+            return acierto;
     }
     return -1;
 }
@@ -736,11 +780,11 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
         if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
             continue;               // no seleccionable fuera de su rango de zoom
 
-        for (const MapFeature &f : m_model->featuresInLayer(capas[i].id)) {
+        m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
             if (!f.visible || !f.selectable)
-                continue;
+                return true;
             if (!featureInView(f, vista_))
-                continue;               // fuera de pantalla: no hace falta probar
+                return true;            // fuera de pantalla: no hace falta probar
 
             double d = std::numeric_limits<double>::max();
 
@@ -786,7 +830,8 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
                 mejorDist = d;
                 mejor = f.id;
             }
-        }
+            return true;
+        });
 
         // Si algo se acerto en esta capa, no se sigue bajando.
         if (mejor >= 0)

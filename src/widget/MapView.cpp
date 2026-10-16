@@ -2,10 +2,14 @@
 
 #include "core/Logging.h"
 #include "geo/GeoMath.h"
+#include "geo/MapDecor.h"
+#include "libmapa/Coordinates.h"
 #include "geo/TileMatrix.h"
 #include "geo/WebMercator.h"
 #include "geo/WebMercator.h"
 
+#include <QContextMenuEvent>
+#include <QCursor>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QResizeEvent>
@@ -81,6 +85,14 @@ MapView::MapView(TileService *service, QWidget *parent)
     m_rangeLayer->setLayer(QStringLiteral("targets"));
     m_rangeLayer->setAxisMapper(
         [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
+    // Anillos en una entidad punto: su posicion sale del modelo de entidades,
+    // y la siguen al moverla (arrastre, edicion, deshacer).
+    m_rangeLayer->setFeatureResolver([this](qint64 id) {
+        const auto f = m_model ? m_model->feature(id) : std::nullopt;
+        return f && f->kind == GeometryKind::Point ? f->position() : QGeoCoordinate();
+    });
+    if (m_model)
+        connect(m_model, &OverlayModel::featureUpdated, m_rangeLayer, &RangeLayer::featureChanged);
     m_targetLayer = new TargetLayer(this, m_targetModel);
     m_targetLayer->setLayer(QStringLiteral("targets"));
     m_targetLayer->setAxisMapper(
@@ -371,6 +383,9 @@ qint64 MapView::targetAt(const QPoint &pixel, double tolPx) const
         const MapTarget &t = it->target;
         if (!t.position.isValid())
             continue;
+        if (m_targetLayer && (m_targetLayer->isFilteredOut(t.id)
+                              || m_targetLayer->isClustered(t.id)))
+            continue;                  // oculto por el filtro o dentro de un grupo
         const QPointF a = toAxis(t.position);
         const double dx = xAxis->coordToPixel(a.x()) - pixel.x();
         const double dy = yAxis->coordToPixel(a.y()) - pixel.y();
@@ -443,9 +458,12 @@ void MapView::clearAreaSelection()
     }
     if (m_draftIsSelection && !m_drafting) {
         m_draftIsSelection = false;
+        m_selectionIsMeasure = false;
         m_draft = MapFeature();
-        if (m_featureLayer)
+        if (m_featureLayer) {
             m_featureLayer->setDraft(nullptr);
+            m_featureLayer->setDraftLabel(QString());
+        }
         cambio = true;
     }
     if (cambio)
@@ -485,24 +503,137 @@ void MapView::resizeEvent(QResizeEvent *event)
     refreshPlan();
 }
 
-// Rueda del raton = zoom por pasos discretos, anclado al punto bajo el cursor
-// (para eso pasa la posicion a setZoom). Ignora deltas que no llegan a un paso.
+// Posicion global del evento (Qt5 y Qt6), para que la app abra menus y tarjetas
+// justo donde se hizo clic.
+static QPoint globalDe(const QMouseEvent *e)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return e->globalPosition().toPoint();
+#else
+    return e->globalPos();
+#endif
+}
+
+// Rueda: acerca o aleja un nivel por cada 120 unidades de giro, centrado en el
+// cursor. Los giros se ACUMULAN: una rueda de alta resolucion o un touchpad
+// mandan muchos eventos de 5 a 40 unidades y antes se descartaban todos (solo
+// contaba un evento de 120 o mas). Lo acumulado se olvida tras medio segundo
+// parado o al cambiar de sentido.
 void MapView::wheelEvent(QWheelEvent *event)
 {
-    const int pasos = event->angleDelta().y() / 120;
-    if (pasos == 0) {
+    const int delta = event->angleDelta().y();
+    if (delta == 0) {
         event->ignore();
         return;
     }
+    if (!m_wheelClock.isValid() || m_wheelClock.elapsed() > 500
+        || (m_wheelAccum != 0 && (m_wheelAccum > 0) != (delta > 0)))
+        m_wheelAccum = 0;
+    m_wheelClock.restart();
+    m_wheelAccum += delta;
+    const int pasos = m_wheelAccum / 120;
+    m_wheelAccum -= pasos * 120;
+    event->accept();
+    if (pasos == 0)
+        return;
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
     const QPointF pos = event->position();
 #else
     const QPointF pos = event->posF();
 #endif
-
     setZoom(m_zoom + pasos, &pos);
-    event->accept();
+}
+
+// Desplaza la vista \a dx, \a dy pixeles (positivo = hacia la derecha / abajo).
+// Como el arrastre, se calcula en el eje PROYECTADO: el mismo numero de pixeles
+// no son los mismos grados de latitud arriba que abajo del mapa.
+void MapView::panByPixels(int dx, int dy)
+{
+    const QPointF a(xAxis->pixelToCoord(0), yAxis->pixelToCoord(0));
+    const QPointF b(xAxis->pixelToCoord(dx), yAxis->pixelToCoord(dy));
+    const double centroMercY = WebMercator::latitudeToMercatorDegrees(m_center.latitude());
+    applyZoomToAxes(fromAxis(QPointF(m_center.longitude() + (b.x() - a.x()),
+                                     centroMercY + (b.y() - a.y()))));
+    emit centerChanged(m_center);
+    requestVisibleTiles();
+    refreshPlan();
+}
+
+// ¿Se puede editar la capa? Una capa que no existe aun se crea al anadir, asi
+// que cuenta como editable. La bandera de la capa se hacia cumplir solo por
+// \c selectable en las capas del paquete; aqui se respeta en la edicion.
+bool MapView::capaEditable(const QString &layerId) const
+{
+    const auto capa = m_model->layer(layerId);
+    return !capa || capa->editable;
+}
+
+// Cancela lo que la herramienta activa tenga a medias, SIN cambiar de
+// herramienta: el primer punto de Medir, el recuadro de Zoom/Seleccionar area
+// (y su marca ya cerrada), o la captura de un punto (que vuelve a Navegar y
+// avisa con pickCancelled). Devuelve false si no habia nada que cancelar. Lo
+// llaman Esc y el clic derecho.
+bool MapView::cancelOperation()
+{
+    bool hecho = false;
+    if (m_tool == MapTool::Measure
+        && (m_toolFirstPointSet || (m_measureLine && m_measureLine->visible()))) {
+        m_toolFirstPointSet = false;
+        if (m_measureLine)
+            m_measureLine->setVisible(false);
+        if (m_measureStart)
+            m_measureStart->setVisible(false);
+        hecho = true;
+    } else if ((m_tool == MapTool::AreaZoom || m_tool == MapTool::SelectArea)
+               && (m_toolFirstPointSet || (m_areaRect && m_areaRect->visible()))) {
+        m_toolFirstPointSet = false;
+        if (m_areaRect)
+            m_areaRect->setVisible(false);
+        hecho = true;
+    } else if (m_tool == MapTool::PickPoint) {
+        setActiveTool(MapTool::None);
+        emit pickCancelled();
+        return true;
+    }
+    if (hecho)
+        replot(QCustomPlot::rpQueuedReplot);
+    return hecho;
+}
+
+// Cursor segun lo que haya bajo el puntero (sin botones pulsados), para saber
+// que se puede agarrar: manita sobre objetivos, grupos, entidades y marcas;
+// «mover» sobre rotulos y sobre los tiradores de vertice. Limitado a un calculo
+// cada 30 ms: son varias pruebas de acierto.
+void MapView::actualizarCursorHover(const QPoint &pos)
+{
+    if (m_hoverClock.isValid() && m_hoverClock.elapsed() < 30)
+        return;
+    m_hoverClock.restart();
+
+    Qt::CursorShape c = Qt::ArrowCursor;
+    if (m_tool == MapTool::None) {
+        if (m_featureLayer->labelAt(pos) >= 0 || (m_targetLayer && m_targetLayer->labelAt(pos) >= 0)) {
+            c = Qt::SizeAllCursor;
+        } else if (m_targetLayer && (!m_targetLayer->clusterAt(pos).isEmpty() || targetAt(pos) >= 0)) {
+            c = Qt::PointingHandCursor;
+        } else if (m_featureLayer->featureAt(pos) >= 0) {
+            c = Qt::PointingHandCursor;
+        } else if (m_rangeLayer && m_rangeLayer->markAt(QPointF(pos)) >= 0) {
+            c = Qt::PointingHandCursor;
+        }
+    } else if (m_tool == MapTool::EditFeature) {
+        const qint64 sel = m_model->selectedId();
+        m_hoverVertex = sel >= 0 ? m_featureLayer->vertexAt(sel, pos) : -1;
+        c = m_hoverVertex >= 0 ? Qt::SizeAllCursor : Qt::PointingHandCursor;
+    } else {
+        return;                 // el resto de herramientas tienen su cruz
+    }
+    if (!m_hoverSet || c != m_hoverShape) {
+        setCursor(c);
+        m_hoverShape = c;
+        m_hoverSet = true;
+    }
 }
 
 // Gestiona la herramienta de medir en dos clics. Primer clic: ancla el origen
@@ -556,6 +687,28 @@ void MapView::handleMeasureClick(const QGeoCoordinate &donde)
     replot(QCustomPlot::rpQueuedReplot);
 }
 
+// Medida en vivo de MeasureArea: superficie y perimetro de los vertices puestos
+// mas el punto del cursor (si es valido), cerrando el poligono. Con menos de 3
+// puntos solo hay longitud. Unidades de la escala grafica.
+void MapView::updateAreaLabel(const QGeoCoordinate &cursor)
+{
+    if (!m_featureLayer)
+        return;
+    QVector<QGeoCoordinate> pts = m_draft.geometry;
+    if (cursor.isValid() && (pts.isEmpty() || pts.last() != cursor))
+        pts.append(cursor);
+    const ScaleUnits u = m_scaleBarLayer ? m_scaleBarLayer->units() : ScaleUnits::Metric;
+    QString txt;
+    if (pts.size() >= 3) {
+        txt = tr("Superficie %1\nPerímetro %2")
+                  .arg(MapDecor::formatArea(polygonArea(pts), u),
+                       MapDecor::formatDistance(pathLength(pts, true), u));
+    } else if (pts.size() == 2) {
+        txt = tr("Lado %1").arg(MapDecor::formatDistance(pathLength(pts), u));
+    }
+    m_featureLayer->setDraftLabel(txt);
+}
+
 // Cancela el trazado en curso (si lo hay): descarta el borrador y avisa. Devuelve
 // true si de verdad habia algo que cancelar. Lo llama Escape y el cambio de
 // herramienta.
@@ -565,8 +718,10 @@ bool MapView::cancelDrawing()
         return false;
     m_drafting = false;
     m_draftIsSelection = false;
+    m_selectionIsMeasure = false;
     m_draft = MapFeature();
     m_featureLayer->setDraft(nullptr);
+    m_featureLayer->setDraftLabel(QString());
     emit drawingCancelled();
     return true;
 }
@@ -587,13 +742,25 @@ qint64 MapView::finishDrawing()
         const QVector<QGeoCoordinate> poly = m_draft.geometry;
         if (poly.size() < 3) {               // poligono degenerado: se descarta
             m_draftIsSelection = false;
+            m_selectionIsMeasure = false;
             m_draft = MapFeature();
             m_featureLayer->setDraft(nullptr);
+            m_featureLayer->setDraftLabel(QString());
             emit drawingCancelled();
             return -1;
         }
         m_featureLayer->setDraftCursor(QPoint(), false);  // apaga la goma
         m_featureLayer->setDraft(&m_draft);               // deja el contorno
+        if (m_selectionIsMeasure) {
+            // Medida final (sin el lado al cursor), rotulada en el centro.
+            updateAreaLabel(QGeoCoordinate());
+            AreaMeasurement m;
+            m.polygon = poly;
+            m.areaSquareMeters = polygonArea(poly);
+            m.perimeterMeters = pathLength(poly, true);
+            emit areaMeasured(m);
+            return -1;
+        }
         emit polygonSelected(poly);
         return -1;                                        // no hay id de entidad
     }
@@ -616,20 +783,22 @@ qint64 MapView::finishDrawing()
     return id;
 }
 
-// Atajos de teclado sensibles al contexto: Escape cancela el trazado o la
-// seleccion; Enter cierra el trazado; Supr/Retroceso deshace el ultimo vertice
-// mientras se dibuja o borra la entidad seleccionada al editar. Lo no manejado se
-// delega en QCustomPlot.
+// Teclado sobre el mapa. Esc: cancela el trazado, o lo que la herramienta tenga
+// a medias, o deselecciona (entidad Y objetivo; antes un objetivo seleccionado no
+// se podia deseleccionar). Enter cierra el trazado. Supr/Retroceso quitan el
+// ultimo vertice trazado o, en Editar, el vertice bajo el puntero (y, si no hay,
+// la entidad). Flechas: mueven la vista (Mayus, mas); + y - (o RePag/AvPag): zoom.
 void MapView::keyPressEvent(QKeyEvent *event)
 {
     switch (event->key()) {
     case Qt::Key_Escape:
-        if (cancelDrawing()) {
+        if (cancelDrawing() || cancelOperation()) {
             event->accept();
             return;
         }
-        if (m_model->selectedId() >= 0) {
+        if (m_model->selectedId() >= 0 || m_selectedTarget >= 0) {
             m_model->clearSelection();
+            setSelectedTarget(-1);
             event->accept();
             return;
         }
@@ -657,11 +826,47 @@ void MapView::keyPressEvent(QKeyEvent *event)
             return;
         }
         if (m_tool == MapTool::EditFeature && m_model->selectedId() >= 0) {
-            m_model->removeFeature(m_model->selectedId());
+            const qint64 sel = m_model->selectedId();
+            const auto f = m_model->feature(sel);
+            if (f && !capaEditable(f->layerId)) {
+                emit interactionBlocked(tr("La capa «%1» está bloqueada: no se puede borrar").arg(f->layerId));
+            } else if (m_hoverVertex >= 0) {
+                if (!m_model->removeVertex(sel, m_hoverVertex))
+                    emit interactionBlocked(tr("No se puede quitar ese vértice: la entidad "
+                                               "se quedaría con menos de los necesarios"));
+                m_hoverVertex = -1;
+            } else {
+                m_model->removeFeature(sel);
+            }
             event->accept();
             return;
         }
         break;
+
+    case Qt::Key_Left:
+    case Qt::Key_Right:
+    case Qt::Key_Up:
+    case Qt::Key_Down: {
+        const int paso = qMax(40, plotArea().width() / 5)
+                         * ((event->modifiers() & Qt::ShiftModifier) ? 3 : 1);
+        panByPixels(event->key() == Qt::Key_Left ? -paso : event->key() == Qt::Key_Right ? paso : 0,
+                    event->key() == Qt::Key_Up ? -paso : event->key() == Qt::Key_Down ? paso : 0);
+        event->accept();
+        return;
+    }
+
+    case Qt::Key_Plus:
+    case Qt::Key_Equal:
+    case Qt::Key_PageUp:
+        setZoom(m_zoom + 1);
+        event->accept();
+        return;
+
+    case Qt::Key_Minus:
+    case Qt::Key_PageDown:
+        setZoom(m_zoom - 1);
+        event->accept();
+        return;
 
     default:
         break;
@@ -669,9 +874,27 @@ void MapView::keyPressEvent(QKeyEvent *event)
     QCustomPlot::keyPressEvent(event);
 }
 
+// Menu contextual pedido con el TECLADO (tecla de menu, Mayus+F10): se abre en el
+// puntero, o en el centro de la vista si esta fuera. Con el raton no se usa: el
+// clic derecho lo emite mouseReleaseEvent.
+void MapView::contextMenuEvent(QContextMenuEvent *event)
+{
+    if (event->reason() != QContextMenuEvent::Keyboard) {
+        event->ignore();
+        return;
+    }
+    QPoint p = mapFromGlobal(QCursor::pos());
+    if (!rect().contains(p))
+        p = rect().center();
+    emit contextMenuRequested(p, mapToGlobal(p));
+    event->accept();
+}
+
 // Doble clic: si se esta trazando, lo cierra; si se esta editando y cae sobre un
-// lado de una entidad, inserta un vertice ahi. En cualquier otro caso, delega en
-// QCustomPlot.
+// lado de una entidad, inserta un vertice ahi. En cualquier otro caso Qt manda
+// el doble clic EN LUGAR del segundo pulsado: se trata como un pulsado, para no
+// perder el gesto (dos clics seguidos, o un clic y un arrastre rapidos) y, sobre
+// el mapa vacio con Navegar, acercar un nivel al soltar.
 void MapView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     const QGeoCoordinate donde = coordinateAt(event->pos());
@@ -692,8 +915,12 @@ void MapView::mouseDoubleClickEvent(QMouseEvent *event)
             if (f && f->kind != GeometryKind::Point) {
                 const int tras = m_featureLayer->segmentAt(*f, event->pos());
                 if (tras >= 0) {
-                    m_model->insertVertex(id, tras + 1, donde);
-                    m_model->setSelected(id);
+                    if (!capaEditable(f->layerId)) {
+                        emit interactionBlocked(tr("La capa «%1» está bloqueada: no se puede editar").arg(f->layerId));
+                    } else {
+                        m_model->insertVertex(id, tras + 1, donde);
+                        m_model->setSelected(id);
+                    }
                     event->accept();
                     return;
                 }
@@ -701,16 +928,43 @@ void MapView::mouseDoubleClickEvent(QMouseEvent *event)
         }
     }
 
+    if (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton) {
+        m_dblPress = true;
+        mousePressEvent(event);
+        return;
+    }
     QCustomPlot::mouseDoubleClickEvent(event);
 }
 
-// Boton izquierdo segun la herramienta activa: arrastrar el mapa (None), anclar
-// el rectangulo de area (AreaZoom/SelectArea), medir o elegir punto (al PULSAR,
-// no al soltar, para que la marca caiga donde se apunta), colocar/continuar el
-// trazado de una entidad, o en modo edicion agarrar un vertice o mover/seleccionar
-// una entidad (abriendo un grupo de deshacer para todo el arrastre).
+// Boton izquierdo segun la herramienta activa. Con Navegar el gesto se decide
+// al SOLTAR: pulsar y arrastrar mueve el mapa aunque se empiece sobre un objetivo,
+// un grupo, una entidad o una marca; pulsar y soltar sin mover (menos de unos
+// pixeles) es un CLIC (selecciona, abre el grupo, avisa con elementClicked; en
+// vacio, deselecciona, o con doble clic acerca). Solo los rotulos y las
+// entidades draggable se agarran al pulsar (y las segundas, tras el umbral).
+// Medir y elegir punto actuan AL PULSAR (la marca cae donde se apunta). Con
+// Editar se agarra un vertice o la entidad, y el cambio empieza tras el umbral
+// para que un clic con temblor no mueva nada. El boton central mueve el mapa con
+// cualquier herramienta.
 void MapView::mousePressEvent(QMouseEvent *event)
 {
+    const bool dbl = m_dblPress;
+    m_dblPress = false;
+
+    if (event->button() == Qt::MiddleButton) {
+        m_dragging = true;
+        m_panButton = Qt::MiddleButton;
+        m_dragStartPx = event->pos();
+        m_dragStartGeo = m_center;
+        m_dragMoved = false;
+        m_pend = Pend::Nada;
+        m_pendDbl = false;
+        setCursor(Qt::ClosedHandCursor);
+        m_hoverSet = false;
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton) {
         switch (m_tool) {
         case MapTool::None: {
@@ -740,35 +994,55 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 break;
             }
 
-            // Prioridad 2: un clic sobre una entidad PUNTO marcada 'draggable'
-            // (p. ej. un pin A/B) la arrastra, en vez de desplazar el mapa. La
-            // semantica (que hacer con la nueva posicion) la decide la app por
-            // las senales featureDrag*; la libreria ademas la mueve en el modelo.
+            // Prioridad 2: una entidad PUNTO marcada 'draggable' (un pin A/B, un
+            // radar...) se arrastra en vez de desplazar el mapa. Se selecciona al
+            // pulsar, pero NO se mueve hasta superar el umbral: un clic solo la
+            // selecciona. La semantica (que hacer con la nueva posicion) la decide
+            // la app por las senales featureDrag*; la libreria ademas la mueve.
             const qint64 fid = m_featureLayer->featureAt(event->pos());
             if (fid >= 0) {
                 const auto f = m_model->feature(fid);
                 if (f && f->draggable && f->kind == GeometryKind::Point) {
                     m_dragFeature = fid;
+                    m_dragFeatureStarted = false;
+                    m_dragFeaturePx = event->pos();
                     m_model->setSelected(fid);
-                    m_model->beginUndoGroup();
-                    setCursor(Qt::ClosedHandCursor);
-                    emit featureDragStarted(fid);
                     break;
                 }
             }
 
-            // Prioridad 3: un clic sobre un objetivo lo SELECCIONA (no inicia
-            // arrastre); sobre el mapa vacio, arrastra para desplazar.
-            const qint64 tid = targetAt(event->pos());
-            if (tid >= 0) {
-                setSelectedTarget(tid);
-                emit targetClicked(tid, coordinateAt(event->pos()));
-                break;
+            // El resto (grupo, objetivo, entidad, marca o fondo) se resuelve al
+            // SOLTAR; entretanto, arrastrar mueve el mapa.
+            m_pend = Pend::Nada;
+            m_pendId = -1;
+            m_pendGrupo.clear();
+            m_pendDbl = dbl;
+            if (m_targetLayer) {
+                m_pendGrupo = m_targetLayer->clusterAt(event->pos());
+                if (!m_pendGrupo.isEmpty())
+                    m_pend = Pend::Grupo;
+            }
+            if (m_pend == Pend::Nada) {
+                const qint64 tid = targetAt(event->pos());
+                if (tid >= 0) {
+                    m_pend = Pend::Objetivo;
+                    m_pendId = tid;
+                } else if (fid >= 0) {
+                    m_pend = Pend::Entidad;
+                    m_pendId = fid;
+                } else if (m_rangeLayer) {
+                    const qint64 marca = m_rangeLayer->markAt(QPointF(event->pos()));
+                    if (marca >= 0) {
+                        m_pend = Pend::Marca;
+                        m_pendId = marca;
+                    }
+                }
             }
             m_dragging = true;
+            m_panButton = Qt::LeftButton;
             m_dragStartPx = event->pos();
             m_dragStartGeo = m_center;
-            setCursor(Qt::ClosedHandCursor);
+            m_dragMoved = false;
             break;
         }
 
@@ -802,6 +1076,10 @@ void MapView::mousePressEvent(QMouseEvent *event)
             break;
 
         case MapTool::DrawPoint: {
+            if (!capaEditable(m_activeLayer)) {
+                emit interactionBlocked(tr("La capa «%1» está bloqueada: elige otra para dibujar").arg(m_activeLayer));
+                break;
+            }
             MapFeature f;
             f.kind = GeometryKind::Point;
             f.layerId = m_activeLayer;
@@ -817,6 +1095,10 @@ void MapView::mousePressEvent(QMouseEvent *event)
         case MapTool::DrawPolyline:
         case MapTool::DrawPolygon:
             if (!m_drafting) {
+                if (!capaEditable(m_activeLayer)) {
+                    emit interactionBlocked(tr("La capa «%1» está bloqueada: elige otra para dibujar").arg(m_activeLayer));
+                    break;
+                }
                 m_drafting = true;
                 m_draftIsSelection = false;
                 m_draft = MapFeature();
@@ -841,24 +1123,32 @@ void MapView::mousePressEvent(QMouseEvent *event)
             break;
 
         case MapTool::SelectPolygon:
+        case MapTool::MeasureArea:
             // Igual que dibujar un poligono, pero es una SELECCION transitoria:
             // no crea entidad. Reusa el borrador de FeatureLayer para la linea
             // de goma; doble clic / Enter / clic derecho lo cierra (finishDrawing
-            // detecta m_draftIsSelection y emite polygonSelected).
+            // detecta m_draftIsSelection y emite polygonSelected, o areaMeasured
+            // si es una medida). Un clic tras una medida ya cerrada empieza otra.
             if (!m_drafting) {
                 m_drafting = true;
                 m_draftIsSelection = true;
+                m_selectionIsMeasure = (m_tool == MapTool::MeasureArea);
                 m_draft = MapFeature();
                 m_draft.kind = GeometryKind::Polygon;
-                m_draft.style.lineColor = QColor(0, 0, 0);
+                m_draft.style.lineColor = m_selectionIsMeasure ? QColor(0x6a, 0x1b, 0x9a)
+                                                               : QColor(0, 0, 0);
                 m_draft.style.lineWidth = 2;
             }
             m_draft.geometry.append(coordinateAt(event->pos()));
             m_featureLayer->setDraft(&m_draft);
+            if (m_selectionIsMeasure)
+                updateAreaLabel(coordinateAt(event->pos()));
             break;
 
         case MapTool::EditFeature: {
             const qint64 seleccionada = m_model->selectedId();
+            m_editStarted = false;
+            m_editPressPx = event->pos();
 
             // Primero se mira si hay un tirador de vertice bajo el cursor:
             // tiene prioridad sobre la propia entidad, porque los tiradores
@@ -866,11 +1156,20 @@ void MapView::mousePressEvent(QMouseEvent *event)
             if (seleccionada >= 0) {
                 const int v = m_featureLayer->vertexAt(seleccionada, event->pos());
                 if (v >= 0) {
+                    const auto f = m_model->feature(seleccionada);
+                    if (f && !capaEditable(f->layerId)) {
+                        emit interactionBlocked(tr("La capa «%1» está bloqueada: no se puede editar").arg(f->layerId));
+                        break;
+                    }
+                    // Ctrl + clic en un tirador: quita ese vertice.
+                    if (event->modifiers() & Qt::ControlModifier) {
+                        if (!m_model->removeVertex(seleccionada, v))
+                            emit interactionBlocked(tr("No se puede quitar ese vértice: la entidad "
+                                                       "se quedaría con menos de los necesarios"));
+                        break;
+                    }
                     m_editVertex = v;
                     m_lastEditPos = coordinateAt(event->pos());
-                    // Un arrastre genera decenas de moveVertex; deben
-                    // deshacerse de una sola vez.
-                    m_model->beginUndoGroup();
                     break;
                 }
             }
@@ -879,9 +1178,13 @@ void MapView::mousePressEvent(QMouseEvent *event)
             m_model->setSelected(id);
             if (id >= 0) {
                 emit featureClicked(id, coordinateAt(event->pos()));
+                const auto f = m_model->feature(id);
+                if (f && !capaEditable(f->layerId)) {
+                    emit interactionBlocked(tr("La capa «%1» está bloqueada: no se puede editar").arg(f->layerId));
+                    break;
+                }
                 m_movingFeature = true;
                 m_lastEditPos = coordinateAt(event->pos());
-                m_model->beginUndoGroup();
             }
             break;
         }
@@ -897,7 +1200,10 @@ void MapView::mousePressEvent(QMouseEvent *event)
 // arrastra un vertice/entidad (prioridad sobre el resto), estira el "lado de goma"
 // del trazado, desplaza el mapa (calculado en el eje proyectado, no en latitud) o
 // redimensiona el recuadro de area / la linea de medir. Todo en coordenadas de
-// Mercator para que no haya desfase con el zoom ni la latitud.
+// Mercator para que no haya desfase con el zoom ni la latitud. Un arrastre (del
+// mapa, de una entidad o de un vertice) no empieza hasta superar unos pixeles
+// desde el pulsado: antes es un clic. Sin botones pulsados, pone el cursor segun
+// lo que haya debajo.
 void MapView::mouseMoveEvent(QMouseEvent *event)
 {
     const QGeoCoordinate bajo = coordinateAt(event->pos());
@@ -920,9 +1226,22 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
 
     // Arrastre de una entidad draggable: la mueve en el modelo (no-op si la app
     // la recreo) y avisa con la coordenada para que la app actualice su estado.
-    if (m_dragFeature >= 0 && bajo.isValid()) {
-        m_model->moveVertex(m_dragFeature, 0, bajo);
-        emit featureDragMovedTo(m_dragFeature, bajo);
+    // Empieza (y abre su grupo de deshacer) al superar el umbral.
+    if (m_dragFeature >= 0) {
+        if (!m_dragFeatureStarted) {
+            if ((event->pos() - m_dragFeaturePx).manhattanLength() <= kClickSlopPx) {
+                event->accept();
+                return;
+            }
+            m_dragFeatureStarted = true;
+            m_model->beginUndoGroup();
+            setCursor(Qt::ClosedHandCursor);
+            emit featureDragStarted(m_dragFeature);
+        }
+        if (bajo.isValid()) {
+            m_model->moveVertex(m_dragFeature, 0, bajo);
+            emit featureDragMovedTo(m_dragFeature, bajo);
+        }
         event->accept();
         return;
     }
@@ -930,6 +1249,14 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
     // Edicion en curso: tiene prioridad sobre el desplazamiento del mapa.
     if (m_tool == MapTool::EditFeature
         && (m_editVertex >= 0 || m_movingFeature)) {
+        if (!m_editStarted) {
+            if ((event->pos() - m_editPressPx).manhattanLength() <= kClickSlopPx) {
+                event->accept();
+                return;
+            }
+            m_editStarted = true;
+            m_model->beginUndoGroup();     // todo el arrastre, un solo deshacer
+        }
         const qint64 id = m_model->selectedId();
         if (id >= 0 && m_lastEditPos.isValid() && bajo.isValid()) {
             if (m_editVertex >= 0) {
@@ -948,9 +1275,21 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
     // Mientras se traza, el lado siguiente sigue al raton.
     if (m_drafting) {
         m_featureLayer->setDraftCursor(event->pos(), true);
+        if (m_selectionIsMeasure)
+            updateAreaLabel(bajo);
     }
 
     if (m_dragging) {
+        // Hasta superar el umbral es un clic, no un arrastre.
+        if (!m_dragMoved) {
+            if ((event->pos() - m_dragStartPx).manhattanLength() <= kClickSlopPx) {
+                event->accept();
+                return;
+            }
+            m_dragMoved = true;
+            m_pend = Pend::Nada;           // ya no es un clic sobre nada
+            setCursor(Qt::ClosedHandCursor);
+        }
         // El desplazamiento se calcula en el eje PROYECTADO, no en latitud:
         // arrastrar 100 pixeles no equivale al mismo numero de grados de
         // latitud arriba que abajo del mapa.
@@ -988,46 +1327,65 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
         replot(QCustomPlot::rpQueuedReplot);
     }
 
+    if (event->buttons() == Qt::NoButton)
+        actualizarCursorHover(event->pos());
+
     event->accept();
 }
 
 // Soltar el boton cierra el gesto en curso: termina la edicion (cerrando el grupo
-// de deshacer), suelta el arrastre del mapa, o confirma el area seleccionada
-// (emite areaSelected y, si es AreaZoom, encuadra; si es SelectArea, deja el
-// recuadro como marca). El clic derecho cierra el trazado. Medir/elegir ya se
-// atendieron al pulsar.
+// de deshacer), suelta el arrastre del mapa o decide el CLIC pendiente (ver
+// mousePressEvent), o confirma el area seleccionada (emite areaSelected y, si es
+// AreaZoom, encuadra; si es SelectArea, deja el recuadro como marca). El clic
+// derecho cierra el trazado, o cancela lo que la herramienta tenga a medias, o
+// pide el menu contextual. Medir/elegir ya se atendieron al pulsar.
 void MapView::mouseReleaseEvent(QMouseEvent *event)
 {
     const QGeoCoordinate donde = coordinateAt(event->pos());
+    const bool izq = event->button() == Qt::LeftButton;
 
     // Fin del arrastre de una etiqueta.
-    if (m_dragLabelFeature >= 0) {
+    if (izq && m_dragLabelFeature >= 0) {
         m_model->endUndoGroup();
         m_dragLabelFeature = -1;
         unsetCursor();
+        m_hoverSet = false;
         event->accept();
         return;
     }
-    if (m_dragLabelTarget >= 0) {
+    if (izq && m_dragLabelTarget >= 0) {
         m_dragLabelTarget = -1;
         unsetCursor();
+        m_hoverSet = false;
         event->accept();
         return;
     }
 
-    // Fin del arrastre de una entidad draggable.
-    if (m_dragFeature >= 0) {
-        m_model->endUndoGroup();
+    // Fin del arrastre de una entidad draggable. Si no llego a moverse fue un
+    // clic: la entidad ya quedo seleccionada al pulsar.
+    if (izq && m_dragFeature >= 0) {
         const qint64 id = m_dragFeature;
+        const bool movio = m_dragFeatureStarted;
         m_dragFeature = -1;
+        m_dragFeatureStarted = false;
         unsetCursor();
-        emit featureDragFinished(id);
+        m_hoverSet = false;
+        if (movio) {
+            m_model->endUndoGroup();
+            emit featureDragFinished(id);
+        } else {
+            emit featureClicked(id, donde);
+            emit elementClicked(event->pos(), globalDe(event));
+            emit mapClicked(donde, Qt::LeftButton);
+        }
         event->accept();
         return;
     }
 
-    if (m_editVertex >= 0 || m_movingFeature) {
-        m_model->endUndoGroup();
+    if (izq && (m_editVertex >= 0 || m_movingFeature)) {
+        if (m_editStarted)
+            m_model->endUndoGroup();
+        m_editStarted = false;
         m_editVertex = -1;
         m_movingFeature = false;
         m_lastEditPos = QGeoCoordinate();
@@ -1035,10 +1393,63 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
 
-    if (m_dragging) {
+    // Fin del arrastre del mapa (boton izquierdo o central). Sin moverse es un
+    // clic: aqui se decide lo que estaba pendiente al pulsar.
+    if (m_dragging && event->button() == m_panButton) {
         m_dragging = false;
         unsetCursor();
-        emit mapClicked(donde, event->button());
+        m_hoverSet = false;
+        const bool movio = m_dragMoved;
+        const Pend pend = m_pend;
+        const bool dbl = m_pendDbl;
+        const qint64 id = m_pendId;
+        const QVector<qint64> grupo = m_pendGrupo;
+        const Qt::MouseButton boton = m_panButton;
+        m_dragMoved = false;
+        m_pend = Pend::Nada;
+        m_pendDbl = false;
+        m_pendId = -1;
+        m_pendGrupo.clear();
+        m_panButton = Qt::NoButton;
+        if (!movio) {
+            if (boton == Qt::LeftButton) {
+                // Un doble clic sobre un elemento no repite lo que hizo el primero.
+                switch (pend) {
+                case Pend::Objetivo:
+                    if (!dbl) {
+                        setSelectedTarget(id);
+                        emit targetClicked(id, donde);
+                        emit elementClicked(event->pos(), globalDe(event));
+                    }
+                    break;
+                case Pend::Grupo:
+                    if (!dbl)
+                        emit targetClusterClicked(grupo, donde);
+                    break;
+                case Pend::Entidad:
+                    if (!dbl) {
+                        m_model->setSelected(id);
+                        emit featureClicked(id, donde);
+                        emit elementClicked(event->pos(), globalDe(event));
+                    }
+                    break;
+                case Pend::Marca:
+                    if (!dbl)
+                        emit elementClicked(event->pos(), globalDe(event));
+                    break;
+                case Pend::Nada:
+                    if (dbl) {
+                        const QPointF pos(event->pos());
+                        setZoom(m_zoom + 1, &pos);      // doble clic en vacio: acerca
+                    } else {
+                        m_model->clearSelection();      // clic en vacio: deselecciona
+                        setSelectedTarget(-1);
+                    }
+                    break;
+                }
+            }
+            emit mapClicked(donde, boton);
+        }
         event->accept();
         return;
     }
@@ -1085,8 +1496,13 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
         }
     } else if (event->button() == Qt::RightButton && m_drafting) {
         finishDrawing();
+    } else if (event->button() == Qt::RightButton && cancelOperation()) {
+        // El clic derecho cancela lo que la herramienta tenia a medias (la
+        // medida, el recuadro, la captura de un punto) en vez de abrir el menu.
     } else {
         emit mapClicked(donde, event->button());
+        if (event->button() == Qt::RightButton)
+            emit contextMenuRequested(event->pos(), globalDe(event));
     }
 
     event->accept();
@@ -1109,12 +1525,21 @@ void MapView::setActiveTool(MapTool tool)
     // herramienta, igual que el recuadro de SelectArea.
     if (m_draftIsSelection) {
         m_draftIsSelection = false;
+        m_selectionIsMeasure = false;
         m_draft = MapFeature();
-        if (m_featureLayer) m_featureLayer->setDraft(nullptr);
+        if (m_featureLayer) {
+            m_featureLayer->setDraft(nullptr);
+            m_featureLayer->setDraftLabel(QString());
+        }
     }
 
     m_tool = tool;
     m_toolFirstPointSet = false;
+    m_pend = Pend::Nada;
+    m_pendDbl = false;
+    m_dblPress = false;
+    m_hoverVertex = -1;
+    m_hoverSet = false;               // el cursor de la herramienta manda hasta el primer hover
     if (m_measureLine) m_measureLine->setVisible(false);
     if (m_areaRect)    m_areaRect->setVisible(false);
 

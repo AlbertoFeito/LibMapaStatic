@@ -66,6 +66,29 @@ public:
     //! Lineas de maximo acercamiento de los pares en alerta (vacio = ninguna).
     void setProximityLines(const QVector<ProximityLine> &lines);
     void setProximityColor(const QColor &c) { m_proximityColor = c; }
+
+    /*!
+     * \brief Objetivos que NO pasan el filtro de la app.
+     *
+     * Con \a dim false no se dibujan (ni se pueden pinchar: ver
+     * isFilteredOut); con \a dim true se dibujan tenues, sin rotulo ni traza,
+     * para que lo que si pasa destaque sin perder el contexto.
+     */
+    void setFilteredOut(const QSet<qint64> &ids, bool dim);
+    //! Agrupacion de objetivos cercanos (ver TargetClustering).
+    void setClustering(const TargetClustering &c);
+    TargetClustering clustering() const { return m_clustering; }
+    //! Objetivos del grupo dibujado bajo \a pixel en el ultimo repintado (vacio
+    //! si no hay grupo ahi).
+    QVector<qint64> clusterAt(const QPoint &pixel) const;
+    //! Grupos dibujados en el ultimo repintado.
+    int lastClusterCount() const { return int(m_clusterHits.size()); }
+    //! ¿Esta el objetivo dentro de un grupo en el ultimo repintado? (entonces
+    //! no se dibuja suelto ni se puede pinchar suelto).
+    bool isClustered(qint64 id) const { return m_clustered.contains(id); }
+
+    //! ¿Esta oculto por el filtro? (atenuado no cuenta: se ve y se puede pinchar).
+    bool isFilteredOut(qint64 id) const { return !m_filterDim && m_filteredOut.contains(id); }
     bool isSelectedHistoryVisible() const { return m_historyVisible; }
 
     //! Nivel de detalle para escalar a MILES de objetivos: si en un repintado
@@ -105,6 +128,7 @@ private:
     // Historial completo del objetivo seleccionado y marca de su origen.
     void drawHistory(QPainter *painter, const TargetModel::Entry &e) const;
     void drawProximity(QPainter *painter) const;
+    void drawCluster(QPainter *painter, const QPointF &center, int count) const;
 
     TargetModel *m_model = nullptr;
     std::function<QPointF(const QGeoCoordinate &)> m_toAxis;
@@ -117,6 +141,17 @@ private:
     bool m_historyVisible = true;    //!< El seleccionado muestra su historial.
     QVector<ProximityLine> m_proximity;              //!< Pares en alerta CPA.
     QColor m_proximityColor = QColor(0xff, 0x3d, 0x00);
+    QSet<qint64> m_filteredOut;                      //!< No pasan el filtro.
+    TargetClustering m_clustering;
+    //! Grupos del ultimo repintado, para el hit-test: centro, radio y miembros.
+    struct ClusterHit {
+        QPointF center;
+        double radius = 0.0;
+        QVector<qint64> ids;
+    };
+    QVector<ClusterHit> m_clusterHits;
+    QSet<qint64> m_clustered;                        //!< Miembros de algun grupo.
+    bool m_filterDim = false;                        //!< Atenuar en vez de ocultar.
     QTimer m_repintar;               //!< Agrupa avisos: como mucho ~30 fps.
     mutable int m_lastDrawn = 0;
     mutable int m_lastLabels = 0;

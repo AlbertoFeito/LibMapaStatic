@@ -4,6 +4,7 @@
 #include "libmapa/MapTypes.h"
 
 #include <QGeoCoordinate>
+#include <QPointF>
 #include <QString>
 #include <QVector>
 
@@ -60,9 +61,47 @@ QString formatLongitude(double longitudeDeg, double stepDeg);
  */
 QString formatDistance(double meters, ScaleUnits units);
 
+/*!
+ * \brief Superficie para un rotulo: "850 m²", "12.5 ha", "3.42 km²" (metrico)
+ *        o "1.25 NM²" (nautico).
+ *
+ * En metrico: metros cuadrados por debajo de una hectarea, hectareas hasta
+ * 1 km² y kilometros cuadrados a partir de ahi. Mismos decimales y sin ceros
+ * sobrantes que formatDistance. Vacio si no es finita.
+ */
+QString formatArea(double squareMeters, ScaleUnits units);
+
+/*!
+ * \brief Separacion "redonda" para \a count anillos que quepan en un radio.
+ *
+ * El mayor valor 1, 2, 2.5 o 5 por potencia de 10 (en metros o en millas
+ * nauticas, segun \a units) tal que \a count anillos no pasen de
+ * \a maxRadiusMeters: 9 km con 4 anillos -> 2 km. Lo usan los anillos de
+ * separacion automatica. 0 si los datos no valen.
+ */
+double niceRingSpacing(double maxRadiusMeters, int count, ScaleUnits units);
+
 //! Rumbo o marcacion verdadera con tres cifras: "045°", "359°". Se normaliza
 //! a [0, 360) y se redondea al grado. Vacio si no es finito.
 QString formatBearing(double degrees);
+
+//! Un grupo de puntos de pantalla que se dibuja como uno solo.
+struct PointCluster {
+    QPointF center;          //!< Centroide de los miembros, en pixeles.
+    QVector<int> members;    //!< Indices en el vector de entrada.
+};
+
+/*!
+ * \brief Agrupa puntos de pantalla por celdas de \a cellSize pixeles.
+ *
+ * Las celdas que reunen al menos \a minCount puntos forman un grupo; los
+ * puntos de celdas con menos quedan sueltos (no se devuelven: los dibuja quien
+ * llama uno a uno). La rejilla se ancla en \a gridOrigin, un punto FIJO del
+ * mundo pasado a pixeles: asi, al desplazar el mapa, los grupos no cambian (solo
+ * al cambiar de zoom). O(n). Grupos ordenados de mayor a menor.
+ */
+QVector<PointCluster> clusterPoints(const QVector<QPointF> &points, double cellSize,
+                                    int minCount, const QPointF &gridOrigin = QPointF());
 
 /*!
  * \brief Circulo GEODESICO de radio \a radiusMeters alrededor de \a center:

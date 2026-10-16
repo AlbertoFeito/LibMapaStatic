@@ -6,11 +6,14 @@
 #include "db/SqliteConnectionPool.h"
 #include "db/VectorRepository.h"
 #include "widget/MapView.h"
+#include "widget/OverlayModel.h"
 #include "geo/TileMatrix.h"
 
 #include <climits>
 
+#include <QContextMenuEvent>
 #include <QMouseEvent>
+#include <QWheelEvent>
 
 //! El constructor de QMouseEvent con QPointF quedo obsoleto en Qt 6.
 static QMouseEvent mouseEvent(QEvent::Type tipo, const QPoint &pos,
@@ -155,6 +158,47 @@ private slots:
     //! Reproduccion de un historial: los objetivos aparecen, se mueven y
     //! desaparecen con las horas del fichero; ir atras rehace su historial.
     void trackPlayerReplaysHistory();
+    //! Herramienta MeasureArea: rotulo en vivo, areaMeasured al cerrar con la
+    //! superficie y el perimetro del poligono, y limpieza al cambiar de herramienta.
+    void measureAreaToolMeasuresPolygon();
+    //! Importar un fichero es UNA operacion de deshacer (capa incluida), y no
+    //! cuesta O(n^2) aunque traiga cientos de entidades.
+    void importIsOneUndoStep();
+    //! Filtro de objetivos: clase, velocidad, zona y criterio de la app;
+    //! ocultar (no se pueden pinchar) o atenuar; se reevalua al moverse.
+    void targetFilterHidesOrDims();
+    //! Agrupacion: un monton de objetivos es un grupo con su numero, que se
+    //! pincha como grupo; el seleccionado queda suelto; maxZoom la limita.
+    void targetClusteringGroupsCrowds();
+
+    // --- Interaccion con el raton y el teclado ---------------------------
+    //! Rueda: los giros finos (touchpad) se acumulan; 120 en total = un nivel.
+    void wheelAccumulatesFineDeltas();
+    //! Navegar: agarrar un objetivo y arrastrar mueve el mapa; pulsar y soltar
+    //! lo selecciona al soltar; un clic en vacio y Esc deseleccionan.
+    void navigateGesturesAreDecidedOnRelease();
+    //! Doble clic: acerca sobre el vacio y no pierde el segundo pulsado (un clic
+    //! seguido de un clic-arrastre rapido mueve el mapa).
+    void doubleClickZoomsAndNeverLosesTheDrag();
+    //! `clicked` no se emite al terminar un arrastre.
+    void clickedIsNotEmittedAfterDragging();
+    //! Editar: un clic con temblor no mueve nada, un arrastre real es un solo
+    //! deshacer; Ctrl+clic quita un vertice; las capas bloqueadas se respetan.
+    void editNeedsARealDragAndRespectsLockedLayers();
+    //! Clic derecho y Esc cancelan lo que la herramienta tenga a medias; el clic
+    //! derecho sin nada pendiente abre el menu.
+    void rightClickAndEscCancelPendingOperations();
+    //! Boton central, flechas y +/- mueven la vista con cualquier herramienta.
+    void middleButtonAndKeysMoveTheView();
+    //! Cursor de mano sobre lo que se puede agarrar; menu contextual con el teclado.
+    void hoverCursorAndKeyboardContextMenu();
+    //! elementClicked: con un clic sobre un objetivo o una entidad, no al arrastrar.
+    void elementClickedOnlyWithoutDragging();
+    //! El indice por capa del modelo sigue el orden y los cambios de capa.
+    void layerIndexStaysConsistent();
+    //! hitTest dice que hay bajo un pixel (objetivo, entidad, anillos,
+    //! marcacion, mapa), y el clic derecho lo emite en contextMenuRequested.
+    void hitTestAndContextMenu();
 
     /*! El item debe quedar EXACTAMENTE bajo el cursor. */
     void toolsLandExactlyUnderTheCursor();
@@ -2537,10 +2581,180 @@ void TstMapWidget::rangeRingsAndBearingLinesFollowTargets()
     w.removeTarget(idb);
     QVERIFY(!w.bearingLineMeasure(marcacion, &rumbo, &dist));
 
+    // Una marcacion sin longitud (mismo objetivo, o el mismo punto, en los dos
+    // extremos) se rechaza: solo dibujaria un rotulo "000° · 0 m".
+    BearingLine nula;
+    nula.fromTarget = ida;
+    nula.toTarget = ida;
+    QCOMPARE(w.addBearingLine(nula), qint64(-1));
+    nula = BearingLine();
+    nula.from = QGeoCoordinate(22.0, -80.1);
+    nula.to = nula.from;
+    QCOMPARE(w.addBearingLine(nula), qint64(-1));
+    QVERIFY(!w.updateBearingLine(idFija, nula));
+
+    // Consultas por id: cada una solo devuelve su tipo.
+    QVERIFY(w.rangeRings(anillos).has_value());
+    QCOMPARE(w.rangeRings(anillos)->targetId, ida);
+    QVERIFY(!w.rangeRings(idFija).has_value());
+    QVERIFY(w.bearingLine(idFija).has_value());
+    QVERIFY(!w.bearingLine(anillos).has_value());
+    QCOMPARE(w.rangeRingsSpacing(anillos), 1852.0);          // fija
+
+    // Anillos automaticos en un punto fijo con nombre (un radar): la
+    // separacion es redonda, los anillos caben en la vista y al alejar crece.
+    RangeRings radar;
+    radar.center = QGeoCoordinate(22.0, -80.0);
+    radar.spacingMeters = 0.0;
+    radar.count = 4;
+    radar.name = QStringLiteral("Radar");
+    const qint64 idRadar = w.addRangeRings(radar);
+    captura();
+    const double pasoCerca = w.rangeRingsSpacing(idRadar);
+    QVERIFY(pasoCerca > 0.0);
+    const double m = pasoCerca / std::pow(10.0, std::floor(std::log10(pasoCerca)));
+    QVERIFY(qAbs(m - 1.0) < 1e-6 || qAbs(m - 2.0) < 1e-6 || qAbs(m - 2.5) < 1e-6
+            || qAbs(m - 5.0) < 1e-6);
+    // A zoom 10 y lat 22 hay ~140 m/px: 4 anillos en el 45 % de 600 px.
+    const double mPorPx = 156543.03 * std::cos(qDegreesToRadians(22.0)) / std::pow(2.0, 10);
+    QVERIFY(pasoCerca * 4 <= 0.45 * 600 * mPorPx * 1.05);
+    QVERIFY(pasoCerca * 4 >= 0.45 * 600 * mPorPx / 2.5 * 0.95);
+    w.setZoom(8);
+    captura();
+    QVERIFY(w.rangeRingsSpacing(idRadar) > pasoCerca * 2.0);
+    w.setZoom(10);
+
+    // Anillos en una entidad punto (un observador): la siguen al moverla y
+    // dejan de dibujarse si se borra.
+    MapFeature obs;
+    obs.kind = GeometryKind::Point;
+    obs.layerId = w.activeFeatureLayer();
+    obs.geometry = { QGeoCoordinate(22.05, -79.95) };
+    const qint64 idObs = w.addFeature(obs);
+    QVERIFY(idObs >= 0);
+    RangeRings enObs;
+    enObs.featureId = idObs;
+    enObs.spacingMeters = 1000.0;
+    const qint64 idEnObs = w.addRangeRings(enObs);
+    captura();
+    QCOMPARE(w.rangeRingsSpacing(idEnObs), 1000.0);
+    QVERIFY(w.moveFeature(idObs, 0.01, 0.01));
+    QCOMPARE(w.rangeRings(idEnObs)->featureId, idObs);
+
+    // Marcacion entre una entidad punto y un objetivo: sigue a los dos.
+    BearingLine conPunto;
+    conPunto.fromFeature = idObs;
+    conPunto.toTarget = ida;
+    const qint64 idConPunto = w.addBearingLine(conPunto);
+    QVERIFY(idConPunto > 0);
+    double rumboP = 0.0, distP = 0.0;
+    QVERIFY(w.bearingLineMeasure(idConPunto, &rumboP, &distP));
+    const double distAntes = distP;
+    QVERIFY(w.moveFeature(idObs, 0.02, 0.0));                    // el punto se mueve: la linea cambia
+    QVERIFY(w.bearingLineMeasure(idConPunto, &rumboP, &distP));
+    QVERIFY(qAbs(distP - distAntes) > 100.0);
+    BearingLine mismoPunto;                                      // el mismo punto en los dos extremos
+    mismoPunto.fromFeature = idObs;
+    mismoPunto.toFeature = idObs;
+    QCOMPARE(w.addBearingLine(mismoPunto), qint64(-1));
+
+    w.removeFeature(idObs);
+    QCOMPARE(w.rangeRingsSpacing(idEnObs), 0.0);                 // sin centro: no se dibuja
+    QVERIFY(!w.bearingLineMeasure(idConPunto, &rumboP, &distP)); // ni se puede medir
+
     QVERIFY(w.removeRangeMark(anillos));
     QVERIFY(!w.removeRangeMark(anillos));
+    QCOMPARE(w.rangeRingsSpacing(anillos), 0.0);
     w.clearRangeMarks();
     QVERIFY(w.rangeMarks().isEmpty());
+}
+
+// Clic derecho: la libreria resuelve que hay debajo y la app monta el menu.
+void TstMapWidget::hitTestAndContextMenu()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.show();
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -80.0);
+    w.setCenter(centro);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+
+    // Un poligono, un objetivo dentro, unos anillos fijos en otro sitio y una
+    // marcacion que no cruza nada.
+    MapFeature pol;
+    pol.kind = GeometryKind::Polygon;
+    pol.layerId = w.activeFeatureLayer();
+    pol.geometry = { QGeoCoordinate(22.05, -80.05), QGeoCoordinate(22.05, -79.95),
+                     QGeoCoordinate(21.95, -79.95), QGeoCoordinate(21.95, -80.05) };
+    const qint64 idPol = w.addFeature(pol);
+    QVERIFY(idPol >= 0);
+    MapTarget t;
+    t.position = QGeoCoordinate(22.02, -80.02);
+    const qint64 idT = w.addTarget(t);
+
+    RangeRings r;
+    r.center = QGeoCoordinate(22.15, -80.25);
+    r.spacingMeters = 6000.0;            // ~43 px a zoom 10: anillo y centro bien separados
+    r.count = 2;
+    const qint64 idR = w.addRangeRings(r);
+    BearingLine l;
+    l.from = QGeoCoordinate(21.85, -80.30);
+    l.to = QGeoCoordinate(21.85, -80.20);
+    const qint64 idL = w.addBearingLine(l);
+
+    // Sobre el objetivo: objetivo Y entidad (cada cosa por separado).
+    MapHit h = w.hitTest(pixel(t.position));
+    QCOMPARE(h.targetId, idT);
+    QCOMPARE(h.featureId, idPol);
+    QCOMPARE(h.rangeMarkId, qint64(-1));
+    QVERIFY(h.coordinate.distanceTo(t.position) < 200.0);
+
+    // Dentro del poligono, lejos del objetivo: solo la entidad.
+    h = w.hitTest(pixel(QGeoCoordinate(21.97, -79.97)));
+    QCOMPARE(h.targetId, qint64(-1));
+    QCOMPARE(h.featureId, idPol);
+
+    // En el centro de los anillos y sobre el primer anillo (6 km al este).
+    QCOMPARE(w.hitTest(pixel(r.center)).rangeMarkId, idR);
+    QCOMPARE(w.hitTest(pixel(r.center.atDistanceAndAzimuth(6000.0, 90.0))).rangeMarkId, idR);
+    // Entre el centro y el anillo no hay nada.
+    QCOMPARE(w.hitTest(pixel(r.center.atDistanceAndAzimuth(3000.0, 90.0))).rangeMarkId, qint64(-1));
+    // Sobre la marcacion.
+    QCOMPARE(w.hitTest(pixel(QGeoCoordinate(21.85, -80.25))).rangeMarkId, idL);
+
+    // Mapa vacio.
+    h = w.hitTest(pixel(QGeoCoordinate(21.80, -79.80)));
+    QVERIFY(h.isEmpty());
+    QVERIFY(h.coordinate.isValid());
+
+    // Clic derecho sobre el objetivo: se emite con lo que hay debajo.
+    QSignalSpy spy(&w, &MapWidget::contextMenuRequested);
+    const QPoint donde = pixel(t.position);
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, donde, Qt::RightButton, Qt::RightButton);
+    QCoreApplication::sendEvent(plot, &pulsa);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, donde, Qt::RightButton, Qt::NoButton);
+    QCoreApplication::sendEvent(plot, &suelta);
+    QCOMPARE(spy.count(), 1);
+    const MapHit recibido = spy.at(0).at(0).value<MapHit>();
+    QCOMPARE(recibido.targetId, idT);
+    QCOMPARE(recibido.featureId, idPol);
+    QCOMPARE(recibido.pixel, donde);
+
+    // Con el boton izquierdo no hay menu.
+    QMouseEvent izq = mouseEvent(QEvent::MouseButtonPress, donde, Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(plot, &izq);
+    QMouseEvent izqS = mouseEvent(QEvent::MouseButtonRelease, donde, Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(plot, &izqS);
+    QCOMPARE(spy.count(), 1);
 }
 
 // Importar un historial GPX: el track marca inicio y fin siempre (modo por
@@ -2675,6 +2889,305 @@ void TstMapWidget::trackPlayerReplaysHistory()
     QString err;
     QVERIFY(!player.loadFile(QStringLiteral("/no/existe.gpx"), &err));
     QVERIFY(!err.isEmpty());
+}
+
+// Se marcan 4 vertices de un cuadrado de ~2 km con clics reales sobre la vista.
+// La medida en vivo cambia lo dibujado; Intro cierra y emite areaMeasured con
+// la superficie del poligono marcado (la de polygonArea) y su perimetro; al
+// cambiar de herramienta se quita la marca. No crea ninguna entidad.
+void TstMapWidget::measureAreaToolMeasuresPolygon()
+{
+    qRegisterMetaType<libmapa::AreaMeasurement>();
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    const auto pixel = [vista](const QGeoCoordinate &c) {
+        const QPointF ax = MapView::toAxis(c);
+        return QPoint(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                      int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+    };
+    const auto clic = [vista](const QPoint &p) {
+        QMouseEvent pulsar = mouseEvent(QEvent::MouseButtonPress, p, Qt::LeftButton, Qt::LeftButton);
+        QMouseEvent soltar = mouseEvent(QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton);
+        QCoreApplication::sendEvent(vista, &pulsar);
+        QCoreApplication::sendEvent(vista, &soltar);
+    };
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    const int entidades = int(w.features().size());
+    QSignalSpy medida(&w, &MapWidget::areaMeasured);
+    w.setActiveTool(MapTool::MeasureArea);
+    const QGeoCoordinate a = centro.atDistanceAndAzimuth(1000.0, 225.0 + 0.0);
+    const QGeoCoordinate b = a.atDistanceAndAzimuth(2000.0, 90.0);
+    const QGeoCoordinate c = b.atDistanceAndAzimuth(2000.0, 0.0);
+    const QGeoCoordinate d = a.atDistanceAndAzimuth(2000.0, 0.0);
+    clic(pixel(a));
+    clic(pixel(b));
+    clic(pixel(c));
+    const QImage tresVertices = captura();
+    // Mover el raton cambia la medida en vivo (y su rotulo).
+    QMouseEvent mover = mouseEvent(QEvent::MouseMove, pixel(d), Qt::NoButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &mover);
+    QVERIFY(captura() != tresVertices);
+    clic(pixel(d));
+    QCOMPARE(medida.count(), 0);                           // aun abierto
+
+    QKeyEvent intro(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(vista, &intro);
+    QCOMPARE(medida.count(), 1);
+    const AreaMeasurement m = medida.first().at(0).value<AreaMeasurement>();
+    QCOMPARE(m.polygon.size(), 4);
+    QVERIFY(qAbs(m.areaSquareMeters - polygonArea(m.polygon)) < 1e-6);
+    // ~4 km2 y ~8 km: los clics caen en pixeles enteros (~36 m a zoom 12), y
+    // eso mueve cada lado hasta un 2 %.
+    QVERIFY(qAbs(m.areaSquareMeters - 4.0e6) < 0.16e6);
+    QVERIFY(qAbs(m.perimeterMeters - 8000.0) < 160.0);
+    QCOMPARE(int(w.features().size()), entidades);         // no crea entidad
+
+    const QImage cerrada = captura();
+    w.setActiveTool(MapTool::None);                        // quita la marca
+    QVERIFY(captura() != cerrada);
+
+    // Con menos de 3 vertices no hay medida.
+    w.setActiveTool(MapTool::MeasureArea);
+    clic(pixel(a));
+    clic(pixel(b));
+    QCoreApplication::sendEvent(vista, &intro);
+    QCOMPARE(medida.count(), 1);
+}
+
+// Un GeoJSON de 300 puntos: tras importarlo hay UN paso de deshacer mas, y
+// deshacerlo quita las 300 entidades y la capa nueva; rehacer las devuelve.
+// Lo que habia antes (una entidad del usuario) sigue en su sitio.
+void TstMapWidget::importIsOneUndoStep()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    const qint64 previa = w.addFeature(puntoDe(QStringLiteral("previa"), 21.0, -80.0));
+    QVERIFY(previa > 0);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString ruta = dir.filePath(QStringLiteral("muchos.geojson"));
+    {
+        QJsonArray feats;
+        for (int i = 0; i < 300; ++i) {
+            QJsonObject geom{ { QStringLiteral("type"), QStringLiteral("Point") },
+                              { QStringLiteral("coordinates"),
+                                QJsonArray{ -80.0 + 0.01 * i, 22.0 } } };
+            feats.append(QJsonObject{ { QStringLiteral("type"), QStringLiteral("Feature") },
+                                      { QStringLiteral("properties"), QJsonObject() },
+                                      { QStringLiteral("geometry"), geom } });
+        }
+        QFile f(ruta);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QJsonDocument(QJsonObject{ { QStringLiteral("type"), QStringLiteral("FeatureCollection") },
+                                           { QStringLiteral("features"), feats } }).toJson());
+    }
+
+    QElapsedTimer reloj;
+    reloj.start();
+    QVERIFY(w.importVectorFile(ruta, QStringLiteral("muchos")) > 0);
+    qInfo("importar 300 entidades: %lld ms", reloj.elapsed());
+    QCOMPARE(w.featuresInLayer(QStringLiteral("muchos")).size(), 300);
+
+    QVERIFY(w.undo());                                     // UN deshacer basta
+    QVERIFY(w.featuresInLayer(QStringLiteral("muchos")).isEmpty());
+    bool hayCapa = false;
+    for (const LayerInfo &c : w.featureLayers())
+        hayCapa = hayCapa || c.id == QStringLiteral("muchos");
+    QVERIFY(!hayCapa);                                     // la capa tambien se va
+    QVERIFY(w.feature(previa).has_value());                // lo de antes sigue
+
+    QVERIFY(w.redo());
+    QCOMPARE(w.featuresInLayer(QStringLiteral("muchos")).size(), 300);
+}
+
+// Tres objetivos (buque rapido, aeronave, UAV lento). Filtro "buques y UAV a
+// mas de 5 m/s": solo pasa el buque. Oculto = no se pincha; atenuado = si.
+// Cambiar la velocidad del UAV lo hace pasar; "solo en zonas" y un predicado
+// sobre atributos tambien filtran; un filtro vacio lo quita.
+void TstMapWidget::targetFilterHidesOrDims()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    const auto pixel = [vista](const QGeoCoordinate &c) {
+        const QPointF ax = MapView::toAxis(c);
+        return QPoint(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                      int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+    };
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    MapTarget b;
+    b.kind = QStringLiteral("buque");
+    b.position = centro;
+    b.attributes.insert(QStringLiteral("bandera"), QStringLiteral("CU"));
+    const qint64 buque = w.addTarget(b);
+    MapTarget a;
+    a.kind = QStringLiteral("aeronave");
+    a.position = centro.atDistanceAndAzimuth(5000.0, 90.0);
+    const qint64 avion = w.addTarget(a);
+    MapTarget u;
+    u.kind = QStringLiteral("uav");
+    u.position = centro.atDistanceAndAzimuth(5000.0, 270.0);
+    const qint64 uav = w.addTarget(u);
+    w.setTargetVelocity(buque, 8.0, 0.0);
+    w.setTargetVelocity(avion, 120.0, 0.0);
+    w.setTargetVelocity(uav, 2.0, 0.0);
+    QVERIFY(!w.hasTargetFilter());
+    QVERIFY(w.targetPassesFilter(avion));
+    const QImage todos = captura();
+
+    TargetFilter f;
+    f.kinds = QStringList{ QStringLiteral("buque"), QStringLiteral("uav") };
+    f.minSpeed = 5.0;
+    w.setTargetFilter(f);
+    QVERIFY(w.hasTargetFilter());
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion, uav }));
+    QVERIFY(w.targetPassesFilter(buque));
+    QVERIFY(!w.targetPassesFilter(avion));
+    QCOMPARE(w.targetAt(pixel(a.position)), qint64(-1));    // oculto: no se pincha
+    QCOMPARE(w.targetAt(pixel(b.position)), buque);
+    const QImage oculto = captura();
+    QVERIFY(oculto != todos);
+    QCOMPARE(w.targets().size(), 3);                         // siguen existiendo
+
+    // Atenuar: se ven (distinto de ocultos) y se pueden pinchar.
+    f.dim = true;
+    w.setTargetFilter(f);
+    QCOMPARE(w.targetAt(pixel(a.position)), avion);
+    const QImage tenue = captura();
+    QVERIFY(tenue != oculto && tenue != todos);
+
+    // El UAV acelera: pasa a cumplir sin recalcular nada a mano.
+    w.setTargetVelocity(uav, 6.0, 0.0);
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion }));
+
+    // Solo dentro de zonas vigiladas: zona alrededor del buque.
+    MapFeature zona;
+    zona.kind = GeometryKind::Polygon;
+    zona.geometry = { centro.atDistanceAndAzimuth(2000.0, 45.0), centro.atDistanceAndAzimuth(2000.0, 135.0),
+                      centro.atDistanceAndAzimuth(2000.0, 225.0), centro.atDistanceAndAzimuth(2000.0, 315.0) };
+    const qint64 idZona = w.addFeature(zona);
+    QVERIFY(w.watchZone(idZona));
+    TargetFilter enZona;
+    enZona.onlyInWatchedZones = true;
+    w.setTargetFilter(enZona);
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion, uav }));
+    // El UAV entra en la zona: pasa (lo reevalua la transicion de zona).
+    w.updateTarget(uav, centro.atDistanceAndAzimuth(100.0, 0.0));
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion }));
+
+    // Criterio libre de la app sobre los atributos.
+    TargetFilter bandera;
+    bandera.predicate = [](const MapTarget &t) {
+        return t.attributes.value(QStringLiteral("bandera")).toString() == QLatin1String("CU");
+    };
+    w.setTargetFilter(bandera);
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ avion, uav }));
+
+    w.removeTarget(avion);
+    QCOMPARE(w.filteredOutTargets(), QVector<qint64>({ uav }));
+    w.clearTargetFilter();
+    QVERIFY(!w.hasTargetFilter());
+    QVERIFY(w.filteredOutTargets().isEmpty());
+    QVERIFY(!w.targetPassesFilter(avion));                   // ya no existe
+}
+
+// 20 objetivos en unos 200 m (a zoom 9, un par de pixeles) y uno lejos: con
+// la agrupacion activa hay un grupo de 20 y el lejano va suelto. Se pincha el
+// grupo (no un objetivo); seleccionar uno lo saca del grupo; por encima de
+// maxZoom no se agrupa.
+void TstMapWidget::targetClusteringGroupsCrowds()
+{
+    qRegisterMetaType<QVector<qint64>>();
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(9);
+    const QGeoCoordinate centro(22.0, -79.5);
+    w.setCenter(centro);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    const auto pixel = [vista](const QGeoCoordinate &c) {
+        const QPointF ax = MapView::toAxis(c);
+        return QPoint(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                      int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+    };
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        QTest::qWait(60);
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+
+    QVector<qint64> monton;
+    for (int i = 0; i < 20; ++i) {
+        MapTarget t;
+        t.position = centro.atDistanceAndAzimuth(10.0 * i, 18.0 * i);
+        monton.append(w.addTarget(t));
+    }
+    MapTarget lejos;
+    lejos.position = centro.atDistanceAndAzimuth(60000.0, 90.0);
+    const qint64 idLejos = w.addTarget(lejos);
+    const QImage sueltos = captura();
+    QVERIFY(w.targetClusterAt(pixel(centro)).isEmpty());   // desactivada
+
+    TargetClustering c;
+    c.enabled = true;
+    w.setTargetClustering(c);
+    QVERIFY(w.targetClustering().enabled);
+    const QImage agrupados = captura();
+    QVERIFY(agrupados != sueltos);
+    QVector<qint64> grupo = w.targetClusterAt(pixel(centro));
+    std::sort(grupo.begin(), grupo.end());
+    QCOMPARE(grupo, monton);
+    QCOMPARE(w.targetAt(pixel(centro)), qint64(-1));        // dentro de un grupo
+    QCOMPARE(w.targetAt(pixel(lejos.position)), idLejos);   // suelto
+
+    // Clic sobre el grupo: targetClusterClicked con sus 20 ids.
+    QSignalSpy clicGrupo(&w, &MapWidget::targetClusterClicked);
+    w.setActiveTool(MapTool::None);
+    QMouseEvent pulsar = mouseEvent(QEvent::MouseButtonPress, pixel(centro), Qt::LeftButton, Qt::LeftButton);
+    QMouseEvent soltar = mouseEvent(QEvent::MouseButtonRelease, pixel(centro), Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &pulsar);
+    QCoreApplication::sendEvent(vista, &soltar);
+    QCOMPARE(clicGrupo.count(), 1);
+    QCOMPARE(clicGrupo.first().at(0).value<QVector<qint64>>().size(), 20);
+
+    // El seleccionado sale del grupo.
+    w.setSelectedTarget(monton.first());
+    captura();
+    QCOMPARE(w.targetClusterAt(pixel(centro)).size(), 19);
+    w.setSelectedTarget(-1);
+
+    // Por encima de maxZoom, sin grupos.
+    c.maxZoom = 8;
+    w.setTargetClustering(c);
+    captura();
+    QVERIFY(w.targetClusterAt(pixel(centro)).isEmpty());
+    QCOMPARE(w.targets().size(), 21);                        // solo cambia el dibujo
 }
 
 // Crea una entidad de punto minima (como el helper de tst_overlaymodel).
@@ -3179,6 +3692,462 @@ void TstMapWidget::areaLabelHangsFromFirstVertex()
     // La caja de la etiqueta arranca junto al primer vertice (400,300)+hueco.
     QCOMPARE(w.featureLabelAt(QPoint(414, 296)), id);
 }
+
+// --------------------------------------------------- raton y teclado ---------
+
+// Evento de raton con modificadores (Qt5 y Qt6).
+static QMouseEvent mouseEventMod(QEvent::Type tipo, const QPoint &pos, Qt::MouseButton boton,
+                                 Qt::MouseButtons botones, Qt::KeyboardModifiers mods)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return QMouseEvent(tipo, QPointF(pos), QPointF(pos), boton, botones, mods);
+#else
+    return QMouseEvent(tipo, pos, boton, botones, mods);
+#endif
+}
+
+// Pixel de una coordenada en la vista.
+static QPoint pixelDe(MapWidget &w, MapView *v, const QGeoCoordinate &c)
+{
+    v->ensureLayout();
+    const QPointF e = w.toAxisCoords(c);
+    return QPoint(qRound(v->xAxis->coordToPixel(e.x())), qRound(v->yAxis->coordToPixel(e.y())));
+}
+
+// Manda un evento de raton a la vista.
+static void enviar(MapView *v, QEvent::Type t, const QPoint &p, Qt::MouseButton b = Qt::LeftButton,
+                   Qt::MouseButtons bs = Qt::LeftButton)
+{
+    QMouseEvent e = mouseEvent(t, p, t == QEvent::MouseMove ? Qt::NoButton : b, bs);
+    QCoreApplication::sendEvent(v, &e);
+}
+
+// Pulsar, mover (en un solo salto) y soltar con el boton izquierdo.
+static void arrastrar(MapView *v, const QPoint &desde, const QPoint &hasta)
+{
+    enviar(v, QEvent::MouseButtonPress, desde);
+    enviar(v, QEvent::MouseMove, hasta, Qt::LeftButton, Qt::LeftButton);
+    enviar(v, QEvent::MouseButtonRelease, hasta, Qt::LeftButton, Qt::NoButton);
+}
+
+// Tecla enviada a la vista.
+static void tecla(MapView *v, int key, Qt::KeyboardModifiers mods = Qt::NoModifier)
+{
+    QKeyEvent e(QEvent::KeyPress, key, mods);
+    QCoreApplication::sendEvent(v, &e);
+}
+
+void TstMapWidget::wheelAccumulatesFineDeltas()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(w.maxZoom() > w.minZoom() + 1);
+    const int z0 = w.minZoom();
+    w.setZoom(z0);
+
+    const auto rueda = [&](int delta) {
+        QWheelEvent e(QPointF(400, 300), QPointF(400, 300), QPoint(), QPoint(0, delta),
+                      Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(v, &e);
+    };
+    for (int i = 0; i < 7; ++i)
+        rueda(15);
+    QCOMPARE(w.zoom(), z0);             // 105 de 120: aun no
+    rueda(15);
+    QCOMPARE(w.zoom(), z0 + 1);         // 120 en total: un nivel
+    rueda(120);
+    QCOMPARE(w.zoom(), z0 + 2);         // una muesca entera, como siempre
+    rueda(-120);
+    QCOMPARE(w.zoom(), z0 + 1);
+    // Un cambio de sentido olvida lo acumulado.
+    rueda(100);
+    rueda(-100);
+    QCOMPARE(w.zoom(), z0 + 1);
+}
+
+void TstMapWidget::navigateGesturesAreDecidedOnRelease()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(w.minZoom() + 1);
+    const QGeoCoordinate c(22.0, -80.0);
+    w.setCenter(c);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+
+    MapTarget t;
+    t.position = c;
+    const qint64 id = w.addTarget(t);
+    QSignalSpy clics(&w, &MapWidget::targetClicked);
+    const QPoint p = pixelDe(w, v, c);
+
+    // Agarrar el objetivo y arrastrar mueve el mapa (antes, no se movia) y no lo
+    // selecciona.
+    const QGeoCoordinate antes = w.center();
+    arrastrar(v, p, p + QPoint(80, 40));
+    QVERIFY(antes.distanceTo(w.center()) > 100.0);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    QCOMPARE(clics.count(), 0);
+
+    // Pulsar y soltar sin mover: se selecciona AL SOLTAR.
+    w.setCenter(c);
+    const QPoint q = pixelDe(w, v, c);
+    enviar(v, QEvent::MouseButtonPress, q);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    enviar(v, QEvent::MouseButtonRelease, q, Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(w.selectedTarget(), id);
+    QCOMPARE(clics.count(), 1);
+
+    // Un clic en el vacio deselecciona.
+    clic(v, q + QPoint(250, 150));
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+
+    // Esc tambien (antes un objetivo seleccionado no se podia deseleccionar).
+    clic(v, q);
+    QCOMPARE(w.selectedTarget(), id);
+    tecla(v, Qt::Key_Escape);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+
+    // En Navegar, un clic sobre una entidad la selecciona (antes no).
+    MapFeature pt;
+    pt.kind = GeometryKind::Point;
+    pt.layerId = w.activeFeatureLayer();
+    pt.geometry = { c.atDistanceAndAzimuth(600000.0, 90.0) };   // lejos del objetivo
+    const qint64 idPt = w.addFeature(pt);
+    clic(v, pixelDe(w, v, pt.geometry.first()));
+    QCOMPARE(w.selectedFeature(), idPt);
+    clic(v, q + QPoint(0, 200));                        // vacio: deselecciona
+    QCOMPARE(w.selectedFeature(), qint64(-1));
+}
+
+void TstMapWidget::doubleClickZoomsAndNeverLosesTheDrag()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(w.minZoom());
+    w.setCenter(QGeoCoordinate(22.0, -80.0));
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    const QPoint p(400, 300);
+
+    // Doble clic en el vacio: Qt manda pulsar, soltar, DOBLE CLIC, soltar.
+    const int z0 = w.zoom();
+    enviar(v, QEvent::MouseButtonPress, p);
+    enviar(v, QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton);
+    enviar(v, QEvent::MouseButtonDblClick, p);
+    enviar(v, QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(w.zoom(), z0 + 1);
+
+    // Un clic y, enseguida, un clic-arrastre: el doble clic ocupa el sitio del
+    // segundo pulsado y el arrastre debe mover el mapa igualmente.
+    w.setCenter(QGeoCoordinate(22.0, -80.0));
+    const QGeoCoordinate antes = w.center();
+    enviar(v, QEvent::MouseButtonPress, p);
+    enviar(v, QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton);
+    enviar(v, QEvent::MouseButtonDblClick, p);
+    enviar(v, QEvent::MouseMove, p + QPoint(100, 0), Qt::LeftButton, Qt::LeftButton);
+    enviar(v, QEvent::MouseButtonRelease, p + QPoint(100, 0), Qt::LeftButton, Qt::NoButton);
+    QVERIFY(antes.distanceTo(w.center()) > 100.0);
+    QCOMPARE(w.zoom(), z0 + 1);                         // y no acerco
+
+    // Con una herramienta de dibujo, el segundo clic rapido tampoco se pierde.
+    w.setActiveTool(MapTool::DrawPoint);
+    const int n0 = w.featureCount();
+    enviar(v, QEvent::MouseButtonPress, p);
+    enviar(v, QEvent::MouseButtonRelease, p, Qt::LeftButton, Qt::NoButton);
+    enviar(v, QEvent::MouseButtonDblClick, p + QPoint(2, 0));
+    enviar(v, QEvent::MouseButtonRelease, p + QPoint(2, 0), Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(w.featureCount(), n0 + 2);
+}
+
+void TstMapWidget::clickedIsNotEmittedAfterDragging()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(w.minZoom() + 1);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    QSignalSpy clics(&w, &MapWidget::clicked);
+
+    arrastrar(v, QPoint(300, 300), QPoint(500, 380));
+    QCOMPARE(clics.count(), 0);
+    clic(v, QPoint(300, 300));
+    QCOMPARE(clics.count(), 1);
+    // Un temblor de 2 px sigue siendo un clic.
+    enviar(v, QEvent::MouseButtonPress, QPoint(300, 300));
+    enviar(v, QEvent::MouseMove, QPoint(302, 301), Qt::LeftButton, Qt::LeftButton);
+    enviar(v, QEvent::MouseButtonRelease, QPoint(302, 301), Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(clics.count(), 2);
+}
+
+void TstMapWidget::editNeedsARealDragAndRespectsLockedLayers()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    QSignalSpy bloqueos(&w, &MapWidget::interactionBlocked);
+
+    w.setActiveTool(MapTool::DrawPolygon);
+    const QVector<QPoint> vertices{{200, 200}, {500, 200}, {500, 450}, {200, 450}};
+    for (const QPoint &p : vertices)
+        clic(v, p);
+    const qint64 id = w.finishDrawing();
+    QVERIFY(id > 0);
+    w.setActiveTool(MapTool::EditFeature);
+    clic(v, QPoint(350, 300));
+    QCOMPARE(w.selectedFeature(), id);
+
+    // Un clic con 1 px de temblor no mueve la entidad ni apila un deshacer.
+    const auto original = w.feature(id)->geometry;
+    enviar(v, QEvent::MouseButtonPress, QPoint(350, 300));
+    enviar(v, QEvent::MouseMove, QPoint(351, 301), Qt::LeftButton, Qt::LeftButton);
+    enviar(v, QEvent::MouseButtonRelease, QPoint(351, 301), Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(w.feature(id)->geometry, original);
+
+    // Un arrastre real la mueve, y se deshace de una vez.
+    arrastrar(v, QPoint(350, 300), QPoint(410, 340));
+    QVERIFY(w.feature(id)->geometry != original);
+    QVERIFY(w.undo());
+    QCOMPARE(w.feature(id)->geometry, original);
+
+    // Ctrl + clic en un tirador quita ese vertice (4 -> 3) y un 4o intento se
+    // rechaza con aviso: un poligono no baja de tres.
+    {
+        QMouseEvent p1 = mouseEventMod(QEvent::MouseButtonPress, vertices[1], Qt::LeftButton,
+                                       Qt::LeftButton, Qt::ControlModifier);
+        QMouseEvent r1 = mouseEventMod(QEvent::MouseButtonRelease, vertices[1], Qt::LeftButton,
+                                       Qt::NoButton, Qt::ControlModifier);
+        QCoreApplication::sendEvent(v, &p1);
+        QCoreApplication::sendEvent(v, &r1);
+    }
+    QCOMPARE(w.feature(id)->geometry.size(), qsizetype(3));
+    QCOMPARE(bloqueos.count(), 0);
+    {
+        QMouseEvent p1 = mouseEventMod(QEvent::MouseButtonPress, vertices[2], Qt::LeftButton,
+                                       Qt::LeftButton, Qt::ControlModifier);
+        QCoreApplication::sendEvent(v, &p1);
+    }
+    QCOMPARE(w.feature(id)->geometry.size(), qsizetype(3));
+    QCOMPARE(bloqueos.count(), 1);
+
+    // Capa bloqueada: se puede seleccionar pero no mover, ni dibujar en ella.
+    v->overlayModel()->setLayerEditable(w.activeFeatureLayer(), false);
+    const auto antes = w.feature(id)->geometry;
+    arrastrar(v, QPoint(300, 400), QPoint(360, 440));      // dentro del triangulo que queda
+    QCOMPARE(w.feature(id)->geometry, antes);
+    QVERIFY(bloqueos.count() >= 2);
+    const int n0 = w.featureCount();
+    w.setActiveTool(MapTool::DrawPoint);
+    clic(v, QPoint(100, 100));
+    QCOMPARE(w.featureCount(), n0);
+    QVERIFY(bloqueos.count() >= 3);
+}
+
+void TstMapWidget::rightClickAndEscCancelPendingOperations()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(w.minZoom() + 1);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    QSignalSpy menu(&w, &MapWidget::contextMenuRequested);
+    QSignalSpy captura(&w, &MapWidget::pickCancelled);
+    const auto derecho = [&](const QPoint &p) {
+        enviar(v, QEvent::MouseButtonPress, p, Qt::RightButton, Qt::RightButton);
+        enviar(v, QEvent::MouseButtonRelease, p, Qt::RightButton, Qt::NoButton);
+    };
+
+    // Medir con el primer punto puesto: el clic derecho lo cancela y NO abre el menu.
+    w.setActiveTool(MapTool::Measure);
+    clic(v, QPoint(300, 300));
+    derecho(QPoint(350, 300));
+    QCOMPARE(menu.count(), 0);
+    derecho(QPoint(350, 300));                          // ya no hay nada pendiente
+    QCOMPARE(menu.count(), 1);
+
+    // Esc tambien cancela la medida (y no hace nada mas).
+    clic(v, QPoint(300, 300));
+    tecla(v, Qt::Key_Escape);
+    derecho(QPoint(350, 300));
+    QCOMPARE(menu.count(), 2);
+
+    // Captura de un punto: Esc y clic derecho la cancelan y vuelven a Navegar.
+    w.setActiveTool(MapTool::PickPoint);
+    tecla(v, Qt::Key_Escape);
+    QCOMPARE(captura.count(), 1);
+    QCOMPARE(w.activeTool(), MapTool::None);
+    w.setActiveTool(MapTool::PickPoint);
+    derecho(QPoint(350, 300));
+    QCOMPARE(captura.count(), 2);
+    QCOMPARE(w.activeTool(), MapTool::None);
+    QCOMPARE(menu.count(), 2);                          // sin menu
+}
+
+void TstMapWidget::middleButtonAndKeysMoveTheView()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    QVERIFY(w.maxZoom() > w.minZoom() + 1);
+    w.setZoom(w.minZoom() + 1);
+    const QGeoCoordinate c(22.0, -80.0);
+    w.setCenter(c);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+
+    // Boton central: mueve el mapa aunque la herramienta sea de dibujo.
+    w.setActiveTool(MapTool::DrawPolygon);
+    enviar(v, QEvent::MouseButtonPress, QPoint(400, 300), Qt::MiddleButton, Qt::MiddleButton);
+    enviar(v, QEvent::MouseMove, QPoint(500, 300), Qt::MiddleButton, Qt::MiddleButton);
+    enviar(v, QEvent::MouseButtonRelease, QPoint(500, 300), Qt::MiddleButton, Qt::NoButton);
+    QVERIFY(c.distanceTo(w.center()) > 100.0);
+    QVERIFY(w.center().longitude() < c.longitude());    // arrastrar a la derecha: la vista va al oeste
+    QVERIFY(!w.isDrawing());                            // y no pone vertices
+
+    // Flechas: la vista va hacia donde apunta la tecla; Mayus, mas lejos.
+    w.setActiveTool(MapTool::None);
+    w.setCenter(c);
+    tecla(v, Qt::Key_Right);
+    const double este = w.center().longitude();
+    QVERIFY(este > c.longitude());
+    w.setCenter(c);
+    tecla(v, Qt::Key_Right, Qt::ShiftModifier);
+    QVERIFY(w.center().longitude() > este);
+    w.setCenter(c);
+    tecla(v, Qt::Key_Up);
+    QVERIFY(w.center().latitude() > c.latitude());
+    tecla(v, Qt::Key_Down);
+    tecla(v, Qt::Key_Down);
+    QVERIFY(w.center().latitude() < c.latitude());
+
+    // + y -.
+    const int z = w.zoom();
+    tecla(v, Qt::Key_Plus);
+    QCOMPARE(w.zoom(), z + 1);
+    tecla(v, Qt::Key_Minus);
+    QCOMPARE(w.zoom(), z);
+}
+
+void TstMapWidget::hoverCursorAndKeyboardContextMenu()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(w.minZoom() + 1);
+    const QGeoCoordinate c(22.0, -80.0);
+    w.setCenter(c);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    MapTarget t;
+    t.position = c;
+    w.addTarget(t);
+
+    const QPoint sobre = pixelDe(w, v, c);
+    enviar(v, QEvent::MouseMove, sobre, Qt::NoButton, Qt::NoButton);
+    QCOMPARE(v->cursor().shape(), Qt::PointingHandCursor);        // algo que agarrar
+    QTest::qWait(45);                                              // el hover se limita a uno cada 30 ms
+    enviar(v, QEvent::MouseMove, sobre + QPoint(200, 150), Qt::NoButton, Qt::NoButton);
+    QCOMPARE(v->cursor().shape(), Qt::ArrowCursor);
+
+    // Menu con el teclado (tecla de menu): se emite; con el raton, por Qt, no.
+    QSignalSpy menu(&w, &MapWidget::contextMenuRequested);
+    QContextMenuEvent teclado(QContextMenuEvent::Keyboard, QPoint(300, 200), v->mapToGlobal(QPoint(300, 200)));
+    QCoreApplication::sendEvent(v, &teclado);
+    QCOMPARE(menu.count(), 1);
+    QContextMenuEvent raton(QContextMenuEvent::Mouse, QPoint(300, 200), v->mapToGlobal(QPoint(300, 200)));
+    QCoreApplication::sendEvent(v, &raton);
+    QCOMPARE(menu.count(), 1);
+}
+
+void TstMapWidget::elementClickedOnlyWithoutDragging()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(w.minZoom() + 1);
+    const QGeoCoordinate c(22.0, -80.0);
+    w.setCenter(c);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    MapTarget t;
+    t.position = c;
+    const qint64 idT = w.addTarget(t);
+    MapFeature pt;
+    pt.kind = GeometryKind::Point;
+    pt.layerId = w.activeFeatureLayer();
+    pt.geometry = { c.atDistanceAndAzimuth(600000.0, 90.0) };   // lejos del objetivo
+    const qint64 idP = w.addFeature(pt);
+    QSignalSpy tarjetas(&w, &MapWidget::elementClicked);
+
+    clic(v, pixelDe(w, v, c));
+    QCOMPARE(tarjetas.count(), 1);
+    const MapHit h1 = tarjetas.at(0).at(0).value<MapHit>();
+    QCOMPARE(h1.targetId, idT);
+
+    clic(v, pixelDe(w, v, pt.geometry.first()));
+    QCOMPARE(tarjetas.count(), 2);
+    QCOMPARE(tarjetas.at(1).at(0).value<MapHit>().featureId, idP);
+
+    // Arrastrar desde un elemento mueve el mapa y no abre tarjeta.
+    arrastrar(v, pixelDe(w, v, c), pixelDe(w, v, c) + QPoint(90, 50));
+    QCOMPARE(tarjetas.count(), 2);
+
+    // Clic en vacio: nada. Y solo con Navegar.
+    clic(v, QPoint(30, 30));
+    QCOMPARE(tarjetas.count(), 2);
+    w.setActiveTool(MapTool::Measure);
+    clic(v, pixelDe(w, v, pt.geometry.first()));
+    QCOMPARE(tarjetas.count(), 2);
+}
+
+void TstMapWidget::layerIndexStaysConsistent()
+{
+    OverlayModel m;
+    m.addLayer(QStringLiteral("a"));
+    m.addLayer(QStringLiteral("b"));
+    const auto punto = [](const QString &capa, double lat) {
+        MapFeature f;
+        f.kind = GeometryKind::Point;
+        f.layerId = capa;
+        f.geometry = { QGeoCoordinate(lat, -80.0) };
+        return f;
+    };
+    const auto ids = [&m](const QString &capa) {
+        QVector<qint64> v;
+        m.forEachInLayer(capa, [&v](const MapFeature &f) { v.append(f.id); return true; });
+        return v;
+    };
+    const qint64 f1 = m.addFeature(punto(QStringLiteral("a"), 22.0));
+    const qint64 f2 = m.addFeature(punto(QStringLiteral("a"), 22.1));
+    const qint64 f3 = m.addFeature(punto(QStringLiteral("b"), 22.2));
+    QCOMPARE(ids(QStringLiteral("a")), QVector<qint64>({ f1, f2 }));
+    QCOMPARE(ids(QStringLiteral("b")), QVector<qint64>({ f3 }));
+    QVERIFY(ids(QStringLiteral("nada")).isEmpty());
+
+    // Mover un vertice no cambia el indice; cambiar una entidad de capa, si.
+    QVERIFY(m.moveVertex(f1, 0, QGeoCoordinate(22.5, -80.0)));
+    QCOMPARE(ids(QStringLiteral("a")), QVector<qint64>({ f1, f2 }));
+    MapFeature cambiada = *m.feature(f2);
+    cambiada.layerId = QStringLiteral("b");
+    QVERIFY(m.updateFeature(cambiada));
+    QCOMPARE(ids(QStringLiteral("a")), QVector<qint64>({ f1 }));
+    QCOMPARE(ids(QStringLiteral("b")), QVector<qint64>({ f2, f3 }));      // siempre por id
+
+    // Baja y deshacer.
+    QVERIFY(m.removeFeature(f1));
+    QVERIFY(ids(QStringLiteral("a")).isEmpty());
+    QVERIFY(m.undo());
+    QCOMPARE(ids(QStringLiteral("a")), QVector<qint64>({ f1 }));
+
+    // Parar el recorrido.
+    int visitadas = 0;
+    m.forEachInLayer(QStringLiteral("b"), [&visitadas](const MapFeature &) { ++visitadas; return false; });
+    QCOMPARE(visitadas, 1);
+    m.clearLayer(QStringLiteral("b"));
+    QVERIFY(ids(QStringLiteral("b")).isEmpty());
+}
+
 
 QTEST_MAIN(TstMapWidget)
 #include "tst_mapwidget.moc"

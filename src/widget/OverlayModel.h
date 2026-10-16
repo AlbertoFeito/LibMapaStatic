@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QSet>
 #include <QObject>
+#include <functional>
 #include <QVector>
 #include <optional>
 
@@ -62,6 +63,14 @@ public:
     std::optional<MapFeature> feature(qint64 id) const;
     QVector<MapFeature> features() const;
     QVector<MapFeature> featuresInLayer(const QString &layerId) const;
+    /*!
+     * \brief Recorre las entidades de una capa (orden de id) sin copiarlas.
+     *
+     * \a fn devuelve false para parar. No debe modificar el modelo. Es lo que
+     * usan el dibujo y las pruebas de acierto del raton.
+     */
+    void forEachInLayer(const QString &layerId,
+                        const std::function<bool(const MapFeature &)> &fn) const;
     QVector<MapFeature> featuresOfType(const QString &type) const;
     int count() const { return static_cast<int>(m_features.size()); }
 
@@ -140,6 +149,11 @@ signals:
 private:
     QHash<qint64, MapFeature> m_features;
     QHash<QString, LayerInfo> m_layers;
+    //! Indice capa -> ids ordenados, que se reconstruye solo cuando cambia quien
+    //! pertenece a que capa (ver forEachInLayer).
+    mutable QHash<QString, QVector<qint64>> m_idxCapa;
+    mutable bool m_idxSucio = true;
+    void reconstruirIndice() const;
     qint64 m_nextId = 1;
     qint64 m_selected = -1;
 

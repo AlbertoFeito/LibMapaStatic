@@ -49,6 +49,9 @@ public:
      * usuario cancela. Se pasa nullptr para dejar de dibujarla.
      */
     void setDraft(const MapFeature *draft);
+    //! Rotulo del borrador (la medida en vivo de MeasureArea): junto al cursor
+    //! mientras se traza, o en el centro del poligono ya cerrado. Vacio = nada.
+    void setDraftLabel(const QString &text);
 
     //! Punto que sigue al raton mientras se traza, en pixeles. Se dibuja como
     //! el lado que se esta a punto de anadir.
@@ -160,6 +163,7 @@ private:
     bool m_hasDraft = false;
     QPoint m_draftCursor;
     bool m_draftCursorVisible = false;
+    QString m_draftLabel;
 };
 
 } // namespace libmapa

@@ -16,6 +16,7 @@
 #include "widget/TargetModel.h"
 #include "widget/TileLayer.h"
 
+#include <QElapsedTimer>
 #include <QGeoCoordinate>
 
 namespace libmapa {
@@ -147,6 +148,14 @@ public:
 
     //! Cancela el trazado en curso. Devuelve false si no habia ninguno.
     bool cancelDrawing();
+    /*!
+     * \brief Cancela lo que la herramienta activa tenga a medias, sin cambiar de
+     *        herramienta: el primer punto de Medir, el recuadro de area o la
+     *        captura de un punto (que vuelve a Navegar y emite pickCancelled).
+     *
+     * Devuelve false si no habia nada. Lo llaman Esc y el clic derecho.
+     */
+    bool cancelOperation();
     //! Cierra el trazado en curso y crea la entidad. -1 si no era valida.
     qint64 finishDrawing();
     bool isDrawing() const { return m_drafting; }
@@ -156,6 +165,8 @@ signals:
     void featureCreated(qint64 id);
     void featureClicked(qint64 id, const QGeoCoordinate &position);
     void targetClicked(qint64 id, const QGeoCoordinate &position);
+    //! Clic sobre un grupo de objetivos (TargetClustering): sus ids.
+    void targetClusterClicked(const QVector<qint64> &ids, const QGeoCoordinate &position);
     //! Arrastre (herramienta Navegar) de una entidad marcada \c draggable: al
     //! empezar, en cada movimiento (con la coordenada bajo el cursor) y al soltar.
     void featureDragStarted(qint64 id);
@@ -165,11 +176,25 @@ signals:
     void centerChanged(const QGeoCoordinate &center);
     void mouseMovedTo(const QGeoCoordinate &position);
     void mapClicked(const QGeoCoordinate &position, Qt::MouseButton button);
+    //! Clic derecho fuera de un trazado (o la tecla de menu): la app monta su menu
+    //! contextual. No se emite si el clic derecho cancela algo a medias.
+    void contextMenuRequested(const QPoint &pixel, const QPoint &globalPos);
+    //! Clic izquierdo SIN arrastrar sobre un elemento (objetivo, entidad o marca)
+    //! con la herramienta Navegar: la app puede mostrar una tarjeta con sus datos.
+    void elementClicked(const QPoint &pixel, const QPoint &globalPos);
+    //! La captura de un punto (herramienta PickPoint) se cancelo con Esc o con el
+    //! clic derecho; la herramienta ya vuelve a Navegar.
+    void pickCancelled();
+    //! Una accion se rechazo (capa bloqueada, vertices minimos...): el texto
+    //! explica por que, para mostrarlo al usuario.
+    void interactionBlocked(const QString &reason);
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);
     //! Poligono cerrado con la herramienta SelectPolygon (vertices en orden).
     void polygonSelected(const QVector<QGeoCoordinate> &polygon);
+    //! Poligono cerrado con la herramienta MeasureArea, con su medida.
+    void areaMeasured(const libmapa::AreaMeasurement &measurement);
     void pointPicked(const QGeoCoordinate &position);
 
 protected:
@@ -180,10 +205,17 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
 
 private:
     //! Atiende un clic de la herramienta de medir. Se llama AL PULSAR.
     void handleMeasureClick(const QGeoCoordinate &donde);
+    //! Desplaza la vista (pixeles; positivo = derecha/abajo), en el eje proyectado.
+    void panByPixels(int dx, int dy);
+    //! ¿Se puede editar la capa? (una que no existe aun cuenta como editable).
+    bool capaEditable(const QString &layerId) const;
+    //! Cursor segun lo que haya bajo el puntero (sin botones pulsados).
+    void actualizarCursorHover(const QPoint &pos);
 
 private slots:
     void onTilesReady(quint64 requestId, int zoom, int newTiles);
@@ -226,9 +258,31 @@ private:
     qint64 m_selectedTarget = -1;    //!< Objetivo resaltado (-1 = ninguno).
 
     MapTool m_tool = MapTool::None;
-    bool m_dragging = false;
+    bool m_dragging = false;            //!< pulsado para mover el mapa (aun puede ser un clic)
+    Qt::MouseButton m_panButton = Qt::NoButton;
+    bool m_dragMoved = false;           //!< el arrastre del mapa supero el umbral
     QPoint m_dragStartPx;
     QGeoCoordinate m_dragStartGeo;
+
+    //! Umbral (pixeles) para que un pulsado deje de ser un clic y sea un arrastre.
+    static constexpr int kClickSlopPx = 4;
+    //! Lo que habia bajo el puntero al pulsar con Navegar y se decide al soltar.
+    enum class Pend { Nada, Objetivo, Grupo, Entidad, Marca };
+    Pend m_pend = Pend::Nada;
+    qint64 m_pendId = -1;
+    QVector<qint64> m_pendGrupo;
+    bool m_pendDbl = false;             //!< el pulsado vino de un doble clic
+    bool m_dblPress = false;            //!< (transitorio) mouseDoubleClickEvent -> mousePressEvent
+    bool m_dragFeatureStarted = false;  //!< el arrastre de la entidad draggable ya empezo
+    QPoint m_dragFeaturePx;
+    QPoint m_editPressPx;
+    bool m_editStarted = false;         //!< la edicion (vertice/entidad) ya empezo
+    int m_hoverVertex = -1;             //!< tirador del vertice bajo el puntero (Editar)
+    int m_wheelAccum = 0;               //!< giro de rueda acumulado (120 = un nivel)
+    QElapsedTimer m_wheelClock;
+    QElapsedTimer m_hoverClock;
+    Qt::CursorShape m_hoverShape = Qt::ArrowCursor;
+    bool m_hoverSet = false;
 
     // Arrastre de la ETIQUETA (entidad u objetivo) con la herramienta None: se
     // recuerda de quien es el rotulo, el pixel de inicio y su offset inicial; el
@@ -258,6 +312,12 @@ private:
     //! El borrador actual es un POLIGONO DE SELECCION (SelectPolygon), no una
     //! entidad: al cerrarlo se emite polygonSelected y no se crea nada.
     bool m_draftIsSelection = false;
+    //! ...y ademas es una MEDIDA (MeasureArea): al cerrarlo se emite
+    //! areaMeasured, y mientras se traza se rotula la superficie en vivo.
+    bool m_selectionIsMeasure = false;
+    //! Recalcula el rotulo de la medida con los vertices puestos mas, si es
+    //! valido, el punto bajo el cursor (el lado que se esta por anadir).
+    void updateAreaLabel(const QGeoCoordinate &cursor);
 
     //! Vertice que se esta arrastrando, o -1.
     int m_editVertex = -1;

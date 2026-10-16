@@ -5218,3 +5218,548 @@ cerrada y el indicador apagado. El indicador y «Simular» también salen.
 `isLoaded()`.
 
 Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 126. Medir superficie en pantalla
+
+**Qué se hizo.**
+- **`MapTool::MeasureArea`**: se marca un polígono clic a clic y la librería
+  rotula en vivo, junto al cursor, la **superficie** y el **perímetro**,
+  contando el lado hasta el cursor y el de cierre. Con dos puntos rotula la
+  longitud del lado.
+- Doble clic, clic derecho o Intro cierran el polígono. Entonces se emite
+  **`areaMeasured(AreaMeasurement)`** (polígono, m² y m), y el contorno se
+  queda con su medida en el centro hasta cambiar de herramienta o llamar a
+  `clearAreaSelection`. Un clic más empieza otra medida. No crea ninguna
+  entidad.
+- `MapDecor::formatArea`: «850 m²», «12.5 ha», «3.42 km²» o «1 NM²», según
+  las unidades de la escala.
+- `FeatureLayer::setDraftLabel`: rótulo del borrador, junto al cursor
+  mientras se traza y en el centro del polígono una vez cerrado.
+- **Demo**: «Medir superficie» junto a «Medir», en la barra y en *Dibujo*. El
+  resultado sale también en la barra de estado.
+
+**Por qué así.** Reutiliza el trazado de `SelectPolygon` (borrador con línea de
+goma, cierre por doble clic, Intro o clic derecho) con un indicador más: es el
+mismo gesto, pero da un número en lugar de una zona. El cálculo es el de
+`polygonArea`/`pathLength` (§121), sobre el elipsoide: el rótulo y la señal dan
+exactamente lo mismo. El color morado distingue la medida de una selección
+(negra) y de una entidad.
+
+Comprobado en la demo bajo Xvfb (medida en vivo y polígono cerrado con su
+rótulo). `tst_mapwidget::measureAreaToolMeasuresPolygon` marca con clics reales
+un cuadrado de unos 2 km y comprueba:
+- que la medida en vivo cambia lo dibujado;
+- que `areaMeasured` sale al pulsar Intro y no antes;
+- que su superficie es exactamente `polygonArea` del polígono marcado y vale
+  unos 4 km² (con la cuantización de los píxeles a zoom 12);
+- que no se crea ninguna entidad, que cambiar de herramienta quita la marca y
+  que con dos vértices no hay medida.
+
+`tst_mapdecor` comprueba los formatos.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 127. Importar un fichero es una sola operación de deshacer
+
+**El problema.** `importVectorFile` (GeoJSON/KML/GPX) y `loadFeaturesAsLayer`
+añadían las entidades una a una con `addFeature`, y cada alta apilaba una
+instantánea para deshacer. Eso tenía dos efectos:
+- Para quitar una importación de 300 entidades había que deshacer 300 veces.
+  Como la pila guarda 50 pasos, era imposible volver a lo de antes.
+- Cada instantánea copia el estado (al modificarlo, la copia compartida de Qt
+  se separa), así que la importación costaba O(n²).
+
+**Qué se hizo.** `MapWidget::Impl::addFeaturesAsOneUndo` añade un lote de
+entidades dentro de un grupo de deshacer (`beginUndoGroup`/`endUndoGroup`, el
+mismo mecanismo que agrupa el arrastre de un vértice). Lo usan las dos
+funciones. El grupo se abre **antes** de crear la capa, así que deshacer la
+importación quita también la capa nueva, y rehacer la devuelve entera.
+
+**Comprobado.** `tst_mapwidget::importIsOneUndoStep` importa 300 puntos.
+Comprueba que un deshacer los quita todos y también la capa, que la entidad
+previa del usuario sigue y que un rehacer los devuelve. Contra el código
+anterior el test falla (un deshacer solo quitaba la última entidad), y la
+importación pasa de 6 ms a 1 ms.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 128. Textos propios de Qt en español en la demo
+
+**El problema.** Los botones y diálogos estándar de Qt (`QDialogButtonBox`,
+`QMessageBox`, diálogos de fichero) salían en inglés («Close», «Cancel»,
+«Yes») dentro de una demo escrita en español. Además, los scripts de
+despliegue usan `windeployqt --no-translations`, así que aunque la demo
+cargara una traducción, en lo desplegado no habría ninguna que cargar.
+
+**Qué se hizo.**
+- La demo carga `qtbase_es.qm` al arrancar (`cargarTraduccionQt`). Lo busca
+  primero en `translations` junto al ejecutable (lo desplegado) y, si no, en la
+  instalación de Qt (`QLibraryInfo`, con la variante de Qt 5 y la de Qt 6). Si
+  no lo encuentra, sigue en inglés sin error.
+- `desplegar.bat` (Qt 6) y `desplegar_qt5.bat` (Qt 5) copian **solo**
+  `qtbase_es.qm` a `translations\`. No se quita `--no-translations`, que
+  copiaría las traducciones de todos los idiomas. Cada script toca solo el suyo,
+  como pide la guía de despliegue.
+
+**Comprobado** en la demo bajo Xvfb: un `QDialogButtonBox` con
+Open/Close/Cancel/Yes muestra «Abrir», «Cerrar», «Cancelar» y «Sí».
+
+## 129. Filtro de objetivos
+
+**Qué se hizo.**
+- **`TargetFilter`** (público, `MapTarget.h`). Un objetivo **pasa** si cumple
+  todos los criterios que se pongan:
+  - clases (`kinds`);
+  - velocidad mínima y máxima (m/s);
+  - solo dentro de alguna zona vigilada;
+  - un `predicate` libre de la app, por ejemplo sobre `attributes`.
+
+  Con `dim`, los que no pasan se ven **tenues** (25 %, sin rótulo ni traza);
+  sin `dim` se **ocultan** y no se pueden pinchar.
+- **`MapWidget`**: `setTargetFilter`, `clearTargetFilter`, `hasTargetFilter`,
+  `targetPassesFilter` y `filteredOutTargets`.
+- **`TargetLayer::setFilteredOut`** y `MapView::targetAt`, que se salta los
+  objetivos ocultos.
+- **Demo**: *Ver → Filtrar objetivos…* (Ctrl+F).
+  - Casillas con los tipos presentes, velocidad mínima y máxima en nudos,
+    «solo dentro de zonas vigiladas», «atenuar en vez de ocultar» y «Quitar
+    filtro».
+  - Indicador «Filtro: N de M» en la barra de estado.
+  - El rótulo «kn» de los buques simulados es ahora la velocidad a la que se
+    mueven de verdad; antes era un número al azar que no casaba con el filtro.
+
+**Por qué así.**
+- **La velocidad es la de CPA.** La velocidad dada por la app
+  (`setTargetVelocity`) o, si no hay, la estimada por la traza. Así el filtro
+  no interpreta `MapTarget::speed`, que es de la app.
+- **O(1) por actualización.** Al moverse un objetivo, o al cambiar su
+  velocidad, se reevalúa solo él. Cuando una transición de zona lo mete o lo
+  saca de una zona vigilada, también. A la capa solo se le avisa si su
+  estado cambió. Recorrer todos los objetivos ocurre solo al cambiar el
+  filtro.
+- **Ocultar no es borrar.** Los ocultos siguen en `targets()` y cuentan para
+  las alertas de zona y de proximidad: un filtro de vista no debe callar una
+  alerta.
+- **Atenuar** sirve para ver lo que interesa sin perder el contexto. El
+  objetivo seleccionado se ve siempre normal, aunque no pase.
+
+`tst_mapwidget::targetFilterHidesOrDims` comprueba:
+- clase y velocidad, y que un oculto no se puede pinchar y uno atenuado sí;
+- que la imagen cambia en cada modo;
+- la reevaluación al cambiar la velocidad y al entrar en una zona;
+- el predicado sobre atributos, el borrado y quitar el filtro.
+
+En la demo bajo Xvfb, con 60 objetivos y el filtro «buques a más de 15 kn»,
+quedan 19 visibles.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 130. Agrupar objetivos al alejar el zoom
+
+**Qué se hizo.**
+- **`MapDecor::clusterPoints`** (núcleo): agrupa puntos de pantalla por celdas.
+  Una celda con al menos N puntos es un grupo, con su centroide. O(n).
+- **`TargetClustering`** (público, `MapTarget.h`): `enabled`, `cellPixels`,
+  `minTargets`, `maxZoom` (por encima no se agrupa) y `color`.
+- **`TargetLayer`** dibuja cada grupo como un círculo con el número de
+  objetivos que reúne. El radio crece con el logaritmo del número, para que 10
+  y 1000 se distingan sin que los grandes tapen el mapa. Los grupos van encima
+  de los objetivos sueltos.
+- **`MapWidget`**: `setTargetClustering`, `targetClustering`,
+  `targetClusterAt` y la señal **`targetClusterClicked(ids, posición)`**.
+- **Demo**: *Ver → Agrupar objetivos al alejar*, activo por defecto hasta
+  zoom 10. Pinchar un grupo encuadra a sus objetivos, o amplía dos niveles si
+  están casi en el mismo punto.
+
+**Por qué así.**
+- **Rejilla anclada al mundo.** Las celdas se cuentan desde un punto fijo (0°,
+  0°) pasado a píxeles, no desde la esquina de la pantalla. Con una rejilla de
+  pantalla, al desplazar el mapa los objetivos cambiarían de celda y los grupos
+  «bailarían». Así solo cambian al cambiar de zoom (comprobado en el test).
+- **Solo cambia el dibujo.** Los objetivos agrupados siguen existiendo y
+  cuentan para las alertas y los filtros. Lo que no se puede es pinchar uno
+  suelto dentro de un grupo: `targetAt` lo salta y el clic va al grupo.
+- **Nunca se agrupan** el objetivo seleccionado (el usuario lo está mirando) ni
+  los atenuados por el filtro (se ven tenues a propósito).
+- **Rejilla y no distancias.** Agrupar por distancias entre todos los pares
+  (DBSCAN o k-medias) cuesta O(n²) o tiene parámetros difíciles de elegir. La
+  rejilla es O(n) por fotograma con miles de objetivos y da grupos estables y
+  predecibles. A cambio, los grupos se alinean en una cuadrícula, cosa que a
+  zoom bajo se lee como «densidad por zona».
+
+Comprobado en la demo bajo Xvfb: 1000 objetivos a zoom 6 se ven como unos 35
+grupos con su número. Pinchar el de 47 encuadra y deja grupos pequeños y
+objetivos sueltos a zoom 8.
+Tests:
+- `tst_mapdecor::clustersByWorldAnchoredCells`: grupos, centroide, mínimo,
+  orden y estabilidad al desplazar;
+- `tst_mapwidget::targetClusteringGroupsCrowds`: un grupo de 20 frente a un
+  objetivo suelto, el clic al grupo, que el seleccionado sale y que `maxZoom`
+  desactiva.
+
+Compila sin warnings; **24 tests** en verde (21 sin QCustomPlot), Qt 6.4.
+
+## 131. Ejemplo `app_seguimiento`
+
+`examples/app_minima` se quedó en lo mínimo a propósito: es la plantilla que se
+copia para empezar un producto, y meterle objetivos, alertas y menús la haría
+peor plantilla. Por eso el API nuevo (secciones 116–130) se enseña en un ejemplo
+hermano, `examples/app_seguimiento`, con los mismos `CMakeLists.txt` y `.pro`
+(usa la librería **instalada** con `find_package` / `libmapa.pri`, nunca las
+fuentes).
+
+En unas 220 líneas, sin `Q_OBJECT` (todo con lambdas, para no necesitar moc en
+el `.pro`):
+- tres buques simulados que se mueven por estima cada segundo
+  (`updateTarget` con hora, `setTargetVelocity` en nudos);
+- una zona vigilada con aviso al entrar (`targetEnteredZone`);
+- alerta de proximidad CPA/TCPA (0,5 NM, 15 min) sobre el barco propio;
+- anillos de distancia en el propio y demora hacia otro buque;
+- agrupación al alejar el zoom y un filtro «solo a más de 9 kn» atenuado;
+- medir superficie; exportar la vista a PDF y el historial a GPX;
+- reproducir el historial con `TrackPlayer` y salir de la reproducción.
+
+La demo sigue siendo el escaparate completo; este ejemplo es lo que hay que leer
+para saber **qué llamadas** usar en una app propia.
+
+Comprobado: instalada la librería en una carpeta temporal, el ejemplo configura
+y compila sin warnings con `-DCMAKE_PREFIX_PATH` y arranca. No añade tests (es un
+ejemplo fuera del árbol de la librería): siguen **24 tests** en verde.
+
+## 132. `demo/main.cpp` partido en ficheros
+
+La demo había crecido hasta 4864 líneas en un solo `main.cpp`, con toda la
+clase `Ventana` escrita dentro de su declaración. Era difícil de leer y cada
+cambio recompilaba todo. Se ha repartido **sin cambiar ni una línea de lógica**:
+
+| Fichero | Contenido |
+|---|---|
+| `main.cpp` | `main()` y la traducción de Qt |
+| `Comun.h` / `Comun.cpp` | includes, roles del árbol, `SeccionPlegable`, iconos y glifos dibujados en código |
+| `Ventana.h` | la declaración de la clase (métodos y miembros) |
+| `Ventana.cpp` | constructor, señales del mapa, barra de estado |
+| `VentanaMenus.cpp` | menús, barras y temas claro/oscuro |
+| `VentanaPanel.cpp` | árbol de capas/entidades, ficha, estilo, coordenadas |
+| `VentanaDibujo.cpp` | alta de entidades y vuelta a Navegar |
+| `VentanaElevacion.cpp` | pestaña Elevación (perfil, visión, viewshed, picos) |
+| `VentanaFicheros.cpp` | guardar/abrir, importar/exportar, vista a imagen/PDF, GPX |
+| `VentanaObjetivos.cpp` | seguimiento, zonas, CPA, anillos, medidas, reproducción, simulación, filtro |
+
+Sigue siendo **una clase**: partirla en varias habría cambiado el diseño y
+habría hecho falta pasar punteros entre ellas, todo para una demo. Así cada
+fichero se lee de una vez y lo que se toca en uno no recompila los demás.
+
+Se hizo con un script (no a mano) para no introducir errores: mueve cada cuerpo
+de método fuera de la clase como `Ventana::metodo`, quitando de la definición
+los argumentos por defecto, `override` y `static`, y deja en `Ventana.h` la
+firma original. `qcustomplot.h` solo lo incluye `VentanaElevacion.cpp` (la
+cabecera adelanta `class QCustomPlot;`). De paso se escribió el comentario que
+faltaba encima de 26 métodos (la norma es uno por función).
+
+La demo no está en qmake, así que solo cambia su `add_executable` en
+`CMakeLists.txt`. Compila sin warnings y arranca; **24 tests** en verde.
+
+## 133. Anillos de distancia: automáticos según el zoom, puntos fijos y gestor
+
+Probándolo en Windows, los anillos no convencían:
+- con 20 NM de separación a zoom 10 solo se veía un anillo y **ningún rótulo**:
+  las distancias iban arriba de cada anillo, fuera de la pantalla;
+- en el centro salía un **«000° · 0 m»**: una marcación con origen y destino en
+  el mismo sitio (dos clics en el mismo punto);
+- el diálogo solo admitía la separación **en NM**, y el centro solo podía ser el
+  objetivo seleccionado o un clic: no se podía poner un **radar u observador**
+  en unas coordenadas conocidas;
+- solo se podían **quitar todos** a la vez.
+
+Cambios en la librería:
+- `RangeRings::spacingMeters = 0` → **separación automática**. En cada repintado
+  se mide la escala en el centro (píxeles entre el centro y un punto a 1 km al
+  este; Mercator es conforme) y `MapDecor::niceRingSpacing` elige el mayor valor
+  1-2-2.5-5 × 10ⁿ, en la unidad de la escala, con el que los `count` anillos
+  caben en el 45 % del lado corto de la vista. Al alejar de zoom 8 a 6, unos
+  anillos de 10 NM pasan a 50 NM. Valores redondos para que el rótulo se lea
+  («2.5 km», no «2.37 km»).
+- `RangeRings::name`: rótulo junto al centro; los centros fijos llevan además un
+  cuadrado (los de un objetivo, solo la cruz bajo su icono).
+- **Rótulos siempre visibles**: si lo alto de un anillo queda fuera, su distancia
+  va al punto visible del anillo más cercano; la marcación de un radial que se
+  sale de la vista, al borde por donde sale.
+- `addBearingLine` devuelve **-1** si la marcación no tiene longitud (mismo
+  objetivo o mismo punto en los dos extremos), y `updateBearingLine` false; si
+  dos objetivos llegan a coincidir más tarde, la línea simplemente no se dibuja
+  mientras tanto.
+- Consultas: `rangeRings(id)`, `bearingLine(id)` y `rangeRingsSpacing(id)` (la
+  separación con la que se dibujan ahora, útil con la automática).
+
+Cambios en la demo:
+- **Ver → Anillos de distancia…**: nombre; centro = objetivo seleccionado, un
+  punto que se pinche (si cae en un objetivo, lo sigue) o **coordenadas escritas**
+  en cualquier formato (decimal, GMS, UTM, MGRS); separación **automática** (por
+  defecto) o fija **en m, km o NM** (al cambiar de unidad el valor se convierte);
+  radiales cada 10/15/30/45/90°; color.
+- **Ver → Anillos y marcaciones puestos…**: lista con cada uno (nombre, separación
+  —la automática con su valor actual—, centro; o rumbo y distancia), **Centrar**
+  (o doble clic), **Quitar** uno y **Quitar todos**.
+- Si el destino de una marcación coincide con el origen, se vuelve a pedir en vez
+  de dibujar «000° · 0 m».
+
+Tests: `tst_mapdecor::ringSpacingIsRoundAndFits` y, en
+`tst_mapwidget::rangeRingsAndBearingLinesFollowTargets`, marcaciones nulas
+rechazadas, consultas por id y anillos automáticos que caben y crecen al alejar.
+Comprobado con capturas a zoom 8 y 6 (radar con nombre y radiales, anillos fijos
+de 37 km en una aeronave con sus rótulos llevados a la vista). **24 tests** en verde.
+
+## 134. Menú del clic derecho según lo que haya debajo
+
+El usuario pidió acciones en el clic derecho «en dependencia de dónde se hace»:
+sobre un objetivo, las suyas; sobre otros elementos, las de cada uno.
+
+**Librería** (la parte reutilizable, sin imponer un menú):
+- `MapHit`: lo que hay bajo un pixel, **cada cosa por separado** (coordenada,
+  objetivo suelto, miembros del grupo, entidad, anillos o marcación). Un objetivo
+  puede estar encima de un polígono y dentro de unos anillos a la vez: la app
+  decide la prioridad.
+- `MapWidget::hitTest(pixel)` lo calcula (reúne `targetAt`, `targetClusterAt`,
+  `featureAt` y el nuevo `RangeLayer::markAt`).
+- `RangeLayer::markAt`: a menos de 6 px de una marcación, de un anillo o del
+  centro (10 px), con la misma geometría que el dibujo (la separación automática
+  incluida). Las marcaciones, que van encima, ganan a los anillos.
+- Señal `contextMenuRequested(MapHit, globalPos)`: la emite el clic derecho
+  salvo mientras se dibuja (ahí sigue cerrando el trazado). `clicked(…, Right)`
+  se sigue emitiendo como antes.
+
+**Demo** (`demo/VentanaContexto.cpp`), un apartado por cada cosa bajo el cursor
+y, al final, las del punto del mapa (en un submenú si ya hay otras):
+- **Objetivo**: seleccionar (ver su traza), centrar, anillos en él (rápidos o con
+  diálogo), marcación desde él, y con otro seleccionado marcación hasta él y
+  **CPA/TCPA**; mostrar solo los de su tipo / quitar el filtro; exportar su
+  historial a GPX; copiar su posición; quitarlo.
+- **Grupo de objetivos**: ampliar el grupo o ir a uno de ellos (hasta 25).
+- **Anillos**: separación automática sí/no (al fijarla se queda la que se ve),
+  radiales, quitarlos; **marcación**: quitarla; y la lista de todos.
+- **Entidad**: seleccionar y ver propiedades, encuadrar, editar vértices (si la
+  capa se edita), medir (superficie y perímetro, o longitud), vigilar como zona
+  (polígonos), anillos en un punto (radar u observador, con su nombre), borrar.
+- **Mapa**: cabecera con la coordenada y la cota (si hay DEM); copiar
+  coordenadas en decimal, GMS, UTM o MGRS; centrar; anillos aquí (rápidos o con
+  el diálogo ya con estas coordenadas); marcación desde aquí o del seleccionado
+  hasta aquí; nuevo punto aquí; fijar el punto A o B de Elevación.
+
+La cabecera de cada apartado es una acción desactivada en negrita, no
+`addSection`, que en el estilo de Windows no pinta el texto. Del rótulo de un
+objetivo se usa la primera línea («UAV 9», no «UAV 9 Bat 79%»).
+
+Test `tst_mapwidget::hitTestAndContextMenu`: objetivo y entidad a la vez, solo
+la entidad, centro y anillo (y nada entre ellos), marcación, mapa vacío, y un
+clic derecho real que emite la señal con lo de debajo (el izquierdo no).
+Comprobado en la demo bajo Xvfb con capturas de los cuatro menús. **24 tests**
+en verde.
+
+## 135. Límites en anillos y menú contextual con prioridad; Elevación automática
+
+Probando el menú del clic derecho en Windows salieron varias cosas:
+- se podían poner **anillos encima de anillos** sobre el mismo punto, y la cruz
+  del centro tapaba el propio punto;
+- con un objetivo dentro de unos anillos, el menú juntaba el objetivo, los
+  anillos y el lugar: **largo y con nombres repetidos** («Anillos de distancia
+  en él» y «Anillos de distancia en él…»);
+- los pines A y B de Elevación **solo se veían** con la pestaña Elevación abierta
+  y «Visión A→B» elegido; fijar un punto desde el menú no abría la pestaña.
+
+**Librería:** `RangeRings::featureId` cuelga los anillos de una **entidad punto**
+(el radar u observador que coloca el usuario). Los siguen al moverla (arrastre,
+edición, deshacer: `RangeLayer` escucha `featureUpdated` del modelo) y dejan
+de dibujarse si se borra. Con dueño (objetivo o entidad) **no se dibuja marca
+de centro** y los radiales arrancan a 14 px: el símbolo del dueño queda encima.
+
+**Demo:**
+- **Un dueño, unos anillos.** `anillosDe(objetivo, entidad)` busca los que ya
+  tenga; poner otros los **cambia** («Se cambian los anillos que ya tenía…»).
+  El diálogo tiene un modo «Cambiar» (el centro no se toca) y ofrece como centro
+  el objetivo o el punto seleccionados, un lugar pinchado o coordenadas.
+  Borrar un punto u objetivo desde el menú quita sus anillos.
+- **Prioridad en el menú:** se muestra UN elemento, el primero de objetivo →
+  grupo → entidad (los puntos del usuario) → anillos sueltos o marcación; los
+  anillos de un objetivo o punto van **dentro de su menú** (submenú «Anillos de
+  distancia»: poner con los últimos ajustes / eligiendo las opciones, o, si ya
+  tiene, separación automática, radiales, cambiar, quitar). Después, en un
+  submenú, «Este lugar del mapa». Sin nombres repetidos.
+- Sobre el centro de unos anillos el menú del lugar **no ofrece poner otros**.
+- **Elevación desde el menú** (de un lugar, un punto o un objetivo, si hay DEM):
+  «Perfil desde aquí», «Visión desde A hasta aquí», «Viewshed desde aquí»,
+  «10 picos más altos alrededor», y fijar A o B. Cada una **abre la pestaña
+  Elevación** con su análisis elegido (fijar B pasa a «Visión A→B», que es la
+  única que lo usa, y así se ven los dos pines) y, las de análisis, lo calculan.
+- Los pines A/B tienen su propio menú (ver la pestaña, análisis desde ahí), no el
+  de una entidad cualquiera (sin anillos ni borrar).
+
+Tests: en `rangeRingsAndBearingLinesFollowTargets`, anillos en una entidad
+punto que la siguen y que no se dibujan al borrarla. Comprobado bajo Xvfb que
+poner dos veces anillos al mismo punto deja uno. **24 tests** en verde.
+
+## 136. Un punto en el centro de unos anillos se queda con ellos
+
+Caso real: clic derecho en el mapa → anillos aquí; luego, en ese mismo lugar,
+«Nuevo punto aquí». El punto nacía **aparte** y su menú volvía a ofrecer
+«Anillos de distancia», como si no los tuviera. Lo natural es que el punto
+(un radar, un observador) sea el **dueño** de esos anillos y sean un solo
+elemento.
+
+- `anillosSueltosEn(p)`: anillos **sin dueño** con su centro a menos de 12 px.
+  `nuevoPunto(p)` (menú del lugar, y «Poner un punto en su centro…» del menú
+  de unos anillos sueltos) coloca el punto **exactamente** en ese centro, le
+  propone el nombre de los anillos y los liga a él (`featureId`); el rótulo
+  pasa al punto (se le activa) y los anillos dejan de rotular su nombre y de
+  dibujar la cruz. A partir de ahí su menú es el del punto, con los anillos
+  dentro, y no ofrece ponerle otros.
+- Al revés: anillos puestos **pinchando** o con **coordenadas** sobre un punto
+  existente (`puntoEn(p)`, sin contar los pines A/B) también se ligan a él en
+  vez de quedar sueltos encima.
+
+Comprobado bajo Xvfb: unos anillos sueltos y un punto nuevo a 3 px de su centro
+→ el punto queda en el centro (distancia 0), es el dueño y sigue habiendo un
+solo juego de anillos. **24 tests** en verde.
+
+## 137. Lógica de los menús: todo cuelga de un elemento
+
+Probando en Windows: se pusieron anillos en un lugar del mapa y, justo al lado,
+el punto observador de Elevación (perfil desde «aquí»): **no coincidían**. Y se
+podía poner una marcación hacia un lugar vacío. Había dos conceptos
+a medias —anillos «sueltos» y marcaciones «a un lugar»— que chocaban con los
+puntos. Se revisa toda la lógica con una sola regla.
+
+**Modelo (demo):**
+- **Elementos:** objetivo móvil, **punto** del usuario (radar, observador…),
+  zona o línea, y grupo de objetivos. Cada uno tiene su menú.
+- **Anillos y marcaciones no son elementos aparte: cuelgan de uno.** Los anillos
+  son de un objetivo o de un punto (como mucho unos por dueño); una marcación une
+  **dos** elementos. Un punto nuevo con anillos es un solo elemento.
+- **Un lugar vacío** solo ofrece: copiar coordenadas, centrar, **nuevo punto**, **nuevo
+  punto con anillos** y elevación en él. Ya no hay «anillos aquí» ni «marcación
+  desde aquí».
+- **Un solo elemento por clic derecho**, el de más prioridad: objetivo → grupo →
+  entidad (punto, zona, línea) → marca (línea de unos anillos o de una marcación).
+  Clic en la línea de unos anillos abre el menú de su dueño. Las acciones del lugar
+  van en «Este lugar del mapa», reducidas a copiar/centrar si el elemento es un
+  objetivo o un punto (ahí no se crea otro punto).
+
+**Librería:** `BearingLine::fromFeature` / `toFeature` (un punto del mapa en cada
+extremo, que la marcación sigue); rechaza el mismo punto en los dos extremos.
+
+**Demo:**
+- `crearPunto`: capa activa si se edita o, si no, la primera editable (nunca las
+  `elev_*` de resultados). Nombre por defecto «Punto N».
+- **Anillos:** el diálogo ofrece objetivo seleccionado, punto seleccionado, **punto
+  nuevo en unas coordenadas** o **punto nuevo donde se pinche**; el nombre solo se
+  pide para el punto nuevo. Pinchar sobre un objetivo o un punto existente los hace
+  suyos; sobre un lugar vacío, crea el punto. Poner otros anillos a un dueño que ya
+  los tiene **los cambia**.
+- **Marcación** (menú Ver o submenú «Marcación» de un objetivo/punto): origen y
+  destino deben ser un objetivo o un punto. Un clic en un lugar vacío, en el mismo
+  elemento que el origen o repetir una marcación idéntica se avisa y se rechaza; la
+  herramienta sigue armada. En el submenú: «Hasta un objetivo o punto (pinchar)…»,
+  hasta el objetivo o el punto seleccionados, y quitar las que ya tiene.
+- **Esc cancela** la captura de punto (anillos, marcación, A, B); antes la
+  herramienta de pinchar no tenía más salida que elegir «Navegar».
+- **Borrar** un punto (o quitar un objetivo) se lleva sus anillos y marcaciones.
+- **Elevación:** el punto es el observador. Desde su menú, «Usar como observador
+  (punto A)», «Usar como punto B», «Perfil / Viewshed / 10 picos desde él» y
+  «Visión desde A hasta él», con sus coordenadas exactas. Desde un lugar, las
+  mismas, que **se enganchan a un punto del usuario a menos de ~12 px** (también el
+  botón «Mapa» de la pestaña), para que análisis y anillos partan del mismo sitio.
+- Los pines A/B y los resultados de Elevación tienen un menú propio corto.
+- El gestor «Anillos y marcaciones puestos» nombra los extremos
+  («Marcación Radar → Observador · 077° · 59.2 km»).
+
+Test `rangeRingsAndBearingLinesFollowTargets`: marcación entre un punto y un
+objetivo que sigue al punto al moverlo, rechazo del mismo punto en los dos extremos
+y que no se mide si el punto se borra. Comprobado bajo Xvfb: un punto con anillos
+en un lugar queda en su centro (0 m); repetir junto a él no duplica nada;
+marcaciones nulas y a lugares vacíos rechazadas; borrar un punto quita sus 3 marcas.
+**24 tests** en verde.
+
+## 138. Marcación: origen = elemento, destino = cualquier lugar; limpiar el análisis anterior
+
+Dos fallos al probar §137 en Windows:
+
+**1. La recta de visibilidad se quedaba pintada.** Con «Visión A→B» ya calculada,
+al cambiar el selector a «Viewshed» la línea de visión (con su «Obstáculo a… m»),
+el texto «BLOQUEADA…» y la ventana del perfil seguían ahí. Causa: cada análisis
+solo prepara **su** capa (`elev_vision`, `elev_viewshed`, `elev_picos`) y nadie
+quitaba las de los demás. Ahora `quitarResultadosAnalisis()` limpia las tres
+capas, el texto de resultado, los picos y esconde el perfil, y se llama al
+**cambiar de análisis** (y desde «Limpiar»). Los análisis del menú contextual
+cambian el selector antes de calcular, así que parten de una pestaña limpia.
+
+**2. La marcación no dejaba elegir un lugar del mapa.** En §137 se exigió que
+**los dos** extremos fueran elementos; lo pedido era que **para poder poner una
+marcación debe existir algo** de lo que partir. Regla corregida:
+- el **origen** es un objetivo o un punto (no se parte de un lugar vacío);
+- el **destino** es otro elemento (al que la línea sigue) **o cualquier lugar**
+  del mapa (coordenada fija).
+En la demo: «Marcación ▸ Hasta un objetivo, punto o lugar (pinchar)…» desde un
+elemento; desde el menú de un lugar vacío, «Marcación desde <objetivo o punto
+seleccionado> hasta aquí» (desactivada, con el motivo, si no hay nada
+seleccionado); y el menú Ver → Marcación. Se siguen rechazando un origen vacío,
+un destino que es el propio origen y una marcación idéntica a otra. El gestor
+nombra el destino («Radar → 23.29, -82.37 · 043° · 41.4 km»).
+
+Comprobado bajo Xvfb: una capa `elev_vision` y su texto desaparecen al cambiar el
+selector a Viewshed; marcaciones de un punto a dos lugares vacíos (rumbo y distancia
+correctos), la repetida rechazada, el origen vacío rechazado. **24 tests** en verde.
+
+## 139. Ratón y teclado: revisión completa y tarjeta del clic izquierdo
+
+Tras listar todos los gestos del ratón y probarlos con eventos reales (sonda bajo
+Xvfb) salieron 15 fallos. Se corrigen en la librería (con 10 tests nuevos) y en la
+demo; además, el clic izquierdo sobre un elemento muestra ahora una **tarjeta**.
+
+**Fallos corregidos (librería, `MapView`)**
+- *Rueda fina ignorada*: los toques de 15° o menos no hacían nada; ahora se
+  acumulan (`m_wheelAccum`) hasta completar un paso.
+- *Pulsar sobre un objetivo se tragaba el desplazamiento*: la pulsación ya no
+  resuelve nada; el clic se decide al **soltar** (`Pend`) con un margen de 4 px
+  (`kClickSlopPx`) y el arrastre empieza al superarlo. Solo las etiquetas y las
+  entidades `draggable` se agarran al pulsar.
+- *Doble clic*: Qt entrega el doble clic EN LUGAR de la segunda pulsación; se
+  trata como pulsación (`m_dblPress`) y, en un lugar vacío, acerca un nivel.
+- *Objetivo imposible de deseleccionar* y *entidades no seleccionables en
+  Navegar*: el clic en vacío deselecciona; el clic sobre una entidad la selecciona.
+- *`clicked` tras un arrastre*: ya no se emite si hubo desplazamiento.
+- *Edit*: el temblor de 1–2 px movía un vértice ~800 m; ahora hay margen. Ctrl+clic
+  añade vértice; las capas con `LayerInfo::editable == false` no se editan, dibujan
+  ni borran (señal `interactionBlocked` con el motivo).
+- *Botón central* desplaza con cualquier herramienta; teclado: flechas, +/−, Esc,
+  Intro, Retroceso, Supr y la tecla de menú.
+- *Clic derecho con una medida a medias* abría el menú: ahora cancela
+  (`pickCancelled`).
+- *Rendimiento*: `featureAt` costaba 30 ms con 6000 entidades porque
+  `OverlayModel::features()` copiaba y ordenaba todo en cada llamada. Un índice
+  por capa (`forEachInLayer`) lo deja en 12 ms; la demo, además, espera a que el
+  ratón pare antes de buscar bajo el cursor (cursor de mano / de arrastre).
+
+**API nueva**: señales `elementClicked(MapHit, QPoint)`, `pickCancelled()`,
+`interactionBlocked(QString)`; `MapHit::vertexFeature/vertexIndex` (tirador bajo
+el cursor).
+
+**Demo**
+- *Tarjeta* (`demo/VentanaTarjeta.cpp`): clic izquierdo sobre un objetivo, punto,
+  zona, línea o marca → popup con sus datos (posición, rumbo, velocidad en nudos,
+  cota, superficie, anillos, marcaciones…) y botones rápidos (Centrar, Anillos o
+  Quitar anillos, Marcación…, Encuadrar, Vigilar zona) más «Más…», que abre el
+  menú completo del clic derecho. Los botones cierran el popup antes de actuar
+  porque varias acciones abren diálogos o esperan un clic.
+- Los puntos del usuario se arrastran y sus anillos los siguen; el menú de un
+  tirador ofrece «Borrar este vértice» (zonas ≥ 3, líneas ≥ 2).
+- Ayuda → «Ratón y teclado…»: tabla de todos los gestos.
+
+Pendiente conocido: deshacer el borrado de un punto no restaura sus anillos.
+**24 tests** en verde.
+
+## 140. Marcaciones a un lugar libre: nombre del extremo
+
+En «Marcación ▸ Quitar la marcación con …» las marcaciones cuyo extremo es un
+lugar libre (sin objetivo ni punto) salían como «punto -1», todas iguales. Ahora
+`nombreExtremo` devuelve «un lugar del mapa» para un extremo libre y el submenú
+muestra sus coordenadas con rumbo y distancia («23.29, -82.37 (043° · 41.4 km)»),
+de modo que dos marcaciones a lugares distintos se distinguen. 24 tests en verde.

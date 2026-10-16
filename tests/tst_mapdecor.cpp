@@ -20,6 +20,8 @@ private slots:
     void formatsLongitudeAndNormalizes();
     void formatsDistanceAndBearing();
     void geodesicCircleKeepsRadius();
+    void ringSpacingIsRoundAndFits();
+    void clustersByWorldAnchoredCells();
 };
 
 // La barra elige 1-2-5 x 10^n sin pasarse del ancho maximo.
@@ -123,6 +125,14 @@ void TstMapDecor::formatsDistanceAndBearing()
     QCOMPARE(MapDecor::formatDistance(500.0, ScaleUnits::Nautical), QStringLiteral("0.27 NM"));
     QVERIFY(MapDecor::formatDistance(std::nan(""), ScaleUnits::Metric).isEmpty());
 
+    const QString dos = QString(QChar(0x00B2));
+    QCOMPARE(MapDecor::formatArea(850.4, ScaleUnits::Metric), QStringLiteral("850 m") + dos);
+    QCOMPARE(MapDecor::formatArea(125000.0, ScaleUnits::Metric), QStringLiteral("12.5 ha"));
+    QCOMPARE(MapDecor::formatArea(3.42e6, ScaleUnits::Metric), QStringLiteral("3.42 km") + dos);
+    QCOMPARE(MapDecor::formatArea(1852.0 * 1852.0, ScaleUnits::Nautical),
+             QStringLiteral("1 NM") + dos);
+    QVERIFY(MapDecor::formatArea(std::nan(""), ScaleUnits::Metric).isEmpty());
+
     const QString g = QString(QChar(0x00B0));
     QCOMPARE(MapDecor::formatBearing(45.0), QStringLiteral("045") + g);
     QCOMPARE(MapDecor::formatBearing(-10.0), QStringLiteral("350") + g);
@@ -145,6 +155,54 @@ void TstMapDecor::geodesicCircleKeepsRadius()
     }
     QVERIFY(MapDecor::geodesicCircle(QGeoCoordinate(), 100.0).isEmpty());
     QVERIFY(MapDecor::geodesicCircle(QGeoCoordinate(0, 0), 0.0).isEmpty());
+}
+
+// Puntos por celdas de 50 px: un monton de 4 forma grupo (con su centroide),
+// una pareja con minimo 3 no. Desplazar todos los puntos y el origen lo mismo
+// (desplazar el mapa) da los mismos grupos.
+void TstMapDecor::clustersByWorldAnchoredCells()
+{
+    const QVector<QPointF> p = { {10, 10}, {20, 20}, {30, 10}, {40, 40},   // celda (0,0)
+                                 {110, 10}, {120, 15},                      // celda (2,0)
+                                 {300, 300} };                              // sola
+    QVector<MapDecor::PointCluster> g = MapDecor::clusterPoints(p, 50.0, 3);
+    QCOMPARE(g.size(), 1);
+    QCOMPARE(g[0].members, QVector<int>({ 0, 1, 2, 3 }));
+    QCOMPARE(g[0].center, QPointF(25.0, 20.0));
+
+    g = MapDecor::clusterPoints(p, 50.0, 2);
+    QCOMPARE(g.size(), 2);
+    QCOMPARE(g[0].members.size(), 4);                 // de mayor a menor
+    QCOMPARE(g[1].members, QVector<int>({ 4, 5 }));
+
+    // Desplazar el mapa 37 px: mismos grupos, si la rejilla va anclada al mundo.
+    QVector<QPointF> movidos;
+    for (const QPointF &q : p)
+        movidos.append(q + QPointF(37.0, -12.0));
+    const auto g2 = MapDecor::clusterPoints(movidos, 50.0, 2, QPointF(37.0, -12.0));
+    QCOMPARE(g2.size(), 2);
+    QCOMPARE(g2[0].members, g[0].members);
+    QCOMPARE(g2[1].members, g[1].members);
+
+    QVERIFY(MapDecor::clusterPoints(p, 0.0, 2).isEmpty());
+    QVERIFY(MapDecor::clusterPoints({}, 50.0, 2).isEmpty());
+}
+
+// Separacion de anillos automatica: el mayor 1-2-2.5-5 x 10^n (en la unidad de la
+// escala) con el que los anillos caben en el radio.
+void TstMapDecor::ringSpacingIsRoundAndFits()
+{
+    QCOMPARE(MapDecor::niceRingSpacing(9000.0, 4, ScaleUnits::Metric), 2000.0);
+    QCOMPARE(MapDecor::niceRingSpacing(10000.0, 5, ScaleUnits::Metric), 2000.0);
+    QCOMPARE(MapDecor::niceRingSpacing(40000.0, 5, ScaleUnits::Metric), 5000.0);
+    QCOMPARE(MapDecor::niceRingSpacing(450.0, 5, ScaleUnits::Metric), 50.0);
+    QCOMPARE(MapDecor::niceRingSpacing(13000.0, 5, ScaleUnits::Metric), 2500.0);
+    // Nautico: 20 NM con 4 anillos -> 5 NM.
+    QCOMPARE(MapDecor::niceRingSpacing(20.0 * 1852.0, 4, ScaleUnits::Nautical), 5.0 * 1852.0);
+    QCOMPARE(MapDecor::niceRingSpacing(1.0 * 1852.0, 5, ScaleUnits::Nautical), 0.2 * 1852.0);
+    QCOMPARE(MapDecor::niceRingSpacing(0.0, 5, ScaleUnits::Metric), 0.0);
+    QCOMPARE(MapDecor::niceRingSpacing(1000.0, 0, ScaleUnits::Metric), 0.0);
+    QCOMPARE(MapDecor::niceRingSpacing(std::nan(""), 3, ScaleUnits::Metric), 0.0);
 }
 
 QTEST_APPLESS_MAIN(TstMapDecor)

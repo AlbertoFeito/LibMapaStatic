@@ -390,11 +390,13 @@ la API que usa la aplicación:</p>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
 <tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget</td></tr>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b> · consulta puntual <b>targetsInArea · featuresInArea</b></td></tr>
-<tr><td>Anillos y marcaciones</td><td class="mono"><b>addRangeRings · updateRangeRings · addBearingLine · updateBearingLine · removeRangeMark · clearRangeMarks · rangeMarks · bearingLineMeasure</b> · inicio/fin de rutas: <b>setRouteEndpoints (Hidden/Selected/Routes/AllLines)</b></td></tr>
+<tr><td>Agrupación de objetivos</td><td class="mono"><b>setTargetClustering(TargetClustering) · targetClustering · targetClusterAt · señal targetClusterClicked</b> · núcleo: MapDecor::clusterPoints (rejilla anclada al mundo)</td></tr>
+<tr><td>Filtro de objetivos</td><td class="mono"><b>setTargetFilter(TargetFilter) · clearTargetFilter · hasTargetFilter · targetPassesFilter · filteredOutTargets</b> (clase, velocidad, zonas vigiladas, predicado de la app; ocultar o atenuar)</td></tr>
+<tr><td>Anillos y marcaciones</td><td class="mono"><b>hitTest · contextMenuRequested (MapHit)</b> · <b>addRangeRings · updateRangeRings · rangeRings · rangeRingsSpacing · addBearingLine · updateBearingLine · bearingLine · removeRangeMark · clearRangeMarks · rangeMarks · bearingLineMeasure</b> · inicio/fin de rutas: <b>setRouteEndpoints (Hidden/Selected/Routes/AllLines)</b></td></tr>
 <tr><td>Reproducción</td><td class="mono"><b>TrackPlayer</b> (loadFile · setTracks · play · pause · stop · seek · setSpeed · setRoutesVisible · targetIdOf · isLoaded · <b>clear = salir</b> · señales timeChanged / playingChanged / finished / cleared) · núcleo: <b>sampleTrack · trackTimeRange</b> (TrackReplay.h)</td></tr>
 <tr><td>Proximidad (CPA/TCPA)</td><td class="mono"><b>setProximityAlert(distancia, horizonte) · proximityAlerts · targetCpa · setTargetVelocity · setProximityLinesVisible · setProximityColor · señales proximityAlertRaised / proximityAlertCleared</b></td></tr>
 <tr><td>Exportar</td><td class="mono"><b>renderImage(escala) · exportView(ruta, MapExportOptions)</b> (PDF vectorial con título, pie y escala 1:N, o PNG/JPG…) · <b>exportTargetHistory</b> (GPX con horas)</td></tr>
-<tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, AreaZoom, SelectArea, SelectPolygon, Draw…, EditFeature) · clearAreaSelection (quita el recuadro o el contorno de la selección)</td></tr>
+<tr><td>Herramientas / ratón</td><td class="mono">setActiveTool (Measure, <b>MeasureArea</b> → areaMeasured, AreaZoom, SelectArea, SelectPolygon, Draw…, EditFeature) · clearAreaSelection (quita el recuadro o el contorno de la selección)</td></tr>
 <tr><td>Elevación</td><td class="mono">elevationAt · elevationProfile · lineOfSight · viewshed</td></tr>
 <tr><td>Escala / cuadrícula</td><td class="mono">setScaleBarVisible · setScaleBarUnits (Metric/Nautical) · metersPerPixel · setGraticuleVisible · setGraticuleColor · <b>setGraticuleMode (Geographic/Utm)</b></td></tr>
 <tr><td>Cobertura / relieve</td><td class="mono">setCoverageVisible · setCoverageZoom · refreshCoverage · <b>setHillshadeVisible · setHillshadeSun · setHillshadeOpacity · setHillshadeExaggeration · setHillshadeColored · refreshHillshade</b></td></tr>
@@ -634,7 +636,22 @@ borrar el objetivo o la zona no genera salidas. También se vigilan las <b>entid
 entidades, y los objetivos quedan encima. Los anillos son <b>geodésicos</b>
 (<code>MapDecor::geodesicCircle</code>): en Mercator se estiran con la latitud, como la
 distancia real. Las marcaciones siguen la ortodrómica y miden rumbo y distancia al dibujar
-(«202° · 26.7 NM», en las unidades de la escala).</p>
+(«202° · 26.7 NM», en las unidades de la escala). Una marcación sin longitud (mismo
+objetivo o mismo punto en los dos extremos) se rechaza. El centro de los anillos puede ser un
+objetivo, una <b>entidad punto</b> (<code>featureId</code>: un radar u observador colocado por
+el usuario; las marcaciones también admiten una entidad punto en cada extremo, <code>fromFeature</code> y <code>toFeature</code>; los anillos la siguen y su símbolo queda a la vista, sin marca de centro) o un
+<b>punto fijo con nombre</b>. Con
+<code>spacingMeters = 0</code> la separación es <b>automática</b>: en cada repintado se mide
+la escala local en el centro y <code>MapDecor::niceRingSpacing</code> elige el mayor valor
+1-2-2.5-5 × 10<sup>n</sup> (en la unidad de la escala) con el que los anillos caben en el 45 %
+del lado corto de la vista. Si la parte de arriba de un anillo, o el extremo de un radial, queda
+fuera de la vista, su rótulo se lleva al punto visible más cercano.</p>
+<p><b>Clic derecho.</b> <code>MapView</code> emite el clic derecho (salvo mientras se dibuja,
+que lo cierra) y <code>MapWidget</code> lo convierte en <code>contextMenuRequested(MapHit,
+globalPos)</code>: <code>MapHit</code> trae la coordenada y, por separado, el objetivo suelto,
+el grupo, la entidad y los anillos o la marcación que haya bajo el pixel (las marcaciones,
+encima, ganan a los anillos; se prueba con la misma geometría que el dibujo). La librería no
+muestra menú propio: cada app decide qué acciones tienen sentido para cada cosa.</p>
 <p><b>Reproducción de historiales.</b> <code>TrackPlayer</code> convierte cada pista de un
 GPX con horas en un <b>objetivo normal</b> mientras existió. Usa solo la API pública:
 <code>addTarget</code>/<code>updateTarget</code> con los puntos grabados y sus horas, y la
@@ -861,6 +878,14 @@ probada— sirve para la consola y para la ventana con barra de progreso viva.</
 <p><b>Propiedades clave:</b> <span class="tag">reanudable</span> solo baja lo que falta (se corta y se relanza sin repetir); <span class="tag">paralelo</span> hasta <code>connections</code> peticiones en vuelo a la vez (cada una con su <code>Pending</code> y su timeout), con <code>rate</code> como tope de lanzamientos/seg; <span class="tag">codificación exacta</span> inserta con <code>storedZ</code>/Y/s de la base; <span class="tag">polígono</span> descarta las teselas con centro fuera; <span class="tag">auto-freno</span> pausa con backoff creciente (30→60→120…→300&nbsp;s) ante rachas de fallos y reanuda al primer éxito; <span class="tag">busy_timeout</span> convive con el mapa leyendo la misma BD.</p>
 
 <!-- ===================== 13. DECISIONES ===================== -->
+<h3>Interacción con el ratón</h3>
+<ul>
+  <li><b>El clic se decide al soltar.</b> Pulsar solo agarra etiquetas y entidades <code>draggable</code>; el desplazamiento empieza al superar 4&nbsp;px, así que pulsar sobre un objetivo ya no impide mover el mapa.</li>
+  <li><b>Doble clic</b> = pulsación + zoom +1 en vacío. <b>Rueda</b> acumulada. <b>Botón central</b> desplaza con cualquier herramienta.</li>
+  <li><b>Señales:</b> <code>elementClicked(MapHit, QPoint)</code> (tarjeta), <code>contextMenuRequested</code> (menú), <code>pickCancelled()</code>, <code>interactionBlocked(QString)</code> (capa bloqueada).</li>
+  <li><b>Índice por capa</b> en <code>OverlayModel</code> (<code>forEachInLayer</code>): la búsqueda bajo el cursor no copia ni ordena todas las entidades.</li>
+</ul>
+
 <h2 class="sec">13 · Decisiones de diseño e historia</h2>
 <ul>
   <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite probar el núcleo sin GUI (14 de los 17 tests) y no imponer QCustomPlot.</li>
@@ -888,7 +913,8 @@ find_package(libmapa REQUIRED)        # CMAKE_PREFIX_PATH = C:/libmapa;&lt;Qt&gt
 target_link_libraries(miapp PRIVATE libmapa::widget)</pre>
 <p>Bibliotecas estáticas, solo las cabeceras públicas, <code>libmapaConfig.cmake</code>
 (busca las mismas dependencias de Qt) y las herramientas. Plantilla:
-<code>examples/app_minima</code>. Una guarda en CMake impide que la librería enlace
+<code>examples/app_minima</code>; el API de objetivos (alertas, anillos, filtro, agrupación,
+reproducción y exportación) en <code>examples/app_seguimiento</code>. Una guarda en CMake impide que la librería enlace
 <code>Qt Network</code>: el producto trabaja sin conexión.</p>
 
 <h3>Llevarla a otro PC</h3>

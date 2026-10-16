@@ -198,6 +198,89 @@ public:
         return QStringLiteral("CPA %1 en %2").arg(distancia(c.distanceMeters), cuando);
     }
 
+    // Añade un lote de entidades a una capa (creandola si no existe) como UNA
+    // sola operacion de deshacer. Sin el grupo, cada entidad apilaba una copia
+    // del estado: importar n entidades costaba O(n^2) y dejaba n pasos que
+    // deshacer uno a uno. El grupo se abre ANTES de crear la capa, asi que
+    // deshacer la importacion quita tambien la capa nueva. \a nuevosIds: las
+    // entidades vienen de un fichero y deben recibir id nuevo.
+    qint64 addFeaturesAsOneUndo(const QVector<MapFeature> &feats, const QString &layerId,
+                                const QString &displayName, bool nuevosIds)
+    {
+        OverlayModel *modelo = view->overlayModel();
+        modelo->beginUndoGroup();
+        q->addFeatureLayer(layerId, displayName, 0);
+        qint64 primero = -1;
+        for (MapFeature f : feats) {
+            if (nuevosIds)
+                f.id = -1;
+            f.layerId = layerId;
+            const qint64 id = q->addFeature(f);   // conserva estilo/etiqueta/atributos
+            if (primero < 0)
+                primero = id;
+        }
+        modelo->endUndoGroup();
+        return primero;
+    }
+
+    // Filtro de objetivos: el que puso la app y los que hoy NO lo pasan.
+    TargetFilter filtro;
+    bool hayFiltro = false;
+    QSet<qint64> fueraDeFiltro;
+
+    // ¿Pasa el objetivo el filtro? Clase, velocidad (la de la app o estimada,
+    // como en las alertas CPA), zonas vigiladas y el criterio libre de la app.
+    bool pasaFiltro(qint64 id) const
+    {
+        if (!hayFiltro || !view)
+            return true;
+        const auto it = view->targetModel()->entries().constFind(id);
+        if (it == view->targetModel()->entries().constEnd())
+            return false;
+        const MapTarget &t = it->target;
+        if (!filtro.kinds.isEmpty() && !filtro.kinds.contains(t.kind))
+            return false;
+        if (!std::isnan(filtro.minSpeed) || !std::isnan(filtro.maxSpeed)) {
+            const double v = trackOf(id).speed;
+            if (!std::isnan(filtro.minSpeed) && v < filtro.minSpeed)
+                return false;
+            if (!std::isnan(filtro.maxSpeed) && v > filtro.maxSpeed)
+                return false;
+        }
+        if (filtro.onlyInWatchedZones && zones.zonesOf(id).isEmpty())
+            return false;
+        return !filtro.predicate || filtro.predicate(t);
+    }
+
+    // Reevalua UN objetivo (al moverse o cambiar su velocidad) y avisa a la
+    // capa solo si cambio. O(1): no recorre los demas.
+    void syncFiltro(qint64 id)
+    {
+        if (!hayFiltro || !view)
+            return;
+        const bool fuera = view->targetModel()->contains(id) && !pasaFiltro(id);
+        if (fuera == fueraDeFiltro.contains(id))
+            return;
+        if (fuera)
+            fueraDeFiltro.insert(id);
+        else
+            fueraDeFiltro.remove(id);
+        view->targetLayer()->setFilteredOut(fueraDeFiltro, filtro.dim);
+    }
+
+    // Reevalua todos (al cambiar el filtro) y se lo pasa a la capa.
+    void recalcularFiltro()
+    {
+        fueraDeFiltro.clear();
+        if (hayFiltro && view)
+            for (auto it = view->targetModel()->entries().cbegin();
+                 it != view->targetModel()->entries().cend(); ++it)
+                if (!pasaFiltro(it.key()))
+                    fueraDeFiltro.insert(it.key());
+        if (view && view->targetLayer())
+            view->targetLayer()->setFilteredOut(fueraDeFiltro, hayFiltro && filtro.dim);
+    }
+
     // Pasa a la capa de objetivos las lineas de los pares en alerta.
     void refreshProximityLines()
     {
@@ -264,6 +347,9 @@ public:
     {
         if (!cambios.isEmpty())
             refreshAlerts();
+        if (hayFiltro && filtro.onlyInWatchedZones)
+            for (const ZoneMonitor::Transition &t : cambios)
+                syncFiltro(t.targetId);
         for (const ZoneMonitor::Transition &t : cambios) {
             if (t.entered)
                 emit q->targetEnteredZone(t.targetId, t.zoneId);
@@ -523,10 +609,23 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
 
     connect(d->view, &MapView::mouseMovedTo, this, &MapWidget::mouseMoved);
     connect(d->view, &MapView::mapClicked, this, &MapWidget::clicked);
+    // Clic derecho: se resuelve aqui que hay debajo, para que la app solo
+    // tenga que montar el menu.
+    connect(d->view, &MapView::contextMenuRequested, this,
+            [this](const QPoint &pixel, const QPoint &global) {
+                emit contextMenuRequested(hitTest(pixel), global);
+            });
+    connect(d->view, &MapView::elementClicked, this,
+            [this](const QPoint &pixel, const QPoint &global) {
+                emit elementClicked(hitTest(pixel), global);
+            });
+    connect(d->view, &MapView::pickCancelled, this, &MapWidget::pickCancelled);
+    connect(d->view, &MapView::interactionBlocked, this, &MapWidget::interactionBlocked);
     connect(d->view, &MapView::measurementFinished,
             this, &MapWidget::measurementFinished);
     connect(d->view, &MapView::areaSelected, this, &MapWidget::areaSelected);
     connect(d->view, &MapView::polygonSelected, this, &MapWidget::polygonSelected);
+    connect(d->view, &MapView::areaMeasured, this, &MapWidget::areaMeasured);
     connect(d->view, &MapView::pointPicked, this, &MapWidget::pointPicked);
 
     connect(&d->service, &TileService::activeDatasetChanged,
@@ -567,6 +666,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             d->syncZone(id);
     });
     connect(d->view, &MapView::targetClicked, this, &MapWidget::targetClicked);
+    connect(d->view, &MapView::targetClusterClicked, this, &MapWidget::targetClusterClicked);
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
     connect(d->view, &MapView::featureDragStarted, this, &MapWidget::featureDragStarted);
     connect(d->view, &MapView::featureDragMovedTo, this, &MapWidget::featureDragMovedTo);
@@ -1361,15 +1461,8 @@ qint64 MapWidget::loadFeaturesAsLayer(const QString &databasePath,
         return -1;
     }
 
-    addFeatureLayer(layerId, displayName.isEmpty() ? layerId : displayName, 0);
-    qint64 primero = -1;
-    for (MapFeature f : feats) {
-        f.layerId = layerId;                 // todas bajo la capa del overlay
-        const qint64 id = addFeature(f);     // conserva estilo/etiqueta/atributos
-        if (primero < 0)
-            primero = id;
-    }
-    return primero;
+    return d->addFeaturesAsOneUndo(feats, layerId,
+                                   displayName.isEmpty() ? layerId : displayName, false);
 }
 
 // Importa GeoJSON/KML/GPX: lee con VectorFormats y AÑADE cada entidad a la
@@ -1390,16 +1483,8 @@ qint64 MapWidget::importVectorFile(const QString &path, const QString &layerId,
         return -1;
     }
 
-    addFeatureLayer(layerId, displayName.isEmpty() ? layerId : displayName, 0);
-    qint64 primero = -1;
-    for (MapFeature f : feats) {
-        f.id = -1;
-        f.layerId = layerId;
-        const qint64 id = addFeature(f);
-        if (primero < 0)
-            primero = id;
-    }
-    return primero;
+    return d->addFeaturesAsOneUndo(feats, layerId,
+                                   displayName.isEmpty() ? layerId : displayName, true);
 }
 
 // Exporta las entidades (todas, o las de una capa) al formato que diga la
@@ -1440,6 +1525,7 @@ qint64 MapWidget::addTarget(const MapTarget &target, const QDateTime &time)
     if (id >= 0) {
         d->emitZoneTransitions(d->zones.updateTarget(id, target.position));
         d->syncProximity(id);
+        d->syncFiltro(id);
     }
     return id;
 }
@@ -1452,6 +1538,7 @@ bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
         return false;
     d->emitZoneTransitions(d->zones.updateTarget(id, position));
     d->syncProximity(id);
+    d->syncFiltro(id);
     return true;
 }
 
@@ -1523,6 +1610,8 @@ bool MapWidget::removeTarget(qint64 id)
     d->proximity.removeTrack(id);
     d->reportedVelocity.remove(id);
     d->refreshProximityLines();
+    if (d->fueraDeFiltro.remove(id) && d->view)
+        d->view->targetLayer()->setFilteredOut(d->fueraDeFiltro, d->filtro.dim);
     return d->view && d->view->targetModel()->remove(id);
 }
 
@@ -1534,6 +1623,9 @@ void MapWidget::clearTargets()
     d->proximity.clear();
     d->reportedVelocity.clear();
     d->refreshProximityLines();
+    d->fueraDeFiltro.clear();
+    if (d->view)
+        d->view->targetLayer()->setFilteredOut(d->fueraDeFiltro, d->filtro.dim);
     if (d->view)
         d->view->targetModel()->clear();
 }
@@ -1785,7 +1877,73 @@ bool MapWidget::setTargetVelocity(qint64 id, double speedMetersPerSecond, double
     else
         d->reportedVelocity.insert(id, qMakePair(std::max(0.0, speedMetersPerSecond), courseDeg));
     d->syncProximity(id);
+    d->syncFiltro(id);
     return true;
+}
+
+// ---------------------------------------------- agrupacion de objetivos --
+
+// Activa, cambia o apaga la agrupacion (la dibuja TargetLayer).
+void MapWidget::setTargetClustering(const TargetClustering &clustering)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setClustering(clustering);
+}
+
+// Agrupacion actual (desactivada si no hay vista).
+TargetClustering MapWidget::targetClustering() const
+{
+    return d->view && d->view->targetLayer() ? d->view->targetLayer()->clustering()
+                                             : TargetClustering();
+}
+
+// Grupo bajo un pixel del widget, segun el ultimo repintado.
+QVector<qint64> MapWidget::targetClusterAt(const QPoint &pixelPos) const
+{
+    if (!d->view || !d->view->targetLayer())
+        return {};
+    return d->view->targetLayer()->clusterAt(pixelPos);   // la vista ocupa todo el widget, como en targetAt
+}
+
+// --------------------------------------------------- filtro de objetivos --
+
+// Fija el filtro (uno vacio lo quita) y reevalua todos los objetivos.
+void MapWidget::setTargetFilter(const TargetFilter &filter)
+{
+    d->filtro = filter;
+    d->hayFiltro = !filter.isEmpty();
+    d->recalcularFiltro();
+}
+
+// Quita el filtro: se vuelven a ver todos.
+void MapWidget::clearTargetFilter()
+{
+    setTargetFilter(TargetFilter());
+}
+
+// ¿Hay un filtro activo?
+bool MapWidget::hasTargetFilter() const
+{
+    return d->hayFiltro;
+}
+
+// ¿Pasa el objetivo el filtro? (true sin filtro; false si no existe).
+bool MapWidget::targetPassesFilter(qint64 id) const
+{
+    if (!d->view || !d->view->targetModel()->contains(id))
+        return false;
+    return !d->fueraDeFiltro.contains(id);
+}
+
+// Los que no pasan, ordenados.
+QVector<qint64> MapWidget::filteredOutTargets() const
+{
+    QVector<qint64> v;
+    v.reserve(d->fueraDeFiltro.size());
+    for (qint64 id : d->fueraDeFiltro)
+        v.append(id);
+    std::sort(v.begin(), v.end());
+    return v;
 }
 
 // Muestra u oculta las lineas de maximo acercamiento.
@@ -1883,6 +2041,30 @@ qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx) const
 {
     d->syncGeometry();
     return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx) : -1;
+}
+
+// Todo lo que hay bajo un pixel, cada cosa por separado (ver MapHit).
+MapHit MapWidget::hitTest(const QPoint &pixel) const
+{
+    MapHit h;
+    h.pixel = pixel;
+    if (!d->view)
+        return h;
+    h.coordinate = d->view->coordinateAt(pixel);
+    h.targetId = targetAt(pixel);
+    h.clusterTargets = targetClusterAt(pixel);
+    h.featureId = featureAt(pixel);
+    if (d->view->rangeLayer())
+        h.rangeMarkId = d->view->rangeLayer()->markAt(pixel);
+    const qint64 sel = d->view->overlayModel()->selectedId();
+    if (sel >= 0 && d->view->featureLayer()) {
+        const int v = d->view->featureLayer()->vertexAt(sel, pixel);
+        if (v >= 0) {
+            h.vertexFeature = sel;
+            h.vertexIndex = v;
+        }
+    }
+    return h;
 }
 
 // Entidad cuyo rotulo cae bajo el pixel (hit-test de la caja de etiqueta).
@@ -2145,6 +2327,30 @@ void MapWidget::clearRangeMarks()
 QVector<qint64> MapWidget::rangeMarks() const
 {
     return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->ids() : QVector<qint64>();
+}
+
+// Copia de unos anillos por id.
+std::optional<RangeRings> MapWidget::rangeRings(qint64 id) const
+{
+    RangeRings r;
+    if (d->view && d->view->rangeLayer() && d->view->rangeLayer()->rings(id, &r))
+        return r;
+    return std::nullopt;
+}
+
+// Copia de una marcacion por id.
+std::optional<BearingLine> MapWidget::bearingLine(qint64 id) const
+{
+    BearingLine l;
+    if (d->view && d->view->rangeLayer() && d->view->rangeLayer()->bearing(id, &l))
+        return l;
+    return std::nullopt;
+}
+
+// Separacion actual de unos anillos (la automatica depende del zoom).
+double MapWidget::rangeRingsSpacing(qint64 id) const
+{
+    return d->view && d->view->rangeLayer() ? d->view->rangeLayer()->spacing(id) : 0.0;
 }
 
 // Rumbo verdadero y distancia actuales de una marcacion (con sus objetivos

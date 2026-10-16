@@ -118,6 +118,15 @@ for %%L in (Qt5Network.dll Qt5SerialPort.dll) do (
     )
 )
 
+REM  Traduccion de Qt al espanol (botones "Cerrar", "Cancelar"...): solo
+REM  qtbase_es.qm, no todas las de windeployqt (por eso --no-translations).
+REM  La app la busca en "translations" junto al .exe.
+if exist "%QTDIR%\translations\qtbase_es.qm" (
+    if not exist "%DEST%\translations" mkdir "%DEST%\translations"
+    copy /y "%QTDIR%\translations\qtbase_es.qm" "%DEST%\translations\" >nul
+    echo         translations\qtbase_es.qm  copiado
+)
+
 REM --- 4. Plugins imprescindibles -------------------------------------
 echo  [4/5] Comprobando plugins imprescindibles
 set "FALTA="

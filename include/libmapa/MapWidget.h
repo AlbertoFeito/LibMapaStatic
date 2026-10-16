@@ -569,6 +569,39 @@ public:
      * el objetivo. false si no existe. (Nudos: knotsToMetersPerSecond.)
      */
     bool setTargetVelocity(qint64 id, double speedMetersPerSecond, double courseDeg);
+    // --- Agrupacion de objetivos ------------------------------------------
+    /*!
+     * \brief Agrupa los objetivos cercanos en pantalla en un circulo con su
+     *        numero (ver \ref TargetClustering). Desactivada por defecto.
+     *
+     * Solo cambia como se dibujan: los objetivos siguen existiendo y contando
+     * para alertas y filtros. Un objetivo dentro de un grupo no se puede
+     * pinchar suelto (\ref targetAt); el grupo emite \ref targetClusterClicked.
+     */
+    void setTargetClustering(const TargetClustering &clustering);
+    TargetClustering targetClustering() const;
+    //! Ids del grupo dibujado bajo \a pixelPos (coordenadas del widget), o vacio.
+    QVector<qint64> targetClusterAt(const QPoint &pixelPos) const;
+
+    // --- Filtro de objetivos ----------------------------------------------
+    /*!
+     * \brief Muestra solo los objetivos que cumplen \a filter (por clase,
+     *        velocidad, zona o un criterio de la app); el resto se oculta o
+     *        se atenua. Ver \ref TargetFilter.
+     *
+     * Se reevalua cada objetivo al moverse o al cambiar su velocidad, y todos
+     * al cambiar el filtro. Un objetivo oculto no se puede pinchar
+     * (\ref targetAt), pero sigue existiendo: cuenta para las alertas de zona
+     * y de proximidad, y para \ref targets. Un filtro vacio quita el filtro.
+     */
+    void setTargetFilter(const TargetFilter &filter);
+    void clearTargetFilter();
+    bool hasTargetFilter() const;
+    //! ¿Pasa el objetivo el filtro actual? true sin filtro; false si no existe.
+    bool targetPassesFilter(qint64 id) const;
+    //! Objetivos que NO pasan el filtro (ocultos o atenuados), ordenados.
+    QVector<qint64> filteredOutTargets() const;
+
     //! Lineas de maximo acercamiento de los pares en alerta (activo por defecto).
     void setProximityLinesVisible(bool on);
     bool isProximityLinesVisible() const;
@@ -581,6 +614,14 @@ public:
 
     //! Entidad bajo un punto de la pantalla, o -1.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+    /*!
+     * \brief Todo lo que hay bajo un pixel: objetivo suelto, grupo de
+     *        objetivos, entidad, anillos o marcacion, y la coordenada.
+     *
+     * Lo mismo que \ref targetAt, \ref targetClusterAt, \ref featureAt y el
+     * hit-test de anillos/marcaciones en una sola llamada. Ver \ref MapHit.
+     */
+    MapHit hitTest(const QPoint &pixel) const;
 
     //! Entidad cuyo ROTULO cae bajo el pixel, o -1. Permite seleccionar/arrastrar
     //! la etiqueta por separado de la geometria.
@@ -689,6 +730,9 @@ public:
      *
      * Muestra el rumbo verdadero y la distancia ("045° · 5.2 NM"), que se
      * actualizan solos si los extremos son objetivos que se mueven.
+     * \return su id, o -1 si no tiene longitud (el mismo objetivo o el mismo
+     * punto en los dos extremos) o no hay vista. Si mas tarde dos objetivos
+     * coinciden, la linea simplemente no se dibuja mientras tanto.
      */
     qint64 addBearingLine(const BearingLine &line);
     bool updateBearingLine(qint64 id, const BearingLine &line);
@@ -697,6 +741,18 @@ public:
     void clearRangeMarks();
     //! Ids de anillos y marcaciones, ordenados.
     QVector<qint64> rangeMarks() const;
+    //! Los anillos con ese id (vacio si no existen o es una marcacion).
+    std::optional<RangeRings> rangeRings(qint64 id) const;
+    //! La marcacion con ese id (vacio si no existe o son anillos).
+    std::optional<BearingLine> bearingLine(qint64 id) const;
+    /*!
+     * \brief Separacion (m) con la que se dibujan ahora unos anillos.
+     *
+     * La fija o, si son automaticos (\c spacingMeters = 0), la que toca al zoom
+     * actual: cambia al acercar o alejar. 0 si no existen o no se pueden
+     * resolver.
+     */
+    double rangeRingsSpacing(qint64 id) const;
     //! Rumbo verdadero (grados) y distancia (m) actuales de una marcacion.
     //! false si no existe o algun extremo no se puede resolver ahora.
     bool bearingLineMeasure(qint64 id, double *bearingDeg, double *distanceMeters) const;
@@ -811,6 +867,9 @@ signals:
     void featureSelected(qint64 id);      //!< -1 al deseleccionar
     //! Clic sobre un objetivo movil sin herramienta activa (ya queda resaltado).
     void targetClicked(qint64 id, const QGeoCoordinate &position);
+    //! Clic (sin herramienta) sobre un GRUPO de objetivos (\ref setTargetClustering):
+    //! los ids que reune. Lo habitual es ampliar para separarlos.
+    void targetClusterClicked(const QVector<qint64> &ids, const QGeoCoordinate &position);
     //! Un objetivo movil ha entrado en una zona vigilada (ver \ref watchZone).
     void targetEnteredZone(qint64 targetId, qint64 zoneFeatureId);
     //! Un objetivo movil ha salido de una zona vigilada (ver \ref watchZone).
@@ -840,12 +899,47 @@ signals:
     void zoomChanged(int zoom);
     void centerChanged(const QGeoCoordinate &center);
     void mouseMoved(const QGeoCoordinate &position);
+    //! Clic (pulsar y soltar SIN arrastrar) en un punto del mapa. Tras un arrastre
+    //! del mapa no se emite.
     void clicked(const QGeoCoordinate &position, Qt::MouseButton button);
+    /*!
+     * \brief Clic derecho sobre el mapa (no mientras se dibuja, que lo cierra).
+     *
+     * \a hit dice que hay debajo (\ref hitTest) y \a globalPos es donde abrir
+     * el menu (QMenu::exec). La libreria no muestra menu propio: la app pone
+     * las acciones que tengan sentido para un objetivo, una entidad, etc.
+     */
+    void contextMenuRequested(const libmapa::MapHit &hit, const QPoint &globalPos);
+    /*!
+     * \brief Clic izquierdo SIN arrastrar sobre un objetivo, una entidad o una
+     *        marca (anillos, marcacion) con la herramienta Navegar.
+     *
+     * Antes de emitirse el elemento ya esta seleccionado. La app suele mostrar
+     * una tarjeta con sus datos y acciones rapidas (frente al menu completo del
+     * clic derecho). \a hit dice que hay debajo y \a globalPos donde abrirla.
+     * Pulsar y arrastrar mueve el mapa y no emite esto.
+     */
+    void elementClicked(const libmapa::MapHit &hit, const QPoint &globalPos);
+    //! La captura de un punto (\ref MapTool::PickPoint) se cancelo con Esc o con el
+    //! clic derecho; la herramienta ya ha vuelto a Navegar.
+    void pickCancelled();
+    //! Una accion del raton o del teclado se rechazo (capa bloqueada, vertices
+    //! minimos...); \a reason lo explica para mostrarlo al usuario.
+    void interactionBlocked(const QString &reason);
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);
     //! Poligono cerrado con la herramienta SelectPolygon.
     void polygonSelected(const QVector<QGeoCoordinate> &polygon);
+    /*!
+     * \brief Poligono cerrado con la herramienta MeasureArea, con su superficie
+     *        y su perimetro.
+     *
+     * Mientras se marca, el mapa ya rotula la medida en vivo junto al cursor; al
+     * cerrar, el contorno se queda con su medida en el centro hasta cambiar de
+     * herramienta o \ref clearAreaSelection. Un clic mas empieza otra medida.
+     */
+    void areaMeasured(const libmapa::AreaMeasurement &measurement);
     void pointPicked(const QGeoCoordinate &position);
     void errorOccurred(const QString &message);
 
