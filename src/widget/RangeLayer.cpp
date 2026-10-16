@@ -51,6 +51,34 @@ void RangeLayer::setAxisMapper(std::function<QPointF(const QGeoCoordinate &)> to
     m_toAxis = std::move(toAxis);
 }
 
+// Como encontrar la posicion de una entidad punto (anillos con featureId).
+void RangeLayer::setFeatureResolver(std::function<QGeoCoordinate(qint64)> resolver)
+{
+    m_featurePos = std::move(resolver);
+}
+
+// Si algun anillo cuelga de esa entidad (p. ej. se esta arrastrando), se
+// repinta la capa para que la siga.
+void RangeLayer::featureChanged(qint64 id)
+{
+    for (const RangeRings &r : m_rings) {
+        if (r.targetId < 0 && r.featureId == id) {
+            repintar();
+            return;
+        }
+    }
+}
+
+// Centro actual de unos anillos: su objetivo, su entidad o el punto fijo.
+QGeoCoordinate RangeLayer::centro(const RangeRings &r) const
+{
+    if (r.targetId >= 0)
+        return resolve(QGeoCoordinate(), r.targetId);
+    if (r.featureId >= 0)
+        return m_featurePos ? m_featurePos(r.featureId) : QGeoCoordinate();
+    return r.center;
+}
+
 // Repinta solo la capa (buffered) donde vive; si aun no esta en una, nada.
 void RangeLayer::repintar()
 {
@@ -168,7 +196,7 @@ double RangeLayer::spacing(qint64 id) const
     const auto it = m_rings.constFind(id);
     if (it == m_rings.cend())
         return 0.0;
-    const QGeoCoordinate c = resolve(it->center, it->targetId);
+    const QGeoCoordinate c = centro(*it);
     return c.isValid() ? pasoEfectivo(*it, c) : 0.0;
 }
 
@@ -203,7 +231,7 @@ qint64 RangeLayer::markAt(const QPointF &pixel, double tolPx) const
     }
     for (auto it = m_rings.cend(); it != m_rings.cbegin();) {
         --it;
-        const QGeoCoordinate c = resolve(it->center, it->targetId);
+        const QGeoCoordinate c = centro(*it);
         const double paso = c.isValid() ? pasoEfectivo(*it, c) : 0.0;
         if (!(paso > 0.0))
             continue;
@@ -380,7 +408,7 @@ void RangeLayer::draw(QCPPainter *painter)
 // marcacion en el extremo, y una cruz en el centro.
 void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
 {
-    const QGeoCoordinate c = resolve(r.center, r.targetId);
+    const QGeoCoordinate c = centro(r);
     const int n = std::clamp(r.count, 1, kMaxAnillos);
     if (!c.isValid())
         return;
@@ -388,6 +416,7 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
     if (!(paso > 0.0))
         return;
     const QPointF pc = screenPos(c);
+    const bool propio = r.targetId >= 0 || r.featureId >= 0;   // con dueño que lo marca
 
     painter->setBrush(Qt::NoBrush);
     for (int i = 1; i <= n; ++i) {
@@ -408,7 +437,12 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
         for (int az = 0; az < 360; az += salto) {
             const QPointF fin = screenPos(c.atDistanceAndAzimuth(paso * n, az));
             painter->setPen(QPen(r.color, 1.0, Qt::DotLine));
-            painter->drawLine(pc, fin);
+            // Con dueño (objetivo o entidad) el radial empieza fuera de su
+            // simbolo, para no taparlo.
+            const QLineF radial(pc, fin);
+            const double hueco = propio ? 14.0 : 0.0;
+            if (radial.length() > hueco)
+                painter->drawLine(radial.pointAt(hueco / radial.length()), fin);
             if (r.labels && az != 0) {       // el 000 lo tapa el rotulo del anillo
                 const QPointF fuera = screenPos(c.atDistanceAndAzimuth(paso * n * 1.08, az));
                 label(painter, bordeDeVista(pc, fuera), MapDecor::formatBearing(az), r.color);
@@ -416,12 +450,12 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
         }
     }
 
+    if (propio)
+        return;                              // su objetivo o su entidad ya marcan el centro
     painter->setPen(QPen(r.color, 1.6));
     painter->drawLine(pc + QPointF(-6, 0), pc + QPointF(6, 0));
     painter->drawLine(pc + QPointF(0, -6), pc + QPointF(0, 6));
-    if (r.targetId < 0) {                    // punto fijo (radar, observador): un cuadrado
-        painter->drawRect(QRectF(pc - QPointF(3.5, 3.5), QSizeF(7.0, 7.0)));
-    }
+    painter->drawRect(QRectF(pc - QPointF(3.5, 3.5), QSizeF(7.0, 7.0)));   // punto fijo
     if (!r.name.isEmpty()) {
         const QFontMetricsF fm(painter->font());
         label(painter, pc + QPointF(fm.horizontalAdvance(r.name) / 2.0 + 14.0, 12.0), r.name, r.color);

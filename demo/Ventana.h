@@ -249,7 +249,10 @@ private:
 
     QString textoProximidad(qint64 a, qint64 b, double cpa, double tcpa) const;
 
-    void ponerAnillos(const QGeoCoordinate &centro = QGeoCoordinate());
+    void ponerAnillos(const RangeRings &propuesta = RangeRings(), qint64 editar = -1);
+    void ponerAnillosA(const RangeRings &r, const QString &quien);
+    qint64 anillosDe(qint64 targetId, qint64 featureId) const;
+    QString nombreObjetivo(qint64 id) const;
 
     void ponerMarcacion();
     void gestionarMarcas();
@@ -260,7 +263,11 @@ private:
     void menuGrupo(QMenu *menu, const QVector<qint64> &ids);
     void menuMarca(QMenu *menu, qint64 id);
     void menuEntidad(QMenu *menu, qint64 id);
-    void menuPunto(QMenu *menu, const QGeoCoordinate &p);
+    void menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enAnillos);
+    void submenuAnillos(QMenu *menu, qint64 targetId, qint64 featureId);
+    void opcionesAnillos(QMenu *menu, qint64 id);
+    void submenuElevacion(QMenu *menu, const QGeoCoordinate &p);
+    void irAElevacion(int analisis);
     QString textoDistancia(double metros) const;
 
     void iniciarPickMedida(Pick cual, const QString &aviso);

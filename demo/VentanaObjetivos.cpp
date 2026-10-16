@@ -406,50 +406,97 @@ QString Ventana::textoProximidad(qint64 a, qint64 b, double cpa, double tcpa) co
         .arg(qRound(tcpa / 60.0));
 }
 
-// Anillos de distancia: el centro es el objetivo seleccionado (lo siguen), un
-// punto que se pinche (si cae en un objetivo, lo siguen) o unas coordenadas
-// escritas a mano, para un punto fijo como un radar o un observador, con su
-// nombre. La separación es automática (se ajusta al zoom) o fija, en m, km o
-// NM. Se recuerdan los últimos ajustes. Con \a centro válido (clic derecho
-// en el mapa) el diálogo propone esas coordenadas.
-void Ventana::ponerAnillos(const QGeoCoordinate &centro)
+// Anillos de distancia. El centro es un objetivo (lo siguen), una entidad
+// punto (un radar u observador colocado en el mapa: la siguen y su símbolo
+// queda a la vista), un punto que se pinche o unas coordenadas escritas a
+// mano. Cada objetivo o entidad tiene COMO MUCHO unos anillos: si ya los
+// tiene, se cambian en vez de añadir otros encima. \a propuesta dice el
+// centro sugerido (su targetId, featureId o center); con \a editar >= 0 se
+// cambian esos anillos (el centro no se toca). La separación es automática
+// (se ajusta al zoom) o fija, en m, km o NM. Se recuerdan los últimos ajustes.
+void Ventana::ponerAnillos(const RangeRings &propuesta, qint64 editar)
 {
+    const auto existentes = editar >= 0 ? m_mapa->rangeRings(editar) : std::nullopt;
+    if (editar >= 0 && !existentes)
+        return;
+    const RangeRings base = existentes ? *existentes : m_anillos;
+
     QDialog dlg(this);
-    dlg.setWindowTitle(tr("Anillos de distancia"));
+    dlg.setWindowTitle(existentes ? tr("Cambiar anillos de distancia") : tr("Anillos de distancia"));
     auto *form = new QFormLayout(&dlg);
 
-    auto *nombre = new QLineEdit(&dlg);
-    nombre->setPlaceholderText(tr("opcional: p. ej. «Radar Mariel», «Observador 2»"));
-    form->addRow(tr("Nombre:"), nombre);
+    // Candidatos a centro con dueño: el propuesto o, si no, lo seleccionado.
+    qint64 obj = propuesta.targetId >= 0 ? propuesta.targetId : m_mapa->selectedTarget();
+    if (obj >= 0 && !m_mapa->target(obj))
+        obj = -1;
+    qint64 ent = propuesta.featureId >= 0 ? propuesta.featureId : m_mapa->selectedFeature();
+    const auto fEnt = ent >= 0 ? m_mapa->feature(ent) : std::nullopt;
+    if (!fEnt || fEnt->kind != GeometryKind::Point)
+        ent = -1;
+    const QString nomObj = obj >= 0 ? nombreObjetivo(obj) : QString();
+    const QString nomEnt = ent >= 0 ? (fEnt->name.isEmpty() ? tr("entidad %1").arg(ent) : fEnt->name)
+                                    : QString();
 
-    // Centro: tres maneras, una sola elegida.
-    const qint64 sel = m_mapa->selectedTarget();
-    auto *cajaCentro = new QGroupBox(tr("Centro"), &dlg);
-    auto *vc = new QVBoxLayout(cajaCentro);
-    auto *enObjetivo = new QRadioButton(sel >= 0
-        ? tr("El objetivo seleccionado (los anillos lo siguen)")
-        : tr("El objetivo seleccionado (no hay ninguno)"), cajaCentro);
-    enObjetivo->setEnabled(sel >= 0);
-    auto *enPunto = new QRadioButton(tr("Un punto que pinche en el mapa "
-                                        "(si es un objetivo, lo siguen)"), cajaCentro);
-    auto *enCoords = new QRadioButton(tr("Estas coordenadas (punto fijo: radar, observador…):"),
-                                      cajaCentro);
-    auto *coords = new QLineEdit(formatCoordinate(centro.isValid() ? centro : m_mapa->center(),
-                                                  CoordinateFormat::Decimal), cajaCentro);
-    coords->setToolTip(tr("Cualquier formato: 23.1136, -82.3666 · 23°06'49\"N 82°22'00\"W · "
-                          "17Q LF 60056 56750 (UTM o MGRS)"));
-    vc->addWidget(enObjetivo);
-    vc->addWidget(enPunto);
-    vc->addWidget(enCoords);
-    vc->addWidget(coords);
-    (centro.isValid() ? enCoords : (sel >= 0 ? enObjetivo : enPunto))->setChecked(true);
-    coords->setEnabled(enCoords->isChecked());
-    connect(enCoords, &QRadioButton::toggled, coords, &QLineEdit::setEnabled);
-    form->addRow(cajaCentro);
+    auto *nombre = new QLineEdit(base.name, &dlg);
+    nombre->setPlaceholderText(tr("opcional: p. ej. «Radar Mariel», «Observador 2»"));
+
+    QRadioButton *enObjetivo = nullptr, *enEntidad = nullptr, *enPunto = nullptr, *enCoords = nullptr;
+    QLineEdit *coords = nullptr;
+    if (existentes) {
+        // Cambiar: el centro se queda donde está.
+        QString donde = base.targetId >= 0 ? tr("el objetivo %1").arg(nombreObjetivo(base.targetId))
+                      : base.featureId >= 0 ? tr("el punto «%1»").arg(
+                            m_mapa->feature(base.featureId) ? m_mapa->feature(base.featureId)->name
+                                                            : QString::number(base.featureId))
+                      : formatCoordinate(base.center, m_formatoCoord);
+        auto *lbl = new QLabel(tr("Centro: %1").arg(donde), &dlg);
+        lbl->setWordWrap(true);
+        form->addRow(lbl);
+        if (base.targetId < 0 && base.featureId < 0)
+            form->addRow(tr("Nombre:"), nombre);
+    } else {
+        form->addRow(tr("Nombre:"), nombre);
+        auto *cajaCentro = new QGroupBox(tr("Centro"), &dlg);
+        auto *vc = new QVBoxLayout(cajaCentro);
+        enObjetivo = new QRadioButton(obj >= 0
+            ? tr("El objetivo %1 (los anillos lo siguen)").arg(nomObj)
+            : tr("Un objetivo (selecciona uno antes)"), cajaCentro);
+        enObjetivo->setEnabled(obj >= 0);
+        enEntidad = new QRadioButton(ent >= 0
+            ? tr("El punto «%1» (radar, observador…)").arg(nomEnt)
+            : tr("Un punto del mapa (selecciona uno antes)"), cajaCentro);
+        enEntidad->setEnabled(ent >= 0);
+        enPunto = new QRadioButton(tr("Un lugar que pinche en el mapa"), cajaCentro);
+        enCoords = new QRadioButton(tr("Estas coordenadas:"), cajaCentro);
+        coords = new QLineEdit(formatCoordinate(propuesta.center.isValid() ? propuesta.center
+                                                                           : m_mapa->center(),
+                                                CoordinateFormat::Decimal), cajaCentro);
+        coords->setToolTip(tr("Cualquier formato: 23.1136, -82.3666 · 23°06'49\"N 82°22'00\"W · "
+                              "17Q LF 60056 56750 (UTM o MGRS)"));
+        for (QWidget *wdg : std::initializer_list<QWidget *>{ enObjetivo, enEntidad, enPunto, enCoords, coords })
+            vc->addWidget(wdg);
+        // Lo propuesto manda; si no se propuso nada, lo seleccionado.
+        QRadioButton *marcado = propuesta.targetId >= 0 && obj >= 0 ? enObjetivo
+                              : propuesta.featureId >= 0 && ent >= 0 ? enEntidad
+                              : propuesta.center.isValid() ? enCoords
+                              : obj >= 0 ? enObjetivo
+                              : ent >= 0 ? enEntidad : enPunto;
+        marcado->setChecked(true);
+        coords->setEnabled(enCoords->isChecked());
+        connect(enCoords, &QRadioButton::toggled, coords, &QLineEdit::setEnabled);
+        // Con dueño, el nombre es el suyo: el campo no hace falta.
+        const auto ajustarNombre = [nombre, enObjetivo, enEntidad] {
+            nombre->setEnabled(!enObjetivo->isChecked() && !enEntidad->isChecked());
+        };
+        connect(enObjetivo, &QRadioButton::toggled, &dlg, ajustarNombre);
+        connect(enEntidad, &QRadioButton::toggled, &dlg, ajustarNombre);
+        ajustarNombre();
+        form->addRow(cajaCentro);
+    }
 
     // Separación: automática según el zoom, o un valor con su unidad.
     auto *autom = new QCheckBox(tr("Automática (se ajusta al zoom: siempre caben en pantalla)"), &dlg);
-    autom->setChecked(!(m_anillos.spacingMeters > 0.0));
+    autom->setChecked(!(base.spacingMeters > 0.0));
     auto *sep = new QDoubleSpinBox(&dlg);
     sep->setRange(0.01, 100000.0);
     sep->setDecimals(2);
@@ -458,7 +505,8 @@ void Ventana::ponerAnillos(const QGeoCoordinate &centro)
     unidad->addItem(tr("km"), 1000.0);
     unidad->addItem(tr("NM"), 1852.0);
     unidad->setCurrentIndex(m_anillosUnidad);
-    const double previa = m_anillos.spacingMeters > 0.0 ? m_anillos.spacingMeters : 1852.0;
+    const double previa = base.spacingMeters > 0.0 ? base.spacingMeters
+                        : (existentes ? m_mapa->rangeRingsSpacing(editar) : 1852.0);
     sep->setValue(previa / unidad->currentData().toDouble());
     // Al cambiar de unidad se convierte el valor: 1 NM pasa a 1.85 km, no a 1 km.
     connect(unidad, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg,
@@ -479,16 +527,16 @@ void Ventana::ponerAnillos(const QGeoCoordinate &centro)
 
     auto *num = new QSpinBox(&dlg);
     num->setRange(1, 20);
-    num->setValue(m_anillos.count);
+    num->setValue(base.count);
     form->addRow(tr("Anillos:"), num);
 
     auto *radiales = new QComboBox(&dlg);
     for (const int g : { 0, 10, 15, 30, 45, 90 })
         radiales->addItem(g == 0 ? tr("Sin radiales") : tr("Cada %1°").arg(g), g);
-    radiales->setCurrentIndex(std::max(0, radiales->findData(m_anillos.spokeEveryDeg)));
+    radiales->setCurrentIndex(std::max(0, radiales->findData(base.spokeEveryDeg)));
     form->addRow(tr("Radiales:"), radiales);
 
-    QColor color = m_anillos.color;
+    QColor color = base.color;
     auto *btnColor = new QPushButton(&dlg);
     pintarBotonColor(btnColor, color);
     connect(btnColor, &QPushButton::clicked, &dlg, [this, &color, btnColor] {
@@ -504,7 +552,7 @@ void Ventana::ponerAnillos(const QGeoCoordinate &centro)
     QGeoCoordinate fijo;
     auto *botones = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     connect(botones, &QDialogButtonBox::accepted, &dlg, [&] {
-        if (enCoords->isChecked()) {
+        if (enCoords && enCoords->isChecked()) {
             bool ok = false;
             fijo = parseCoordinate(coords->text(), &ok);
             if (!ok || !fijo.isValid()) {
@@ -521,27 +569,84 @@ void Ventana::ponerAnillos(const QGeoCoordinate &centro)
     if (dlg.exec() != QDialog::Accepted)
         return;
 
+    // Ajustes elegidos (se recuerdan para los próximos anillos).
+    RangeRings r = base;
+    r.spacingMeters = autom->isChecked() ? 0.0 : sep->value() * unidad->currentData().toDouble();
+    r.count = num->value();
+    r.spokeEveryDeg = radiales->currentData().toInt();
+    r.color = color;
     m_anillosUnidad = unidad->currentIndex();
-    m_anillos.spacingMeters = autom->isChecked() ? 0.0 : sep->value() * unidad->currentData().toDouble();
-    m_anillos.count = num->value();
-    m_anillos.spokeEveryDeg = radiales->currentData().toInt();
-    m_anillos.color = color;
-    m_anillos.name = nombre->text().trimmed();
-    m_anillos.targetId = -1;
+    m_anillos.spacingMeters = r.spacingMeters;
+    m_anillos.count = r.count;
+    m_anillos.spokeEveryDeg = r.spokeEveryDeg;
+    m_anillos.color = r.color;
+
+    if (existentes) {
+        if (r.targetId < 0 && r.featureId < 0)
+            r.name = nombre->text().trimmed();
+        m_mapa->updateRangeRings(editar, r);
+        statusBar()->showMessage(tr("Anillos cambiados"), 3000);
+        return;
+    }
+    r.targetId = -1;
+    r.featureId = -1;
+    r.name.clear();
     if (enObjetivo->isChecked()) {
-        RangeRings r = m_anillos;
-        r.targetId = sel;
-        m_mapa->addRangeRings(r);
-        statusBar()->showMessage(tr("Anillos alrededor del objetivo %1").arg(sel), 4000);
+        r.targetId = obj;
+        ponerAnillosA(r, tr("el objetivo %1").arg(nomObj));
+    } else if (enEntidad->isChecked()) {
+        r.featureId = ent;
+        ponerAnillosA(r, tr("el punto «%1»").arg(nomEnt));
     } else if (enCoords->isChecked()) {
-        RangeRings r = m_anillos;
         r.center = fijo;
+        r.name = nombre->text().trimmed();
         m_mapa->addRangeRings(r);
         m_mapa->setCenter(fijo);
         statusBar()->showMessage(tr("Anillos en %1").arg(formatCoordinate(fijo, m_formatoCoord)), 4000);
     } else {
+        m_anillos.name = nombre->text().trimmed();
         iniciarPickMedida(Pick::Anillos, tr("Pincha el centro de los anillos…"));
     }
+}
+
+// Pone (o cambia, si ya los tiene) los anillos de un objetivo o de un punto:
+// cada dueño tiene como mucho unos anillos.
+void Ventana::ponerAnillosA(const RangeRings &r, const QString &quien)
+{
+    const qint64 ya = anillosDe(r.targetId, r.featureId);
+    if (ya >= 0) {
+        m_mapa->updateRangeRings(ya, r);
+        statusBar()->showMessage(tr("Se cambian los anillos que ya tenía %1").arg(quien), 4000);
+    } else {
+        m_mapa->addRangeRings(r);
+        statusBar()->showMessage(tr("Anillos en %1 (lo siguen)").arg(quien), 4000);
+    }
+}
+
+// Id de los anillos de un objetivo (\a targetId) o de una entidad punto
+// (\a featureId), o -1 si no tiene.
+qint64 Ventana::anillosDe(qint64 targetId, qint64 featureId) const
+{
+    for (const qint64 id : m_mapa->rangeMarks()) {
+        const auto r = m_mapa->rangeRings(id);
+        if (!r)
+            continue;
+        if (targetId >= 0 && r->targetId == targetId)
+            return id;
+        if (targetId < 0 && featureId >= 0 && r->targetId < 0 && r->featureId == featureId)
+            return id;
+    }
+    return -1;
+}
+
+// Nombre corto de un objetivo para menús y mensajes: la primera línea de su
+// rótulo («UAV 9», no «UAV 9 Bat 79%») o «objetivo N».
+QString Ventana::nombreObjetivo(qint64 id) const
+{
+    const auto t = m_mapa->target(id);
+    if (!t || t->label.isEmpty())
+        return tr("objetivo %1").arg(id);
+    return t->label.section(QLatin1Char('\n'), 0, 0);
 }
 
 // Distancia legible en las unidades de la escala del mapa (m/km o NM).
@@ -571,9 +676,10 @@ void Ventana::gestionarMarcas()
         for (const qint64 id : m_mapa->rangeMarks()) {
             QString txt;
             if (const auto r = m_mapa->rangeRings(id)) {
-                const QString centro = r->targetId >= 0
-                    ? tr("objetivo %1").arg(r->targetId)
-                    : formatCoordinate(r->center, m_formatoCoord);
+                const auto fe = r->featureId >= 0 ? m_mapa->feature(r->featureId) : std::nullopt;
+                const QString centro = r->targetId >= 0 ? tr("objetivo %1").arg(nombreObjetivo(r->targetId))
+                    : fe ? tr("punto «%1»").arg(fe->name.isEmpty() ? QString::number(r->featureId) : fe->name)
+                         : formatCoordinate(r->center, m_formatoCoord);
                 const double paso = m_mapa->rangeRingsSpacing(id);
                 const QString sep = r->spacingMeters > 0.0
                     ? textoDistancia(r->spacingMeters)
@@ -605,9 +711,11 @@ void Ventana::gestionarMarcas()
             return;
         const qint64 id = it->data(Qt::UserRole).toLongLong();
         QGeoCoordinate c;
-        if (const auto r = m_mapa->rangeRings(id))
+        if (const auto r = m_mapa->rangeRings(id)) {
+            const auto fe = r->featureId >= 0 ? m_mapa->feature(r->featureId) : std::nullopt;
             c = r->targetId >= 0 && m_mapa->target(r->targetId) ? m_mapa->target(r->targetId)->position
-                                                                 : r->center;
+                : fe ? fe->position() : r->center;
+        }
         else if (const auto l = m_mapa->bearingLine(id))
             c = l->fromTarget >= 0 && m_mapa->target(l->fromTarget)
                 ? m_mapa->target(l->fromTarget)->position : l->from;
@@ -689,11 +797,18 @@ void Ventana::puntoDeMedida(const QGeoCoordinate &p)
     const qint64 obj = objetivoCerca(p);
     if (cual == Pick::Anillos) {
         RangeRings r = m_anillos;
-        r.targetId = obj;
-        r.center = p;
-        m_mapa->addRangeRings(r);
-        statusBar()->showMessage(obj >= 0 ? tr("Anillos alrededor del objetivo %1").arg(obj)
-                                          : tr("Anillos puestos"), 4000);
+        r.featureId = -1;
+        if (obj >= 0) {                    // cayó en un objetivo: son suyos
+            r.targetId = obj;
+            r.name.clear();
+            ponerAnillosA(r, tr("el objetivo %1").arg(nombreObjetivo(obj)));
+        } else {
+            r.targetId = -1;
+            r.center = p;
+            m_mapa->addRangeRings(r);
+            statusBar()->showMessage(tr("Anillos puestos"), 4000);
+        }
+        m_anillos.name.clear();
     } else if (cual == Pick::OrigenEbl) {
         m_ebl.fromTarget = obj;
         m_ebl.from = p;

@@ -638,7 +638,9 @@ entidades, y los objetivos quedan encima. Los anillos son <b>geodésicos</b>
 distancia real. Las marcaciones siguen la ortodrómica y miden rumbo y distancia al dibujar
 («202° · 26.7 NM», en las unidades de la escala). Una marcación sin longitud (mismo
 objetivo o mismo punto en los dos extremos) se rechaza. El centro de los anillos puede ser un
-objetivo o un <b>punto fijo con nombre</b> (radar, observador). Con
+objetivo, una <b>entidad punto</b> (<code>featureId</code>: un radar u observador colocado por
+el usuario; los anillos la siguen y su símbolo queda a la vista, sin marca de centro) o un
+<b>punto fijo con nombre</b>. Con
 <code>spacingMeters = 0</code> la separación es <b>automática</b>: en cada repintado se mide
 la escala local en el centro y <code>MapDecor::niceRingSpacing</code> elige el mayor valor
 1-2-2.5-5 × 10<sup>n</sup> (en la unidad de la escala) con el que los anillos caben en el 45 %

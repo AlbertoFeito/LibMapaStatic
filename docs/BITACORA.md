@@ -5554,3 +5554,45 @@ la entidad, centro y anillo (y nada entre ellos), marcación, mapa vacío, y un
 clic derecho real que emite la señal con lo de debajo (el izquierdo no).
 Comprobado en la demo bajo Xvfb con capturas de los cuatro menús. **24 tests**
 en verde.
+
+## 135. Límites en anillos y menú contextual con prioridad; Elevación automática
+
+Probando el menú del clic derecho en Windows salieron varias cosas:
+- se podían poner **anillos encima de anillos** sobre el mismo punto, y la cruz
+  del centro tapaba el propio punto;
+- con un objetivo dentro de unos anillos, el menú juntaba el objetivo, los
+  anillos y el lugar: **largo y con nombres repetidos** («Anillos de distancia
+  en él» y «Anillos de distancia en él…»);
+- los pines A y B de Elevación **solo se veían** con la pestaña Elevación abierta
+  y «Visión A→B» elegido; fijar un punto desde el menú no abría la pestaña.
+
+**Librería:** `RangeRings::featureId` cuelga los anillos de una **entidad punto**
+(el radar u observador que coloca el usuario). Los siguen al moverla (arrastre,
+edición, deshacer: `RangeLayer` escucha `featureUpdated` del modelo) y dejan
+de dibujarse si se borra. Con dueño (objetivo o entidad) **no se dibuja marca
+de centro** y los radiales arrancan a 14 px: el símbolo del dueño queda encima.
+
+**Demo:**
+- **Un dueño, unos anillos.** `anillosDe(objetivo, entidad)` busca los que ya
+  tenga; poner otros los **cambia** («Se cambian los anillos que ya tenía…»).
+  El diálogo tiene un modo «Cambiar» (el centro no se toca) y ofrece como centro
+  el objetivo o el punto seleccionados, un lugar pinchado o coordenadas.
+  Borrar un punto u objetivo desde el menú quita sus anillos.
+- **Prioridad en el menú:** se muestra UN elemento, el primero de objetivo →
+  grupo → entidad (los puntos del usuario) → anillos sueltos o marcación; los
+  anillos de un objetivo o punto van **dentro de su menú** (submenú «Anillos de
+  distancia»: poner con los últimos ajustes / eligiendo las opciones, o, si ya
+  tiene, separación automática, radiales, cambiar, quitar). Después, en un
+  submenú, «Este lugar del mapa». Sin nombres repetidos.
+- Sobre el centro de unos anillos el menú del lugar **no ofrece poner otros**.
+- **Elevación desde el menú** (de un lugar, un punto o un objetivo, si hay DEM):
+  «Perfil desde aquí», «Visión desde A hasta aquí», «Viewshed desde aquí»,
+  «10 picos más altos alrededor», y fijar A o B. Cada una **abre la pestaña
+  Elevación** con su análisis elegido (fijar B pasa a «Visión A→B», que es la
+  única que lo usa, y así se ven los dos pines) y, las de análisis, lo calculan.
+- Los pines A/B tienen su propio menú (ver la pestaña, análisis desde ahí), no el
+  de una entidad cualquiera (sin anillos ni borrar).
+
+Tests: en `rangeRingsAndBearingLinesFollowTargets`, anillos en una entidad
+punto que la siguen y que no se dibujan al borrarla. Comprobado bajo Xvfb que
+poner dos veces anillos al mismo punto deja uno. **24 tests** en verde.

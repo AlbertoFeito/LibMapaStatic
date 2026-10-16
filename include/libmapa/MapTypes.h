@@ -84,8 +84,12 @@ enum class GraticuleMode {
  * en el punto visible mas cercano). Opcionalmente, radiales cada
  * \a spokeEveryDeg grados con su marcacion ("030°") en el extremo.
  *
- * El centro es un punto fijo (un radar, un observador: \a center, con su
- * \a name rotulado al lado) o un objetivo movil (\a targetId), al que siguen.
+ * El centro es un punto fijo (\a center, con su \a name rotulado al lado y un
+ * cuadrado), un objetivo movil (\a targetId) o una entidad punto del mapa
+ * (\a featureId: un radar u observador colocado por el usuario). En los dos
+ * ultimos los anillos siguen a su dueño si se mueve, y no se dibuja marca de
+ * centro: el propio simbolo del objetivo o de la entidad queda a la vista
+ * (los radiales arrancan a unos pixeles del centro para no taparlo).
  *
  * Con \a spacingMeters = 0 la separacion es AUTOMATICA: se ajusta al zoom
  * para que los \a count anillos llenen casi la vista, con un valor redondo
@@ -95,6 +99,7 @@ enum class GraticuleMode {
 struct RangeRings {
     QGeoCoordinate center;          //!< Centro fijo (si \a targetId < 0).
     qint64 targetId = -1;           //!< O centrado en este objetivo, y lo sigue.
+    qint64 featureId = -1;          //!< O en esta entidad punto (si targetId < 0), y la sigue.
     double spacingMeters = 1852.0;  //!< Separacion entre anillos; 0 = automatica (segun el zoom).
     int count = 5;                  //!< Numero de anillos (1..50).
     int spokeEveryDeg = 0;          //!< Radiales cada N grados; 0 = sin radiales.

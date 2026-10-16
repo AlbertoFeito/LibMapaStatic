@@ -34,6 +34,11 @@ public:
     //! Coordenada geografica -> coordenada de eje (Mercator), la de MapView.
     void setAxisMapper(std::function<QPointF(const QGeoCoordinate &)> toAxis);
     void setUnits(ScaleUnits units) { m_units = units; }
+    //! Posicion de una entidad punto por su id (invalida si no existe), para
+    //! los anillos con RangeRings::featureId. La pone MapView.
+    void setFeatureResolver(std::function<QGeoCoordinate(qint64)> resolver);
+    //! Una entidad ha cambiado: si hay anillos en ella, se repintan.
+    void featureChanged(qint64 id);
 
     qint64 addRings(const RangeRings &rings);
     bool updateRings(qint64 id, const RangeRings &rings);
@@ -77,6 +82,7 @@ protected:
 private:
     QPointF screenPos(const QGeoCoordinate &c) const;
     QGeoCoordinate resolve(const QGeoCoordinate &fixed, qint64 targetId) const;
+    QGeoCoordinate centro(const RangeRings &r) const;
     bool ends(const BearingLine &l, QGeoCoordinate *from, QGeoCoordinate *to) const;
     static bool degenerada(const BearingLine &l);
     double pasoEfectivo(const RangeRings &r, const QGeoCoordinate &c) const;
@@ -91,6 +97,7 @@ private:
 
     TargetModel *m_targets = nullptr;
     std::function<QPointF(const QGeoCoordinate &)> m_toAxis;
+    std::function<QGeoCoordinate(qint64)> m_featurePos;
     ScaleUnits m_units = ScaleUnits::Metric;
     qint64 m_nextId = 1;
     QMap<qint64, RangeRings> m_rings;        //!< Ordenados: dibujo estable.

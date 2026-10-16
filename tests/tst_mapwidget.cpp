@@ -2595,6 +2595,25 @@ void TstMapWidget::rangeRingsAndBearingLinesFollowTargets()
     QVERIFY(w.rangeRingsSpacing(idRadar) > pasoCerca * 2.0);
     w.setZoom(10);
 
+    // Anillos en una entidad punto (un observador): la siguen al moverla y
+    // dejan de dibujarse si se borra.
+    MapFeature obs;
+    obs.kind = GeometryKind::Point;
+    obs.layerId = w.activeFeatureLayer();
+    obs.geometry = { QGeoCoordinate(22.05, -79.95) };
+    const qint64 idObs = w.addFeature(obs);
+    QVERIFY(idObs >= 0);
+    RangeRings enObs;
+    enObs.featureId = idObs;
+    enObs.spacingMeters = 1000.0;
+    const qint64 idEnObs = w.addRangeRings(enObs);
+    captura();
+    QCOMPARE(w.rangeRingsSpacing(idEnObs), 1000.0);
+    QVERIFY(w.moveFeature(idObs, 0.01, 0.01));
+    QCOMPARE(w.rangeRings(idEnObs)->featureId, idObs);
+    w.removeFeature(idObs);
+    QCOMPARE(w.rangeRingsSpacing(idEnObs), 0.0);                 // sin centro: no se dibuja
+
     QVERIFY(w.removeRangeMark(anillos));
     QVERIFY(!w.removeRangeMark(anillos));
     QCOMPARE(w.rangeRingsSpacing(anillos), 0.0);

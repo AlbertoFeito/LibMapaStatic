@@ -83,6 +83,14 @@ MapView::MapView(TileService *service, QWidget *parent)
     m_rangeLayer->setLayer(QStringLiteral("targets"));
     m_rangeLayer->setAxisMapper(
         [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
+    // Anillos en una entidad punto: su posicion sale del modelo de entidades,
+    // y la siguen al moverla (arrastre, edicion, deshacer).
+    m_rangeLayer->setFeatureResolver([this](qint64 id) {
+        const auto f = m_model ? m_model->feature(id) : std::nullopt;
+        return f && f->kind == GeometryKind::Point ? f->position() : QGeoCoordinate();
+    });
+    if (m_model)
+        connect(m_model, &OverlayModel::featureUpdated, m_rangeLayer, &RangeLayer::featureChanged);
     m_targetLayer = new TargetLayer(this, m_targetModel);
     m_targetLayer->setLayer(QStringLiteral("targets"));
     m_targetLayer->setAxisMapper(
