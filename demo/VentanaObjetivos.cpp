@@ -472,6 +472,8 @@ QString Ventana::nombrePunto(qint64 id) const
 // Nombre de un extremo: su objetivo o su punto.
 QString Ventana::nombreExtremo(qint64 targetId, qint64 featureId) const
 {
+    if (targetId < 0 && featureId < 0)
+        return tr("un lugar del mapa");          // extremo libre: nunca «punto -1»
     return targetId >= 0 ? nombreObjetivo(targetId) : nombrePunto(featureId);
 }
 

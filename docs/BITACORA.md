@@ -5755,3 +5755,11 @@ el cursor).
 
 Pendiente conocido: deshacer el borrado de un punto no restaura sus anillos.
 **24 tests** en verde.
+
+## 140. Marcaciones a un lugar libre: nombre del extremo
+
+En «Marcación ▸ Quitar la marcación con …» las marcaciones cuyo extremo es un
+lugar libre (sin objetivo ni punto) salían como «punto -1», todas iguales. Ahora
+`nombreExtremo` devuelve «un lugar del mapa» para un extremo libre y el submenú
+muestra sus coordenadas con rumbo y distancia («23.29, -82.37 (043° · 41.4 km)»),
+de modo que dos marcaciones a lugares distintos se distinguen. 24 tests en verde.

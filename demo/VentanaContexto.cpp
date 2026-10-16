@@ -171,8 +171,20 @@ void Ventana::submenuMarcacion(QMenu *menu, qint64 targetId, qint64 featureId)
             continue;
         const bool salgo = targetId >= 0 ? l->fromTarget == targetId
                                          : (l->fromTarget < 0 && l->fromFeature == featureId);
-        const QString otro = salgo ? nombreExtremo(l->toTarget, l->toFeature)
-                                   : nombreExtremo(l->fromTarget, l->fromFeature);
+        // El otro extremo: su elemento o, si es un lugar libre, sus coordenadas
+        // y el rumbo/distancia (así dos marcaciones a lugares distintos se distinguen).
+        const qint64 oT = salgo ? l->toTarget : l->fromTarget;
+        const qint64 oF = salgo ? l->toFeature : l->fromFeature;
+        QString otro;
+        if (oT >= 0 || oF >= 0) {
+            otro = nombreExtremo(oT, oF);
+        } else {
+            otro = formatCoordinate(salgo ? l->to : l->from, m_formatoCoord);
+            double rumbo = 0.0, dist = 0.0;
+            if (m_mapa->bearingLineMeasure(id, &rumbo, &dist))
+                otro += tr(" (%1° · %2)").arg(qRound(rumbo) % 360, 3, 10, QLatin1Char('0'))
+                            .arg(textoDistancia(dist));
+        }
         connect(sub->addAction(tr("Quitar la marcación con %1").arg(otro)), &QAction::triggered, this,
                 [this, id] { m_mapa->removeRangeMark(id); });
     }
