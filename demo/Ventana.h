@@ -268,6 +268,9 @@ private:
     void opcionesAnillos(QMenu *menu, qint64 id);
     void submenuElevacion(QMenu *menu, const QGeoCoordinate &p);
     void irAElevacion(int analisis);
+    qint64 anillosSueltosEn(const QGeoCoordinate &p) const;
+    qint64 puntoEn(const QGeoCoordinate &p) const;
+    void nuevoPunto(const QGeoCoordinate &p);
     QString textoDistancia(double metros) const;
 
     void iniciarPickMedida(Pick cual, const QString &aviso);

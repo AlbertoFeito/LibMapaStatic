@@ -5596,3 +5596,26 @@ de centro** y los radiales arrancan a 14 px: el símbolo del dueño queda encima
 Tests: en `rangeRingsAndBearingLinesFollowTargets`, anillos en una entidad
 punto que la siguen y que no se dibujan al borrarla. Comprobado bajo Xvfb que
 poner dos veces anillos al mismo punto deja uno. **24 tests** en verde.
+
+## 136. Un punto en el centro de unos anillos se queda con ellos
+
+Caso real: clic derecho en el mapa → anillos aquí; luego, en ese mismo lugar,
+«Nuevo punto aquí». El punto nacía **aparte** y su menú volvía a ofrecer
+«Anillos de distancia», como si no los tuviera. Lo natural es que el punto
+(un radar, un observador) sea el **dueño** de esos anillos y sean un solo
+elemento.
+
+- `anillosSueltosEn(p)`: anillos **sin dueño** con su centro a menos de 12 px.
+  `nuevoPunto(p)` (menú del lugar, y «Poner un punto en su centro…» del menú
+  de unos anillos sueltos) coloca el punto **exactamente** en ese centro, le
+  propone el nombre de los anillos y los liga a él (`featureId`); el rótulo
+  pasa al punto (se le activa) y los anillos dejan de rotular su nombre y de
+  dibujar la cruz. A partir de ahí su menú es el del punto, con los anillos
+  dentro, y no ofrece ponerle otros.
+- Al revés: anillos puestos **pinchando** o con **coordenadas** sobre un punto
+  existente (`puntoEn(p)`, sin contar los pines A/B) también se ligan a él en
+  vez de quedar sueltos encima.
+
+Comprobado bajo Xvfb: unos anillos sueltos y un punto nuevo a 3 px de su centro
+→ el punto queda en el centro (distancia 0), es el dueño y sigue habiendo un
+solo juego de anillos. **24 tests** en verde.

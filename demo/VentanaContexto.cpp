@@ -352,6 +352,12 @@ void Ventana::menuMarca(QMenu *menu, qint64 id)
         }
         cabecera(menu, r->name.isEmpty() ? tr("Anillos de distancia") : tr("Anillos «%1»").arg(r->name));
         opcionesAnillos(menu, id);
+        // Sin dueño: un punto en su centro (radar, observador) se los queda y
+        // pasan a ser un solo elemento.
+        menu->addSeparator();
+        QAction *conPunto = menu->addAction(tr("Poner un punto en su centro (radar, observador)..."));
+        conPunto->setEnabled(capaEditable(m_mapa->activeFeatureLayer()));
+        connect(conPunto, &QAction::triggered, this, [this, c = r->center] { nuevoPunto(c); });
     } else if (m_mapa->bearingLine(id)) {
         double rumbo = 0.0, dist = 0.0;
         cabecera(menu, m_mapa->bearingLineMeasure(id, &rumbo, &dist)
@@ -496,24 +502,7 @@ void Ventana::menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enAnillos)
     QAction *nuevo = menu->addAction(editable ? tr("Nuevo punto aquí...")
                                               : tr("Nuevo punto aquí (la capa activa no se edita)"));
     nuevo->setEnabled(editable);
-    connect(nuevo, &QAction::triggered, this, [this, p] {
-        bool ok = false;
-        const QString nombre = QInputDialog::getText(this, tr("Nuevo punto"), tr("Nombre:"),
-                                                     QLineEdit::Normal, QString(), &ok);
-        if (!ok)
-            return;
-        MapFeature f;
-        f.kind = GeometryKind::Point;
-        f.layerId = m_mapa->activeFeatureLayer();
-        f.name = nombre.trimmed();
-        f.geometry = { p };
-        f.style = estiloActual();
-        const qint64 id = m_mapa->addFeature(f);
-        if (id >= 0) {
-            marcarSucio();
-            m_mapa->selectFeature(id);
-        }
-    });
+    connect(nuevo, &QAction::triggered, this, [this, p] { nuevoPunto(p); });
     if (!enAnillos) {
         QMenu *sub = menu->addMenu(tr("Anillos de distancia"));
         connect(sub->addAction(tr("Poner aquí con los últimos ajustes")), &QAction::triggered, this,
@@ -555,4 +544,60 @@ void Ventana::menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enAnillos)
         menu->addSeparator();
         connect(menu->addAction(tr("Volver a navegar")), &QAction::triggered, this, &Ventana::volverANavegar);
     }
+}
+
+// Anillos SIN dueño cuyo centro está en \a p (a menos de 12 px a la escala
+// actual), o -1. Así un punto puesto ahí se queda con ellos.
+qint64 Ventana::anillosSueltosEn(const QGeoCoordinate &p) const
+{
+    const double tolerancia = 12.0 * std::max(1.0, m_mapa->metersPerPixel());
+    qint64 mejor = -1;
+    double dMejor = tolerancia;
+    for (const qint64 id : m_mapa->rangeMarks()) {
+        const auto r = m_mapa->rangeRings(id);
+        if (!r || r->targetId >= 0 || r->featureId >= 0 || !r->center.isValid())
+            continue;
+        const double d = r->center.distanceTo(p);
+        if (d <= dMejor) {
+            dMejor = d;
+            mejor = id;
+        }
+    }
+    return mejor;
+}
+
+// Crea un punto con nombre en \a p en la capa activa. Si ahí está el centro de
+// unos anillos sueltos, el punto se pone EXACTAMENTE en ese centro y pasa a
+// ser su dueño (los anillos lo siguen y son un solo elemento con él); si no
+// se le da nombre, toma el de los anillos.
+void Ventana::nuevoPunto(const QGeoCoordinate &p)
+{
+    const qint64 anillos = anillosSueltosEn(p);
+    const auto r = anillos >= 0 ? m_mapa->rangeRings(anillos) : std::nullopt;
+    bool ok = false;
+    const QString nombre = QInputDialog::getText(this, tr("Nuevo punto"),
+        r ? tr("Nombre (se queda con los anillos de este centro):") : tr("Nombre:"),
+        QLineEdit::Normal, r ? r->name : QString(), &ok);
+    if (!ok)
+        return;
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.layerId = m_mapa->activeFeatureLayer();
+    f.name = nombre.trimmed();
+    f.geometry = { r ? r->center : p };
+    f.style = estiloActual();
+    if (r)
+        f.style.labelVisible = true;       // el nombre que rotulaban los anillos lo rotula él
+    const qint64 id = m_mapa->addFeature(f);
+    if (id < 0)
+        return;
+    if (r) {
+        RangeRings suyos = *r;
+        suyos.featureId = id;
+        suyos.name.clear();                // el rótulo ya lo pone el punto
+        m_mapa->updateRangeRings(anillos, suyos);
+        statusBar()->showMessage(tr("El punto «%1» se queda con los anillos").arg(f.name), 4000);
+    }
+    marcarSucio();
+    m_mapa->selectFeature(id);
 }

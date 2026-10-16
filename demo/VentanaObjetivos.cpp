@@ -597,6 +597,10 @@ void Ventana::ponerAnillos(const RangeRings &propuesta, qint64 editar)
     } else if (enEntidad->isChecked()) {
         r.featureId = ent;
         ponerAnillosA(r, tr("el punto «%1»").arg(nomEnt));
+    } else if (enCoords->isChecked() && puntoEn(fijo) >= 0) {
+        // Esas coordenadas son las de un punto que ya existe: los anillos son suyos.
+        r.featureId = puntoEn(fijo);
+        ponerAnillosA(r, tr("el punto"));
     } else if (enCoords->isChecked()) {
         r.center = fijo;
         r.name = nombre->text().trimmed();
@@ -798,10 +802,16 @@ void Ventana::puntoDeMedida(const QGeoCoordinate &p)
     if (cual == Pick::Anillos) {
         RangeRings r = m_anillos;
         r.featureId = -1;
+        const qint64 punto = obj >= 0 ? -1 : puntoEn(p);
         if (obj >= 0) {                    // cayó en un objetivo: son suyos
             r.targetId = obj;
             r.name.clear();
             ponerAnillosA(r, tr("el objetivo %1").arg(nombreObjetivo(obj)));
+        } else if (punto >= 0) {           // cayó en un punto del usuario: son suyos
+            r.targetId = -1;
+            r.featureId = punto;
+            r.name.clear();
+            ponerAnillosA(r, tr("el punto"));
         } else {
             r.targetId = -1;
             r.center = p;
@@ -1146,4 +1156,25 @@ void Ventana::filtrarObjetivos()
     statusBar()->showMessage(m_mapa->hasTargetFilter()
         ? tr("Filtro aplicado: %1 de %2 objetivos").arg(total - m_mapa->filteredOutTargets().size()).arg(total)
         : tr("Sin filtro: se ven todos los objetivos"), 5000);
+}
+
+// Entidad punto del usuario en \a p (a menos de 12 px a la escala actual), o
+// -1. No cuentan los pines A/B de Elevación.
+qint64 Ventana::puntoEn(const QGeoCoordinate &p) const
+{
+    if (!p.isValid())
+        return -1;
+    const double tolerancia = 12.0 * std::max(1.0, m_mapa->metersPerPixel());
+    qint64 mejor = -1;
+    double dMejor = tolerancia;
+    for (const MapFeature &f : m_mapa->features()) {
+        if (f.kind != GeometryKind::Point || f.layerId == kCapaPuntos || !f.visible)
+            continue;
+        const double d = f.position().distanceTo(p);
+        if (d <= dMejor) {
+            dMejor = d;
+            mejor = f.id;
+        }
+    }
+    return mejor;
 }
