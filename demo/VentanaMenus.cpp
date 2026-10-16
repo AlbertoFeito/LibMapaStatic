@@ -460,6 +460,8 @@ void Ventana::construirMenuYBarra()
     connect(m_accSalirRep, &QAction::triggered, this, &Ventana::salirReproduccion);
 
     QMenu *mAyuda = mb->addMenu(tr("A&yuda"));
+    connect(mAyuda->addAction(tr("Ratón y teclado...")), &QAction::triggered, this,
+            &Ventana::mostrarAyudaRaton);
     connect(mAyuda->addAction(tr("Acerca de...")), &QAction::triggered, this, [this] {
         QMessageBox::about(this, tr("LibMapaStatic"),
             tr("Demostración de LibMapaStatic: librería de mapas por teselas "

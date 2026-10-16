@@ -5707,3 +5707,51 @@ nombra el destino («Radar → 23.29, -82.37 · 043° · 41.4 km»).
 Comprobado bajo Xvfb: una capa `elev_vision` y su texto desaparecen al cambiar el
 selector a Viewshed; marcaciones de un punto a dos lugares vacíos (rumbo y distancia
 correctos), la repetida rechazada, el origen vacío rechazado. **24 tests** en verde.
+
+## 139. Ratón y teclado: revisión completa y tarjeta del clic izquierdo
+
+Tras listar todos los gestos del ratón y probarlos con eventos reales (sonda bajo
+Xvfb) salieron 15 fallos. Se corrigen en la librería (con 10 tests nuevos) y en la
+demo; además, el clic izquierdo sobre un elemento muestra ahora una **tarjeta**.
+
+**Fallos corregidos (librería, `MapView`)**
+- *Rueda fina ignorada*: los toques de 15° o menos no hacían nada; ahora se
+  acumulan (`m_wheelAccum`) hasta completar un paso.
+- *Pulsar sobre un objetivo se tragaba el desplazamiento*: la pulsación ya no
+  resuelve nada; el clic se decide al **soltar** (`Pend`) con un margen de 4 px
+  (`kClickSlopPx`) y el arrastre empieza al superarlo. Solo las etiquetas y las
+  entidades `draggable` se agarran al pulsar.
+- *Doble clic*: Qt entrega el doble clic EN LUGAR de la segunda pulsación; se
+  trata como pulsación (`m_dblPress`) y, en un lugar vacío, acerca un nivel.
+- *Objetivo imposible de deseleccionar* y *entidades no seleccionables en
+  Navegar*: el clic en vacío deselecciona; el clic sobre una entidad la selecciona.
+- *`clicked` tras un arrastre*: ya no se emite si hubo desplazamiento.
+- *Edit*: el temblor de 1–2 px movía un vértice ~800 m; ahora hay margen. Ctrl+clic
+  añade vértice; las capas con `LayerInfo::editable == false` no se editan, dibujan
+  ni borran (señal `interactionBlocked` con el motivo).
+- *Botón central* desplaza con cualquier herramienta; teclado: flechas, +/−, Esc,
+  Intro, Retroceso, Supr y la tecla de menú.
+- *Clic derecho con una medida a medias* abría el menú: ahora cancela
+  (`pickCancelled`).
+- *Rendimiento*: `featureAt` costaba 30 ms con 6000 entidades porque
+  `OverlayModel::features()` copiaba y ordenaba todo en cada llamada. Un índice
+  por capa (`forEachInLayer`) lo deja en 12 ms; la demo, además, espera a que el
+  ratón pare antes de buscar bajo el cursor (cursor de mano / de arrastre).
+
+**API nueva**: señales `elementClicked(MapHit, QPoint)`, `pickCancelled()`,
+`interactionBlocked(QString)`; `MapHit::vertexFeature/vertexIndex` (tirador bajo
+el cursor).
+
+**Demo**
+- *Tarjeta* (`demo/VentanaTarjeta.cpp`): clic izquierdo sobre un objetivo, punto,
+  zona, línea o marca → popup con sus datos (posición, rumbo, velocidad en nudos,
+  cota, superficie, anillos, marcaciones…) y botones rápidos (Centrar, Anillos o
+  Quitar anillos, Marcación…, Encuadrar, Vigilar zona) más «Más…», que abre el
+  menú completo del clic derecho. Los botones cierran el popup antes de actuar
+  porque varias acciones abren diálogos o esperan un clic.
+- Los puntos del usuario se arrastran y sus anillos los siguen; el menú de un
+  tirador ofrece «Borrar este vértice» (zonas ≥ 3, líneas ≥ 2).
+- Ayuda → «Ratón y teclado…»: tabla de todos los gestos.
+
+Pendiente conocido: deshacer el borrado de un punto no restaura sus anillos.
+**24 tests** en verde.

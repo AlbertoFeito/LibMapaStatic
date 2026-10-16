@@ -98,6 +98,14 @@ QWidget *Ventana::construirTabElevacion()
     m_plotObj = m_mapa->customPlot();
     if (m_plotObj)
         m_plotObj->installEventFilter(this);
+    // El tooltip y el resalte de picos del hover se calculan cuando el ratón se
+    // PARA unos instantes (no en cada movimiento): con miles de entidades visibles
+    // cada prueba de acierto cuesta varios milisegundos y hacía ir a tirones el
+    // arrastre del mapa.
+    m_hoverTimer = new QTimer(this);
+    m_hoverTimer->setSingleShot(true);
+    m_hoverTimer->setInterval(90);
+    connect(m_hoverTimer, &QTimer::timeout, this, &Ventana::tooltipEnPuntero);
 
     // Las capas de análisis y los pines A/B son TEMPORALES: viven solo
     // durante la sesión y NO se guardan con las entidades del usuario.
@@ -531,43 +539,49 @@ QString Ventana::tooltipDe(const MapFeature &f)
     return lin.join(QStringLiteral("<br>"));
 }
 
-// Intercepta el ratón sobre la MapView: tooltip de la entidad bajo el cursor
-// (TODA entidad, no solo curvas), resalte de picos por hover, y ARRASTRE de
-// los pines A/B (su punta sigue al cursor sobre el terreno).
+// Intercepta el ratón sobre la MapView para el hover: cada movimiento sin botones
+// reinicia un temporizador y el tooltip se calcula al pararse (ver
+// tooltipEnPuntero); al arrastrar o pulsar se oculta y no se calcula nada. El
+// arrastre de los pines A/B lo gestiona la librería (entidad draggable).
 bool Ventana::eventFilter(QObject *obj, QEvent *ev)
 {
     if (obj != m_plotObj)
         return QMainWindow::eventFilter(obj, ev);
 
     const QEvent::Type t = ev->type();
-
-    // Esc cancela una captura de punto en curso (anillos, marcación, A o B):
-    // la herramienta de pinchar no tenía otra salida que elegir «Navegar».
-    if (t == QEvent::KeyPress && static_cast<QKeyEvent *>(ev)->key() == Qt::Key_Escape
-        && m_picking != Pick::Ninguno) {
-        cancelarCaptura();
-        return true;
-    }
-
-    // El arrastre de los pines A/B ya NO se hace aquí: lo gestiona la librería
-    // (entidad marcada draggable + señales featureDrag*, ver construirPanel).
-
-    // --- hover: resalte de picos + tooltip de cualquier entidad ---
     if (t == QEvent::MouseMove) {
         auto *me = static_cast<QMouseEvent *>(ev);
-        const qint64 id = m_mapa->featureAt(me->pos(), 8.0);
-        if (!m_picoIds.isEmpty())
-            resaltarPico(id);
-        QString tip;
-        if (id >= 0)
-            if (const auto f = m_mapa->feature(id))
-                tip = tooltipDe(*f);
-        if (!tip.isEmpty())
-            QToolTip::showText(QCursor::pos(), tip, m_mapa);   // global, Qt5/Qt6
-        else
+        if (me->buttons() != Qt::NoButton) {
+            m_hoverTimer->stop();
             QToolTip::hideText();
+        } else {
+            m_hoverPos = me->pos();
+            m_hoverTimer->start();
+        }
+    } else if (t == QEvent::MouseButtonPress || t == QEvent::Leave || t == QEvent::Wheel) {
+        m_hoverTimer->stop();
+        QToolTip::hideText();
     }
     return QMainWindow::eventFilter(obj, ev);
+}
+
+// Hover con el ratón parado: resalte de picos y tooltip de la entidad que haya
+// debajo (TODA entidad, no solo curvas).
+void Ventana::tooltipEnPuntero()
+{
+    if (!m_mapa || !m_mapa->underMouse())
+        return;
+    const qint64 id = m_mapa->featureAt(m_hoverPos, 8.0);
+    if (!m_picoIds.isEmpty())
+        resaltarPico(id);
+    QString tip;
+    if (id >= 0)
+        if (const auto f = m_mapa->feature(id))
+            tip = tooltipDe(*f);
+    if (!tip.isEmpty())
+        QToolTip::showText(QCursor::pos(), tip, m_mapa);   // global, Qt5/Qt6
+    else
+        QToolTip::hideText();
 }
 
 // Vuelca una coordenada (arrastre de un pin A/B) en sus campos lat/lon, que

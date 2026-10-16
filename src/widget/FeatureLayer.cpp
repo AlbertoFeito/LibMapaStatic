@@ -234,14 +234,13 @@ void FeatureLayer::draw(QCPPainter *painter)
             continue;
         if (zoomActual >= 0 && !capaVisibleAZoom(capa, zoomActual))
             continue;               // capa de detalle fuera de su rango de zoom
-        for (const MapFeature &f : m_model->featuresInLayer(capa.id)) {
-            if (!f.visible)
-                continue;
-            if (!featureInView(f, visible))
-                continue;           // fuera de pantalla: ni se proyecta
+        m_model->forEachInLayer(capa.id, [&](const MapFeature &f) {
+            if (!f.visible || !featureInView(f, visible))
+                return true;        // oculta o fuera de pantalla: ni se proyecta
             drawFeature(&p, f, f.id == m_model->selectedId());
             ++m_lastDrawn;
-        }
+            return true;
+        });
     }
 
     p.end();
@@ -719,15 +718,20 @@ qint64 FeatureLayer::labelAt(const QPoint &pixel) const
             continue;
         if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
             continue;
-        for (const MapFeature &f : m_model->featuresInLayer(capas[i].id)) {
+        qint64 acierto = -1;
+        m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
             if (!f.visible || !f.selectable || !f.style.labelVisible || f.name.isEmpty())
-                continue;
+                return true;
             const QPointF base = labelAnchorScreen(f);
             if (base.isNull())
-                continue;
-            if (labelBoxFor(f, base, fm).contains(QPointF(pixel)))
-                return f.id;
-        }
+                return true;
+            if (!labelBoxFor(f, base, fm).contains(QPointF(pixel)))
+                return true;
+            acierto = f.id;
+            return false;
+        });
+        if (acierto >= 0)
+            return acierto;
     }
     return -1;
 }
@@ -776,11 +780,11 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
         if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
             continue;               // no seleccionable fuera de su rango de zoom
 
-        for (const MapFeature &f : m_model->featuresInLayer(capas[i].id)) {
+        m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
             if (!f.visible || !f.selectable)
-                continue;
+                return true;
             if (!featureInView(f, vista_))
-                continue;               // fuera de pantalla: no hace falta probar
+                return true;            // fuera de pantalla: no hace falta probar
 
             double d = std::numeric_limits<double>::max();
 
@@ -826,7 +830,8 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
                 mejorDist = d;
                 mejor = f.id;
             }
-        }
+            return true;
+        });
 
         // Si algo se acerto en esta capa, no se sigue bajando.
         if (mejor >= 0)

@@ -120,6 +120,9 @@ private:
     static QString tooltipDe(const MapFeature &f);
 
     bool eventFilter(QObject *obj, QEvent *ev) override;
+    void tooltipEnPuntero();
+    void mostrarTarjeta(const MapHit &hit, const QPoint &global);
+    void mostrarAyudaRaton();
 
     void moverPinCoord(Pick cual, const QGeoCoordinate &g);
 
@@ -275,7 +278,7 @@ private:
     void menuObjetivo(QMenu *menu, qint64 id);
     void menuGrupo(QMenu *menu, const QVector<qint64> &ids);
     void menuMarca(QMenu *menu, qint64 id);
-    void menuEntidad(QMenu *menu, qint64 id);
+    void menuEntidad(QMenu *menu, qint64 id, int vertice = -1);
     void menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enElemento);
     void submenuMarcacion(QMenu *menu, qint64 targetId, qint64 featureId);
     void submenuAnillos(QMenu *menu, qint64 targetId, qint64 featureId);
@@ -389,6 +392,8 @@ private:
     Pick m_picking = Pick::Ninguno;
     Pick m_dragPick = Pick::Ninguno;        //!< pin A/B que se está arrastrando
     QObject *m_plotObj = nullptr;           //!< la MapView, objetivo del eventFilter
+    QTimer *m_hoverTimer = nullptr;         //!< tooltip del hover: se calcula con el ratón parado
+    QPoint m_hoverPos;                      //!< último pixel con el ratón sin pulsar
     QLabel *m_infoPuntos = nullptr;         //!< cota A/B, rumbo y distancia A→B
     QCheckBox *m_marComo0 = nullptr;        //!< tratar mar/sin dato como 0 m
     QCheckBox *m_curvatura = nullptr;       //!< aplicar curvatura 4/3

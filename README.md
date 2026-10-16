@@ -75,6 +75,20 @@ la BD de entidades del usuario y el punto de arranque. Lo que se rellene a mano
 en `MapConfig` (`initialZoom`, `elevationDbFile`…) **manda sobre el paquete**.
 La configuración clásica con `datasetsFile` sigue funcionando.
 
+## Ratón y teclado
+
+| Gesto | Efecto |
+|---|---|
+| Arrastrar / botón central | desplazar (el central, con cualquier herramienta) |
+| Rueda | zoom hacia el cursor (los toques finos se acumulan) |
+| Doble clic en vacío | acercar un nivel |
+| Clic sobre un elemento | selecciona y emite `elementClicked` (la demo muestra una **tarjeta** con sus datos y acciones) |
+| Clic derecho | menú contextual (`contextMenuRequested`); cancela una medida a medias |
+| Edit: arrastrar tirador / Ctrl+clic | mover vértice (margen de 4 px) / añadir vértice |
+| Esc, Intro, Retroceso, Supr, flechas, +/− | cancelar, terminar, quitar vértice, borrar, mover, zoom |
+
+La demo recoge todo en Ayuda → «Ratón y teclado…».
+
 ## Seguimiento de objetivos móviles
 
 La librería **representa** objetos móviles sobre el mapa (naval, aéreo, UAVs…) y

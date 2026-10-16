@@ -183,3 +183,27 @@ QIcon glifo(const QString &k, const QColor &c)
     p.end();
     return QIcon(pm);
 }
+
+// Recuadro que contiene todos los puntos (para encuadrar entidades y grupos),
+// con un margen para que lo encuadrado no toque el borde. false si no hay
+// ningún punto válido.
+bool recuadroDe(const QVector<QGeoCoordinate> &puntos, QGeoCoordinate *no, QGeoCoordinate *se)
+{
+    double n = -90, s = 90, e = -180, o = 180;
+    bool alguno = false;
+    for (const QGeoCoordinate &c : puntos) {
+        if (!c.isValid())
+            continue;
+        alguno = true;
+        n = std::max(n, c.latitude());
+        s = std::min(s, c.latitude());
+        e = std::max(e, c.longitude());
+        o = std::min(o, c.longitude());
+    }
+    if (!alguno)
+        return false;
+    const double mLat = std::max((n - s) * 0.15, 0.002), mLon = std::max((e - o) * 0.15, 0.002);
+    *no = QGeoCoordinate(std::min(n + mLat, 85.0), o - mLon);
+    *se = QGeoCoordinate(std::max(s - mLat, -85.0), e + mLon);
+    return true;
+}

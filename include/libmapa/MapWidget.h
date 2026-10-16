@@ -899,6 +899,8 @@ signals:
     void zoomChanged(int zoom);
     void centerChanged(const QGeoCoordinate &center);
     void mouseMoved(const QGeoCoordinate &position);
+    //! Clic (pulsar y soltar SIN arrastrar) en un punto del mapa. Tras un arrastre
+    //! del mapa no se emite.
     void clicked(const QGeoCoordinate &position, Qt::MouseButton button);
     /*!
      * \brief Clic derecho sobre el mapa (no mientras se dibuja, que lo cierra).
@@ -908,6 +910,22 @@ signals:
      * las acciones que tengan sentido para un objetivo, una entidad, etc.
      */
     void contextMenuRequested(const libmapa::MapHit &hit, const QPoint &globalPos);
+    /*!
+     * \brief Clic izquierdo SIN arrastrar sobre un objetivo, una entidad o una
+     *        marca (anillos, marcacion) con la herramienta Navegar.
+     *
+     * Antes de emitirse el elemento ya esta seleccionado. La app suele mostrar
+     * una tarjeta con sus datos y acciones rapidas (frente al menu completo del
+     * clic derecho). \a hit dice que hay debajo y \a globalPos donde abrirla.
+     * Pulsar y arrastrar mueve el mapa y no emite esto.
+     */
+    void elementClicked(const libmapa::MapHit &hit, const QPoint &globalPos);
+    //! La captura de un punto (\ref MapTool::PickPoint) se cancelo con Esc o con el
+    //! clic derecho; la herramienta ya ha vuelto a Navegar.
+    void pickCancelled();
+    //! Una accion del raton o del teclado se rechazo (capa bloqueada, vertices
+    //! minimos...); \a reason lo explica para mostrarlo al usuario.
+    void interactionBlocked(const QString &reason);
     void measurementFinished(const libmapa::Measurement &measurement);
     void areaSelected(const QGeoCoordinate &northWest,
                       const QGeoCoordinate &southEast);

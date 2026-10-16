@@ -92,6 +92,13 @@ void Ventana::conectarSenales()
 {
     // Clic derecho: menú según lo que haya debajo (objetivo, entidad...).
     connect(m_mapa, &MapWidget::contextMenuRequested, this, &Ventana::menuContextual);
+    // Clic izquierdo sobre un elemento: tarjeta con sus datos y acciones rápidas.
+    connect(m_mapa, &MapWidget::elementClicked, this, &Ventana::mostrarTarjeta);
+    // Esc o clic derecho durante una captura de punto: se cancela.
+    connect(m_mapa, &MapWidget::pickCancelled, this, &Ventana::cancelarCaptura);
+    // Lo que el ratón o el teclado rechazan (capa bloqueada, vértices mínimos...).
+    connect(m_mapa, &MapWidget::interactionBlocked, this,
+            [this](const QString &motivo) { statusBar()->showMessage(motivo, 6000); });
     // Los anillos y las marcaciones de un punto se van con él (es un solo elemento).
     connect(m_mapa, &MapWidget::featureRemoved, this, [this](qint64 id) { quitarMarcasDe(-1, id); });
 
@@ -232,6 +239,8 @@ void Ventana::conectarSenales()
         if (m_dragPick != Pick::Ninguno) {
             m_dragPick = Pick::Ninguno;
             reejecutar();            // recalcula el análisis con el punto movido
+        } else {
+            marcarSucio();           // un punto del usuario (radar...) movido: hay que guardar
         }
     });
 

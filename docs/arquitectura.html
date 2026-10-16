@@ -878,6 +878,14 @@ probada— sirve para la consola y para la ventana con barra de progreso viva.</
 <p><b>Propiedades clave:</b> <span class="tag">reanudable</span> solo baja lo que falta (se corta y se relanza sin repetir); <span class="tag">paralelo</span> hasta <code>connections</code> peticiones en vuelo a la vez (cada una con su <code>Pending</code> y su timeout), con <code>rate</code> como tope de lanzamientos/seg; <span class="tag">codificación exacta</span> inserta con <code>storedZ</code>/Y/s de la base; <span class="tag">polígono</span> descarta las teselas con centro fuera; <span class="tag">auto-freno</span> pausa con backoff creciente (30→60→120…→300&nbsp;s) ante rachas de fallos y reanuda al primer éxito; <span class="tag">busy_timeout</span> convive con el mapa leyendo la misma BD.</p>
 
 <!-- ===================== 13. DECISIONES ===================== -->
+<h3>Interacción con el ratón</h3>
+<ul>
+  <li><b>El clic se decide al soltar.</b> Pulsar solo agarra etiquetas y entidades <code>draggable</code>; el desplazamiento empieza al superar 4&nbsp;px, así que pulsar sobre un objetivo ya no impide mover el mapa.</li>
+  <li><b>Doble clic</b> = pulsación + zoom +1 en vacío. <b>Rueda</b> acumulada. <b>Botón central</b> desplaza con cualquier herramienta.</li>
+  <li><b>Señales:</b> <code>elementClicked(MapHit, QPoint)</code> (tarjeta), <code>contextMenuRequested</code> (menú), <code>pickCancelled()</code>, <code>interactionBlocked(QString)</code> (capa bloqueada).</li>
+  <li><b>Índice por capa</b> en <code>OverlayModel</code> (<code>forEachInLayer</code>): la búsqueda bajo el cursor no copia ni ordena todas las entidades.</li>
+</ul>
+
 <h2 class="sec">13 · Decisiones de diseño e historia</h2>
 <ul>
   <li><b>Núcleo sin ventanas.</b> Separar <code>libmapa_core</code> de <code>libmapa_widget</code> permite probar el núcleo sin GUI (14 de los 17 tests) y no imponer QCustomPlot.</li>

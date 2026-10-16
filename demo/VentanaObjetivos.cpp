@@ -445,6 +445,7 @@ qint64 Ventana::crearPunto(const QGeoCoordinate &p, const QString &nombre)
     f.geometry = { p };
     f.style = estiloActual();
     f.style.labelVisible = true;
+    f.draggable = true;                  // se mueve arrastrándolo en Navegar; sus anillos lo siguen
     const qint64 id = m_mapa->addFeature(f);
     if (id >= 0) {
         marcarSucio();
@@ -919,11 +920,10 @@ void Ventana::ponerMarcacion()
 }
 
 // Cancela la captura de punto en curso (anillos, marcación, punto A o B) y
-// vuelve a Navegar. No hace nada si no hay ninguna.
+// vuelve a Navegar. Lo llama la librería (Esc o clic derecho: pickCancelled).
 void Ventana::cancelarCaptura()
 {
-    if (m_picking == Pick::Ninguno)
-        return;
+    const bool habia = m_picking != Pick::Ninguno;
     m_picking = Pick::Ninguno;
     m_ebl = BearingLine();
     m_nombrePuntoNuevo.clear();
@@ -931,7 +931,8 @@ void Ventana::cancelarCaptura()
     m_mapa->unsetCursor();
     if (m_accNavegar)
         m_accNavegar->setChecked(true);
-    statusBar()->showMessage(tr("Cancelado"), 2500);
+    if (habia)
+        statusBar()->showMessage(tr("Cancelado"), 2500);
 }
 
 // Arma la herramienta de elegir punto para una medida, con su aviso.

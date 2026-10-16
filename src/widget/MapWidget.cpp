@@ -615,6 +615,12 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
             [this](const QPoint &pixel, const QPoint &global) {
                 emit contextMenuRequested(hitTest(pixel), global);
             });
+    connect(d->view, &MapView::elementClicked, this,
+            [this](const QPoint &pixel, const QPoint &global) {
+                emit elementClicked(hitTest(pixel), global);
+            });
+    connect(d->view, &MapView::pickCancelled, this, &MapWidget::pickCancelled);
+    connect(d->view, &MapView::interactionBlocked, this, &MapWidget::interactionBlocked);
     connect(d->view, &MapView::measurementFinished,
             this, &MapWidget::measurementFinished);
     connect(d->view, &MapView::areaSelected, this, &MapWidget::areaSelected);
@@ -2050,6 +2056,14 @@ MapHit MapWidget::hitTest(const QPoint &pixel) const
     h.featureId = featureAt(pixel);
     if (d->view->rangeLayer())
         h.rangeMarkId = d->view->rangeLayer()->markAt(pixel);
+    const qint64 sel = d->view->overlayModel()->selectedId();
+    if (sel >= 0 && d->view->featureLayer()) {
+        const int v = d->view->featureLayer()->vertexAt(sel, pixel);
+        if (v >= 0) {
+            h.vertexFeature = sel;
+            h.vertexIndex = v;
+        }
+    }
     return h;
 }
 

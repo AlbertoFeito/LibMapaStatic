@@ -144,3 +144,7 @@ private:
 // que se recoloree según el tema (claro/oscuro). Estilo coherente: trazo fino,
 // 20×20, sin relleno salvo donde ayuda a leerlo. \a k es la clave de la acción.
 QIcon glifo(const QString &k, const QColor &c);
+
+// Recuadro (noroeste, sureste) que contiene los puntos válidos, con un margen del
+// 15 % para que lo encuadrado no toque el borde. false si no hay ninguno.
+bool recuadroDe(const QVector<QGeoCoordinate> &puntos, QGeoCoordinate *no, QGeoCoordinate *se);

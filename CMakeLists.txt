@@ -252,7 +252,7 @@ if(LIBMAPA_BUILD_DEMO AND LIBMAPA_HAVE_QCP)
         demo/Ventana.h demo/Ventana.cpp
         demo/VentanaMenus.cpp demo/VentanaPanel.cpp demo/VentanaDibujo.cpp
         demo/VentanaElevacion.cpp demo/VentanaFicheros.cpp demo/VentanaObjetivos.cpp
-        demo/VentanaContexto.cpp)
+        demo/VentanaContexto.cpp demo/VentanaTarjeta.cpp)
     target_link_libraries(demo PRIVATE libmapa_widget Qt${QT_VERSION_MAJOR}::PrintSupport)
     # El demo dibuja el perfil con QCustomPlot (ya compilado dentro de
     # libmapa_widget); su cabecera va como SYSTEM para que nuestros -W... no la marquen.

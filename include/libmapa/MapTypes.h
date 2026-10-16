@@ -123,6 +123,10 @@ struct MapHit {
     QVector<qint64> clusterTargets;     //!< Miembros, si cae en un grupo de objetivos.
     qint64 featureId = -1;              //!< Entidad de arriba bajo el cursor.
     qint64 rangeMarkId = -1;            //!< Anillos (centro o un anillo) o marcacion.
+    //! Tirador de vertice bajo el pixel en la entidad SELECCIONADA (\a vertexFeature),
+    //! o -1: sirve para ofrecer «borrar este vertice».
+    qint64 vertexFeature = -1;
+    int vertexIndex = -1;
     //! Nada bajo el cursor: solo el mapa.
     bool isEmpty() const
     {

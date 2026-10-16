@@ -36,30 +36,6 @@ static void cabecera(QMenu *menu, const QString &texto)
     a->setEnabled(false);
 }
 
-// Recuadro que contiene todos los puntos (para encuadrar entidades y grupos),
-// con un margen para que lo encuadrado no toque el borde. false si no hay
-// ningún punto válido.
-static bool recuadro(const QVector<QGeoCoordinate> &puntos, QGeoCoordinate *no, QGeoCoordinate *se)
-{
-    double n = -90, s = 90, e = -180, o = 180;
-    bool alguno = false;
-    for (const QGeoCoordinate &c : puntos) {
-        if (!c.isValid())
-            continue;
-        alguno = true;
-        n = std::max(n, c.latitude());
-        s = std::min(s, c.latitude());
-        e = std::max(e, c.longitude());
-        o = std::min(o, c.longitude());
-    }
-    if (!alguno)
-        return false;
-    const double mLat = std::max((n - s) * 0.15, 0.002), mLon = std::max((e - o) * 0.15, 0.002);
-    *no = QGeoCoordinate(std::min(n + mLat, 85.0), o - mLon);
-    *se = QGeoCoordinate(std::max(s - mLat, -85.0), e + mLon);
-    return true;
-}
-
 // ¿Es la entidad \a id un punto del usuario (radar, observador, hito…)? No lo
 // son los pines ni los resultados de Elevación (capas elev_*).
 static bool esPuntoDelUsuario(const MapWidget *mapa, qint64 id)
@@ -80,6 +56,8 @@ void Ventana::menuContextual(const MapHit &hit, const QPoint &global)
         menuObjetivo(&menu, hit.targetId);
     else if (!hit.clusterTargets.isEmpty())
         menuGrupo(&menu, hit.clusterTargets);
+    else if (hit.vertexFeature >= 0)
+        menuEntidad(&menu, hit.vertexFeature, hit.vertexIndex);     // sobre un tirador de vértice
     else if (hit.featureId >= 0)
         menuEntidad(&menu, hit.featureId);
     else if (hit.rangeMarkId >= 0)
@@ -375,7 +353,7 @@ void Ventana::menuGrupo(QMenu *menu, const QVector<qint64> &ids)
             if (const auto t = m_mapa->target(id))
                 pos.append(t->position);
         QGeoCoordinate no, se;
-        if (recuadro(pos, &no, &se))
+        if (recuadroDe(pos, &no, &se))
             m_mapa->fitBounds(no, se);
     });
     // Los primeros, para ir directamente a uno.
@@ -445,7 +423,7 @@ void Ventana::menuMarca(QMenu *menu, qint64 id)
 // él y borrarlo (con lo que cuelga de él). Una zona o una línea: encuadrar,
 // editar vértices, medir y vigilar como zona. Los pines A/B y los resultados de
 // Elevación tienen un menú propio, más corto.
-void Ventana::menuEntidad(QMenu *menu, qint64 id)
+void Ventana::menuEntidad(QMenu *menu, qint64 id, int vertice)
 {
     const auto f = m_mapa->feature(id);
     if (!f)
@@ -476,6 +454,20 @@ void Ventana::menuEntidad(QMenu *menu, qint64 id)
 
     const bool editable = capaEditable(f->layerId);
     cabecera(menu, f->type.isEmpty() ? nombre : tr("%1 (%2)").arg(nombre, f->type));
+    // Sobre un tirador de vértice de la entidad seleccionada: borrarlo (una zona
+    // no baja de 3 vértices ni una línea de 2).
+    if (vertice >= 0 && f->kind != GeometryKind::Point) {
+        const int minimo = f->kind == GeometryKind::Polygon ? 3 : 2;
+        const bool puede = editable && f->geometry.size() > minimo;
+        QAction *borrarV = menu->addAction(puede ? tr("Borrar este vértice")
+                                                 : tr("Borrar este vértice (no puede quedar con menos de %1)").arg(minimo));
+        borrarV->setEnabled(puede);
+        connect(borrarV, &QAction::triggered, this, [this, id, vertice] {
+            if (m_mapa->removeVertex(id, vertice))
+                marcarSucio();
+        });
+        menu->addSeparator();
+    }
     connect(menu->addAction(tr("Seleccionar y ver propiedades")), &QAction::triggered, this, [this, id] {
         m_mapa->selectFeature(id);
         if (m_dock)
@@ -496,7 +488,7 @@ void Ventana::menuEntidad(QMenu *menu, qint64 id)
                 for (const auto &parte : e->outlines())
                     todos += parte;
                 QGeoCoordinate no, se;
-                if (recuadro(todos, &no, &se))
+                if (recuadroDe(todos, &no, &se))
                     m_mapa->fitBounds(no, se);
             });
 
