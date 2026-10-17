@@ -11,7 +11,7 @@
  * ajustar el sol al vuelo está la capa en vivo de MapWidget.
  *
  * Uso:
- *   dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out relieve.sqlitedb
+ *   dem_to_hillshade --in <carpeta_hgt | carpeta/fichero GeoTIFF | dem.sqlitedb> --out relieve.sqlitedb
  *                    [--cuba | --bbox latN,lonO,latS,lonE]
  *                    [--minzoom 6 --maxzoom 13]
  *                    [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]
@@ -30,6 +30,7 @@
  * En un servidor sin pantalla: QT_QPA_PLATFORM=offscreen (QImage necesita Gui).
  */
 
+#include "dem/ElevationSources.h"
 #include "dem/HgtElevation.h"
 #include "dem/IElevationSource.h"
 #include "dem/SqliteElevation.h"
@@ -176,7 +177,7 @@ int main(int argc, char *argv[])
 
     QTextStream cout(stdout);
     if (in.isEmpty() || out.isEmpty() || !haveBbox) {
-        cout << "Uso: dem_to_hillshade --in <carpeta_hgt|dem.sqlitedb> --out relieve.sqlitedb\n"
+        cout << "Uso: dem_to_hillshade --in <carpeta_hgt|GeoTIFF|dem.sqlitedb> --out relieve.sqlitedb\n"
                 "                      (--cuba | --bbox latN,lonO,latS,lonE)\n"
                 "                      [--minzoom 6 --maxzoom 13]\n"
                 "                      [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2]\n"
@@ -189,16 +190,16 @@ int main(int argc, char *argv[])
         name = QStringLiteral("Relieve sombreado");
     if (minZ > maxZ) std::swap(minZ, maxZ);
 
-    // Origen de elevación: carpeta de .hgt o una BD .sqlitedb.
-    std::unique_ptr<IElevationSource> dem;
-    const QFileInfo fi(in);
-    if (fi.isDir()) {
-        auto h = std::make_unique<HgtElevation>();
-        h->setDirectory(in);
-        dem = std::move(h);
-    } else {
-        dem = std::make_unique<SqliteElevation>(in);
+    // Origen de elevación: carpeta de .hgt, carpeta o fichero GeoTIFF (p. ej.
+    // Copernicus) o una BD .sqlitedb; la elige openElevationSource por la ruta.
+    QString avisos;
+    std::unique_ptr<IElevationSource> dem = openElevationSource(in, &avisos);
+    if (!dem) {
+        qCritical() << "no se pudo abrir la elevación:" << in;
+        return 1;
     }
+    if (!avisos.isEmpty())
+        qWarning().noquote() << avisos;
 
     if (QFile::exists(out)) {
         if (!overwrite) {
