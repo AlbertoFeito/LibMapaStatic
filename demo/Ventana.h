@@ -121,6 +121,7 @@ private:
 
     bool eventFilter(QObject *obj, QEvent *ev) override;
     void tooltipEnPuntero();
+    bool elevacionEnUso() const;
     void mostrarTarjeta(const MapHit &hit, const QPoint &global);
     void mostrarAyudaRaton();
 
@@ -413,6 +414,7 @@ private:
     QSpinBox *m_picosSepM = nullptr;           //!< separación mínima entre cumbres
     // Entrada por análisis: un selector y filas que se muestran/ocultan según el tipo.
     QComboBox *m_tipoAnalisis = nullptr;
+    bool m_pinsAnalisis = false;            //!< hay un análisis calculado: los pines A/B se ven aunque la pestaña no esté
     QWidget *m_rowPosA = nullptr, *m_rowPosB = nullptr, *m_rowAzimut = nullptr;
     QWidget *m_rowDist = nullptr, *m_rowAnt1 = nullptr, *m_rowAnt2 = nullptr;
     QWidget *m_rowRadio = nullptr, *m_rowSep = nullptr, *m_rowChecks = nullptr;

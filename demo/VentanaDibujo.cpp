@@ -21,6 +21,7 @@ void Ventana::limpiarAnalisis()
 // recta de visibilidad de «Visión A→B») se quedaba pintado bajo el nuevo.
 void Ventana::quitarResultadosAnalisis()
 {
+    m_pinsAnalisis = false;            // sin resultados, los pines vuelven a depender de la pestaña
     m_mapa->removeFeatureLayer(kCapaVision);
     m_mapa->removeFeatureLayer(kCapaViewshed);
     m_mapa->removeFeatureLayer(kCapaPicos);

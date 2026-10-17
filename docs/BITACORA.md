@@ -5763,3 +5763,13 @@ lugar libre (sin objetivo ni punto) salían como «punto -1», todas iguales. Ah
 `nombreExtremo` devuelve «un lugar del mapa» para un extremo libre y el submenú
 muestra sus coordenadas con rumbo y distancia («23.29, -82.37 (043° · 41.4 km)»),
 de modo que dos marcaciones a lugares distintos se distinguen. 24 tests en verde.
+
+## 141. El pin A solo se ve cuando se usa la elevación
+
+El pin azul del punto A de Elevación estaba siempre sobre el mapa, aunque no se
+estuviera analizando nada. Ahora `marcarPuntosActivos` solo lo dibuja (y el B en
+Visión) si `elevacionEnUso()`: la pestaña Elevación está a la vista, o hay un
+análisis calculado en el mapa (`m_pinsAnalisis`, que se apaga al limpiar o
+cambiar de análisis). Se redibuja al cambiar de pestaña y al mostrar u ocultar el
+panel. Las acciones del menú de Elevación abren la pestaña, así que los pines
+aparecen al usarlas. 24 tests en verde.
