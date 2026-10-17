@@ -32,8 +32,10 @@ Ventana::Ventana(const QString &origen, bool esPaquete,
     cfg.autosaveFeatures = false;
     cfg.cacheMiB = 192;
 
-    m_demActivo = esPaquete || !demDir.isEmpty() || !demDb.isEmpty();
     m_mapa = new MapWidget(cfg, this);
+    // Hay DEM solo si la libreria pudo cargar algo (con --dem, --dem-db o el
+    // paquete): una carpeta vacia o una ruta equivocada no cuenta.
+    m_demActivo = !m_mapa->elevationDescription().isEmpty();
     setCentralWidget(m_mapa);
     actualizarTitulo();
     resize(1200, 800);
@@ -292,29 +294,51 @@ void Ventana::mostrarCota(const QGeoCoordinate &p)
         : QStringLiteral("  %1 m  ").arg(m, 0, 'f', 0));
 }
 
-// Elige una CARPETA de ficheros `.hgt` como origen de elevacion (en caliente).
+// Elige una CARPETA de ficheros `.hgt` o GeoTIFF como origen de elevacion (en
+// caliente); el formato lo reconoce la libreria por lo que haya dentro.
 void Ventana::alElegirDemCarpeta()
 {
     const QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Carpeta de ficheros de elevacion (.hgt)"));
+        this, tr("Carpeta de ficheros de elevacion (.hgt o GeoTIFF)"));
     if (dir.isEmpty())
         return;
     m_mapa->setElevationDir(dir);
-    m_demActivo = true;
-    statusBar()->showMessage(tr("Elevacion (carpeta): %1").arg(dir), 4000);
+    avisarElevacion();
 }
 
-// Elige una BASE DE DATOS `.sqlitedb` de elevacion como origen (en caliente).
+// Elige una BASE DE DATOS `.sqlitedb` o un GeoTIFF de elevacion como origen (en
+// caliente).
 void Ventana::alElegirDemDb()
 {
     const QString file = QFileDialog::getOpenFileName(
-        this, tr("Base de datos de elevacion"), QString(),
-        tr("Base de datos de elevacion (*.sqlitedb *.db);;Todos (*)"));
+        this, tr("Base de datos o GeoTIFF de elevacion"), QString(),
+        tr("Elevacion (*.sqlitedb *.db *.tif *.tiff);;Base de datos (*.sqlitedb *.db);;"
+           "GeoTIFF (*.tif *.tiff);;Todos (*)"));
     if (file.isEmpty())
         return;
     m_mapa->setElevationDb(file);
-    m_demActivo = true;
-    statusBar()->showMessage(tr("Elevacion (BD): %1").arg(file), 4000);
+    avisarElevacion();
+}
+
+// Dice que quedo cargado tras elegir una elevacion: en la barra de estado lo que
+// se leyo (p. ej. «42 GeoTIFF, lat 19.0..24.0…») y, si algo fallo -ficheros
+// ilegibles, carpeta sin datos-, un aviso con el motivo. Antes la demo decia
+// «Elevacion: <ruta>» aunque no hubiera cargado nada, y los errores solo iban al
+// registro de Qt Creator.
+void Ventana::avisarElevacion()
+{
+    const QString desc = m_mapa->elevationDescription();
+    const QStringList avisos = m_mapa->elevationWarnings();
+    m_demActivo = !desc.isEmpty();
+    if (!desc.isEmpty())
+        statusBar()->showMessage(tr("Elevación: %1").arg(desc), 10000);
+    if (!avisos.isEmpty()) {
+        const QString cabecera = desc.isEmpty()
+            ? tr("No se pudo cargar la elevación:")
+            : tr("Se cargó la elevación, pero algunos ficheros no se pudieron usar:");
+        QMessageBox::warning(this, tr("Elevación"), cabecera + QLatin1String("\n\n")
+                                                        + avisos.join(QLatin1Char('\n')));
+    }
 }
 
 // Habilita deshacer/rehacer/borrar y pone el resumen de la barra de estado.

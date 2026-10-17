@@ -147,13 +147,18 @@ void Ventana::construirMenuYBarra()
         if (m_accCobertura->isChecked()) m_mapa->setCoverageZoom(v);
     });
 
+    // Cargar la elevacion (DEM): las mismas dos acciones en el boton «DEM...» de
+    // la barra y en los menus Datos y Elevación, para que se encuentren donde se
+    // espera (antes solo estaban en el boton y «Datos» parecia leer solo .geo).
+    m_accDemCarpeta = new QAction(tr("Carpeta de GeoTIFF o .hgt..."), this);
+    connect(m_accDemCarpeta, &QAction::triggered, this, &Ventana::alElegirDemCarpeta);
+    m_accDemFichero = new QAction(tr("Fichero GeoTIFF o base de datos .sqlitedb..."), this);
+    connect(m_accDemFichero, &QAction::triggered, this, &Ventana::alElegirDemDb);
     m_btnDem = new QPushButton(tr("DEM..."), this);
     {
         QMenu *md = new QMenu(m_btnDem);
-        connect(md->addAction(tr("Carpeta de .hgt...")), &QAction::triggered,
-                this, &Ventana::alElegirDemCarpeta);
-        connect(md->addAction(tr("Base de datos .sqlitedb...")), &QAction::triggered,
-                this, &Ventana::alElegirDemDb);
+        md->addAction(m_accDemCarpeta);
+        md->addAction(m_accDemFichero);
         m_btnDem->setMenu(md);
     }
 
@@ -419,6 +424,9 @@ void Ventana::construirMenuYBarra()
     mDibujo->addAction(m_accRehacer);
 
     QMenu *mElev = mb->addMenu(tr("&Elevación"));
+    mElev->addAction(m_accDemCarpeta);
+    mElev->addAction(m_accDemFichero);
+    mElev->addSeparator();
     mElev->addAction(accPerfil);
     mElev->addAction(accVision);
     mElev->addAction(accViewshed);
@@ -430,6 +438,9 @@ void Ventana::construirMenuYBarra()
 
     QMenu *mDatos = mb->addMenu(tr("&Datos"));
     mDatos->addAction(accGeo);
+    QMenu *mDem = mDatos->addMenu(tr("Cargar elevación (DEM)"));
+    mDem->addAction(m_accDemCarpeta);
+    mDem->addAction(m_accDemFichero);
     mDatos->addAction(accImportar);
     mDatos->addAction(accExportar);
     mDatos->addAction(accExportarVista);

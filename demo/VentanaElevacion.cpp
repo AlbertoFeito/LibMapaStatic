@@ -251,8 +251,17 @@ void Ventana::mostrarPerfil(const ElevationProfile &p, const QString &resumen,
         m_plot->yAxis->setLabel(tr("Altura (m)"));
         lay->addWidget(m_plot, 1);
         auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, m_perfilWin);
-        connect(bb, &QDialogButtonBox::rejected, m_perfilWin, &QDialog::hide);
+        connect(bb, &QDialogButtonBox::rejected, m_perfilWin, &QDialog::reject);
         lay->addWidget(bb);
+        // Al cerrar la ventana (botón, Esc o la X): un PERFIL no deja nada más en
+        // el mapa, así que su análisis termina y los pines vuelven a depender de
+        // la pestaña. La visión sí deja su línea, y con ella los pines.
+        connect(m_perfilWin, &QDialog::finished, this, [this] {
+            if (m_tipoAnalisis && m_tipoAnalisis->currentIndex() == 0) {
+                m_pinsAnalisis = false;
+                marcarPuntosActivos();
+            }
+        });
     }
     m_perfilInfo->setText(resumen);
     pintarPerfil(p, conVision, zA, zB, D, critD, bloqueado, maxInicial);
@@ -689,13 +698,25 @@ void Ventana::actualizarEntradaAnalisis(int idx)
     actualizarInfoPuntos();   // redibuja los pines activos y la lectura
 }
 
-// Dibuja el/los pin(es) del ANÁLISIS ACTIVO: siempre la posición A (azul) y, solo
-// en Visión A→B, también B (rojo). Así el punto seleccionado se ve sin analizar,
-// pero no sobran pines (B no aparece en perfil/viewshed/picos).
+// ¿Está el usuario trabajando con la elevación? Sí si la pestaña Elevación está
+// a la vista o si hay un análisis calculado en el mapa. Solo entonces tiene
+// sentido enseñar los pines A/B; si no, son ruido sobre el mapa.
+bool Ventana::elevacionEnUso() const
+{
+    if (m_pinsAnalisis)
+        return true;
+    return m_tabs && m_dock && m_dock->isVisible() && m_tabs->currentIndex() == m_tabs->count() - 1;
+}
+
+// Dibuja el/los pin(es) del ANÁLISIS ACTIVO: la posición A (azul) y, solo en
+// Visión A→B, también B (rojo). Solo se ven mientras se usa la elevación (ver
+// elevacionEnUso): con la pestaña Capas a la vista y sin análisis, no hay pines.
 void Ventana::marcarPuntosActivos()
 {
     if (!m_mapa) return;
     prepararCapa(kCapaPuntos, tr("Puntos"), 60);
+    if (!elevacionEnUso())
+        return;
     auto pin = [this](const QGeoCoordinate &p, const QColor &c, const QString &txt) {
         if (!p.isValid()) return;
         MapFeature f;
@@ -750,6 +771,7 @@ void Ventana::analizarPerfil()
         statusBar()->showMessage(tr("Punto A no válido (fíjalo en el mapa o escríbelo)."), 5000);
         return;
     }
+    m_pinsAnalisis = true;
     marcarPuntosActivos();              // pin azul fijo en A
     const double alcanceM = m_alcanceKm->value() * 1000.0;
     const QGeoCoordinate fin = a.atDistanceAndAzimuth(alcanceM, m_rumbo->value());
@@ -785,6 +807,7 @@ void Ventana::analizarVision()
             tr("Fija los puntos A y B (distintos) en el mapa o escríbelos."), 5000);
         return;
     }
+    m_pinsAnalisis = true;
     marcarPuntosActivos();               // pines fijos azul (A) y rojo (B)
     LineOfSightParams lp;
     lp.voidElevation = voidElev();
@@ -931,6 +954,7 @@ void Ventana::analizarViewshed()
         statusBar()->showMessage(tr("Punto (A) no válido (fíjalo en el mapa o escríbelo)."), 5000);
         return;
     }
+    m_pinsAnalisis = true;
     marcarPuntosActivos();              // pin azul fijo en A (observador)
 
     ViewshedParams vp;
@@ -1061,6 +1085,7 @@ void Ventana::analizarPicosAltos()
         return;
     }
     m_ultimo = Analisis::Picos;
+    m_pinsAnalisis = true;
     marcarPuntosActivos();              // pin azul fijo en A (centro)
     m_picoIds.clear(); m_picoBase.clear(); m_picoHover = -1;
 

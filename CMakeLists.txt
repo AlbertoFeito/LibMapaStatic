@@ -112,6 +112,8 @@ add_library(libmapa_core STATIC
 
     src/tiles/TileDataset.cpp
     src/tiles/TileDataset.h
+    src/tiles/MBTiles.cpp
+    src/tiles/MBTiles.h
     src/tiles/TileKey.h
     src/tiles/ITileSource.h
     src/tiles/RMapsTileSource.cpp
@@ -146,6 +148,12 @@ add_library(libmapa_core STATIC
     src/dem/HgtElevation.h
     src/dem/SqliteElevation.cpp
     src/dem/SqliteElevation.h
+    src/dem/GeoTiff.cpp
+    src/dem/GeoTiff.h
+    src/dem/GeoTiffElevation.cpp
+    src/dem/GeoTiffElevation.h
+    src/dem/ElevationSources.cpp
+    src/dem/ElevationSources.h
     src/dem/ElevationAnalysis.cpp
     src/dem/ElevationAnalysis.h
     src/dem/Contours.cpp
@@ -385,6 +393,10 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_vectorrepository)
     libmapa_add_test(tst_hgtelevation)
     libmapa_add_test(tst_sqliteelevation)
+    libmapa_add_test(tst_geotiff)
+    libmapa_add_test(tst_mbtiles)
+    target_compile_definitions(tst_geotiff PRIVATE
+        LIBMAPA_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
     libmapa_add_test(tst_elevationanalysis)
     libmapa_add_test(tst_contours)
     libmapa_add_test(tst_zonemonitor)

@@ -111,6 +111,16 @@ struct TileDataset
     QString colImage = QStringLiteral("image");
     bool hasSColumn  = true;
 
+    /*!
+     * \brief true si el fichero es un MBTiles estandar (no una base RMaps).
+     *
+     * Solo cambia la DISPOSICION (columnas zoom_level/tile_column/tile_row/
+     * tile_data y esquema TMS, que \c MBTiles::applyLayout deja en los campos de
+     * arriba); la lectura de teselas es la misma de siempre. Se guarda para que
+     * toJson() lo escriba y datasets.json recuerde de que formato era.
+     */
+    bool mbtiles = false;
+
     int storedZ(int logicalZ) const { return zFactor * logicalZ + zOffset; }
 
     int logicalZ(int storedZ) const

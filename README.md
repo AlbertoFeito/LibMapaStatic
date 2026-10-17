@@ -12,9 +12,9 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 24 tests (21 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 26 tests (23 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
-- Elevación del terreno desde ficheros SRTM `.hgt` **o** una base de datos `.sqlitedb` empaquetable (cota bajo el cursor en `fill_map`)
+- Elevación del terreno desde ficheros SRTM `.hgt`, una base de datos `.sqlitedb` empaquetable **o GeoTIFF** (un fichero o una carpeta; cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
 - **Etiquetas ancladas y movibles**: el rótulo de una entidad o de un objetivo puede desplazarse (`setFeatureLabelOffset` / `setTargetLabelOffset`), queda unido a su punto por una línea guía y, al ser relativo, lo sigue cuando se mueve; se localiza aparte con `featureLabelAt` / `targetLabelAt` (hasta 3 líneas, por `\n`)
 - **Seguimiento de objetivos móviles** en tiempo real, **agnóstico del dominio**: cada objetivo lleva `kind` y un juego de `attributes` libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta → vale igual para seguimiento naval, aéreo o de UAVs. **Simbología por hooks**: la app registra su juego de iconos (`setTargetSymbolProvider`) y la librería los coloca y los gira por el rumbo. **Escala a miles** (ADS-B regional) con culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza
@@ -373,6 +373,20 @@ escribe el bloque ya correcto para pegar en `datasets`/`mapa.json` (`tableName`,
 Un buen generador local de MBTiles **ráster** es QGIS (*Processing → Generate XYZ
 tiles (MBTiles)*), que la librería consume tal cual.
 
+**Sin pasar por `probe_db`:** una entrada de `datasets.json` (o de `mapa.json`)
+cuyo `filePath` termina en `.mbtiles` —o que lleva `"format": "mbtiles"`— solo
+necesita `id` y `filePath`; al cargar, la librería lee del propio fichero los
+zooms mínimo y máximo, el lado de tesela, el nombre y el esquema. Lo que escribas
+a mano manda sobre lo detectado, y lo que ya tenías (bloques generados por
+`probe_db`, bases RMaps) se carga exactamente igual que antes:
+
+```json
+{ "id": "mundo", "filePath": "mapa.mbtiles" }
+```
+
+Si el MBTiles tiene huecos grandes, pon `"typicalFill"` (p. ej. `0.4`) para que
+la escalera de respaldo se precargue.
+
 ## Herramientas
 
 | | |
@@ -420,6 +434,18 @@ Para empaquetar la elevación en un solo fichero, el pipeline es
 → `dem_to_db carpeta --out dem.sqlitedb` (BD comprimida, ~30 % del tamaño) →
 `fill_map --dem-db dem.sqlitedb`. El generador acepta también tus propios `.hgt`
 de 90 m. La BD es ideal para distribuir dentro de una app.
+
+**GeoTIFF:** `MapConfig::elevationDbFile` (un `.tif`) o `elevationDir` (una carpeta
+con `.tif`; si también hay `.hgt`, mandan los `.hgt` como siempre) —y en caliente
+`setElevationDb()`/`setElevationDir()`, o `fill_map` con `--dem-db`/`--dem`, y el
+**«elevation»** de un paquete de datos— aceptan modelos de terreno en GeoTIFF. La
+librería los lee **sin GDAL**: TIFF clásico y BigTIFF, franjas o teselas, sin
+compresión, LZW, Deflate o PackBits (con predictores 2 y 3), enteros de 8/16/32
+bits y coma flotante de 32/64, georreferenciados en grados (cualquier datum) o en
+Web Mercator, con su valor «sin dato». Solo lee los bloques que se consultan, así
+que un DEM de varios GB no ocupa memoria. Un sistema proyectado distinto (p. ej.
+UTM) se rechaza con un mensaje que dice cuál es: reproyecta antes a EPSG:4326
+(`gdalwarp -t_srs EPSG:4326`). Se asume la banda 1 en metros.
 
 ### Análisis de elevación
 
@@ -649,11 +675,11 @@ src/
   geo/               proyección Web Mercator, conversión geo <-> tesela
   db/                conexiones SQLite, esquema, repositorio vectorial
   tiles/             lectura, caché, planificación y carga de teselas
-  dem/               elevación del terreno: ficheros SRTM .hgt o BD .sqlitedb
+  dem/               elevación del terreno: ficheros SRTM .hgt, BD .sqlitedb o GeoTIFF
   io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               24 tests (21 sin QCustomPlot)
+tests/               26 tests (23 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo (clase Ventana repartida por tema en Ventana*.cpp)
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
@@ -681,7 +707,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 7 | Objetivos en movimiento (capa en tiempo real) y ficheros `.geo` como capas multi-parte |
 | 8 | Vector pesado a teselas (`geo_to_tiles`); descarga de teselas que faltan (`fill_tiles`/`fill_map`), base nueva, auto-freno y mancha de cobertura |
 | 9 | Descarga por polígono, en paralelo y con estimación de tamaño |
-| 10 | Elevación del terreno: ficheros `.hgt` o BD `.sqlitedb` (`fill_hgt` → `dem_to_db`), cota bajo el cursor |
+| 10 | Elevación del terreno: ficheros `.hgt`, BD `.sqlitedb` (`fill_hgt` → `dem_to_db`) o GeoTIFF, cota bajo el cursor |
 | 11 | Persistencia automática de entidades (`MapConfig.featuresDbFile`) y `demo` al día |
 | 12 | **Paquete de datos sin conexión**: manifiesto `mapa.json`, `MapConfig.dataDir`, capas fijas, entidades del usuario en `AppData` |
 | 13 | Comprobación del paquete: `check_data` (informe con cobertura por zoom) y `MapWidget::dataWarnings()` al abrir |

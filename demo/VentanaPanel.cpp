@@ -181,6 +181,10 @@ void Ventana::construirPanel()
     m_tabs->addTab(construirTabElevacion(), tr("Elevación"));
     dock->setWidget(m_tabs);
     addDockWidget(Qt::RightDockWidgetArea, dock);
+    // Los pines A/B solo se ven con la pestaña Elevación a la vista: se
+    // actualizan al cambiar de pestaña o al mostrar/ocultar el panel.
+    connect(m_tabs, &QTabWidget::currentChanged, this, [this] { marcarPuntosActivos(); });
+    connect(dock, &QDockWidget::visibilityChanged, this, [this] { marcarPuntosActivos(); });
 
     // --- Toggles del panel en el menú «Ver» (m_menuVer lo dejó la Fase A) -
     if (m_menuVer) {
