@@ -5865,3 +5865,28 @@ vacía en un test. 26 tests en verde.
 Para el usuario: los cuadros de Copernicus 30 m miden 25-50 MB comprimidos y un
 bloque descodificado de 1024x1024 ocupa 4 MiB, así que 256 MiB son ~64 bloques en
 memoria a la vez, con independencia de cuántos ficheros haya en la carpeta.
+
+## 145. La demo dice qué elevación cargó (y por qué no)
+
+El usuario descargó 42 cuadros GeoTIFF de Copernicus y dijo que la demo «solo lee
+.geo». Había dos causas, una mía:
+- Las entradas para cargar elevación solo estaban en el botón **«DEM…»** de la
+  barra; el menú **Datos** solo tenía «Cargar .geo…». Se le había indicado un menú
+  que no las tenía. Ahora están también en **Datos → Cargar elevación (DEM)** y al
+  principio del menú **Elevación** (las mismas dos `QAction`, compartidas con el
+  botón): «Carpeta de GeoTIFF o .hgt…» y «Fichero GeoTIFF o base de datos…».
+- La demo decía «Elevación: <ruta>» aunque no hubiera cargado nada, y los errores
+  solo iban al registro de Qt Creator. Nuevo API: `MapWidget::elevationDescription()`
+  (p. ej. «42 GeoTIFF, lat 19.0..24.0, lon -85.0..-74.0», «12 ficheros .hgt», «base
+  de datos x.sqlitedb», vacía si no hay nada utilizable) y `elevationWarnings()`
+  (ficheros ilegibles, carpeta sin `.hgt` ni `.tif`, ruta inexistente). Una carpeta
+  sin datos ya no cuenta como DEM. La demo muestra la descripción en la barra de
+  estado y, si algo falló, un aviso con el motivo; `m_demActivo` sale de lo que se
+  cargó de verdad. `openElevationSource` devuelve ahora los avisos también cuando
+  solo fallan algunos ficheros.
+
+Probado en la demo real (Xvfb) con una carpeta de dos cuadros reales de Copernicus:
+«2 GeoTIFF, lat 20.0..21.0, lon -78.0..-76.0», sin avisos, 70 m en tierra y 0 m en el
+mar; y el menú Datos con la entrada nueva. `tst_mapwidget` cubre descripción,
+fichero roto (aviso con su nombre, el bueno sigue funcionando) y carpeta vacía.
+26 tests en verde.

@@ -45,6 +45,10 @@ public:
     QString path() const { return m_path; }
     int imageCount() const { return int(m_images.size()); }
 
+    //! Zona (en grados) que cubren, juntas, todas las imágenes abiertas. false si
+    //! no hay ninguna.
+    bool extent(double *latMin, double *latMax, double *lonMin, double *lonMax) const;
+
     //! Motivos por los que algún fichero de la ruta no se pudo usar.
     QStringList warnings() const { return m_warnings; }
 

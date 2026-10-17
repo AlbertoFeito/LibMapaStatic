@@ -640,10 +640,19 @@ public:
     //! configurado (carpeta `.hgt` o base de datos), o NaN si no hay dato (sin
     //! origen, tile ausente o hueco). Comprueba el resultado con std::isnan.
     double elevationAt(const QGeoCoordinate &position) const;
-    //! Usa en caliente una CARPETA de ficheros `.hgt` como origen (vacia = quita).
+    //! Usa en caliente una CARPETA de ficheros `.hgt` o GeoTIFF como origen
+    //! (vacia = quita). El formato lo reconoce la libreria por lo que haya dentro.
     void setElevationDir(const QString &dir);
-    //! Usa en caliente una BASE DE DATOS `.sqlitedb` como origen (vacia = quita).
+    //! Usa en caliente una BASE DE DATOS `.sqlitedb` o un fichero GeoTIFF como
+    //! origen (vacia = quita).
     void setElevationDb(const QString &dbFile);
+    //! Que hay cargado como origen de elevacion, en una linea para mostrarla al
+    //! usuario (p. ej. «42 GeoTIFF, lat 19.0..24.0, lon -85.0..-74.0»). Vacia si no
+    //! hay elevacion utilizable: sin origen, o una carpeta sin `.hgt` ni GeoTIFF.
+    QString elevationDescription() const;
+    //! Problemas de la ultima carga de elevacion (p. ej. GeoTIFF ilegibles, o una
+    //! carpeta sin datos), uno por elemento. Vacia si todo fue bien.
+    QStringList elevationWarnings() const;
 
     //! Perfil de elevacion del terreno a lo largo de una ruta (polilinea): la
     //! cota en cada lugar, muestreada cada \c params.stepMeters (30 m por

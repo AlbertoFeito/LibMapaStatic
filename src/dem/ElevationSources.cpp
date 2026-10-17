@@ -44,7 +44,8 @@ std::unique_ptr<IElevationSource> openElevationSource(const QString &path, QStri
         return nullptr;
     if (isGeoTiffElevationPath(path)) {
         auto tif = std::make_unique<GeoTiffElevation>();
-        if (!tif->setPath(path) && error)
+        tif->setPath(path);
+        if (error && !tif->warnings().isEmpty())          // tambien si solo fallan algunos
             *error = tif->warnings().join(QLatin1Char('\n'));
         return tif;
     }

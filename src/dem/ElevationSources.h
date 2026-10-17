@@ -25,8 +25,9 @@ bool isGeoTiffElevationPath(const QString &path);
  *
  * Así quien configure la elevación (MapConfig, un paquete de datos, la demo) no
  * necesita saber el formato: lo da la ruta. Con \a path vacío devuelve null. Si
- * es GeoTIFF y no se puede leer ninguna imagen, devuelve igualmente la fuente
- * (siempre responde NaN) y deja el motivo en \a error.
+ * es GeoTIFF devuelve siempre la fuente (si no se pudo leer ninguna imagen,
+ * responde NaN) y deja en \a error, una por línea, las razones por las que algún
+ * fichero no se pudo usar (también si solo fallan algunos).
  */
 std::unique_ptr<IElevationSource> openElevationSource(const QString &path,
                                                       QString *error = nullptr);

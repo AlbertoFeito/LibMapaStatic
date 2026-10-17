@@ -82,6 +82,9 @@ private:
     void alElegirDemCarpeta();
 
     void alElegirDemDb();
+    void avisarElevacion();
+    QAction *m_accDemCarpeta = nullptr;     //!< Cargar elevación: carpeta de GeoTIFF o .hgt
+    QAction *m_accDemFichero = nullptr;     //!< Cargar elevación: un GeoTIFF o una BD .sqlitedb
 
     // ============================================= analisis de elevacion ==
     QWidget *construirTabElevacion();

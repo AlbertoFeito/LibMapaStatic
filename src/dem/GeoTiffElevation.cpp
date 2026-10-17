@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -46,6 +47,25 @@ bool GeoTiffElevation::setPath(const QString &path)
         indexImage(int(m_images.size()) - 1);
     }
     return !m_images.isEmpty();
+}
+
+// Unión de las extensiones de todas las imágenes abiertas.
+bool GeoTiffElevation::extent(double *latMin, double *latMax, double *lonMin, double *lonMax) const
+{
+    if (m_images.isEmpty())
+        return false;
+    double la0 = 91, la1 = -91, lo0 = 361, lo1 = -361;
+    for (const auto &img : m_images) {
+        la0 = std::min(la0, img->latMin());
+        la1 = std::max(la1, img->latMax());
+        lo0 = std::min(lo0, img->lonMin());
+        lo1 = std::max(lo1, img->lonMax());
+    }
+    if (latMin) *latMin = la0;
+    if (latMax) *latMax = la1;
+    if (lonMin) *lonMin = lo0;
+    if (lonMax) *lonMax = lo1;
+    return true;
 }
 
 // Anota en cada celda de 1° que toca la imagen \a index que hay que mirarla ahí.

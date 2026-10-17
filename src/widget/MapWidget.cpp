@@ -3,6 +3,7 @@
 #include "core/Logging.h"
 #include "dem/ElevationAnalysis.h"
 #include "dem/ElevationSources.h"
+#include "dem/GeoTiffElevation.h"
 #include "dem/HgtElevation.h"
 #include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
@@ -20,6 +21,7 @@
 #include "widget/MapView.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -104,6 +106,8 @@ public:
     // Elevacion del terreno (opcional): carpeta `.hgt` o base de datos. Puntero a
     // la interfaz para poder cambiar de origen en caliente. Nulo = sin elevacion.
     std::unique_ptr<IElevationSource> elevation;
+    QString elevationDesc;                  //!< resumen para el usuario (ver elevationDescription)
+    QStringList elevationWarn;              //!< problemas de la ultima carga
 
     // Persistencia automatica de entidades (opcional). Vacio = apagada. El timer
     // agrupa las rafagas de cambios; suppressAutosave evita guardar durante la
@@ -479,6 +483,49 @@ public:
     }
 };
 
+// Instala \a path como origen de elevacion (vacia = quita) y deja en \a d una
+// descripcion para el usuario y los problemas encontrados. Una carpeta sin `.hgt`
+// ni GeoTIFF, o una BD que no existe, no es un origen utilizable: se avisa en vez
+// de quedarse en silencio con una elevacion que siempre da «sin dato».
+static void instalarElevacion(std::unique_ptr<IElevationSource> &elevation, QString &desc,
+                              QStringList &warn, const QString &path)
+{
+    elevation.reset();
+    desc.clear();
+    warn.clear();
+    if (path.isEmpty())
+        return;
+
+    QString avisos;
+    elevation = openElevationSource(path, &avisos);
+    if (!avisos.isEmpty())
+        warn = avisos.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+
+    const QFileInfo info(path);
+    if (const auto *tif = dynamic_cast<const GeoTiffElevation *>(elevation.get())) {
+        double la0, la1, lo0, lo1;
+        if (tif->extent(&la0, &la1, &lo0, &lo1))
+            desc = QObject::tr("%1 GeoTIFF, lat %2..%3, lon %4..%5")
+                                   .arg(tif->imageCount())
+                                   .arg(la0, 0, 'f', 1).arg(la1, 0, 'f', 1)
+                                   .arg(lo0, 0, 'f', 1).arg(lo1, 0, 'f', 1);
+    } else if (info.isDir()) {
+        const int hgt = int(QDir(path).entryList({ QStringLiteral("*.hgt"), QStringLiteral("*.HGT") },
+                                                 QDir::Files).size());
+        if (hgt > 0)
+            desc = QObject::tr("%1 ficheros .hgt").arg(hgt);
+        else
+            warn << QObject::tr("La carpeta %1 no tiene ficheros .hgt ni GeoTIFF (.tif)")
+                                    .arg(QDir::toNativeSeparators(path));
+    } else if (info.isFile()) {
+        desc = QObject::tr("base de datos %1").arg(info.fileName());
+    } else {
+        warn << QObject::tr("No existe %1").arg(QDir::toNativeSeparators(path));
+    }
+    if (desc.isEmpty())
+        elevation.reset();           // sin datos utilizables: que no parezca que hay DEM
+}
+
 // Construye el widget completo desde la configuracion: carga los datasets del
 // datasets.json, arranca el TileService (con su hilo de carga), crea la MapView y
 // reemite hacia el exterior las senales utiles del view, del servicio y de los
@@ -581,15 +628,10 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     // Origen de elevacion: la base de datos tiene prioridad sobre la carpeta. El
     // formato lo da la ruta (SQLite, carpeta de .hgt o GeoTIFF; ver
     // openElevationSource), asi que ambos campos admiten cualquiera de ellos.
-    {
-        QString avisoElev;
-        if (!cfg.elevationDbFile.isEmpty())
-            d->elevation = openElevationSource(cfg.elevationDbFile, &avisoElev);
-        else if (!cfg.elevationDir.isEmpty())
-            d->elevation = openElevationSource(cfg.elevationDir, &avisoElev);
-        if (!avisoElev.isEmpty())
-            qCWarning(lcMapaRender) << avisoElev;
-    }
+    instalarElevacion(d->elevation, d->elevationDesc, d->elevationWarn,
+                      !cfg.elevationDbFile.isEmpty() ? cfg.elevationDbFile : cfg.elevationDir);
+    for (const QString &aviso : d->elevationWarn)
+        qCWarning(lcMapaRender) << aviso;
 
     if (!cfg.initialLayerId.isEmpty())
         d->service.setActiveDataset(cfg.initialLayerId);
@@ -2144,9 +2186,8 @@ Viewshed MapWidget::viewshed(const QGeoCoordinate &origin,
 // quita elevacion).
 void MapWidget::setElevationDir(const QString &dir)
 {
-    QString aviso;
-    d->elevation = openElevationSource(dir, &aviso);
-    if (!aviso.isEmpty())
+    instalarElevacion(d->elevation, d->elevationDesc, d->elevationWarn, dir);
+    for (const QString &aviso : d->elevationWarn)
         qCWarning(lcMapaRender) << aviso;
 }
 
@@ -2154,10 +2195,21 @@ void MapWidget::setElevationDir(const QString &dir)
 // GeoTIFF (vacia = quita).
 void MapWidget::setElevationDb(const QString &dbFile)
 {
-    QString aviso;
-    d->elevation = openElevationSource(dbFile, &aviso);
-    if (!aviso.isEmpty())
+    instalarElevacion(d->elevation, d->elevationDesc, d->elevationWarn, dbFile);
+    for (const QString &aviso : d->elevationWarn)
         qCWarning(lcMapaRender) << aviso;
+}
+
+// Resumen para el usuario de la elevacion cargada (vacio si no hay ninguna util).
+QString MapWidget::elevationDescription() const
+{
+    return d->elevationDesc;
+}
+
+// Problemas de la ultima carga de elevacion.
+QStringList MapWidget::elevationWarnings() const
+{
+    return d->elevationWarn;
 }
 
 // Herramienta activa (arrastrar, medir, dibujar, editar...).

@@ -555,6 +555,27 @@ void TstMapWidget::geotiffElevationThroughTheWidget()
     w.setElevationDir(m_dir.filePath(QStringLiteral("dems")));
     QVERIFY(std::fabs(w.elevationAt(QGeoCoordinate(20.495, -77.495)) - 972.0) < 1.5);
 
+    // La libreria dice QUE cargo, y por que no si no cargo nada: la demo lo muestra.
+    QVERIFY2(w.elevationDescription().contains(QStringLiteral("1 GeoTIFF")),
+             qPrintable(w.elevationDescription()));
+    QVERIFY(w.elevationWarnings().isEmpty());
+    QFile rota(m_dir.filePath(QStringLiteral("dems/roto.tif")));
+    QVERIFY(rota.open(QIODevice::WriteOnly));
+    rota.write("no soy un tiff");
+    rota.close();
+    w.setElevationDir(m_dir.filePath(QStringLiteral("dems")));      // uno bueno y uno roto
+    QVERIFY(w.elevationDescription().contains(QStringLiteral("1 GeoTIFF")));
+    QCOMPARE(w.elevationWarnings().size(), 1);
+    QVERIFY(w.elevationWarnings().first().contains(QStringLiteral("roto.tif")));
+    QFile::remove(m_dir.filePath(QStringLiteral("dems/roto.tif")));
+    QDir().mkpath(m_dir.filePath(QStringLiteral("vacia")));
+    w.setElevationDir(m_dir.filePath(QStringLiteral("vacia")));      // sin datos: no hay DEM
+    QVERIFY(w.elevationDescription().isEmpty());
+    QCOMPARE(w.elevationWarnings().size(), 1);
+    QVERIFY(std::isnan(w.elevationAt(QGeoCoordinate(20.495, -77.495))));
+    w.setElevationDir(m_dir.filePath(QStringLiteral("dems")));       // y vuelve a funcionar
+    QVERIFY(std::fabs(w.elevationAt(QGeoCoordinate(20.495, -77.495)) - 972.0) < 1.5);
+
     // Y el análisis de siempre, sobre ese DEM: perfil recto por encima del cerro.
     const ElevationProfile perfil = w.elevationProfile({ QGeoCoordinate(20.5, -77.8),
                                                          QGeoCoordinate(20.5, -77.2) });
