@@ -5773,3 +5773,13 @@ análisis calculado en el mapa (`m_pinsAnalisis`, que se apaga al limpiar o
 cambiar de análisis). Se redibuja al cambiar de pestaña y al mostrar u ocultar el
 panel. Las acciones del menú de Elevación abren la pestaña, así que los pines
 aparecen al usarlas. 24 tests en verde.
+
+## 142. Cerrar el perfil libera el pin A
+
+Con un análisis de Perfil, el pin A se quedaba en el mapa al cerrar la ventana del
+perfil y pasar a la pestaña Capas, hasta que se hacía algo en Elevación: el flag
+`m_pinsAnalisis` seguía activo y nada lo apagaba. El perfil solo deja su ventana
+(no hay capa en el mapa), así que al cerrarla (botón, Esc o la X; ahora el botón
+usa `reject` para que todo emita `finished`) el análisis termina, el flag se apaga
+y los pines se redibujan según la pestaña. Con Visión A→B, que deja su línea en el
+mapa, los pines se mantienen. 24 tests en verde.

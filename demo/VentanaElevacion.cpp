@@ -251,8 +251,17 @@ void Ventana::mostrarPerfil(const ElevationProfile &p, const QString &resumen,
         m_plot->yAxis->setLabel(tr("Altura (m)"));
         lay->addWidget(m_plot, 1);
         auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, m_perfilWin);
-        connect(bb, &QDialogButtonBox::rejected, m_perfilWin, &QDialog::hide);
+        connect(bb, &QDialogButtonBox::rejected, m_perfilWin, &QDialog::reject);
         lay->addWidget(bb);
+        // Al cerrar la ventana (botón, Esc o la X): un PERFIL no deja nada más en
+        // el mapa, así que su análisis termina y los pines vuelven a depender de
+        // la pestaña. La visión sí deja su línea, y con ella los pines.
+        connect(m_perfilWin, &QDialog::finished, this, [this] {
+            if (m_tipoAnalisis && m_tipoAnalisis->currentIndex() == 0) {
+                m_pinsAnalisis = false;
+                marcarPuntosActivos();
+            }
+        });
     }
     m_perfilInfo->setText(resumen);
     pintarPerfil(p, conVision, zA, zB, D, critD, bloqueado, maxInicial);
