@@ -38,6 +38,7 @@ private slots:
     void planarBands();
     void rejectsWhatItCannotRead();
     void largeTiledImage();
+    void sharedCacheStaysBounded();
     void folderOfTiles();
     void factoryPicksTheRightSource();
 
@@ -395,6 +396,36 @@ void TstGeoTiff::largeTiledImage()
     QVERIFY(std::isnan(img.sample(s.width, 0)));
     QVERIFY(std::isnan(img.sample(0, s.height)));
     QVERIFY(std::isnan(img.sample(-1, 0)));
+}
+
+// La caché de bloques es una para todo el proceso y respeta su límite: con un
+// presupuesto minúsculo (unos pocos bloques) las lecturas siguen saliendo exactas
+// aunque se expulsen y se descodifiquen una y otra vez, y varias imágenes a la vez
+// no suman presupuestos.
+void TstGeoTiff::sharedCacheStaysBounded()
+{
+    const qint64 previo = GeoTiffImage::cacheLimit();
+    QCOMPARE(previo, qint64(256) * 1024 * 1024);
+
+    TiffSpec s;
+    s.width = 600; s.height = 600; s.bps = 16; s.sampleFormat = 2;
+    s.tiled = true; s.tile = 64; s.compression = 8;
+    const QString a = tmp("cache_a"), b = tmp("cache_b");
+    QVERIFY(writeGeoTiff(a, s, [](int c, int r, int) { return c + r * 3 - 900; }));
+    QVERIFY(writeGeoTiff(b, s, [](int c, int r, int) { return c * 2 - r; }));
+    GeoTiffImage ia, ib;
+    QVERIFY(ia.open(a) && ib.open(b));
+
+    GeoTiffImage::setCacheLimit(40 * 1024);          // ~4 bloques de 64x64 (16 KiB c/u)
+    for (int k = 0; k < 600; ++k) {
+        const int c = (k * 97) % 600, r = (k * 211) % 600;
+        QCOMPARE(ia.sample(c, r), double(c + r * 3 - 900));
+        QCOMPARE(ib.sample(c, r), double(c * 2 - r));
+    }
+    GeoTiffImage::setCacheLimit(0);                              // sin caché: todo se vuelve a leer
+    QCOMPARE(ia.sample(321, 123), double(321 + 123 * 3 - 900));
+    GeoTiffImage::setCacheLimit(previo);
+    QCOMPARE(GeoTiffImage::cacheLimit(), previo);
 }
 
 // Una carpeta con varias zonas contiguas: cada coordenada se resuelve en su

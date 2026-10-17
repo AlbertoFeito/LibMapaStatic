@@ -10,6 +10,7 @@
 #include <QtEndian>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -314,6 +315,54 @@ void fromMercator(double x, double y, double *lon, double *lat)
     *lat = std::atan(std::sinh(y / kMercatorR)) * 180.0 / kPi;
 }
 
+// Caché de bloques COMPARTIDA por todas las imágenes del proceso. Un solo
+// presupuesto de memoria da igual cuántos GeoTIFF haya abiertos: una carpeta con
+// 40 cuadros no multiplica el uso por 40. Un único cerrojo la protege (y, de
+// paso, serializa la lectura de ficheros, que de todos modos va a disco).
+struct SharedCache
+{
+    QMutex mutex;
+    QHash<quint64, Block> map;        // clave: (id de imagen << 32) | índice de bloque
+    QVector<quint64> lru;             // más reciente al final
+    qint64 bytes = 0;
+    qint64 limit = qint64(256) * 1024 * 1024;
+};
+
+// La caché única del proceso (creada la primera vez que se usa).
+SharedCache &sharedCache()
+{
+    static SharedCache cache;
+    return cache;
+}
+
+// Peso aproximado de un bloque en memoria.
+qint64 blockBytes(const Block &b)
+{
+    return qint64(b.v.size()) * 4 + 64;
+}
+
+// Expulsa los bloques menos recientes hasta que quepan \a room bytes más sin
+// pasar del límite. Requiere el cerrojo tomado.
+void evictFor(SharedCache &c, qint64 room)
+{
+    while (c.bytes + room > c.limit && !c.lru.isEmpty()) {
+        const quint64 old = c.lru.first();
+        c.lru.removeFirst();
+        const auto it = c.map.find(old);
+        if (it != c.map.end()) {
+            c.bytes -= blockBytes(it.value());
+            c.map.erase(it);
+        }
+    }
+}
+
+// Id nuevo, único en el proceso, para cada imagen abierta.
+quint32 nextImageId()
+{
+    static std::atomic<quint32> next{1};
+    return next++;
+}
+
 } // namespace
 
 // Estado interno de la imagen: cabecera leída, georreferencia y caché de bloques.
@@ -338,10 +387,9 @@ struct GeoTiffImage::Impl
     bool hasNoData = false;
     double noData = 0.0;
 
-    mutable QMutex mutex;
-    mutable QHash<quint64, Block> cache;
-    mutable QVector<quint64> lru;        // más reciente al final
-    mutable qint64 cacheBytes = 0;
+    const quint32 id = nextImageId();    // identifica sus bloques en la caché compartida
+
+    ~Impl();
 
     // Lee el fichero entero hasta el directorio y rellena todo lo anterior.
     bool load(const QString &file, QString *error);
@@ -477,15 +525,15 @@ bool GeoTiffImage::Impl::parseGeo(QFile &f, const QMap<quint16, Entry> &entries,
         const QVector<double> k = entryDoubles(f, entries.value(TagGeoKeys));
         const int nKeys = k.size() >= 4 ? int(k[3]) : 0;
         for (int i = 0; i < nKeys && 4 + (i + 1) * 4 <= k.size(); ++i) {
-            const int id = int(k[4 + i * 4]);
+            const int keyId = int(k[4 + i * 4]);
             const int loc = int(k[4 + i * 4 + 1]);
             const int val = int(k[4 + i * 4 + 3]);
             if (loc != 0)
                 continue;                   // el valor vive en otra etiqueta: no hace falta
-            if (id == 1024) modelType = val;
-            else if (id == 1025) pixelIsPoint = val == 2;
-            else if (id == 2048) geographicEpsg = val;
-            else if (id == 3072) projectedEpsg = val;
+            if (keyId == 1024) modelType = val;
+            else if (keyId == 1025) pixelIsPoint = val == 2;
+            else if (keyId == 2048) geographicEpsg = val;
+            else if (keyId == 3072) projectedEpsg = val;
         }
     }
 
@@ -792,34 +840,41 @@ Block GeoTiffImage::Impl::decodeBlock(int index) const
     return out;
 }
 
-// Bloque \a index de la caché; si falta lo descodifica y, si la caché pasa de
-// ~96 MiB, expulsa los menos recientes. Lo llama quien ya tiene el cerrojo.
+// Libera de la caché compartida los bloques de esta imagen al cerrarse.
+GeoTiffImage::Impl::~Impl()
+{
+    SharedCache &c = sharedCache();
+    QMutexLocker lock(&c.mutex);
+    for (auto it = c.map.begin(); it != c.map.end();) {
+        if (quint32(it.key() >> 32) == id) {
+            c.bytes -= blockBytes(it.value());
+            c.lru.removeAll(it.key());
+            it = c.map.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// Bloque \a index de la caché compartida; si falta lo descodifica y expulsa los
+// menos recientes si hace falta sitio. Lo llama quien ya tiene su cerrojo.
 const Block &GeoTiffImage::Impl::blockFor(int index) const
 {
-    const quint64 key = quint64(index);
-    auto it = cache.find(key);
-    if (it != cache.end()) {
-        if (lru.isEmpty() || lru.last() != key) {
-            lru.removeAll(key);
-            lru.append(key);
+    SharedCache &c = sharedCache();
+    const quint64 key = (quint64(id) << 32) | quint32(index);
+    auto it = c.map.find(key);
+    if (it != c.map.end()) {
+        if (c.lru.isEmpty() || c.lru.last() != key) {
+            c.lru.removeAll(key);
+            c.lru.append(key);
         }
         return it.value();
     }
     Block b = decodeBlock(index);
-    const qint64 bytes = qint64(b.v.size()) * 4 + 64;
-    const qint64 budget = qint64(96) * 1024 * 1024;
-    while (cacheBytes + bytes > budget && !lru.isEmpty()) {
-        const quint64 old = lru.first();
-        lru.removeFirst();
-        const auto oit = cache.find(old);
-        if (oit != cache.end()) {
-            cacheBytes -= qint64(oit.value().v.size()) * 4 + 64;
-            cache.erase(oit);
-        }
-    }
-    cacheBytes += bytes;
-    lru.append(key);
-    return *cache.insert(key, b);
+    evictFor(c, blockBytes(b));
+    c.bytes += blockBytes(b);
+    c.lru.append(key);
+    return *c.map.insert(key, b);
 }
 
 // Valor de la muestra (col,row,band) o NaN. Requiere el cerrojo tomado.
@@ -874,6 +929,23 @@ bool GeoTiffImage::Impl::locateXY(double x, double y, double *col, double *row) 
 GeoTiffImage::GeoTiffImage() : d(new Impl) {}
 GeoTiffImage::~GeoTiffImage() = default;
 
+// Límite de la caché compartida (todas las imágenes); al bajarlo se expulsa lo que sobra.
+void GeoTiffImage::setCacheLimit(qint64 bytes)
+{
+    SharedCache &c = sharedCache();
+    QMutexLocker lock(&c.mutex);
+    c.limit = std::max<qint64>(bytes, 0);
+    evictFor(c, 0);
+}
+
+// Límite actual de la caché compartida.
+qint64 GeoTiffImage::cacheLimit()
+{
+    SharedCache &c = sharedCache();
+    QMutexLocker lock(&c.mutex);
+    return c.limit;
+}
+
 // Abre el fichero y lee su cabecera. Deja el motivo en \a error si falla.
 bool GeoTiffImage::open(const QString &path, QString *error)
 {
@@ -906,7 +978,7 @@ double GeoTiffImage::sample(int col, int row, int band) const
 {
     if (!d->open)
         return std::numeric_limits<double>::quiet_NaN();
-    QMutexLocker lock(&d->mutex);
+    QMutexLocker lock(&sharedCache().mutex);
     return d->sampleLocked(col, row, band);
 }
 
@@ -944,7 +1016,7 @@ double GeoTiffImage::interpolate(double lon, double lat, int band) const
     const double tx = u - c0;
     const double ty = v - r0;
 
-    QMutexLocker lock(&d->mutex);
+    QMutexLocker lock(&sharedCache().mutex);
     const double v00 = d->sampleLocked(c0, r0, band);
     const double v01 = d->sampleLocked(c1, r0, band);
     const double v10 = d->sampleLocked(c0, r1, band);

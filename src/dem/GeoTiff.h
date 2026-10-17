@@ -2,6 +2,7 @@
 #define LIBMAPA_DEM_GEOTIFF_H_
 
 #include <QString>
+#include <QtGlobal>
 
 #include <memory>
 
@@ -32,7 +33,9 @@ namespace libmapa {
  *
  * No carga la imagen entera: descodifica bajo demanda los bloques que se
  * consultan y guarda los últimos en una caché acotada, así que un DEM de varios
- * GB no ocupa memoria. Es seguro para varios hilos.
+ * GB no ocupa memoria. La caché es UNA para todas las imágenes del proceso (256
+ * MiB por defecto, ver \c setCacheLimit): abrir una carpeta con decenas de
+ * cuadros no multiplica el consumo. Es seguro para varios hilos.
  */
 class GeoTiffImage
 {
@@ -89,6 +92,12 @@ public:
      * false si la coordenada queda fuera de la imagen.
      */
     bool locate(double lon, double lat, double *col, double *row) const;
+
+    //! Límite, en bytes, de la caché de bloques compartida por todas las imágenes
+    //! (por defecto 256 MiB). Al bajarlo se expulsa lo que sobre. Los bloques
+    //! descodificados ocupan 4 bytes por muestra (un bloque de 1024x1024 son 4 MiB).
+    static void setCacheLimit(qint64 bytes);
+    static qint64 cacheLimit();
 
     //! Cota (o valor de la banda \a band) interpolada bilinealmente en la
     //! coordenada; NaN si queda fuera o algún vecino es «sin dato».

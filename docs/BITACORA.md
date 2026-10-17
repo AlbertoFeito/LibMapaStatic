@@ -5817,8 +5817,7 @@ así que bastaba una fuente nueva:
   de 8/16/32 bits y coma flotante de 32/64. Georreferencia por escala+enlace o
   `ModelTransformation` sin rotación, PixelIsArea/PixelIsPoint, grados (cualquier
   datum) o Web Mercator, y la etiqueta `GDAL_NODATA`. Cualquier otro CRS se rechaza
-  diciendo cuál es. Lee **bajo demanda** los bloques que se consultan (caché de
-  ~96 MiB, con cerrojo), así que un DEM de varios GB no ocupa memoria. Deflate usa
+  diciendo cuál es. Lee **bajo demanda** los bloques que se consultan (caché con cerrojo, ver §144), así que un DEM de varios GB no ocupa memoria. Deflate usa
   `qUncompress` (Qt ya trae zlib): sin dependencias nuevas.
 - `GeoTiffElevation`: un fichero o una carpeta de ellos, con índice por celdas de 1°
   y atajo a la última imagen que respondió. Bilineal; NaN fuera o junto a un hueco.
@@ -5849,3 +5848,20 @@ sin JPEG/WebP dentro del TIFF; las ortofotos GeoTIFF **no** se dibujan como capa
 (haría falta reproyectarlas a teselas: queda como herramienta futura, el lector ya
 lee varias bandas); un `typicalFill` de 1.0 por defecto en MBTiles con huecos grandes
 se ajusta a mano en el JSON.
+
+## 144. Una sola caché de bloques para todos los GeoTIFF
+
+Al probar con una carpeta real de Cuba (42 cuadros de Copernicus de 3600x3600) se vio
+un fallo de diseño propio del §143: cada `GeoTiffImage` tenía SU presupuesto de ~96
+MiB, así que un análisis grande (un viewshed que toca decenas de cuadros) podía
+llegar a ocupar varios GB. Ahora la caché es **una para todo el proceso**
+(`SharedCache`, 256 MiB por defecto, `GeoTiffImage::setCacheLimit`), con un solo
+cerrojo y expulsión por antigüedad; al cerrar una imagen se liberan sus bloques.
+Un test (`sharedCacheStaysBounded`) fuerza un presupuesto de unos pocos bloques, y
+otro a cero, con dos imágenes a la vez: las lecturas siguen saliendo exactas aunque
+se descodifiquen una y otra vez. De paso, un aviso de `-Wshadow` y una comprobación
+vacía en un test. 26 tests en verde.
+
+Para el usuario: los cuadros de Copernicus 30 m miden 25-50 MB comprimidos y un
+bloque descodificado de 1024x1024 ocupa 4 MiB, así que 256 MiB son ~64 bloques en
+memoria a la vez, con independencia de cuántos ficheros haya en la carpeta.
