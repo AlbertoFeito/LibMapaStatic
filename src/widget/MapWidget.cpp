@@ -2,6 +2,7 @@
 
 #include "core/Logging.h"
 #include "dem/ElevationAnalysis.h"
+#include "dem/ElevationSources.h"
 #include "dem/HgtElevation.h"
 #include "dem/SqliteElevation.h"
 #include "geo/TileMatrix.h"
@@ -577,13 +578,17 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     }
     d->service.setDebounceMs(cfg.debounceMs);
 
-    // Origen de elevacion: la base de datos tiene prioridad sobre la carpeta.
-    if (!cfg.elevationDbFile.isEmpty())
-        d->elevation = std::make_unique<SqliteElevation>(cfg.elevationDbFile);
-    else if (!cfg.elevationDir.isEmpty()) {
-        auto hgt = std::make_unique<HgtElevation>();
-        hgt->setDirectory(cfg.elevationDir);
-        d->elevation = std::move(hgt);
+    // Origen de elevacion: la base de datos tiene prioridad sobre la carpeta. El
+    // formato lo da la ruta (SQLite, carpeta de .hgt o GeoTIFF; ver
+    // openElevationSource), asi que ambos campos admiten cualquiera de ellos.
+    {
+        QString avisoElev;
+        if (!cfg.elevationDbFile.isEmpty())
+            d->elevation = openElevationSource(cfg.elevationDbFile, &avisoElev);
+        else if (!cfg.elevationDir.isEmpty())
+            d->elevation = openElevationSource(cfg.elevationDir, &avisoElev);
+        if (!avisoElev.isEmpty())
+            qCWarning(lcMapaRender) << avisoElev;
     }
 
     if (!cfg.initialLayerId.isEmpty())
@@ -2135,26 +2140,24 @@ Viewshed MapWidget::viewshed(const QGeoCoordinate &origin,
     return libmapa::computeViewshed(*d->elevation, origin, params, progress);
 }
 
-// Cambia en caliente el origen a una CARPETA de `.hgt` (vacia = quita elevacion).
+// Cambia en caliente el origen a una CARPETA de `.hgt` o de GeoTIFF (vacia =
+// quita elevacion).
 void MapWidget::setElevationDir(const QString &dir)
 {
-    if (dir.isEmpty()) {
-        d->elevation.reset();
-        return;
-    }
-    auto hgt = std::make_unique<HgtElevation>();
-    hgt->setDirectory(dir);
-    d->elevation = std::move(hgt);
+    QString aviso;
+    d->elevation = openElevationSource(dir, &aviso);
+    if (!aviso.isEmpty())
+        qCWarning(lcMapaRender) << aviso;
 }
 
-// Cambia en caliente el origen a una BASE DE DATOS `.sqlitedb` (vacia = quita).
+// Cambia en caliente el origen a una BASE DE DATOS `.sqlitedb` o a un fichero
+// GeoTIFF (vacia = quita).
 void MapWidget::setElevationDb(const QString &dbFile)
 {
-    if (dbFile.isEmpty()) {
-        d->elevation.reset();
-        return;
-    }
-    d->elevation = std::make_unique<SqliteElevation>(dbFile);
+    QString aviso;
+    d->elevation = openElevationSource(dbFile, &aviso);
+    if (!aviso.isEmpty())
+        qCWarning(lcMapaRender) << aviso;
 }
 
 // Herramienta activa (arrastrar, medir, dibujar, editar...).

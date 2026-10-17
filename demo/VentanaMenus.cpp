@@ -150,9 +150,9 @@ void Ventana::construirMenuYBarra()
     m_btnDem = new QPushButton(tr("DEM..."), this);
     {
         QMenu *md = new QMenu(m_btnDem);
-        connect(md->addAction(tr("Carpeta de .hgt...")), &QAction::triggered,
+        connect(md->addAction(tr("Carpeta de .hgt o GeoTIFF...")), &QAction::triggered,
                 this, &Ventana::alElegirDemCarpeta);
-        connect(md->addAction(tr("Base de datos .sqlitedb...")), &QAction::triggered,
+        connect(md->addAction(tr("Base de datos .sqlitedb o GeoTIFF...")), &QAction::triggered,
                 this, &Ventana::alElegirDemDb);
         m_btnDem->setMenu(md);
     }

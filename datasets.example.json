@@ -11,7 +11,8 @@
         "  geo_to_tiles --in Cuba.geo --out Cuba_Vector.sqlitedb \\",
         "               --id costas --name 'Costas de Cuba' --minzoom 4 --maxzoom 12",
         "Esa capa NO usa columna 's' (hasSColumn:false); no le pongas 'sValue'.",
-        "Las rutas relativas se resuelven respecto a la ubicacion de este fichero."
+        "Las rutas relativas se resuelven respecto a la ubicacion de este fichero.",
+        "Un .mbtiles ráster vale con id y filePath: los zooms, el lado de tesela y el nombre se leen del propio fichero (lo que escribas aqui manda)."
     ],
     "version": 1,
     "datasets": [

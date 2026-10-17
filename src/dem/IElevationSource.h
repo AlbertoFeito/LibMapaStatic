@@ -10,8 +10,8 @@ namespace libmapa {
  *
  * Igual que \c ITileSource hace con las teselas, esta interfaz deja que el resto
  * de la libreria (y las apps) pidan la cota de una coordenada sin saber si viene
- * de ficheros `.hgt` sueltos (\c HgtElevation) o de una base de datos SQLite
- * empaquetable (\c SqliteElevation). El contrato es siempre el mismo: metros, o
+ * de ficheros `.hgt` sueltos (\c HgtElevation), de una base de datos SQLite
+ * empaquetable (\c SqliteElevation) o de GeoTIFF (\c GeoTiffElevation). El contrato es siempre el mismo: metros, o
  * NaN si no hay dato.
  */
 class IElevationSource

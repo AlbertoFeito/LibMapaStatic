@@ -1,6 +1,7 @@
 #include "tiles/TileService.h"
 
 #include "core/Logging.h"
+#include "tiles/MBTiles.h"
 
 #include <QDir>
 #include <QFile>
@@ -137,6 +138,14 @@ QVector<TileDataset> TileService::loadDatasets(const QString &jsonPath,
         // el fichero se pueda mover junto a los datos.
         if (!d.filePath.isEmpty() && QFileInfo(d.filePath).isRelative())
             d.filePath = baseDir.absoluteFilePath(d.filePath);
+        // MBTiles: lo que el JSON no diga (zooms, lado de tesela, nombre) se lee
+        // del propio fichero. Si no se puede, se avisa y se sigue: la capa se
+        // queda con los valores por defecto y PackageCheck dara el detalle.
+        if (d.mbtiles) {
+            QString aviso;
+            if (!MBTiles::describe(d, v.toObject(), &aviso))
+                qCWarning(lcMapaTiles) << aviso;
+        }
         if (d.isValid())
             out.append(d);
     }

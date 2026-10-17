@@ -1,5 +1,7 @@
 #include "io/DataPackage.h"
 
+#include "tiles/MBTiles.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -121,6 +123,11 @@ std::optional<DataPackage> DataPackage::load(const QString &path, QString *error
     for (const QJsonValue &v : root.value(QStringLiteral("datasets")).toArray()) {
         TileDataset d = TileDataset::fromJson(v.toObject());
         d.filePath = resolve(base, d.filePath);
+        if (d.mbtiles && QFileInfo::exists(d.filePath)) {      // zooms y lado desde el propio fichero
+            QString aviso;
+            if (!MBTiles::describe(d, v.toObject(), &aviso))
+                p.warnings << aviso;
+        }
         if (!d.isValid()) {
             p.warnings << QStringLiteral("Dataset \"%1\" incompleto: se ignora").arg(d.id);
             continue;
@@ -193,7 +200,9 @@ QStringList DataPackage::files() const
     anadir(elevationFile);
     if (!elevationDir.isEmpty())
         for (const QFileInfo &f : QDir(elevationDir).entryInfoList(
-                 {QStringLiteral("*.hgt"), QStringLiteral("*.HGT")}, QDir::Files))
+                 {QStringLiteral("*.hgt"), QStringLiteral("*.HGT"),
+                  QStringLiteral("*.tif"), QStringLiteral("*.TIF"),
+                  QStringLiteral("*.tiff"), QStringLiteral("*.TIFF")}, QDir::Files))
             anadir(f.absoluteFilePath());
     for (const Overlay &ov : overlays)
         anadir(ov.file);

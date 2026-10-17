@@ -51,12 +51,14 @@ struct MapConfig
      */
     QString datasetsFile;
 
-    //! Carpeta con ficheros de elevacion SRTM `.hgt` (nombres tipo `N19W077.hgt`).
-    //! Vacia = sin elevacion por carpeta. Opcional.
+    //! Carpeta con ficheros de elevacion SRTM `.hgt` (nombres tipo `N19W077.hgt`) o,
+    //! si no hay `.hgt`, con GeoTIFF (`.tif`/`.tiff`). Vacia = sin elevacion por
+    //! carpeta. Opcional.
     QString elevationDir;
 
-    //! Base de datos de elevacion (`.sqlitedb` generada por `dem_to_db`). Si viene,
-    //! TIENE PRIORIDAD sobre elevationDir. Vacia = no se usa. Opcional.
+    //! Base de datos de elevacion (`.sqlitedb` generada por `dem_to_db`) o un
+    //! fichero GeoTIFF (`.tif`/`.tiff`, en grados o Web Mercator). Si viene, TIENE
+    //! PRIORIDAD sobre elevationDir. Vacia = no se usa. Opcional.
     QString elevationDbFile;
 
     //! Base de datos de ENTIDADES (puntos/lineas/poligonos dibujados). Si viene,

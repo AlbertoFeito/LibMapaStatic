@@ -1,3 +1,4 @@
+#include "GeoTiffWriter.h"
 #include "SyntheticTileDb.h"
 
 #include "libmapa/MapWidget.h"
@@ -33,10 +34,16 @@ static QMouseEvent mouseEvent(QEvent::Type tipo, const QPoint &pos,
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QBuffer>
+#include <QDir>
+#include <QImage>
 #include <QSet>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QVariant>
 #include <QtTest>
 
 using namespace libmapa;
@@ -57,6 +64,11 @@ private slots:
 
     //! El requisito central: alternar OSM <-> Satelital en caliente.
     void switchesBaseLayerInPlace();
+
+    //! Formatos de entrada estandar: un MBTiles se dibuja como una capa mas, y la
+    //! elevacion puede venir de un GeoTIFF (fichero o carpeta).
+    void mbtilesLayerRendersInTheWidget();
+    void geotiffElevationThroughTheWidget();
 
     void navigationKeepsCenter();
     void zoomIsClampedToRecommendedRange();
@@ -416,6 +428,138 @@ void TstMapWidget::switchesBaseLayerInPlace()
     // Una capa inexistente se rechaza sin romper el estado.
     QVERIFY(!w.setBaseLayerId(QStringLiteral("relieve")));
     QCOMPARE(w.baseLayerId(), QStringLiteral("satelital"));
+}
+
+// Un MBTiles listado en datasets.json con solo "id" y "filePath" se dibuja como
+// cualquier otra capa base: el color del centro del mapa es el de la tesela que
+// geograficamente lo contiene (x,y en XYZ), lo que comprueba el volteo TMS de
+// extremo a extremo. Y las capas de siempre siguen funcionando a su lado.
+void TstMapWidget::mbtilesLayerRendersInTheWidget()
+{
+    const QString mb = m_dir.filePath(QStringLiteral("e2e.mbtiles"));
+    const QString conn = QStringLiteral("mk_e2e");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+        db.setDatabaseName(mb);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, "
+                                      "tile_row INTEGER, tile_data BLOB)")));
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE metadata (name TEXT, value TEXT)")));
+        QVERIFY(q.exec(QStringLiteral("INSERT INTO metadata VALUES ('name','Prueba MBTiles'), "
+                                      "('format','png'), ('minzoom','3'), ('maxzoom','4')")));
+        db.transaction();
+        for (int z = 3; z <= 4; ++z)
+            for (int x = 0; x < (1 << z); ++x)
+                for (int y = 0; y < (1 << z); ++y) {
+                    QImage img(256, 256, QImage::Format_RGB32);
+                    img.fill(QColor(x * 16, y * 16, 100));       // el color dice la tesela (XYZ)
+                    QByteArray png;
+                    QBuffer buf(&png);
+                    buf.open(QIODevice::WriteOnly);
+                    img.save(&buf, "PNG");
+                    q.prepare(QStringLiteral("INSERT INTO tiles VALUES (:z, :x, :y, :d)"));
+                    q.bindValue(QStringLiteral(":z"), z);
+                    q.bindValue(QStringLiteral(":x"), x);
+                    q.bindValue(QStringLiteral(":y"), (1 << z) - 1 - y);          // TMS
+                    q.bindValue(QStringLiteral(":d"), png);
+                    QVERIFY(q.exec());
+                }
+        db.commit();
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(conn);
+
+    // datasets.json: las dos bases de siempre y el MBTiles con lo minimo.
+    QJsonObject root = QJsonDocument::fromJson([&] {
+        QFile f(m_jsonPath);
+        f.open(QIODevice::ReadOnly);
+        return f.readAll();
+    }()).object();
+    QJsonArray arr = root.value(QStringLiteral("datasets")).toArray();
+    arr.append(QJsonObject{ { QStringLiteral("id"), QStringLiteral("mb") },
+                            { QStringLiteral("filePath"), mb } });
+    root[QStringLiteral("datasets")] = arr;
+    const QString json = m_dir.filePath(QStringLiteral("con_mbtiles.json"));
+    QFile out(json);
+    QVERIFY(out.open(QIODevice::WriteOnly));
+    out.write(QJsonDocument(root).toJson());
+    out.close();
+
+    MapConfig cfg = baseConfig(json);
+    cfg.initialLayerId = QStringLiteral("mb");
+    cfg.initialZoom = 4;
+    cfg.initialCenter = QGeoCoordinate(40.0, -100.0);
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+    w.resize(600, 400);
+    QCOMPARE(w.baseLayerId(), QStringLiteral("mb"));
+    QCOMPARE(w.availableBaseLayers().size(), 3);
+    QTRY_VERIFY_WITH_TIMEOUT(w.exactCoverage() > 0.99, 20000);
+
+    // Tesela XYZ que contiene el centro, calculada en el test con Mercator.
+    const double lat = 40.0, lon = -100.0;
+    const double pi = 3.14159265358979323846;
+    const int n = 1 << 4;
+    const int ex = int(std::floor((lon + 180.0) / 360.0 * n));
+    const int ey = int(std::floor((1.0 - std::log(std::tan(lat * pi / 180.0)
+                                  + 1.0 / std::cos(lat * pi / 180.0)) / pi) / 2.0 * n));
+    QCoreApplication::processEvents();
+    QTest::qWait(50);
+    const QImage img = w.grab().toImage();
+    const QColor centro = QColor(img.pixel(img.width() / 2, img.height() / 2));
+    QCOMPARE(centro.red(), ex * 16);
+    QCOMPARE(centro.green(), ey * 16);
+    QCOMPARE(centro.blue(), 100);
+
+    // Las capas de siempre siguen ahi y se alterna con ellas sin problema.
+    QVERIFY(w.setBaseLayerId(QStringLiteral("osm")));
+    QVERIFY(w.setBaseLayerId(QStringLiteral("mb")));
+}
+
+// La elevacion puede venir de un GeoTIFF suelto o de una carpeta de ellos, tanto
+// por la configuracion como en caliente; el resto de la API (cota, visibilidad)
+// funciona igual que con las bases de siempre.
+void TstMapWidget::geotiffElevationThroughTheWidget()
+{
+    // Un cerro cónico de 1° x 1° en (20..21 N, -78..-77 E): cota = 1000 - distancia al
+    // centro en grados * 4000, con 0.01° de píxel.
+    TiffSpec s;
+    s.width = 100; s.height = 100; s.bps = 16; s.sampleFormat = 2;
+    s.originX = -78.0; s.originY = 21.0; s.dx = 0.01; s.dy = 0.01;
+    s.tiled = true; s.tile = 32; s.compression = 8; s.predictor = 2;
+    const QString tif = m_dir.filePath(QStringLiteral("cerro.tif"));
+    QVERIFY(writeGeoTiff(tif, s, [](int c, int r, int) {
+        const double lon = -78.0 + (c + 0.5) * 0.01, lat = 21.0 - (r + 0.5) * 0.01;
+        const double d = std::sqrt((lon + 77.5) * (lon + 77.5) + (lat - 20.5) * (lat - 20.5));
+        return std::round(1000.0 - d * 4000.0);
+    }));
+
+    MapConfig cfg = baseConfig(m_jsonPath);
+    cfg.elevationDbFile = tif;                       // un .tif donde iría la BD
+    MapWidget w(cfg);
+    QVERIFY(w.isReady());
+    // El pico cae en la esquina de cuatro píxeles; se pide en el centro de uno de
+    // ellos, a 0.00707° del vértice: 1000 - 0.00707*4000 = 971.7.
+    const double cima = w.elevationAt(QGeoCoordinate(20.495, -77.495));
+    QVERIFY2(std::fabs(cima - 972.0) < 1.5, qPrintable(QString::number(cima)));
+    const double falda = w.elevationAt(QGeoCoordinate(20.5, -77.3));      // a 0.2° del centro
+    QVERIFY2(std::fabs(falda - 200.0) < 3.0, qPrintable(QString::number(falda)));
+    QVERIFY(std::isnan(w.elevationAt(QGeoCoordinate(25.0, -70.0))));      // fuera
+
+    // En caliente, con una carpeta de GeoTIFF.
+    QDir().mkpath(m_dir.filePath(QStringLiteral("dems")));
+    QVERIFY(QFile::copy(tif, m_dir.filePath(QStringLiteral("dems/z1.tif"))));
+    w.setElevationDb(QString());
+    QVERIFY(std::isnan(w.elevationAt(QGeoCoordinate(20.495, -77.495))));
+    w.setElevationDir(m_dir.filePath(QStringLiteral("dems")));
+    QVERIFY(std::fabs(w.elevationAt(QGeoCoordinate(20.495, -77.495)) - 972.0) < 1.5);
+
+    // Y el análisis de siempre, sobre ese DEM: perfil recto por encima del cerro.
+    const ElevationProfile perfil = w.elevationProfile({ QGeoCoordinate(20.5, -77.8),
+                                                         QGeoCoordinate(20.5, -77.2) });
+    QVERIFY(perfil.isValid());
+    QVERIFY(std::fabs(perfil.maxElevation - 1000.0) < 40.0);
 }
 
 void TstMapWidget::navigationKeepsCenter()

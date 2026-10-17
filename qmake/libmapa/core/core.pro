@@ -31,6 +31,7 @@ SOURCES += \
     $$ROOT/src/db/Schema.cpp \
     $$ROOT/src/db/VectorRepository.cpp \
     $$ROOT/src/tiles/TileDataset.cpp \
+    $$ROOT/src/tiles/MBTiles.cpp \
     $$ROOT/src/tiles/RMapsTileSource.cpp \
     $$ROOT/src/tiles/TileDatasetProbe.cpp \
     $$ROOT/src/tiles/TileCache.cpp \
@@ -45,6 +46,9 @@ SOURCES += \
     $$ROOT/src/dem/GridElevation.cpp \
     $$ROOT/src/dem/HgtElevation.cpp \
     $$ROOT/src/dem/SqliteElevation.cpp \
+    $$ROOT/src/dem/GeoTiff.cpp \
+    $$ROOT/src/dem/GeoTiffElevation.cpp \
+    $$ROOT/src/dem/ElevationSources.cpp \
     $$ROOT/src/dem/ElevationAnalysis.cpp \
     $$ROOT/src/dem/Contours.cpp
 

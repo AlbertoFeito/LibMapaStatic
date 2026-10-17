@@ -5783,3 +5783,69 @@ perfil y pasar a la pestaña Capas, hasta que se hacía algo en Elevación: el f
 usa `reject` para que todo emita `finished`) el análisis termina, el flag se apaga
 y los pines se redibujan según la pestaña. Con Visión A→B, que deja su línea en el
 mapa, los pines se mantienen. 24 tests en verde.
+
+## 143. Entradas estándar: GeoTIFF como elevación y MBTiles sin sondar
+
+Pedido: aceptar MBTiles y GeoTIFF como entrada **sin que cambie nada de lo que ya
+funciona**. Cada formato se enchufó en el punto de la arquitectura que ya estaba
+pensado para ello.
+
+**MBTiles (ya se leían: faltaba el atajo).** Antes de tocar nada se comprobó qué
+había: `RMapsTileSource` ya lee cualquier tabla cuyas columnas y esquema describa un
+`TileDataset`, y `TileDatasetProbe`/`probe_db` ya detectaban los MBTiles (§ anterior
+del README). Lo que faltaba era usarlos **sin pasar por la sonda**. Ahora
+`TileDataset::fromJson` parte de la disposición MBTiles (`zoom_level`,
+`tile_column`, `tile_row`, `tile_data`, TMS, sin `s`) cuando el `filePath` acaba en
+`.mbtiles` o hay `"format":"mbtiles"`, y `MBTiles::describe` (nuevo
+`src/tiles/MBTiles.{h,cpp}`) completa del propio fichero lo que el JSON no diga:
+zooms, lado de tesela (decodificando una tesela real), nombre y esquema. Se llama
+al cargar `datasets.json` (`TileService::loadDatasets`) y un paquete de datos
+(`DataPackage::load`). Lo escrito a mano manda sobre lo detectado; los vectoriales
+(`pbf`, o teselas gzip aunque el metadato diga png) se rechazan con un mensaje claro.
+Para las bases RMaps los valores por defecto de `fromJson` son los de siempre
+(un test lo fija), y un bloque generado por `probe_db` se carga idéntico (otro test
+compara campo a campo). Se intentó primero una rama de `probe_db` para `.mbtiles`;
+se **revirtió** porque sustituía su informe y su prueba de humo, que ya hacían bien
+ese trabajo.
+
+**GeoTIFF como elevación.** Hay una interfaz (`IElevationSource`) y el resto de la
+librería (perfil, visibilidad, viewshed, curvas, relieve) solo pide `elevationAt`,
+así que bastaba una fuente nueva:
+- `GeoTiffImage` (`src/dem/GeoTiff.{h,cpp}`): lector de TIFF **sin GDAL**. TIFF
+  clásico y BigTIFF, orden de bytes cualquiera, franjas o teselas, planos juntos o
+  separados, compresión ninguna/LZW/Deflate/PackBits con predictores 2 y 3, enteros
+  de 8/16/32 bits y coma flotante de 32/64. Georreferencia por escala+enlace o
+  `ModelTransformation` sin rotación, PixelIsArea/PixelIsPoint, grados (cualquier
+  datum) o Web Mercator, y la etiqueta `GDAL_NODATA`. Cualquier otro CRS se rechaza
+  diciendo cuál es. Lee **bajo demanda** los bloques que se consultan (caché de
+  ~96 MiB, con cerrojo), así que un DEM de varios GB no ocupa memoria. Deflate usa
+  `qUncompress` (Qt ya trae zlib): sin dependencias nuevas.
+- `GeoTiffElevation`: un fichero o una carpeta de ellos, con índice por celdas de 1°
+  y atajo a la última imagen que respondió. Bilineal; NaN fuera o junto a un hueco.
+- `openElevationSource(ruta)` (`ElevationSources.h`): elige por la ruta —`.tif` o
+  carpeta con `.tif` y sin `.hgt` → GeoTIFF; carpeta con `.hgt` → `HgtElevation`;
+  otro fichero → `SqliteElevation`— y es lo que usan ahora `MapWidget`
+  (configuración y `setElevationDb/Dir`) y `PackageCheck`. Los campos
+  `elevationDbFile`/`elevationDir` y `"elevation"` de un paquete aceptan, pues,
+  cualquier formato; `DataPackage::files()` incluye también los `.tif`. La demo
+  deja elegir `.tif` en sus diálogos de elevación.
+
+**Cómo se probó.** `tst_geotiff` (39 casos) fabrica GeoTIFF con todas las
+variantes (21 combinaciones de tipo, compresión, predictor, teselas, BigTIFF y
+orden de bytes; bandas; PixelIsPoint; Web Mercator; sin dato; rechazos; imagen de
+1500×1100; carpeta de zonas; fábrica) y, además, lee **seis ficheros reales de
+`tests/data/geotiff` escritos por tifffile+imagecodecs** (LZW, Deflate,
+predictores 2 y 3, BigTIFF, big-endian): así el lector no solo coincide con el
+escritor de los tests —que también es mío—, sino con lo que produce otra
+implementación. `tst_mbtiles` (9 casos) prueba el volteo TMS, `datasets.json`,
+paquetes, rechazos y compatibilidad. En `tst_mapwidget`, un MBTiles se dibuja de
+extremo a extremo (el color del centro es el de la tesela correcta) y un `.tif`
+alimenta `elevationAt` y `elevationProfile`, por configuración y en caliente.
+`probe_db` + `check_data` sobre un MBTiles real siguen dando su informe.
+**26 tests** en verde, sin avisos.
+
+**Límites conocidos.** Una sola banda y metros como unidad vertical; sin rotación;
+sin JPEG/WebP dentro del TIFF; las ortofotos GeoTIFF **no** se dibujan como capa base
+(haría falta reproyectarlas a teselas: queda como herramienta futura, el lector ya
+lee varias bandas); un `typicalFill` de 1.0 por defecto en MBTiles con huecos grandes
+se ajusta a mano en el JSON.

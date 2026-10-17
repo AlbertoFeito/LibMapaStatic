@@ -20,7 +20,8 @@ namespace libmapa {
  *
  * Implementaciones previstas:
  *   - RMapsTileSource : las dos .sqlitedb actuales (tabla 'tiles').
- *   - MBTilesSource   : formato estandar, si algun dia hace falta.
+ *   - MBTiles         : formato estandar; NO tiene fuente propia, se lee con
+ *                       RMapsTileSource y otra disposicion de columnas (ver MBTiles.h).
  *   - HttpTileSource  : servidor remoto.
  */
 class ITileSource

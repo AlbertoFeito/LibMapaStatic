@@ -1,6 +1,8 @@
 #include "io/PackageCheck.h"
 
 #include "db/SqliteConnectionPool.h"
+#include "dem/ElevationSources.h"
+#include "dem/GeoTiffElevation.h"
 #include "geo/TileMatrix.h"
 #include "io/DataPackage.h"
 #include "libmapa/GeoFile.h"
@@ -251,10 +253,24 @@ PackageCheck PackageCheck::run(const DataPackage &p, const Options &options)
     }
 
     // --- elevacion ------------------------------------------------------
+    // Comprueba un GeoTIFF (o una carpeta de ellos): que se abra y cuantas
+    // imagenes utiles tiene; lo que no se pueda leer, con su motivo.
+    auto revisarGeoTiff = [&r](const QString &ruta) {
+        GeoTiffElevation dem;
+        const bool ok = dem.setPath(ruta);
+        for (const QString &aviso : dem.warnings())
+            r.add(ok ? Severity::Warning : Severity::Error, QStringLiteral("elevation"), aviso);
+        if (ok)
+            r.add(Severity::Info, QStringLiteral("elevation"),
+                  QStringLiteral("%1 imagen(es) GeoTIFF").arg(dem.imageCount()));
+    };
     if (!p.elevationFile.isEmpty()) {
         if (!QFileInfo::exists(p.elevationFile)) {
             r.add(Severity::Error, QStringLiteral("elevation"),
                   QStringLiteral("No existe %1").arg(QDir::toNativeSeparators(p.elevationFile)));
+        } else if (isGeoTiffElevationPath(p.elevationFile)) {
+            r.totalBytes += sizeOf(p.elevationFile);
+            revisarGeoTiff(p.elevationFile);
         } else {
             r.totalBytes += sizeOf(p.elevationFile);
             QSqlDatabase db = SqliteConnectionPool::connectionFor(
@@ -276,6 +292,9 @@ PackageCheck PackageCheck::run(const DataPackage &p, const Options &options)
                           QStringLiteral("%1 tiles de 1x1 grado").arg(tiles));
             }
         }
+    } else if (!p.elevationDir.isEmpty() && isGeoTiffElevationPath(p.elevationDir)) {
+        r.totalBytes += sizeOf(p.elevationDir);
+        revisarGeoTiff(p.elevationDir);
     } else if (!p.elevationDir.isEmpty()) {
         const QStringList hgt = QDir(p.elevationDir).entryList(
             {QStringLiteral("*.hgt"), QStringLiteral("*.HGT")}, QDir::Files);

@@ -292,11 +292,12 @@ void Ventana::mostrarCota(const QGeoCoordinate &p)
         : QStringLiteral("  %1 m  ").arg(m, 0, 'f', 0));
 }
 
-// Elige una CARPETA de ficheros `.hgt` como origen de elevacion (en caliente).
+// Elige una CARPETA de ficheros `.hgt` o GeoTIFF como origen de elevacion (en
+// caliente); el formato lo reconoce la libreria por lo que haya dentro.
 void Ventana::alElegirDemCarpeta()
 {
     const QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Carpeta de ficheros de elevacion (.hgt)"));
+        this, tr("Carpeta de ficheros de elevacion (.hgt o GeoTIFF)"));
     if (dir.isEmpty())
         return;
     m_mapa->setElevationDir(dir);
@@ -304,12 +305,14 @@ void Ventana::alElegirDemCarpeta()
     statusBar()->showMessage(tr("Elevacion (carpeta): %1").arg(dir), 4000);
 }
 
-// Elige una BASE DE DATOS `.sqlitedb` de elevacion como origen (en caliente).
+// Elige una BASE DE DATOS `.sqlitedb` o un GeoTIFF de elevacion como origen (en
+// caliente).
 void Ventana::alElegirDemDb()
 {
     const QString file = QFileDialog::getOpenFileName(
-        this, tr("Base de datos de elevacion"), QString(),
-        tr("Base de datos de elevacion (*.sqlitedb *.db);;Todos (*)"));
+        this, tr("Base de datos o GeoTIFF de elevacion"), QString(),
+        tr("Elevacion (*.sqlitedb *.db *.tif *.tiff);;Base de datos (*.sqlitedb *.db);;"
+           "GeoTIFF (*.tif *.tiff);;Todos (*)"));
     if (file.isEmpty())
         return;
     m_mapa->setElevationDb(file);

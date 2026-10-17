@@ -1,5 +1,7 @@
 #include "tiles/TileDataset.h"
 
+#include "tiles/MBTiles.h"
+
 namespace libmapa {
 
 // Enum de esquema -> texto para datasets.json ("XYZ" / "TMS").
@@ -46,6 +48,8 @@ QJsonObject TileDataset::toJson() const
     o[QStringLiteral("colS")]        = colS;
     o[QStringLiteral("colImage")]    = colImage;
     o[QStringLiteral("hasSColumn")]  = hasSColumn;
+    if (mbtiles)
+        o[QStringLiteral("format")] = QStringLiteral("mbtiles");
     return o;
 }
 
@@ -57,24 +61,34 @@ TileDataset TileDataset::fromJson(const QJsonObject &o)
     d.id          = o.value(QStringLiteral("id")).toString();
     d.displayName = o.value(QStringLiteral("displayName")).toString();
     d.filePath    = o.value(QStringLiteral("filePath")).toString();
-    d.tableName   = o.value(QStringLiteral("tableName")).toString(QStringLiteral("tiles"));
-    d.zFactor     = o.value(QStringLiteral("zFactor")).toInt(1);
-    d.zOffset     = o.value(QStringLiteral("zOffset")).toInt(0);
+
+    // Un MBTiles (por "format" o por la extension) parte de su propia disposicion
+    // de columnas; lo que el JSON diga a mano manda sobre ella. Para una base
+    // RMaps los valores iniciales son los de siempre, asi que nada cambia.
+    if (o.value(QStringLiteral("format")).toString().compare(QLatin1String("mbtiles"),
+                                                             Qt::CaseInsensitive) == 0
+        || MBTiles::isMBTilesPath(d.filePath))
+        MBTiles::applyLayout(d);
+
+    d.tableName   = o.value(QStringLiteral("tableName")).toString(d.tableName);
+    d.zFactor     = o.value(QStringLiteral("zFactor")).toInt(d.zFactor);
+    d.zOffset     = o.value(QStringLiteral("zOffset")).toInt(d.zOffset);
     d.minZoom     = o.value(QStringLiteral("minZoom")).toInt(0);
     d.baseZoom    = o.value(QStringLiteral("baseZoom")).toInt(d.minZoom);
     d.maxZoom     = o.value(QStringLiteral("maxZoom")).toInt(17);
     d.recommendedMaxZoom =
         o.value(QStringLiteral("recommendedMaxZoom")).toInt(d.maxZoom);
     d.typicalFill = o.value(QStringLiteral("typicalFill")).toDouble(1.0);
-    d.scheme      = tileSchemeFromString(o.value(QStringLiteral("scheme")).toString());
+    if (o.contains(QStringLiteral("scheme")))
+        d.scheme  = tileSchemeFromString(o.value(QStringLiteral("scheme")).toString());
     d.sValue      = o.value(QStringLiteral("sValue")).toInt(0);
     d.tileSize    = o.value(QStringLiteral("tileSize")).toInt(256);
-    d.colZ        = o.value(QStringLiteral("colZ")).toString(QStringLiteral("z"));
-    d.colX        = o.value(QStringLiteral("colX")).toString(QStringLiteral("x"));
-    d.colY        = o.value(QStringLiteral("colY")).toString(QStringLiteral("y"));
-    d.colS        = o.value(QStringLiteral("colS")).toString(QStringLiteral("s"));
-    d.colImage    = o.value(QStringLiteral("colImage")).toString(QStringLiteral("image"));
-    d.hasSColumn  = o.value(QStringLiteral("hasSColumn")).toBool(true);
+    d.colZ        = o.value(QStringLiteral("colZ")).toString(d.colZ);
+    d.colX        = o.value(QStringLiteral("colX")).toString(d.colX);
+    d.colY        = o.value(QStringLiteral("colY")).toString(d.colY);
+    d.colS        = o.value(QStringLiteral("colS")).toString(d.colS);
+    d.colImage    = o.value(QStringLiteral("colImage")).toString(d.colImage);
+    d.hasSColumn  = o.value(QStringLiteral("hasSColumn")).toBool(d.hasSColumn);
     return d;
 }
 
