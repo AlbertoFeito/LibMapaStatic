@@ -192,10 +192,12 @@ public:
         m_mapa->removeFeatureLayer(kCapa);       // un fichero cada vez
         m_rutaActual = -1;
         m_mapa->addFeatureLayer(kCapa, QFileInfo(ruta).fileName(), kOrdenCapa);
+        m_mapa->setFeatureLayerTransient(kCapa);   // lo abierto no se guarda en la BD de entidades
         if (m_mapa->importVectorFile(ruta, kCapa, QFileInfo(ruta).fileName(), &error) < 0) {
             statusBar()->showMessage(tr("No se pudo abrir: %1").arg(error));
             return false;
         }
+        colorearRutas();
         m_ruta = ruta;
         setWindowTitle(tr("Visor de rutas - %1").arg(QFileInfo(ruta).fileName()));
         encuadrar();
@@ -214,6 +216,22 @@ public:
             .arg(QFileInfo(ruta).fileName()).arg(numEntidades()).arg(kmEnRutas(), 0, 'f', 2));
         seleccionarPrimeraRuta();     // que el perfil salga de entrada (luego se pincha otra)
         return true;
+    }
+
+    // Distingue a simple vista las rutas planificadas (azul, <rte>) de los tracks
+    // grabados (rojo, <trk>): el lector de GPX marca cada línea con gpx_kind.
+    void colorearRutas()
+    {
+        for (MapFeature f : m_mapa->featuresInLayer(kCapa)) {
+            const QString tipo = f.attributes.value(QStringLiteral("gpx_kind")).toString();
+            if (tipo == QLatin1String("rte"))
+                f.style.lineColor = QColor(0x15, 0x65, 0xc0);
+            else if (tipo == QLatin1String("trk"))
+                f.style.lineColor = QColor(0xd3, 0x2f, 0x2f);
+            else
+                continue;
+            m_mapa->updateFeature(f);
+        }
     }
 
     // Entidades de la capa abierta.

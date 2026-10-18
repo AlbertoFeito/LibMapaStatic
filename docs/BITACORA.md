@@ -6094,3 +6094,9 @@ de ~400 líneas y trae su README, su `.pro` y un modo `--comprobar` sin ventana.
   ejemplos siguientes:** una capa propia de la app que deba ser seleccionable va con un orden mayor
   que el de las capas del paquete. **Idea para más adelante:** un `"selectable": false` en las
   entradas de `overlays` de `mapa.json` para quien no quiera esas capas pinchables.
+- **Distinguir rutas y no ensuciar el paquete (misma sección 153):** un GPX con una ruta
+  planificada (`<rte>`, rectas entre puntos de paso) y un track grabado (`<trk>`, el recorrido con
+  horas) mostraba las dos líneas iguales y se leía como una sola ruta. Ahora la planificada va en azul
+  y el track en rojo (por el atributo `gpx_kind` que pone el lector). Y la capa del fichero se marca
+  como temporal (`setFeatureLayerTransient`): sin eso, un paquete con `"features"` (base de entidades con
+  guardado automático) guardaría ahí lo abierto en el visor.

@@ -14,6 +14,11 @@ recorridos**: senderismo, post-análisis de una misión, revisión de un track d
 | Reproducir un GPX con horas (play, pausa, ir a una hora, velocidad) | `TrackPlayer` |
 | Exportar la vista a PDF o imagen, con título y atribución | `exportView` |
 
+Un GPX puede traer **rutas planificadas** (`<rte>`, líneas rectas entre puntos de paso) y
+**tracks grabados** (`<trk>`, el recorrido real con horas): el visor pinta las primeras en
+**azul** y los segundos en **rojo**. Las capas del paquete (provincias, curvas de nivel) no
+le quitan la selección a la ruta. Lo abierto no se guarda en la base de entidades.
+
 Todo en un solo fichero, [`main.cpp`](main.cpp), pensado para leerse de arriba abajo.
 El perfil de elevación solo sale si el paquete de datos trae elevación (SRTM,
 GeoTIFF o `.sqlitedb`, la clave `"elevation"` de `mapa.json`) y esta cubre la ruta;
