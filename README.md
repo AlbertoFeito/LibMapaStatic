@@ -627,7 +627,11 @@ fill_hgt     (--cuba | --bbox latN,lonO,latS,lonE) --out <carpeta>
 
 dem_to_db    <carpeta_hgt> --out <dem.sqlitedb> [--overwrite]
 
-dem_to_hillshade --in <carpeta_hgt | dem.sqlitedb> --out <relieve.sqlitedb>
+geotiff_check <fichero.tif | carpeta> [más…]
+             (revisa GeoTIFF y avisa de los cortados o dañados: sus bloques se leerían
+              como «sin dato» y dejarían un hueco rectangular en el mapa)
+
+dem_to_hillshade --in <carpeta_hgt | carpeta/fichero GeoTIFF | dem.sqlitedb> --out <relieve.sqlitedb>
              (--cuba | --bbox latN,lonO,latS,lonE) [--minzoom 6 --maxzoom 13]
              [--sun-az 315 --sun-alt 45 --exag 2 --contrast 2.2] [--sea-level 0]
              [--colored] [--water-level 0]

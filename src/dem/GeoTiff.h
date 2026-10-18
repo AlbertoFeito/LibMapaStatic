@@ -2,11 +2,24 @@
 #define LIBMAPA_DEM_GEOTIFF_H_
 
 #include <QString>
+#include <QStringList>
 #include <QtGlobal>
 
 #include <memory>
 
 namespace libmapa {
+
+//! Resultado de revisar los bloques de una imagen (ver \c GeoTiffImage::verifyBlocks).
+struct GeoTiffBlockReport
+{
+    int total = 0;            //!< bloques de la primera banda
+    int sparse = 0;           //!< bloques «dispersos» (tamaño 0): se leen como sin dato
+    int outOfFile = 0;        //!< bloques cuyos datos caen más allá del final del fichero
+    int undecodable = 0;      //!< bloques que no se pudieron descomprimir
+    qint64 fileSize = 0;      //!< tamaño real del fichero
+    //! Descripción (píxeles de columna/fila y motivo) de los primeros bloques con problema.
+    QStringList problems;
+};
 
 /*!
  * \brief Lector mínimo de imágenes GeoTIFF, sin GDAL ni librerías externas.
@@ -98,6 +111,13 @@ public:
     //! descodificados ocupan 4 bytes por muestra (un bloque de 1024x1024 son 4 MiB).
     static void setCacheLimit(qint64 bytes);
     static qint64 cacheLimit();
+
+    /*!
+     * \brief Revisa uno a uno los bloques de la primera banda sin cargarlos en la
+     *        caché. Sirve para detectar descargas cortadas o ficheros dañados:
+     *        sus bloques se leerían como «sin dato» sin más aviso.
+     */
+    GeoTiffBlockReport verifyBlocks() const;
 
     //! Cota (o valor de la banda \a band) interpolada bilinealmente en la
     //! coordenada; NaN si queda fuera o algún vecino es «sin dato».

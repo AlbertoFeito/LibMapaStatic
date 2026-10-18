@@ -41,6 +41,7 @@ private slots:
     void sharedCacheStaysBounded();
     void folderOfTiles();
     void factoryPicksTheRightSource();
+    void verifyBlocksFindsDamage();
 
 private:
     // Valor sintético exacto en cada formato (cabe y se representa sin pérdida).
@@ -499,6 +500,37 @@ void TstGeoTiff::factoryPicksTheRightSource()
     const QString db = m_dir.path() + QStringLiteral("/dem.sqlitedb");
     QVERIFY(dynamic_cast<SqliteElevation *>(openElevationSource(db).get()) != nullptr);
     QVERIFY(openElevationSource(QString()) == nullptr);
+}
+
+// verifyBlocks: un fichero sano no da problemas y uno con la descarga cortada
+// los da (sus bloques se leerían como «sin dato» sin más aviso).
+void TstGeoTiff::verifyBlocksFindsDamage()
+{
+    const QString good = QStringLiteral(LIBMAPA_TESTDATA) + QStringLiteral("/geotiff/lzw_pred2_int16_tiled.tif");
+    GeoTiffImage sano;
+    QVERIFY(sano.open(good));
+    const GeoTiffBlockReport ok = sano.verifyBlocks();
+    QVERIFY(ok.total > 0);
+    QCOMPARE(ok.outOfFile, 0);
+    QCOMPARE(ok.undecodable, 0);
+    QVERIFY(ok.problems.isEmpty());
+
+    // La misma imagen con el final cortado: la cabecera se lee, pero faltan datos.
+    QFile f(good);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    const QByteArray all = f.readAll();
+    const QString cut = m_dir.path() + QStringLiteral("/cortado.tif");
+    QFile out(cut);
+    QVERIFY(out.open(QIODevice::WriteOnly));
+    out.write(all.left(all.size() / 2));
+    out.close();
+    GeoTiffImage roto;
+    QString error;
+    if (roto.open(cut, &error)) {       // si la tabla de bloques queda cortada, ni abre
+        const GeoTiffBlockReport r = roto.verifyBlocks();
+        QVERIFY(r.outOfFile + r.undecodable > 0);
+        QVERIFY(!r.problems.isEmpty());
+    }
 }
 
 QTEST_APPLESS_MAIN(TstGeoTiff)

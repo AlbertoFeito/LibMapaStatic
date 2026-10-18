@@ -294,6 +294,10 @@ if(LIBMAPA_BUILD_TOOLS)
 
     # Hornea un relieve sombreado (hillshade) del DEM a una piramide de teselas
     # SQLite (offline, para la vista general). Tambien necesita Gui (QImage).
+    add_executable(geotiff_check tools/geotiff_check/main.cpp)
+    target_link_libraries(geotiff_check PRIVATE libmapa_core)
+    target_include_directories(geotiff_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
     add_executable(dem_to_hillshade tools/dem_to_hillshade/main.cpp)
     target_link_libraries(dem_to_hillshade PRIVATE libmapa_core Qt${QT_VERSION_MAJOR}::Gui)
     target_include_directories(dem_to_hillshade PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -521,7 +525,7 @@ if(LIBMAPA_INSTALL)
     # Herramientas de consola que existan en esta configuracion.
     foreach(_libmapa_tool check_data probe_db render_map dem_to_db fill_hgt
                           fill_tiles fill_map geo_to_tiles bench_tiles dem_to_hillshade
-                          dem_to_contours)
+                          dem_to_contours geotiff_check)
         if(TARGET ${_libmapa_tool})
             install(TARGETS ${_libmapa_tool} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
         endif()

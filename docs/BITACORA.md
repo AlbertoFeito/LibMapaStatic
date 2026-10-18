@@ -5890,3 +5890,38 @@ Probado en la demo real (Xvfb) con una carpeta de dos cuadros reales de Copernic
 mar; y el menú Datos con la entrada nueva. `tst_mapwidget` cubre descripción,
 fichero roto (aviso con su nombre, el bueno sigue funcionando) y carpeta vacía.
 26 tests en verde.
+
+## 146. `dem_to_hillshade` también lee GeoTIFF (Copernicus)
+
+El usuario tiene los cuadros de Copernicus DEM en GeoTIFF y quería una segunda capa de
+relieve sombreado (gris) junto a `cuba_relieve` en colores. La herramienta solo
+abría carpetas `.hgt` o `.sqlitedb`. Ahora abre el origen con `openElevationSource`
+(la misma fábrica que usan el mapa y la demo), así que `--in` acepta también una
+carpeta o un fichero GeoTIFF, y muestra los avisos de ficheros ilegibles.
+
+Probado con dos cuadros reales de Copernicus (N20/N21, W078/W077): bbox
+21,-78 .. 20,-76, z8..10, `--sea-level 0` -> 33 teselas en 6 s, relieve nítido y el mar
+transparente (en Copernicus el mar vale 0). Uso:
+`dem_to_hillshade --in C:\...\dem_cuba --cuba --out relieve_cop.sqlitedb --sea-level 0
+--id relieve_cop --name "Relieve Copernicus"`.
+
+Se descartó la rama de ortofotos (herramienta `ortho_to_tiles`): por ahora no aporta
+nada al usuario. Queda guardada en la rama local `backup-ortofotos` / PR #11.
+
+## 147. `geotiff_check`: detectar GeoTIFF cortados o dañados
+
+El relieve de Copernicus del usuario salió con un hueco rectangular al este de la
+isla, aunque estaban los 42 cuadros. La lista de ficheros cubría toda la tierra de
+Cuba (los que faltan son mar abierto, que Copernicus casi no publica), así que no era
+un cuadro ausente. Los bordes rectos (~30 km de alto, 70–96 km de ancho) encajan con
+bloques internos de 1024×1024 píxeles: un bloque cuyo dato falta o no se puede
+descomprimir se lee como «sin dato» y no da ningún aviso. Se sospecha una descarga
+cortada en `N20 W075`/`N19 W075`, pero no se pudo confirmar sin los ficheros.
+
+- `GeoTiffImage::verifyBlocks()` recorre los bloques de la primera banda sin pasar por
+  la caché y cuenta los vacíos (tamaño 0, legítimos), los que caen más allá del final
+  del fichero y los que no se descomprimen, con la posición de los primeros.
+- Herramienta **`geotiff_check <fichero|carpeta>…`**: una línea por fichero (`ok`/`MAL`,
+  tamaño, extensión, nº de bloques) y los bloques con problema. Código de salida 1 si
+  alguno falla. Probada con los cuadros reales y con uno truncado a propósito.
+- Test `verifyBlocksFindsDamage` en `tst_geotiff` (sano y cortado). 26 tests en verde.
