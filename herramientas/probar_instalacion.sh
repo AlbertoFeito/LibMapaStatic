@@ -7,10 +7,11 @@
 #  fuentes de la libreria. Este script:
 #    1. mira que el prefijo tenga lo que se promete (config, bibliotecas,
 #       cabeceras, herramientas);
-#    2. fabrica un paquete de datos minimo (una tesela, sin red);
+#    2. fabrica un paquete de datos minimo (teselas de 1 px y, si esta en el repo,
+#       el indice de lugares de prueba; sin red);
 #    3. compila TODOS los ejemplos (examples/CMakeLists.txt) contra el prefijo;
-#    4. arranca app_minima, visor_gpx y editor_rutas con --comprobar y check_data
-#       sobre ese paquete.
+#    4. arranca app_minima, visor_gpx, editor_rutas y buscador_lugares con
+#       --comprobar, y check_data, sobre ese paquete.
 #
 #  Uso:   herramientas/probar_instalacion.sh <prefijo de instalacion> [carpeta de trabajo]
 #  Antes: cmake --install <build> --prefix <prefijo>
@@ -52,9 +53,10 @@ ls "$PREFIJO"/lib/libmapa_widget.* >/dev/null 2>&1 || fallo "falta libmapa_widge
 echo "== 2/4 Paquete de datos minimo"
 PAQ="$TRABAJO/paquete"
 mkdir -p "$PAQ"
-python3 - "$PAQ" <<'PY'
-import base64, json, os, sqlite3, sys
+python3 - "$PAQ" "$RAIZ" <<'PY'
+import base64, json, os, shutil, sqlite3, sys
 d = sys.argv[1]
+raiz = sys.argv[2]
 # PNG de 1x1 pixel: basta para que la base de teselas sea valida.
 png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 db = os.path.join(d, "base.sqlitedb")
@@ -68,7 +70,13 @@ for z in range(0, 3):
         for y in range(2 ** z):
             c.execute("INSERT INTO tiles VALUES (1,?,?,?,?)", (z, x, y, png))
 c.commit(); c.close()
-json.dump({
+# Indice de lugares de prueba (12 lugares inventados del repo), si esta.
+lugares = os.path.join(raiz, "tests", "data", "places", "lugares_prueba.sqlitedb")
+places = {}
+if os.path.exists(lugares):
+    shutil.copy(lugares, os.path.join(d, "lugares.sqlitedb"))
+    places = {"file": "lugares.sqlitedb"}
+paquete = {
     "format": "libmapa-package", "version": 2,
     "package": {"id": "prueba", "name": "Paquete de prueba",
                 "bounds": {"north": 85, "west": -180, "south": -85, "east": 180},
@@ -77,7 +85,10 @@ json.dump({
     "datasets": [{"id": "base", "displayName": "Base", "filePath": "base.sqlitedb",
                   "zFactor": 1, "zOffset": 0, "scheme": "XYZ",
                   "minZoom": 0, "maxZoom": 2, "baseZoom": 0, "hasSColumn": False}],
-}, open(os.path.join(d, "mapa.json"), "w"), indent=2)
+}
+if places:
+    paquete["places"] = places
+json.dump(paquete, open(os.path.join(d, "mapa.json"), "w"), indent=2)
 PY
 
 # --- 3. Todos los ejemplos contra el prefijo ---------------------------
@@ -105,5 +116,10 @@ VISOR="$(find "$TRABAJO/ejemplos" -type f -name visor_gpx -perm -u+x | head -1)"
 EDITOR="$(find "$TRABAJO/ejemplos" -type f -name editor_rutas -perm -u+x | head -1)"
 [ -n "$EDITOR" ] || fallo "no se encuentra editor_rutas compilado"
 "$EDITOR" "$PAQ" --comprobar || fallo "editor_rutas --comprobar no sale con 0"
+
+# buscador_lugares: busca en el indice de lugares y lee una coordenada MGRS.
+BUSCADOR="$(find "$TRABAJO/ejemplos" -type f -name buscador_lugares -perm -u+x | head -1)"
+[ -n "$BUSCADOR" ] || fallo "no se encuentra buscador_lugares compilado"
+"$BUSCADOR" "$PAQ" --comprobar || fallo "buscador_lugares --comprobar no sale con 0"
 
 echo "OK: la instalacion en $PREFIJO sirve a los ejemplos"
