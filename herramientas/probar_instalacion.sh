@@ -9,8 +9,8 @@
 #       cabeceras, herramientas);
 #    2. fabrica un paquete de datos minimo (una tesela, sin red);
 #    3. compila TODOS los ejemplos (examples/CMakeLists.txt) contra el prefijo;
-#    4. arranca app_minima --comprobar, visor_gpx --comprobar y check_data sobre
-#       ese paquete.
+#    4. arranca app_minima, visor_gpx y editor_rutas con --comprobar y check_data
+#       sobre ese paquete.
 #
 #  Uso:   herramientas/probar_instalacion.sh <prefijo de instalacion> [carpeta de trabajo]
 #  Antes: cmake --install <build> --prefix <prefijo>
@@ -89,7 +89,7 @@ cmake --build "$TRABAJO/ejemplos" -j"$(nproc 2>/dev/null || echo 2)" >/dev/null 
     || fallo "los ejemplos no compilan contra la instalacion"
 
 # --- 4. Funciona de verdad ---------------------------------------------
-echo "== 4/4 Arrancar app_minima / visor_gpx --comprobar y check_data"
+echo "== 4/4 Arrancar los ejemplos con --comprobar y check_data"
 APP="$(find "$TRABAJO/ejemplos" -type f -name app_minima -perm -u+x | head -1)"
 [ -n "$APP" ] || fallo "no se encuentra app_minima compilada"
 "$APP" "$PAQ" --comprobar || fallo "app_minima --comprobar no sale con 0"
@@ -100,5 +100,10 @@ GPX_EJEMPLO="$RAIZ/examples/visor_gpx/ruta_ejemplo.gpx"
 VISOR="$(find "$TRABAJO/ejemplos" -type f -name visor_gpx -perm -u+x | head -1)"
 [ -n "$VISOR" ] || fallo "no se encuentra visor_gpx compilado"
 "$VISOR" "$PAQ" "$GPX_EJEMPLO" --comprobar || fallo "visor_gpx --comprobar no sale con 0"
+
+# editor_rutas crea una ruta, la guarda a GPX y la vuelve a leer: debe ser la misma.
+EDITOR="$(find "$TRABAJO/ejemplos" -type f -name editor_rutas -perm -u+x | head -1)"
+[ -n "$EDITOR" ] || fallo "no se encuentra editor_rutas compilado"
+"$EDITOR" "$PAQ" --comprobar || fallo "editor_rutas --comprobar no sale con 0"
 
 echo "OK: la instalacion en $PREFIJO sirve a los ejemplos"

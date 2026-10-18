@@ -19,6 +19,6 @@ project(libmapa_examples LANGUAGES CXX)
 # widget, que necesitan todos).
 find_package(libmapa REQUIRED)
 
-foreach(_ejemplo app_minima app_seguimiento visor_gpx)
+foreach(_ejemplo app_minima app_seguimiento visor_gpx editor_rutas)
     add_subdirectory(${_ejemplo})
 endforeach()
