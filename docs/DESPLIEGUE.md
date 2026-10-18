@@ -21,6 +21,9 @@ internet**.
 Los pasos 0, 1 y 2 se hacen **una sola vez** por PC. Del 3 al 6 son los de cada
 vez que entregas una versión nueva (y si no has tocado nada, el 3 ya está).
 
+> ¿Instalas y despliegas en **el PC de Alberto** (`D:\QtPro`, `C:\libmapa\qt6`)? Los
+> comandos con sus rutas reales están en [`MIS_RUTAS.md`](MIS_RUTAS.md).
+
 > ¿Solo quieres la versión corta para **Qt 5**? Está en
 > [`RESUMEN_QT5.md`](RESUMEN_QT5.md) (misma carpeta). Esta guía es la detallada.
 
@@ -208,6 +211,22 @@ Debe abrirse la ventana con el mapa. Así pruebas sin tener que desplegar.
 > ponle la carpeta del paquete como argumento (los 3 pasos de arriba). Al
 > desplegar (paso 5) ese problema desaparece, porque el script deja `datos\`
 > junto al `.exe`.
+
+### 3.3 bis. Todos los ejemplos de una vez (CMake)
+
+Cada ejemplo de `examples/` usa la librería **instalada**, nunca sus fuentes.
+Para compilarlos todos juntos (y de paso comprobar que la instalación sirve):
+
+```bat
+cmake -S examples -B build-examples -DCMAKE_PREFIX_PATH="C:/libmapa/qt6;C:/Qt/6.11.2/mingw_64"
+cmake --build build-examples
+```
+
+Con qmake: abre `examples\examples.pro` en Qt Creator con el mismo kit.
+En Linux/CI, `herramientas/probar_instalacion.sh <prefijo>` hace todo: mira que
+el prefijo tenga lo prometido, crea un paquete de datos mínimo, compila los
+ejemplos y arranca `app_minima --comprobar` y `check_data`. Un ejemplo nuevo se
+apunta en `examples/CMakeLists.txt` y `examples/examples.pro`.
 
 ### 3.4 Comprobar que compila
 

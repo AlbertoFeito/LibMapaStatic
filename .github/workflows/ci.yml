@@ -72,3 +72,14 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --output-on-failure
+
+      # Contrato de instalacion: libmapa se instala y los ejemplos la usan
+      # desde ahi (find_package), sin tocar las fuentes. Ver
+      # herramientas/probar_instalacion.sh.
+      - name: Instalar libmapa en un prefijo
+        run: cmake --install build --prefix "$RUNNER_TEMP/libmapa"
+
+      - name: Compilar los ejemplos contra la instalacion y arrancarlos
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: herramientas/probar_instalacion.sh "$RUNNER_TEMP/libmapa" "$RUNNER_TEMP/prueba"

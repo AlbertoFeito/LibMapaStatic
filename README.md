@@ -252,6 +252,8 @@ En Qt Creator basta con abrir el `CMakeLists.txt`.
 
 ### Usarla desde otra aplicación
 
+> Comandos con las rutas reales del PC de desarrollo: [`docs/MIS_RUTAS.md`](docs/MIS_RUTAS.md).
+>
 > **Guía paso a paso, sin conocimientos previos:
 > [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md)**: compilar la librería,
 > integrarla en una app qmake y llevarla a otro PC, con Qt 6 o con Qt 5.14.
@@ -285,6 +287,7 @@ target_link_libraries(miapp PRIVATE libmapa::widget)
 [`examples/app_minima`](examples/app_minima) es la plantilla completa: una app
 que solo usa `MapConfig::dataDir`. Con `add_subdirectory` también valen los
 nombres `libmapa::core` / `libmapa::widget`.
+Todos los ejemplos juntos: `cmake -S examples -B build-examples -DCMAKE_PREFIX_PATH=<prefijo>` (o `examples/examples.pro` con qmake); `herramientas/probar_instalacion.sh <prefijo>` comprueba la instalación de punta a punta y es lo que corre CI.
 [`examples/app_seguimiento`](examples/app_seguimiento) se compila igual y enseña
 el API de objetivos en ~220 líneas: buques simulados, zona vigilada, alerta
 CPA/TCPA, anillos y demora, filtro, agrupación, medir superficie, exportar vista
@@ -696,7 +699,7 @@ examples/app_seguimiento/ ejemplo del API de objetivos con la librería instalad
 cmake/               libmapaConfig.cmake.in (para find_package)
 qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri)
 qmake/*.pro          herramientas sueltas con qmake
-herramientas/        desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete;
+herramientas/        probar_instalacion.sh (instalación + ejemplos); desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete;
                      osm_costa_a_sqlitedb.py: costa de OSM -> máscara de tierra (--water-mask)
 docs/DESPLIEGUE.md   guía paso a paso: integrar la librería y llevar la app a otro PC
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
