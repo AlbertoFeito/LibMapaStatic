@@ -124,3 +124,16 @@ echo %ERRORLEVEL%
   cuál.
 - **El ejemplo no enlaza** → está compilado con otro kit que la librería
   instalada: usa el mismo Qt 6.11.2 MinGW 64 en ambos.
+
+## Pendientes (anotados, sin resolver)
+
+- **`mundo`: falta `D:\QtPro\Recursos\world_l1.mbtiles`.** `mapa.json` declara la
+  capa `mundo`, pero el fichero no está en la carpeta. `check_data` (2026-10-18)
+  lo da como `ERROR mundo: No existe …`, y el resto del paquete (osm, satelital,
+  clarity, costas, relieve, relieve_cop, elevación, capas fijas) sale bien.
+  - **Efecto:** `desplegar.bat` **se detiene** en el paso 4 (copiar los datos) mientras
+    haya errores; hasta resolverlo no se puede entregar el paquete completo.
+    Abrir el mapa en tu PC con `app_minima D:\QtPro\Recursos` no se ve afectado.
+  - **Dos salidas, a elegir cuando toque:** conseguir/volver a poner
+    `world_l1.mbtiles` en `Recursos`, o quitar el bloque `mundo` de
+    `D:\QtPro\Recursos\mapa.json` (haz copia del fichero antes).
