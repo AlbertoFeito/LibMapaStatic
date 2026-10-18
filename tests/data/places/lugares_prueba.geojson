@@ -1,0 +1,237 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Guantánamo",
+    "place": "city",
+    "population": "216000"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -75.2092,
+     20.1444
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Guantánamo",
+    "place": "hamlet"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -76.5,
+     20.3
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Santiago de Cuba",
+    "place": "city",
+    "population": "430000"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -75.8295,
+     20.0247
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Baracoa",
+    "place": "town",
+    "population": "42000"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -74.5,
+     20.35
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Báñes",
+    "place": "town"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -75.7,
+     20.96
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Cayo Largo del Sur",
+    "place": "island"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -81.55,
+     21.62
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Bahía de Guantánamo",
+    "natural": "bay"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -75.15,
+     19.9
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Pico Turquino",
+    "natural": "peak"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -76.8,
+     19.99
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Cabo Cruz",
+    "natural": "cape"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -77.73,
+     19.84
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Núñez Jiménez",
+    "place": "village"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -81.3,
+     22.5
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "100% Cubano",
+    "place": "locality"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80.0,
+     22.0
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Sin etiqueta util",
+    "shop": "bakery"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80,
+     22
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Aeropuerto Mariana Grajales",
+    "aeroway": "aerodrome"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -75.8,
+     20.0
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Aeropuerto Mariana Grajales",
+    "aeroway": "aerodrome"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -75.801,
+       19.999
+      ],
+      [
+       -75.799,
+       19.999
+      ],
+      [
+       -75.799,
+       20.001
+      ],
+      [
+       -75.801,
+       20.001
+      ],
+      [
+       -75.801,
+       19.999
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "place": "town"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -80,
+     22
+    ]
+   }
+  }
+ ]
+}

@@ -10,6 +10,7 @@
 #include "libmapa/MapTarget.h"
 #include "libmapa/TargetSymbol.h"
 #include "libmapa/MapTypes.h"
+#include "libmapa/Places.h"
 #include "libmapa/Proximity.h"
 #include "libmapa/libmapa_export.h"
 
@@ -18,6 +19,7 @@
 #include <QPointF>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 #include <QVariant>
 #include <QWidget>
 #include <limits>
@@ -60,6 +62,11 @@ struct MapConfig
     //! fichero GeoTIFF (`.tif`/`.tiff`, en grados o Web Mercator). Si viene, TIENE
     //! PRIORIDAD sobre elevationDir. Vacia = no se usa. Opcional.
     QString elevationDbFile;
+
+    //! Base de datos de BUSQUEDA de lugares (`lugares.sqlitedb`, la genera
+    //! `osm_lugares_a_sqlitedb.py`). Si viene, TIENE PRIORIDAD sobre la del paquete
+    //! (`"places"` en mapa.json). Vacia = la del paquete, o sin busqueda. Opcional.
+    QString placesDbFile;
 
     //! Base de datos de ENTIDADES (puntos/lineas/poligonos dibujados). Si viene,
     //! el widget la carga al abrir y guarda SOLO lo que se dibuje/edite/borre
@@ -653,6 +660,24 @@ public:
     //! Problemas de la ultima carga de elevacion (p. ej. GeoTIFF ilegibles, o una
     //! carpeta sin datos), uno por elemento. Vacia si todo fue bien.
     QStringList elevationWarnings() const;
+
+    // --- Busqueda de lugares ---------------------------------------------
+    //! Usa en caliente una base de datos de lugares (vacia = quita la busqueda).
+    void setPlacesDb(const QString &dbFile);
+    //! ¿Hay un indice de lugares utilizable? (la app puede mostrar o no el buscador)
+    bool hasPlaces() const;
+    /*!
+     * \brief Lugares cuyo nombre contiene todas las palabras de \a text, sin
+     *        distinguir mayusculas ni tildes, mejores primero (ciudades antes que
+     *        aldeas, y los que empiezan por lo escrito antes). Sin internet.
+     *
+     * Lista vacia si \a text esta vacio o no hay indice. Pensado para llamarlo
+     * mientras se escribe: es una consulta indexada y tarda milisegundos.
+     */
+    QVector<Place> searchPlaces(const QString &text, int limit = 10) const;
+    //! Centra el mapa en \a place con el zoom que le corresponde (ver
+    //! \c Place::suggestedZoom, limitado al maximo de la capa activa).
+    void goToPlace(const Place &place);
 
     //! Perfil de elevacion del terreno a lo largo de una ruta (polilinea): la
     //! cota en cada lugar, muestreada cada \c params.stepMeters (30 m por

@@ -83,6 +83,16 @@ private:
 
     void alElegirDemDb();
     void avisarElevacion();
+
+    // ======================================================== buscar lugares ==
+    void crearBuscador(QToolBar *barra);
+    void actualizarBuscador();
+    void buscarLugares(const QString &texto);
+    void irALugar(const Place &lugar);
+    void enfocarBuscador();
+    QLineEdit *m_buscador = nullptr;          //!< campo «Buscar lugar…» de la barra
+    QStringListModel *m_sugerencias = nullptr; //!< filas del desplegable («nombre — tipo»)
+    QVector<Place> m_lugaresVistos;            //!< resultados de la última búsqueda, en el mismo orden
     QAction *m_accDemCarpeta = nullptr;     //!< Cargar elevación: carpeta de GeoTIFF o .hgt
     QAction *m_accDemFichero = nullptr;     //!< Cargar elevación: un GeoTIFF o una BD .sqlitedb
 

@@ -16,6 +16,7 @@
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
 #include "io/PackageCheck.h"
+#include "io/PlaceIndex.h"
 #include "widget/CoverageLayer.h"
 #include "widget/HillshadeLayer.h"
 #include "widget/MapView.h"
@@ -108,6 +109,7 @@ public:
     std::unique_ptr<IElevationSource> elevation;
     QString elevationDesc;                  //!< resumen para el usuario (ver elevationDescription)
     QStringList elevationWarn;              //!< problemas de la ultima carga
+    PlaceIndex places;                      //!< busqueda de lugares (vacio = sin indice)
 
     // Persistencia automatica de entidades (opcional). Vacio = apagada. El timer
     // agrupa las rafagas de cambios; suppressAutosave evita guardar durante la
@@ -579,6 +581,8 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
         // Solo si la app quiere autoguardado (por defecto): si no fijo un
         // featuresDbFile propio, se usa el del paquete. Con autosaveFeatures=false
         // (guardado explicito) NO se toca el fichero del paquete.
+        if (cfg.placesDbFile.isEmpty())
+            cfg.placesDbFile = paquete->placesFile;
         if (cfg.autosaveFeatures && cfg.featuresDbFile.isEmpty()) {
             QString motivo;
             cfg.featuresDbFile = paquete->prepareFeaturesFile(&motivo);
@@ -632,6 +636,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
                       !cfg.elevationDbFile.isEmpty() ? cfg.elevationDbFile : cfg.elevationDir);
     for (const QString &aviso : d->elevationWarn)
         qCWarning(lcMapaRender) << aviso;
+    d->places.setDatabase(cfg.placesDbFile);
 
     if (!cfg.initialLayerId.isEmpty())
         d->service.setActiveDataset(cfg.initialLayerId);
@@ -2210,6 +2215,34 @@ QString MapWidget::elevationDescription() const
 QStringList MapWidget::elevationWarnings() const
 {
     return d->elevationWarn;
+}
+
+// Cambia en caliente la base de datos de lugares (vacia = sin busqueda).
+void MapWidget::setPlacesDb(const QString &dbFile)
+{
+    d->places.setDatabase(dbFile);
+}
+
+// ¿Hay una base de lugares que se pueda consultar?
+bool MapWidget::hasPlaces() const
+{
+    return d->places.isUsable();
+}
+
+// Busca lugares por nombre; la consulta es indexada y rapida.
+QVector<Place> MapWidget::searchPlaces(const QString &text, int limit) const
+{
+    return d->places.search(text, limit);
+}
+
+// Centra el mapa en el lugar, con el zoom que le corresponde sin pasar del
+// maximo de la capa activa (mas alla solo habria teselas escaladas).
+void MapWidget::goToPlace(const Place &place)
+{
+    if (!place.coordinate.isValid())
+        return;
+    setZoom(qMin(place.suggestedZoom(), maxZoom()));
+    setCenter(place.coordinate);
 }
 
 // Herramienta activa (arrastrar, medir, dibujar, editar...).

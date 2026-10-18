@@ -5925,3 +5925,36 @@ cortada en `N20 W075`/`N19 W075`, pero no se pudo confirmar sin los ficheros.
   tamaño, extensión, nº de bloques) y los bloques con problema. Código de salida 1 si
   alguno falla. Probada con los cuadros reales y con uno truncado a propósito.
 - Test `verifyBlocksFindsDamage` en `tst_geotiff` (sano y cortado). 26 tests en verde.
+
+## 148. Búsqueda de lugares sin conexión
+
+Tras revisar qué le falta a la librería, la mejora que más aportaba era poder ir a un
+sitio escribiendo su nombre (hasta ahora, solo coordenadas o arrastrar el mapa).
+
+- **Datos:** `herramientas/osm_lugares_a_sqlitedb.py` convierte un export de Overpass
+  (la consulta va en su cabecera: ciudades, pueblos, aldeas, islas, aeropuertos,
+  puertos, bahías, cabos, picos…) en `lugares.sqlitedb`:
+  `lugar(id, nombre, busqueda, tipo, lat, lon, poblacion, peso)`. `busqueda` es el
+  nombre sin tildes ni mayúsculas; `peso` ordena (ciudad > aldea, más la magnitud de la
+  población). Los elementos que son superficie (un aeródromo mapeado como polígono) se
+  reducen al centro de su caja y los duplicados (nodo + polígono) se funden.
+- **Librería:** `PlaceIndex` (`src/io`) busca con SQL indexado por el pool de
+  conexiones (lectura, una por hilo): todas las palabras deben aparecer, los nombres que
+  EMPIEZAN por lo escrito van antes, luego el peso. `%` y `_` se escapan (son texto,
+  no comodines). `MapWidget::setPlacesDb/hasPlaces/searchPlaces/goToPlace`,
+  `MapConfig::placesDbFile` y `"places"` en `mapa.json` (también en `files()` y en
+  `check_data`). `Place::typeLabel()` da el tipo en español y `suggestedZoom()` el zoom
+  de encuadre. El id de conexión es un contador, no la dirección del objeto: una
+  instancia nueva en la misma dirección heredaría la conexión de otra BD.
+- **Demo:** campo «Buscar lugar…» en la barra principal (Ctrl+K), con desplegable
+  «nombre — tipo» que no filtra por prefijo ("guantanamo" sugiere "Guantánamo"); Intro o
+  elegir lleva al lugar. Sin índice se ve desactivado y dice cómo añadirlo.
+- **Corrección menor en la demo:** el «29 %%» de la barra de estado era un `%%` de
+  `printf` en un `QString::arg`, que no lo interpreta; ahora un solo `%`.
+- **Tests:** `tst_places` (nuevo, 9 casos: normalización idéntica a la del script fila
+  a fila, tildes, orden, todas las palabras, comodines literales, límites, BD
+  inutilizables, etiquetas y el bloque `places` del manifiesto) y un caso en
+  `tst_mapwidget`. Fixture `tests/data/places/` (12 lugares inventados con tildes y
+  casos límite), generado con el propio script. 27 tests en verde (24 sin QCustomPlot).
+- **Pendiente del usuario:** bajar el export de Overpass en su PC (el contenedor no
+  llega a Overpass) y ejecutar el script; no se probó con datos reales de Cuba.

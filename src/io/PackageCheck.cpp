@@ -5,6 +5,7 @@
 #include "dem/GeoTiffElevation.h"
 #include "geo/TileMatrix.h"
 #include "io/DataPackage.h"
+#include "io/PlaceIndex.h"
 #include "libmapa/GeoFile.h"
 #include "tiles/RMapsTileSource.h"
 
@@ -167,6 +168,7 @@ PackageCheck PackageCheck::run(const DataPackage &p, const Options &options)
         revisarRuta(d.id, d.filePath);
     revisarRuta(QStringLiteral("elevation"), p.elevationFile);
     revisarRuta(QStringLiteral("elevation"), p.elevationDir);
+    revisarRuta(QStringLiteral("places"), p.placesFile);
     for (const DataPackage::Overlay &ov : p.overlays)
         revisarRuta(ov.id, ov.file);
     revisarRuta(QStringLiteral("features"), p.featuresSeed);
@@ -306,6 +308,22 @@ PackageCheck PackageCheck::run(const DataPackage &p, const Options &options)
             r.add(Severity::Info, QStringLiteral("elevation"),
                   QStringLiteral("%1 ficheros .hgt").arg(hgt.size()));
         r.totalBytes += sizeOf(p.elevationDir);
+    }
+
+    // --- lugares (busqueda) ---------------------------------------------
+    if (!p.placesFile.isEmpty()) {
+        if (!QFileInfo::exists(p.placesFile)) {
+            r.add(Severity::Error, QStringLiteral("places"),
+                  QStringLiteral("No existe %1").arg(QDir::toNativeSeparators(p.placesFile)));
+        } else {
+            r.totalBytes += sizeOf(p.placesFile);
+            PlaceIndex idx;
+            idx.setDatabase(p.placesFile);
+            if (!idx.isUsable())
+                r.add(Severity::Error, QStringLiteral("places"),
+                      QStringLiteral("No es una base de lugares valida (falta la tabla lugar; "
+                                     "generala con osm_lugares_a_sqlitedb.py)."));
+        }
     }
 
     // --- capas fijas ----------------------------------------------------

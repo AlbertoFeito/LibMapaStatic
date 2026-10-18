@@ -149,6 +149,12 @@ std::optional<DataPackage> DataPackage::load(const QString &path, QString *error
     if (!p.elevationDir.isEmpty() && !QFileInfo(p.elevationDir).isDir())
         p.warnings << QStringLiteral("Falta la carpeta de elevacion: %1").arg(p.elevationDir);
 
+    // --- places (indice de busqueda de lugares) --------------------------
+    const QJsonObject lug = root.value(QStringLiteral("places")).toObject();
+    p.placesFile = resolve(base, lug.value(QStringLiteral("file")).toString());
+    if (!p.placesFile.isEmpty() && !QFileInfo::exists(p.placesFile))
+        p.warnings << QStringLiteral("Falta la base de lugares: %1").arg(p.placesFile);
+
     // --- overlays -------------------------------------------------------
     for (const QJsonValue &v : root.value(QStringLiteral("overlays")).toArray()) {
         const QJsonObject o = v.toObject();
@@ -204,6 +210,7 @@ QStringList DataPackage::files() const
                   QStringLiteral("*.tif"), QStringLiteral("*.TIF"),
                   QStringLiteral("*.tiff"), QStringLiteral("*.TIFF")}, QDir::Files))
             anadir(f.absoluteFilePath());
+    anadir(placesFile);
     for (const Overlay &ov : overlays)
         anadir(ov.file);
     anadir(featuresSeed);

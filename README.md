@@ -12,7 +12,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 26 tests (23 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 27 tests (24 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt`, una base de datos `.sqlitedb` empaquetable **o GeoTIFF** (un fichero o una carpeta; cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
@@ -31,6 +31,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Coordenadas UTM y MGRS** (`Coordinates.h`): conversión y formato en decimal, GMS, UTM y MGRS (al milímetro frente a PROJ), lectura de lo que escribe una persona en cualquiera de ellos, y cuadrícula UTM (`setGraticuleMode`)
 - **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión. El historial de los objetivos sale a **GPX con la hora de cada punto** (`exportTargetHistory`, releíble con `parseGpxTracks`)
 - **Exportar la vista** a imagen o PDF (`exportView`, `renderImage`): el mapa tal cual se ve, con título, pie (extensión, fecha UTC, atribución) y, en PDF, vectorial y con la escala de impresión 1:N
+- **Búsqueda de lugares sin conexión**: `searchPlaces("guantanamo")` devuelve ciudades, pueblos, aeropuertos, bahías, cabos, picos… ordenados (los que empiezan por lo escrito, y la ciudad antes que la aldea), sin distinguir tildes ni mayúsculas; `goToPlace` centra el mapa con el zoom que corresponde al tipo. El índice es un `lugares.sqlitedb` (`"places"` en `mapa.json` o `MapConfig::placesDbFile`) que genera `osm_lugares_a_sqlitedb.py` desde un export de OpenStreetMap. La demo lo usa en un campo de la barra (Ctrl+K)
 - **Medir superficie en pantalla** (`MapTool::MeasureArea`): se marca un polígono clic a clic y la superficie y el perímetro salen en vivo junto al cursor; al cerrarlo, `areaMeasured` da la medida
 - **Consultar una zona**: `targetsInArea` / `featuresInArea` dicen qué hay dentro de cualquier polígono (p. ej. el marcado con `SelectArea` / `SelectPolygon`), y `polygonArea` / `pathLength` dan su superficie y perímetro sobre el elipsoide
 
@@ -195,6 +196,7 @@ o junto a la aplicación. Plantilla: [`mapa.example.json`](mapa.example.json).
   "start":    { "layer": "osm", "center": [21.5, -79.5], "zoom": 7 },
   "datasets": [ { "id": "osm", "filePath": "Cuba_OSM_CID3.sqlitedb", … }, … ],
   "elevation":{ "file": "cuba_dem.sqlitedb" },
+  "places":   { "file": "lugares.sqlitedb" },
   "overlays": [ { "id": "aguas", "file": "Aguas.geo", "style": { "lineColor": "#1565c0" } },
                 { "id": "curvas", "name": "Curvas de nivel", "file": "curvas.sqlitedb", "zOrder": 20 } ],
   "features": { "file": "entidades.db", "seed": "entidades_iniciales.db" }
@@ -207,6 +209,7 @@ o junto a la aplicación. Plantilla: [`mapa.example.json`](mapa.example.json).
 | `start` | Capa, centro y zoom de arranque |
 | `datasets` | Las capas base, igual que en `datasets.json` (los campos omitidos toman su valor por defecto) |
 | `elevation` | `"file"` (BD `.sqlitedb`) o `"dir"` (carpeta de `.hgt`) |
+| `places` | Índice de búsqueda de lugares (`lugares.sqlitedb`, ver `osm_lugares_a_sqlitedb.py`): `MapWidget::searchPlaces` / `goToPlace` |
 | `overlays` | Capas vectoriales **fijas**: un `.geo` con `style` (un trazado, no seleccionable), o una BD de entidades `.sqlitedb` (p. ej. las **curvas de nivel** de `dem_to_contours`), que conserva el estilo/etiqueta/cota por entidad y es **seleccionable**. `zOrder` ordena el pintado; **`minZoom`/`maxZoom`** limitan el zoom en que se dibuja (capas de detalle que estorban a vista general). Se cargan al abrir, bloqueadas, y **no** se guardan con las del usuario |
 | `features` | BD de entidades del usuario. Una ruta relativa va a la carpeta de datos de la aplicación (`AppData/<app>/<package.id>/`), **no** a la del paquete, que puede ser de solo lectura. `seed` se copia ahí la primera vez |
 
@@ -392,6 +395,7 @@ la escalera de respaldo se precargue.
 | | |
 |---|---|
 | `probe_db` | Sondea las BD de teselas y genera `datasets.json`, o con `--package` el manifiesto `mapa.json` del paquete (rutas relativas) |
+| `osm_lugares_a_sqlitedb.py` (en `herramientas/`) | Convierte un export de Overpass (ciudades, aeropuertos, bahías…) en `lugares.sqlitedb`, el índice de la búsqueda de lugares. La consulta Overpass va en su cabecera |
 | `check_data` | Comprueba un paquete de datos antes de distribuirlo: ficheros, que abran, que sus imágenes se decodifiquen, cobertura por zoom en la zona y tamaño total |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
@@ -683,7 +687,7 @@ src/
   io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               26 tests (23 sin QCustomPlot)
+tests/               27 tests (24 sin QCustomPlot)
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo (clase Ventana repartida por tema en Ventana*.cpp)
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)

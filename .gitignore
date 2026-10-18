@@ -20,6 +20,8 @@ Testing/
 # Las bases de teselas pesan gigabytes y son datos, no codigo.
 *.sqlitedb
 *.db
+# Excepcion: la base de lugares de PRUEBA (12 filas, 20 KB) la necesitan los tests.
+!tests/data/places/*.sqlitedb
 *.sig
 Recursos/
 

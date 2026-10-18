@@ -352,7 +352,7 @@ void Ventana::actualizarEstado()
     if (!m_info)
         return;
     m_info->setText(
-        QStringLiteral("  %1  |  zoom %2 de %3  |  %4 %% propias  |  %5 entidades  |  %6 objetivos  ")
+        QStringLiteral("  %1  |  zoom %2 de %3  |  %4 % propias  |  %5 entidades  |  %6 objetivos  ")
         .arg(m_mapa->baseLayerId())
         .arg(m_mapa->zoom())
         .arg(m_mapa->maxZoom())
