@@ -6048,3 +6048,27 @@ nombre del buque.
   contenedor no tiene pantalla): conviene mirar que los rótulos arrastrados se leen bien.
   Los rótulos de **anillos** (distancias) pasan a la capa de arriba pero no se mueven: van
   pegados a su anillo a propósito.
+
+## 153. Primera aplicación de la serie de ejemplos: `visor_gpx`
+
+Con el contrato de instalación asegurado (sección 150) empieza la serie de aplicaciones
+de ejemplo que sirven de base a productos futuros. Cada una vive en `examples/<nombre>/`,
+usa la librería **instalada** (`find_package` / `libmapa.pri`), cabe en un fichero de menos
+de ~400 líneas y trae su README, su `.pro` y un modo `--comprobar` sin ventana.
+
+- **`examples/visor_gpx`**: abre GPX, KML o GeoJSON como capa y la encuadra
+  (`importVectorFile`, `fitBounds`), marca inicio y fin de las rutas
+  (`setRouteEndpoints`), al pinchar una ruta da su longitud y dibuja su perfil de elevación
+  con ascenso y descenso (`elevationProfile`, solo si el paquete trae elevación), reproduce
+  un GPX con horas con play, pausa, deslizador y velocidad (`TrackPlayer`) y exporta la vista a
+  PDF o imagen (`exportView`). `ruta_ejemplo.gpx` son datos sintéticos (una ruta y un track
+  con horas). Opciones `--comprobar` (sale con 0 si lee algo) y `--captura=imagen.png`.
+- **`examples/CMakeLists.txt` y `examples.pro`** lo incluyen, y
+  `herramientas/probar_instalacion.sh` lo arranca con `--comprobar` sobre su GPX (CI, Qt 5 y 6).
+- **Verificado** en el contenedor: compila con `-Wall -Wextra` sin avisos contra una instalación
+  nueva; `--comprobar` lee 2 entidades, 8.97 km y horas; sin fichero, sale con 1; la ventana
+  se ve bien en una captura. **Sin probar**: pinchar una ruta con elevación real, la
+  reproducción interactiva y la exportación (no hay pantalla ni datos de elevación aquí) y el
+  camino qmake.
+- **Siguientes del plan**: `buscador_lugares`, `medidor_campo`, `monitor_trafico`,
+  `vigilancia_zonas`, `analisis_terreno`, `editor_capas`, `cliente_telemetria`.

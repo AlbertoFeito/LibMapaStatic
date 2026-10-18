@@ -288,6 +288,7 @@ target_link_libraries(miapp PRIVATE libmapa::widget)
 que solo usa `MapConfig::dataDir`. Con `add_subdirectory` también valen los
 nombres `libmapa::core` / `libmapa::widget`.
 Todos los ejemplos juntos: `cmake -S examples -B build-examples -DCMAKE_PREFIX_PATH=<prefijo>` (o `examples/examples.pro` con qmake); `herramientas/probar_instalacion.sh <prefijo>` comprueba la instalación de punta a punta y es lo que corre CI.
+[`examples/visor_gpx`](examples/visor_gpx) es un visor de rutas GPX/KML/GeoJSON (~400 líneas): encuadre, inicio y fin, perfil de elevación, reproducción con horas y exportación a PDF.
 [`examples/app_seguimiento`](examples/app_seguimiento) se compila igual y enseña
 el API de objetivos en ~220 líneas: buques simulados, zona vigilada, alerta
 CPA/TCPA, anillos y demora, filtro, agrupación, medir superficie, exportar vista
