@@ -4,8 +4,10 @@
 // cualquier visor de recorridos (senderismo, post-análisis de misiones):
 //   - Abrir un fichero vectorial como capa (importVectorFile) y encuadrarlo.
 //   - Inicio y fin de cada ruta marcados (setRouteEndpoints).
-//   - Al pinchar una ruta: longitud y, si el paquete trae elevación, su perfil
-//     (elevationProfile) con ascenso y descenso.
+//   - Ruta seleccionada (la primera al abrir, o la que se pinche): su longitud y,
+//     si el paquete trae elevación, su perfil con ascenso y descenso
+//     (elevationProfile). Las capas del paquete (provincias, curvas de nivel)
+//     no le quitan la selección: la capa de rutas va por encima de ellas.
 //   - Si el GPX trae horas, reproducirlo en el tiempo (TrackPlayer).
 //   - Exportar la vista a PDF o imagen (exportView).
 //
@@ -47,6 +49,11 @@ namespace {
 
 // Capa donde se carga el fichero abierto (se reemplaza al abrir otro).
 const QString kCapa = QStringLiteral("fichero");
+
+// Orden de dibujo de esa capa: por encima de las capas del paquete (provincias,
+// curvas de nivel...), que traen entidades seleccionables. Si quedara debajo, un
+// clic dentro de una provincia la seleccionaría a ella y no a la ruta.
+const int kOrdenCapa = 1000;
 
 // Hora para mostrar: UTC, que es en la que viajan los GPX.
 QString textoHora(const QDateTime &t)
@@ -163,7 +170,7 @@ public:
         });
 
         // Al pinchar una ruta: su longitud y su perfil.
-        connect(m_mapa, &MapWidget::featureSelected, this, [this](qint64 id) { mostrarRuta(id); });
+        connect(m_mapa, &MapWidget::featureSelected, this, [this](qint64 id) { alSeleccionar(id); });
 
         m_player = new TrackPlayer(m_mapa, this);
         connect(m_player, &TrackPlayer::timeChanged, this, [this](const QDateTime &t) { avanzarReloj(t); });
@@ -183,6 +190,8 @@ public:
         QString error;
         m_player->clear();                       // quita lo del fichero anterior
         m_mapa->removeFeatureLayer(kCapa);       // un fichero cada vez
+        m_rutaActual = -1;
+        m_mapa->addFeatureLayer(kCapa, QFileInfo(ruta).fileName(), kOrdenCapa);
         if (m_mapa->importVectorFile(ruta, kCapa, QFileInfo(ruta).fileName(), &error) < 0) {
             statusBar()->showMessage(tr("No se pudo abrir: %1").arg(error));
             return false;
@@ -306,16 +315,31 @@ private:
         m_mapa->fitBounds(QGeoCoordinate(norte, oeste), QGeoCoordinate(sur, este));
     }
 
-    // Una entidad quedó seleccionada: si es una línea, longitud y perfil.
-    void mostrarRuta(qint64 id)
+    // Cambió la selección del mapa. Solo cuentan las entidades del fichero abierto:
+    // pinchar una provincia, unas curvas de nivel o el fondo no quita la ruta
+    // seleccionada (se vuelve a marcar), así que su perfil no desaparece.
+    void alSeleccionar(qint64 id)
     {
         const auto f = id >= 0 ? m_mapa->feature(id) : std::nullopt;
-        if (!f || f->kind != GeometryKind::Polyline || f->outlines().isEmpty()) {
-            m_perfil->setPerfil(ElevationProfile(),
-                                f ? tr("«%1» no es una línea: el perfil es solo de rutas y tracks").arg(f->name)
-                                  : QString());
+        if (f && f->layerId == kCapa) {
+            mostrarRuta(*f);
             return;
         }
+        if (m_rutaActual >= 0 && id != m_rutaActual)
+            m_mapa->selectFeature(m_rutaActual);
+    }
+
+    // Una entidad del fichero quedó seleccionada: si es una línea, longitud y perfil.
+    void mostrarRuta(const MapFeature &entidad)
+    {
+        const std::optional<MapFeature> f = entidad;
+        if (f->kind != GeometryKind::Polyline || f->outlines().isEmpty()) {
+            m_rutaActual = -1;
+            m_perfil->setPerfil(ElevationProfile(),
+                                tr("«%1» no es una línea: el perfil es solo de rutas y tracks").arg(f->name));
+            return;
+        }
+        m_rutaActual = f->id;
         const QVector<QGeoCoordinate> camino = f->outlines().first();
         const ElevationProfile perfil = m_mapa->elevationProfile(camino);
         const bool conCotas = perfil.isValid() && std::isfinite(perfil.minElevation);
@@ -357,6 +381,7 @@ private:
     QSlider *m_tiempo = nullptr;
     QLabel *m_hora = nullptr;
     QString m_ruta;
+    qint64 m_rutaActual = -1;      //!< Ruta del fichero seleccionada (-1 = ninguna).
     bool m_conHoras = false;
 };
 

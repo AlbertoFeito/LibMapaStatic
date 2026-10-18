@@ -6080,3 +6080,17 @@ de ~400 líneas y trae su README, su `.pro` y un modo `--comprobar` sin ventana.
   entrada. `--comprobar` imprime también el perfil de la primera ruta (ascenso, descenso y
   cotas). Probado con un paquete de prueba con un `.hgt` sintético de La Habana
   (ascenso 57 m, cotas 318–375 m) y sin elevación (lo dice).
+- **Otra corrección tras probarlo con el paquete de Cuba (misma sección 153):** tras pinchar el
+  mapa ya no se podía volver a seleccionar la ruta. Causa: las capas `.sqlitedb` del paquete
+  (`provincias`, `curvas`) conservan entidades seleccionables a propósito (para leer la cota), y
+  la capa de rutas, con el orden de dibujo por defecto, quedaba por DEBAJO de ellas; un clic dentro
+  de una provincia la seleccionaba a ella (un polígono acierta en todo su interior) y la ruta
+  perdía la selección. Ahora la capa del fichero se crea con orden 1000 (encima de todo el paquete) y
+  el visor solo atiende a sus propias entidades: pinchar una provincia, unas curvas o el fondo no quita
+  la ruta seleccionada, así que su perfil no desaparece. Reproducido FUERA del repositorio con un
+  paquete sintético y una capa «provincias» seleccionable de orden 20 (clics simulados sobre la
+  ventana): con el código anterior ningún píxel de la ruta respondía y el clic seleccionaba la
+  provincia; con el nuevo se conserva la ruta y se cambia al pinchar otra. **Lección para los
+  ejemplos siguientes:** una capa propia de la app que deba ser seleccionable va con un orden mayor
+  que el de las capas del paquete. **Idea para más adelante:** un `"selectable": false` en las
+  entradas de `overlays` de `mapa.json` para quien no quiera esas capas pinchables.
