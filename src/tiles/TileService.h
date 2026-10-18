@@ -50,6 +50,14 @@ public:
      */
     bool start(const QVector<TileDataset> &datasets, int cacheMiB = 128);
 
+    /*!
+     * \brief Anade una capa base con el servicio ya arrancado (sin reiniciar nada).
+     *
+     * Falla, con el motivo en \a error, si el dataset no es valido, su fichero no
+     * existe o ya hay una capa con ese id. No cambia la capa activa.
+     */
+    bool addDataset(const TileDataset &dataset, QString *error = nullptr);
+
     //! Carga los datasets desde un datasets.json. \a baseDir resuelve rutas relativas.
     static QVector<TileDataset> loadDatasets(const QString &jsonPath,
                                              QString *error = nullptr);

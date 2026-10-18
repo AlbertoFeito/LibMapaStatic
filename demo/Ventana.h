@@ -84,6 +84,13 @@ private:
     void alElegirDemDb();
     void avisarElevacion();
 
+    // ===================================================== anadir capa base ==
+    void alAnadirCapaBase();
+    void registrarCapaBase(const BaseLayerInfo &c);
+    QMenu *m_menuBase = nullptr;               //!< Ver -> Capa base
+    QActionGroup *m_grupoBase = nullptr;       //!< radio de las capas base del menú
+    QAction *m_accAnadirBase = nullptr;        //!< Datos -> Añadir capa base...
+
     // ======================================================== buscar lugares ==
     void crearBuscador(QToolBar *barra);
     void actualizarBuscador();

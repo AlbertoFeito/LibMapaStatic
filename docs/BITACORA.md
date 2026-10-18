@@ -5958,3 +5958,29 @@ sitio escribiendo su nombre (hasta ahora, solo coordenadas o arrastrar el mapa).
   casos límite), generado con el propio script. 27 tests en verde (24 sin QCustomPlot).
 - **Pendiente del usuario:** bajar el export de Overpass en su PC (el contenedor no
   llega a Overpass) y ejecutar el script; no se probó con datos reales de Cuba.
+
+## 149. Añadir una capa base con el mapa abierto
+
+Para ver su relieve de Copernicus (`relieve_cop.sqlitedb`) el usuario tuvo que editar
+`datasets.json` a mano, aunque la librería ya sabía leerlo. Ahora se añade desde la
+propia aplicación.
+
+- **Servicio:** `TileService::addDataset` valida el dataset (válido, el fichero existe,
+  id libre) y avisa al hilo trabajador con `TileLoader::addDataset`. Hace falta un slot
+  nuevo porque `configure()` VACÍA las fuentes ya abiertas: reutilizarlo habría cerrado
+  las capas en uso. La caché de la capa nueva se crea al usarla, como las demás.
+- **API:** `MapWidget::addBaseLayer(fichero, &error, id)`. Un `.mbtiles` se describe
+  con su `metadata` (`MBTiles::fromFile`); cualquier otra base de teselas se sondea como
+  `probe_db` (`TileDatasetProbe`), usando la zona del paquete para decidir XYZ/TMS. El
+  id sale del nombre del fichero (minúsculas, cifras y `_`) y se hace único con un
+  sufijo (`capa_2`). No activa la capa: se hace con `setBaseLayerId`. Errores con
+  motivo (no existe, no es una base de teselas).
+- **Demo:** Datos → «Añadir capa base (teselas)…». Añade la capa al desplegable de la
+  barra, al menú Ver → Capa base y al árbol de capas, y la activa. El menú de capas
+  base pasó a poder crecer (`registrarCapaBase`).
+- **Test:** `addsBaseLayersAtRuntime` en `tst_mapwidget` (MBTiles y base normal, id
+  único y a elegir, activar y dibujar, ficheros inexistentes o basura). Detectó que
+  el primer borrador dependía de otro test para existir su fichero: ahora crea el suyo.
+  27 tests en verde (24 sin QCustomPlot).
+- **Sin probar a mano:** el diálogo de abrir fichero de la demo (no hay forma de teclear
+  en el contenedor); sí está probado todo lo que hay detrás.

@@ -280,21 +280,11 @@ void Ventana::construirMenuYBarra()
     mArchivo->addAction(accSalir);
 
     QMenu *mVer = mb->addMenu(tr("&Ver"));
-    QMenu *mBase = mVer->addMenu(tr("Capa base"));
-    auto *gBase = new QActionGroup(this);
-    gBase->setExclusive(true);
-    for (const BaseLayerInfo &c : m_mapa->availableBaseLayers()) {
-        QAction *a = mBase->addAction(c.displayName);
-        a->setCheckable(true);
-        a->setData(c.id);
-        a->setChecked(c.id == m_mapa->baseLayerId());
-        gBase->addAction(a);
-        connect(a, &QAction::triggered, this, [this, a] {
-            const QString id = a->data().toString();
-            m_mapa->setBaseLayerId(id);
-            if (m_capasBase) m_capasBase->setCurrentIndex(m_capasBase->findData(id));
-        });
-    }
+    m_menuBase = mVer->addMenu(tr("Capa base"));
+    m_grupoBase = new QActionGroup(this);
+    m_grupoBase->setExclusive(true);
+    for (const BaseLayerInfo &c : m_mapa->availableBaseLayers())
+        registrarCapaBase(c);
     mVer->addSeparator();
     mVer->addAction(accAmpliar);
     mVer->addAction(accReducir);
@@ -443,6 +433,10 @@ void Ventana::construirMenuYBarra()
 
     QMenu *mDatos = mb->addMenu(tr("&Datos"));
     mDatos->addAction(accGeo);
+    m_accAnadirBase = mDatos->addAction(tr("Añadir capa base (teselas)..."));
+    m_accAnadirBase->setStatusTip(tr("Añade al mapa un fichero de teselas (.mbtiles o .sqlitedb) "
+                                     "como capa base, sin reiniciar."));
+    connect(m_accAnadirBase, &QAction::triggered, this, &Ventana::alAnadirCapaBase);
     QMenu *mDem = mDatos->addMenu(tr("Cargar elevación (DEM)"));
     mDem->addAction(m_accDemCarpeta);
     mDem->addAction(m_accDemFichero);

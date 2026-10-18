@@ -52,6 +52,19 @@ void TileLoader::configure(const QVector<TileDataset> &datasets)
                          << m_datasets.size() << "dataset(s)";
 }
 
+// Anade un dataset en caliente. A diferencia de configure(), no vacia las
+// fuentes ya abiertas: las capas que se estan usando siguen funcionando.
+void TileLoader::addDataset(const TileDataset &dataset)
+{
+    if (!dataset.isValid()) {
+        qCWarning(lcMapaTiles) << "Dataset invalido, se ignora:" << dataset.id;
+        return;
+    }
+    m_datasets.insert(dataset.id, dataset);
+    m_sources.remove(dataset.id);          // por si se reutiliza un id: se reabre
+    qCDebug(lcMapaTiles) << "TileLoader: dataset anadido" << dataset.id;
+}
+
 // Devuelve (creando y abriendo la primera vez) la fuente de un dataset. Se hace
 // EN ESTE hilo trabajador porque la conexion SQLite pertenece a quien la abre.
 RMapsTileSource *TileLoader::sourceFor(const QString &datasetId)
