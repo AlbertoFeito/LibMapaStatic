@@ -9,6 +9,7 @@
 #include "widget/GraticuleLayer.h"
 #include "widget/ScaleBarLayer.h"
 #include "widget/HillshadeLayer.h"
+#include "widget/LabelLayer.h"
 #include "widget/FeatureLayer.h"
 #include "widget/OverlayModel.h"
 #include "widget/RangeLayer.h"
@@ -250,6 +251,7 @@ private:
     GraticuleLayer *m_graticuleLayer = nullptr;
     ScaleBarLayer *m_scaleBarLayer = nullptr;
     RangeLayer *m_rangeLayer = nullptr;       //!< Anillos y marcaciones (capa "targets").
+    LabelLayer *m_labelLayer = nullptr;       //!< Rotulos, encima de todo (capa "targets").
     HillshadeLayer *m_hillshadeLayer = nullptr;
 
     int m_zoom = 10;
@@ -289,6 +291,7 @@ private:
     // nuevo offset = inicial + (cursor - inicio). -1 = no se arrastra ninguno.
     qint64 m_dragLabelFeature = -1;
     qint64 m_dragLabelTarget = -1;
+    qint64 m_dragLabelBearing = -1;      //!< Marcacion cuyo rotulo se arrastra.
     QPoint m_dragLabelStartPx;
     QPointF m_dragLabelStartOffset;
 

@@ -32,6 +32,26 @@ QVector<QGeoCoordinate> geodesica(const QGeoCoordinate &a, const QGeoCoordinate 
     return v;
 }
 
+// Punto de la polilinea a la mitad de su longitud (en pantalla). Con pocos
+// puntos (una marcacion de menos de 40 km solo tiene los dos extremos), el punto
+// "del medio" de la lista seria el destino, no el centro de la linea.
+QPointF puntoMedio(const QPolygonF &linea)
+{
+    if (linea.size() < 2)
+        return linea.isEmpty() ? QPointF() : linea.first();
+    double total = 0.0;
+    for (int i = 1; i < linea.size(); ++i)
+        total += QLineF(linea.at(i - 1), linea.at(i)).length();
+    double falta = total / 2.0;
+    for (int i = 1; i < linea.size(); ++i) {
+        const QLineF tramo(linea.at(i - 1), linea.at(i));
+        if (falta <= tramo.length() || i == linea.size() - 1)
+            return tramo.length() > 0.0 ? tramo.pointAt(falta / tramo.length()) : tramo.p1();
+        falta -= tramo.length();
+    }
+    return linea.last();
+}
+
 } // namespace
 
 // Con antialiasing: los anillos son curvas y sin el se verian escalonados.
@@ -391,25 +411,77 @@ void RangeLayer::applyDefaultAntialiasingHint(QCPPainter *painter) const
     applyAntialiasingHint(painter, mAntialiased, QCP::aeAll);
 }
 
-// Rotulo centrado en \a center sobre una caja clara, para leerse en cualquier fondo.
-void RangeLayer::label(QCPPainter *painter, const QPointF &center, const QString &txt,
-                       const QColor &color) const
+// Anota un rotulo para pintarlo despues, por encima de todo (drawLabels). Se
+// pinta aparte para que ni los objetivos ni las entidades lo tapen.
+void RangeLayer::label(const QPointF &anchor, const QString &txt, const QColor &color,
+                       const QPointF &offset, qint64 bearingId) const
 {
-    const QFontMetricsF fm(painter->font());
-    const QSizeF t(fm.horizontalAdvance(txt) + 8.0, fm.height() + 2.0);
-    const QRectF caja(center.x() - t.width() / 2.0, center.y() - t.height() / 2.0,
-                      t.width(), t.height());
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(QColor(255, 255, 255, 215));
-    painter->drawRoundedRect(caja, 3.0, 3.0);
-    painter->setPen(color.darker(130));
-    painter->drawText(caja, Qt::AlignCenter, txt);
+    m_pending.append({anchor, txt, color, offset, bearingId});
+}
+
+// Pinta los rotulos anotados por draw(): cada uno centrado en anclaje + offset
+// sobre una caja clara (se lee en cualquier fondo). Si esta separado de su
+// anclaje, una linea guia del color de la medida los une. Guarda las cajas de
+// los de marcacion: de ahi sale bearingLabelAt.
+void RangeLayer::drawLabels(QCPPainter *painter) const
+{
+    m_bearingLabelBoxes.clear();
+    if (m_pending.isEmpty())
+        return;
+    painter->save();
+    QFont f = painter->font();
+    f.setPointSizeF(7.5);
+    f.setBold(true);
+    painter->setFont(f);
+    const QFontMetricsF fm(f);
+    for (const PendingLabel &p : m_pending) {
+        const QSizeF t(fm.horizontalAdvance(p.text) + 8.0, fm.height() + 2.0);
+        const QPointF centro = p.anchor + p.offset;
+        const QRectF caja(centro.x() - t.width() / 2.0, centro.y() - t.height() / 2.0,
+                          t.width(), t.height());
+        if (p.offset.manhattanLength() > 1.0) {
+            painter->setPen(QPen(p.color, 1.0, Qt::SolidLine));
+            painter->setBrush(Qt::NoBrush);
+            painter->drawLine(p.anchor, caja.center());
+        }
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(255, 255, 255, 215));
+        painter->drawRoundedRect(caja, 3.0, 3.0);
+        painter->setPen(p.color.darker(130));
+        painter->drawText(caja, Qt::AlignCenter, p.text);
+        if (p.bearingId >= 0)
+            m_bearingLabelBoxes.append({p.bearingId, caja});
+    }
+    painter->restore();
+}
+
+// Marcacion cuyo rotulo esta bajo el pixel: se recorre del ultimo al primero
+// porque el ultimo pintado queda encima.
+qint64 RangeLayer::bearingLabelAt(const QPointF &pixel) const
+{
+    for (int i = static_cast<int>(m_bearingLabelBoxes.size()) - 1; i >= 0; --i)
+        if (m_bearingLabelBoxes.at(i).second.contains(pixel))
+            return m_bearingLabelBoxes.at(i).first;
+    return -1;
+}
+
+// Mueve el rotulo de una marcacion y repinta la capa.
+bool RangeLayer::setBearingLabelOffset(qint64 id, const QPointF &offsetPx)
+{
+    const auto it = m_bearings.find(id);
+    if (it == m_bearings.end())
+        return false;
+    it->labelOffsetPx = offsetPx;
+    repintar();
+    return true;
 }
 
 // Dibuja primero los anillos y despues las marcaciones (encima). Lo que cuelga
-// de un objetivo que ya no existe se omite.
+// de un objetivo que ya no existe se omite. Los rotulos no se pintan aqui: se
+// anotan y los pinta drawLabels, por encima de objetivos y entidades.
 void RangeLayer::draw(QCPPainter *painter)
 {
+    m_pending.clear();
     if (!parentPlot() || isEmpty())
         return;
     QFont f = painter->font();
@@ -418,8 +490,8 @@ void RangeLayer::draw(QCPPainter *painter)
     painter->setFont(f);
     for (const RangeRings &r : m_rings)
         drawRings(painter, r);
-    for (const BearingLine &l : m_bearings)
-        drawBearing(painter, l);
+    for (auto it = m_bearings.constBegin(); it != m_bearings.constEnd(); ++it)
+        drawBearing(painter, it.key(), it.value());
 }
 
 // Anillos geodesicos con su distancia arriba, radiales opcionales con su
@@ -446,7 +518,7 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
         painter->setPen(QPen(r.color, 1.4, i == n ? Qt::SolidLine : Qt::DashLine));
         painter->drawPolyline(anillo);
         if (r.labels)
-            label(painter, dentroDeVista(anillo.first(), anillo),
+            label(dentroDeVista(anillo.first(), anillo),
                   MapDecor::formatDistance(paso * i, m_units), r.color);
     }
 
@@ -463,7 +535,7 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
                 painter->drawLine(radial.pointAt(hueco / radial.length()), fin);
             if (r.labels && az != 0) {       // el 000 lo tapa el rotulo del anillo
                 const QPointF fuera = screenPos(c.atDistanceAndAzimuth(paso * n * 1.08, az));
-                label(painter, bordeDeVista(pc, fuera), MapDecor::formatBearing(az), r.color);
+                label(bordeDeVista(pc, fuera), MapDecor::formatBearing(az), r.color);
             }
         }
     }
@@ -476,13 +548,13 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
     painter->drawRect(QRectF(pc - QPointF(3.5, 3.5), QSizeF(7.0, 7.0)));   // punto fijo
     if (!r.name.isEmpty()) {
         const QFontMetricsF fm(painter->font());
-        label(painter, pc + QPointF(fm.horizontalAdvance(r.name) / 2.0 + 14.0, 12.0), r.name, r.color);
+        label(pc + QPointF(fm.horizontalAdvance(r.name) / 2.0 + 14.0, 12.0), r.name, r.color);
     }
 }
 
 // Marcacion: trazo geodesico con halo, flecha en el destino y el rotulo
 // "045° · 5.2 NM" en el medio.
-void RangeLayer::drawBearing(QCPPainter *painter, const BearingLine &l) const
+void RangeLayer::drawBearing(QCPPainter *painter, qint64 id, const BearingLine &l) const
 {
     QGeoCoordinate a, b;
     if (!ends(l, &a, &b) || a.distanceTo(b) < 1.0)
@@ -511,7 +583,7 @@ void RangeLayer::drawBearing(QCPPainter *painter, const BearingLine &l) const
     if (l.label) {
         const QString txt = MapDecor::formatBearing(a.azimuthTo(b)) + QStringLiteral(" · ")
                           + MapDecor::formatDistance(a.distanceTo(b), m_units);
-        label(painter, linea.at(linea.size() / 2), txt, l.color);
+        label(puntoMedio(linea), txt, l.color, l.labelOffsetPx, id);
     }
 }
 

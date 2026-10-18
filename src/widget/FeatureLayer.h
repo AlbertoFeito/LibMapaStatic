@@ -63,6 +63,10 @@ public:
     //! Entidad cuya CAJA DE ETIQUETA cae bajo el pixel, o -1 (la de encima gana).
     //! Permite seleccionar/arrastrar el rotulo por separado de la geometria.
     qint64 labelAt(const QPoint &pixel) const;
+    //! Pinta las etiquetas de todas las entidades visibles sobre \a painter, en
+    //! coordenadas de pantalla. Las llama LabelLayer (encima de los objetivos);
+    //! la propia capa ya no las pinta.
+    void drawLabels(QPainter *painter) const;
 
     /*!
      * \brief Vertice bajo un punto de la pantalla.

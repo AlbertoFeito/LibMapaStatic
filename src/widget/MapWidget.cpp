@@ -2135,6 +2135,20 @@ qint64 MapWidget::targetLabelAt(const QPoint &pixel) const
                ? d->view->targetLayer()->labelAt(pixel) : -1;
 }
 
+// Marcacion cuyo rotulo dibujado cae bajo el pixel.
+qint64 MapWidget::bearingLabelAt(const QPoint &pixel) const
+{
+    return (d->view && d->view->rangeLayer())
+               ? d->view->rangeLayer()->bearingLabelAt(QPointF(pixel)) : -1;
+}
+
+// Desplaza el rotulo de una marcacion (el offset vive en la propia marcacion).
+bool MapWidget::setBearingLabelOffset(qint64 id, const QPointF &offsetPx)
+{
+    return d->view && d->view->rangeLayer()
+           && d->view->rangeLayer()->setBearingLabelOffset(id, offsetPx);
+}
+
 // Fija el desplazamiento de la etiqueta de una entidad y lo PERSISTE: lee la
 // entidad, le cambia el offset del estilo y la actualiza por el camino normal
 // (que repinta y guarda con antirebote).
