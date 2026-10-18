@@ -70,6 +70,7 @@ private slots:
     void mbtilesLayerRendersInTheWidget();
     void geotiffElevationThroughTheWidget();
     void placeSearchThroughTheWidget();
+    void addsBaseLayersAtRuntime();
 
     void navigationKeepsCenter();
     void zoomIsClampedToRecommendedRange();
@@ -521,6 +522,89 @@ void TstMapWidget::mbtilesLayerRendersInTheWidget()
 // La elevacion puede venir de un GeoTIFF suelto o de una carpeta de ellos, tanto
 // por la configuracion como en caliente; el resto de la API (cota, visibilidad)
 // funciona igual que con las bases de siempre.
+// Añadir una capa base con el mapa abierto: un MBTiles y una base de teselas
+// normal entran como capas nuevas (con id unico), se pueden activar y dibujar, y
+// los ficheros que no sirven devuelven un motivo en vez de romper nada.
+void TstMapWidget::addsBaseLayersAtRuntime()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    const auto antes = w.availableBaseLayers().size();
+
+    // MBTiles propio de este test (no depende de que otro lo haya creado antes):
+    // el mundo a zoom 3 y 4, con el color de cada tesela en el PNG.
+    const QString mb = m_dir.filePath(QStringLiteral("capa_extra.mbtiles"));
+    const QString conn = QStringLiteral("mk_extra");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+        db.setDatabaseName(mb);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, "
+                                      "tile_row INTEGER, tile_data BLOB)")));
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE metadata (name TEXT, value TEXT)")));
+        QVERIFY(q.exec(QStringLiteral("INSERT INTO metadata VALUES ('name','Capa extra'), "
+                                      "('format','png'), ('minzoom','3'), ('maxzoom','4')")));
+        db.transaction();
+        for (int z = 3; z <= 4; ++z)
+            for (int x = 0; x < (1 << z); ++x)
+                for (int y = 0; y < (1 << z); ++y) {
+                    QImage img(256, 256, QImage::Format_RGB32);
+                    img.fill(QColor(x * 16, y * 16, 200));
+                    QByteArray png;
+                    QBuffer buf(&png);
+                    buf.open(QIODevice::WriteOnly);
+                    img.save(&buf, "PNG");
+                    q.prepare(QStringLiteral("INSERT INTO tiles VALUES (:z, :x, :y, :d)"));
+                    q.bindValue(QStringLiteral(":z"), z);
+                    q.bindValue(QStringLiteral(":x"), x);
+                    q.bindValue(QStringLiteral(":y"), (1 << z) - 1 - y);          // TMS
+                    q.bindValue(QStringLiteral(":d"), png);
+                    QVERIFY(q.exec());
+                }
+        db.commit();
+    }
+    QSqlDatabase::removeDatabase(conn);
+
+    QString error;
+    const QString id = w.addBaseLayer(mb, &error);
+    QVERIFY2(!id.isEmpty(), qPrintable(error));
+    QCOMPARE(id, QStringLiteral("capa_extra"));
+    QCOMPARE(w.availableBaseLayers().size(), antes + 1);
+
+    // El mismo fichero otra vez: id distinto, no pisa a la anterior.
+    const QString id2 = w.addBaseLayer(mb, &error);
+    QCOMPARE(id2, QStringLiteral("capa_extra_2"));
+
+    // Una base de teselas normal (la satelital sintetica) con id a elegir.
+    const QString sat = w.addBaseLayer(m_dir.filePath(QStringLiteral("sat.sqlitedb")), &error,
+                                       QStringLiteral("mi_sat"));
+    QVERIFY2(sat == QStringLiteral("mi_sat"), qPrintable(error));
+
+    // Se activa y dibuja como cualquier otra.
+    QVERIFY(w.setBaseLayerId(id));
+    QCOMPARE(w.baseLayerId(), id);
+    w.setCenter(QGeoCoordinate(22.0, -79.5));
+    w.setZoom(4);
+    const QImage img = w.renderImage();
+    QVERIFY(!img.isNull());
+    QVERIFY(w.setBaseLayerId(QStringLiteral("osm")));          // y se vuelve a las de siempre
+
+    // Lo que no sirve: motivo claro y nada cambia.
+    const auto total = w.availableBaseLayers().size();
+    QVERIFY(w.addBaseLayer(m_dir.filePath(QStringLiteral("no_existe.mbtiles")), &error).isEmpty());
+    QVERIFY(error.contains(QStringLiteral("no_existe")));
+    const QString basura = m_dir.filePath(QStringLiteral("basura.sqlitedb"));
+    QFile f(basura);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(QByteArray(3000, 'x'));
+    f.close();
+    error.clear();
+    QVERIFY(w.addBaseLayer(basura, &error).isEmpty());
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(w.availableBaseLayers().size(), total);
+}
+
 // Busqueda de lugares a traves del widget: sin indice no hay nada; con el de
 // prueba (de MapConfig o en caliente) se busca sin tildes y goToPlace centra el
 // mapa con el zoom del tipo de lugar, sin pasar del maximo de la capa.

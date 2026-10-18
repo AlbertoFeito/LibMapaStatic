@@ -85,6 +85,9 @@ public slots:
     //! Define los datasets disponibles. No abre nada todavia.
     void configure(const QVector<libmapa::TileDataset> &datasets);
 
+    //! Anade UN dataset a los ya configurados, sin tocar las fuentes ya abiertas.
+    void addDataset(const libmapa::TileDataset &dataset);
+
     //! Sirve las rejillas de la peticion, en orden, emitiendo una senal por
     //! cada una. Abandona en cuanto la peticion queda obsoleta.
     void load(const libmapa::TileRequest &request);

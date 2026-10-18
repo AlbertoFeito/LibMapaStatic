@@ -153,6 +153,20 @@ public:
 
     // --- Capa base -------------------------------------------------------
     QVector<BaseLayerInfo> availableBaseLayers() const;
+    /*!
+     * \brief Anade una capa base desde un fichero de teselas, con el mapa ya abierto.
+     *
+     * Vale un `.mbtiles` o una base de teselas `.sqlitedb`/`.db` (la libreria
+     * detecta sola el esquema, el mapeo de zoom y el tamano de tesela, como
+     * `probe_db`). La capa no se activa: usa \c setBaseLayerId con el id devuelto.
+     *
+     * \param id identificador de la capa; vacio = sale del nombre del fichero (y se
+     *        hace unico si ya existe).
+     * \return el id de la capa creada, o vacio si no se pudo; el motivo queda en
+     *         \a error.
+     */
+    QString addBaseLayer(const QString &file, QString *error = nullptr,
+                         const QString &id = QString());
     QString baseLayerId() const;
     bool setBaseLayerId(const QString &id);
 

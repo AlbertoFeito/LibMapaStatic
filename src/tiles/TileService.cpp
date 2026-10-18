@@ -238,6 +238,32 @@ bool TileService::setActiveDataset(const QString &id)
     return true;
 }
 
+// Registra una capa nueva con el servicio en marcha: la guarda aqui y le dice al
+// hilo trabajador que la conozca. Cada capa tiene su cache (se crea al usarla),
+// asi que no se mezcla con las demas.
+bool TileService::addDataset(const TileDataset &dataset, QString *error)
+{
+    auto fallo = [&](const QString &m) {
+        if (error)
+            *error = m;
+        return false;
+    };
+    if (!m_started || !m_loader)
+        return fallo(tr("El servicio de teselas no esta arrancado."));
+    if (!dataset.isValid())
+        return fallo(tr("La capa %1 no es valida.").arg(dataset.id));
+    if (!QFileInfo::exists(dataset.filePath))
+        return fallo(tr("No existe el fichero %1").arg(dataset.filePath));
+    if (m_datasets.contains(dataset.id))
+        return fallo(tr("Ya hay una capa con el id %1.").arg(dataset.id));
+
+    m_datasets.insert(dataset.id, dataset);
+    QMetaObject::invokeMethod(m_loader, "addDataset", Qt::QueuedConnection,
+                              Q_ARG(libmapa::TileDataset, dataset));
+    qCInfo(lcMapaTiles) << "Capa base anadida:" << dataset.id;
+    return true;
+}
+
 // Cuantos peldanos de "escalera de respaldo" precargar. Si esta en automatico
 // (-1), lo decide segun el relleno tipico de la capa (una BD llena casi no la
 // necesita; una con muchos huecos si).

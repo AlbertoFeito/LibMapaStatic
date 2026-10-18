@@ -11,7 +11,9 @@
 #include "geo/MapDecor.h"
 #include "geo/ProximityMonitor.h"
 #include "geo/ZoneMonitor.h"
+#include "tiles/MBTiles.h"
 #include "tiles/RMapsTileSource.h"
+#include "tiles/TileDatasetProbe.h"
 #include "tiles/TileService.h"
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
@@ -2215,6 +2217,59 @@ QString MapWidget::elevationDescription() const
 QStringList MapWidget::elevationWarnings() const
 {
     return d->elevationWarn;
+}
+
+// Anade una capa base en caliente. El id sale del nombre del fichero (solo
+// minusculas, cifras y guion bajo) y se hace unico con un sufijo si ya existe. Un
+// MBTiles se describe con su propia metadata; cualquier otra base de teselas se
+// sondea como hace probe_db, usando la zona del paquete (si la hay) para decidir
+// entre XYZ y TMS.
+QString MapWidget::addBaseLayer(const QString &file, QString *error, const QString &id)
+{
+    auto fallo = [error](const QString &motivo) {
+        if (error)
+            *error = motivo;
+        return QString();
+    };
+    if (!QFileInfo(file).isFile())
+        return fallo(tr("No existe el fichero %1").arg(QDir::toNativeSeparators(file)));
+
+    QString base = id.trimmed();
+    if (base.isEmpty()) {
+        base = QFileInfo(file).completeBaseName().toLower();
+        for (QChar &c : base)
+            if (!c.isLetterOrNumber() || c.unicode() > 127)
+                c = QLatin1Char('_');
+        if (base.isEmpty())
+            base = QStringLiteral("capa");
+    }
+    QString unico = base;
+    for (int n = 2; d->service.dataset(unico); ++n)
+        unico = QStringLiteral("%1_%2").arg(base).arg(n);
+
+    TileDataset ds;
+    QString motivo;
+    if (MBTiles::isMBTilesPath(file)) {
+        ds = MBTiles::fromFile(file, unico, &motivo);
+        if (!ds.isValid())
+            return fallo(motivo.isEmpty() ? tr("No es un MBTiles de teselas ráster.") : motivo);
+    } else {
+        const std::optional<ProbeResult> r = TileDatasetProbe::probe(file, unico, d->package.bounds);
+        if (!r)
+            return fallo(tr("No se reconoce %1 como una base de datos de teselas.")
+                             .arg(QDir::toNativeSeparators(file)));
+        ds = r->dataset;
+        for (const QString &aviso : r->warnings)
+            qCWarning(lcMapaRender) << aviso;
+    }
+    ds.id = unico;
+    ds.filePath = QFileInfo(file).absoluteFilePath();
+    if (ds.displayName.isEmpty())
+        ds.displayName = QFileInfo(file).completeBaseName();
+
+    if (!d->service.addDataset(ds, &motivo))
+        return fallo(motivo);
+    return unico;
 }
 
 // Cambia en caliente la base de datos de lugares (vacia = sin busqueda).
