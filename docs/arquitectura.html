@@ -441,6 +441,7 @@ añadió para la descarga.</p>
 <tr><td class="cls">TileLayer</td><td>Pinta las teselas del plan (con la escalera de respaldo). Lee del <code>TileCache</code>.</td></tr>
 <tr><td class="cls">FeatureLayer</td><td>Pinta las entidades vectoriales de una capa (según <code>OverlayModel</code>) y sus tiradores al editar. <b>Recorte por viewport</b>: salta (sin proyectar a píxeles) las entidades cuya caja no toca la vista, y respeta el <b>rango de zoom</b> de la capa — así una capa densa (curvas de nivel) no frena el <i>pan</i>. Un punto con icono se ancla por <code>FeatureStyle::iconAnchor</code> (normalizado; <code>(0.5,1.0)</code> = la punta del pin marca el lugar) y su <b>hit-test</b> cubre todo el pixmap, para poder agarrarlo.</td></tr>
 <tr><td class="cls">TargetLayer</td><td>Pinta los objetivos móviles y su traza. Se repinta sola en modo BUFFERED sin rehacer teselas. El símbolo lo decide el proveedor de la app (icono + rotación por rumbo + escala); sin proveedor, un galón por defecto. Para miles de objetivos: culling por vista, nivel de detalle (presupuesto de etiquetas/trazas), declutter de etiquetas y decimación de traza.</td></tr>
+<tr><td class="cls">LabelLayer</td><td>Capa de <b>rótulos</b>: pinta encima de todo el texto que acompaña al mapa. Las entidades, anillos y marcaciones se dibujan en su capa y los objetivos encima; si cada uno pintara su texto, una marcación o un anillo taparían el nombre de una zona. Por eso <code>FeatureLayer::drawLabels</code> (nombre de entidades y alertas CPA) y <code>RangeLayer::drawLabels</code> (distancias de anillos y rótulo de marcación, con línea guía si está desplazado) se pintan aquí: misma capa <i>buffered</i> «targets», creada la última. No guarda estado.</td></tr>
 <tr><td class="cls">GraticuleLayer</td><td>Cuadrícula de meridianos y paralelos con rótulos en el borde, o <b>UTM</b> (líneas de este/norte por zona, 100 km–100 m, curvas muestreadas y recortadas a la zona, límites de zona marcados). Paso automático según el zoom (pasos de carta), paralelos en la proyección del mapa. Encima de las entidades y debajo de los objetivos.</td></tr>
 <tr><td class="cls">ScaleBarLayer</td><td>Escala gráfica abajo a la izquierda, medida en el centro de la vista con la distancia geodésica real entre dos píxeles (en Mercator la escala cambia con la latitud). Encima de todo.</td></tr>
 <tr><td class="cls">CoverageLayer</td><td>Mancha de <b>cobertura</b>: qué zonas de un zoom objetivo ya están en la BD, agregadas a una rejilla gruesa y coloreadas por completitud (ámbar→verde). Fija: se ve aunque mires a otro zoom.</td></tr>
@@ -644,7 +645,10 @@ borrar el objetivo o la zona no genera salidas. También se vigilan las <b>entid
 <code>QCPLayerable</code> de la capa <i>buffered</i> «targets», creado antes que
 <code>TargetLayer</code>. Así los anillos (<code>RangeRings</code>) y las marcaciones
 (<code>BearingLine</code>) que cuelgan de un objetivo se repintan con él, sin tocar teselas ni
-entidades, y los objetivos quedan encima. Los anillos son <b>geodésicos</b>
+entidades, y los objetivos quedan encima. Sus textos no los pinta él: los anota y los pinta
+<code>LabelLayer</code>, por encima de todo; el rótulo de una marcación se arrastra con el
+ratón (<code>BearingLine::labelOffsetPx</code>, <code>MapWidget::setBearingLabelOffset</code> /
+<code>bearingLabelAt</code>) y queda unido a su línea por una línea guía. Los anillos son <b>geodésicos</b>
 (<code>MapDecor::geodesicCircle</code>): en Mercator se estiran con la latitud, como la
 distancia real. Las marcaciones siguen la ortodrómica y miden rumbo y distancia al dibujar
 («202° · 26.7 NM», en las unidades de la escala). Una marcación sin longitud (mismo

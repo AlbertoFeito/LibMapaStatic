@@ -210,6 +210,8 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/RangeLayer.cpp
         src/widget/ScaleBarLayer.h
         src/widget/RangeLayer.h
+        src/widget/LabelLayer.cpp
+        src/widget/LabelLayer.h
         src/widget/HillshadeLayer.cpp
         src/widget/HillshadeLayer.h
         src/widget/MapView.cpp

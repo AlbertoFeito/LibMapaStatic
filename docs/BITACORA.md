@@ -6015,3 +6015,36 @@ comandos con las rutas reales de este PC (Qt 6.11.2 en `C:\Qt`, libmapa en
 librería desde `build-qt6`, comprobar el paquete con `check_data`, compilar `examples.pro`,
 desplegar con `desplegar.bat` y probar con `--comprobar`. Solo documentación; las rutas
 salen de un listado que pegó el usuario, no se han ejecutado aquí (no hay Windows).
+
+## 152. Los rótulos van encima de todo, y el de la marcación se mueve
+
+Con `app_seguimiento` en el PC se vio que los textos flotantes quedaban *debajo*: el
+nombre de una zona («Zona restringida») y el del CPA los pintaba `FeatureLayer` en su capa,
+por debajo de los anillos, de las marcaciones y de los objetivos, así que cualquier línea los
+tapaba; el de la marcación («080° · 2.51 NM»), además, no se podía mover y caía justo sobre el
+nombre del buque.
+
+- **`LabelLayer`** (nueva, `src/widget/`): un `QCPLayerable` en la misma capa *buffered*
+  «targets» pero creado el último, así que queda por encima de todo y se repinta con los
+  objetivos. No guarda estado: pide `FeatureLayer::drawLabels` (nombre de entidades y alertas
+  CPA, que son rótulos de entidad) y `RangeLayer::drawLabels` (distancias de anillos, nombre
+  del centro y rótulo de marcación). `FeatureLayer::drawFeature` ya no pinta la etiqueta; el
+  hit-test (`labelAt`) no cambia porque la caja se calcula igual.
+- **Rótulo de marcación movible**: `BearingLine::labelOffsetPx`, que se cambia arrastrando
+  el rótulo con el ratón (como los de entidad y objetivo) o con
+  `MapWidget::setBearingLabelOffset`; `bearingLabelAt` lo localiza por la caja de la última
+  pasada de dibujo. Con desplazamiento, una línea guía del color de la medida lo une a la
+  línea. En un clic gana el rótulo de marcación (se pinta el último), luego el de entidad y
+  el de objetivo; el cursor «mover» también aparece sobre él.
+- **Error de colocación corregido**: el rótulo de una marcación se ponía en
+  `linea.at(size/2)`, y una marcación de menos de 40 km solo tiene los dos extremos, así que
+  caía en el DESTINO (justo encima del símbolo y del nombre del objetivo). Ahora va en la
+  mitad de la longitud de la línea.
+- **Tests:** `featureLabelsDrawAboveRangeMarks` (una marcación cruza el rótulo: con el
+  arreglo no hay píxeles azules sobre la caja; con el dibujo antiguo salían 6, comprobado) y
+  `bearingLabelMovesWithMouse` (localizar, desplazar, arrastrar con el ratón sin mover el
+  mapa). 27 tests en verde (24 sin QCustomPlot).
+- **Sin probar a mano:** el aspecto en pantalla con la `app_seguimiento` real (el
+  contenedor no tiene pantalla): conviene mirar que los rótulos arrastrados se leen bien.
+  Los rótulos de **anillos** (distancias) pasan a la capa de arriba pero no se mueven: van
+  pegados a su anillo a propósito.

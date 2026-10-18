@@ -123,6 +123,12 @@ private slots:
     //! La etiqueta desplazada se puede localizar por su caja (featureLabelAt) y
     //! el offset se fija y persiste a traves de la fachada.
     void movableLabelHitTestAndOffset();
+    //! Los rotulos de entidades se pintan POR ENCIMA de las marcaciones: una linea
+    //! de marcacion ya no tapa el nombre de una zona.
+    void featureLabelsDrawAboveRangeMarks();
+    //! El rotulo de una marcacion se puede localizar, desplazar (con linea guia) y
+    //! arrastrar con el raton.
+    void bearingLabelMovesWithMouse();
     //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
     //! del PRIMER vértice, no del centro.
     void areaLabelHangsFromFirstVertex();
@@ -3953,6 +3959,120 @@ void TstMapWidget::movableLabelHitTestAndOffset()
     QCOMPARE(w.featureLabelAt(QPoint(465, 266)), id);
     // Sobre el propio punto ya no hay etiqueta (se movio).
     QCOMPARE(w.featureLabelAt(QPoint(400, 300)), qint64(-1));
+}
+
+// Cuenta los pixeles "azul de marcacion" (2962ff y sus cercanos) de un recuadro.
+static int pixelesAzules(const QImage &img, const QRect &r)
+{
+    int n = 0;
+    for (int y = r.top(); y <= r.bottom(); ++y)
+        for (int x = r.left(); x <= r.right(); ++x) {
+            const QColor c = img.pixelColor(x, y);
+            if (c.red() < 110 && c.green() < 160 && c.blue() > 200)
+                ++n;
+        }
+    return n;
+}
+
+// Imagen del widget tras dejar que se atiendan los repintados pendientes (las
+// capas agrupan repintados y las teselas llegan de un hilo).
+static QImage capturaTrasEventos(MapWidget &w)
+{
+    QCoreApplication::processEvents();
+    QTest::qWait(80);
+    QCoreApplication::processEvents();
+    return w.grab().toImage();
+}
+
+void TstMapWidget::featureLabelsDrawAboveRangeMarks()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("obj"), QStringLiteral("Objetivos"), 60);
+    MapFeature p;
+    p.kind = GeometryKind::Point;
+    p.layerId = QStringLiteral("obj");
+    p.geometry = {centro};
+    p.name = QStringLiteral("OBJ");
+    const qint64 id = w.addFeature(p);
+    QVERIFY(id > 0);
+    QVERIFY(w.setFeatureLabelOffset(id, QPointF(50.0, -30.0)));   // caja hacia (457,260)
+
+    // Marcacion horizontal que cruza justo el rotulo (y = 266, unos 34 px al norte
+    // del centro): a ~35.6 m/px en zoom 12 y esa latitud.
+    const QGeoCoordinate fila = centro.atDistanceAndAzimuth(34 * 35.56, 0.0);
+    BearingLine l;
+    l.from = fila.atDistanceAndAzimuth(150 * 35.56, 270.0);
+    l.to = fila.atDistanceAndAzimuth(250 * 35.56, 90.0);
+    l.label = false;                      // solo la linea, sin su propio rotulo
+    QVERIFY(w.addBearingLine(l) > 0);
+
+    // Los primeros pixeles de la caja (margen y comienzo del texto): la linea
+    // pasa por ahi, asi que sin rotulo habria azul; con el rotulo encima, no.
+    const QRect zona(458, 264, 6, 5);
+    const QImage conRotulo = capturaTrasEventos(w);
+    QCOMPARE(pixelesAzules(conRotulo, zona), 0);
+
+    // Prueba de que la linea de verdad pasa por esa zona: sin rotulo, se ve.
+    auto sinRotulo = w.feature(id);
+    QVERIFY(sinRotulo.has_value());
+    sinRotulo->style.labelVisible = false;
+    QVERIFY(w.updateFeature(*sinRotulo));
+    const QImage sinEl = capturaTrasEventos(w);
+    QVERIFY2(pixelesAzules(sinEl, zona) > 0, "la marcacion no cruza la zona de prueba");
+}
+
+void TstMapWidget::bearingLabelMovesWithMouse()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    BearingLine l;
+    l.from = centro.atDistanceAndAzimuth(150 * 35.56, 270.0);
+    l.to = centro.atDistanceAndAzimuth(150 * 35.56, 90.0);
+    const qint64 id = w.addBearingLine(l);
+    QVERIFY(id > 0);
+    capturaTrasEventos(w);                 // el rotulo se localiza por lo ya pintado
+
+    // Sin desplazar, el rotulo esta en el centro de la linea.
+    QCOMPARE(w.bearingLabelAt(QPoint(400, 300)), id);
+    QCOMPARE(w.bearingLabelAt(QPoint(400, 200)), qint64(-1));
+    QVERIFY(!w.setBearingLabelOffset(9999, QPointF(1, 1)));
+
+    // Con un desplazamiento, ya no esta sobre la linea sino 100 px mas arriba.
+    QVERIFY(w.setBearingLabelOffset(id, QPointF(0.0, -100.0)));
+    QCOMPARE(w.bearingLine(id)->labelOffsetPx, QPointF(0.0, -100.0));
+    capturaTrasEventos(w);
+    QCOMPARE(w.bearingLabelAt(QPoint(400, 200)), id);
+    QCOMPARE(w.bearingLabelAt(QPoint(400, 300)), qint64(-1));
+
+    // Arrastrandolo con el raton 60 px a la derecha y 40 abajo.
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    const QPoint pulsa(400, 200);
+    QMouseEvent p1 = mouseEvent(QEvent::MouseButtonPress, pulsa,
+                                Qt::LeftButton, Qt::LeftButton);
+    QMouseEvent m1 = mouseEvent(QEvent::MouseMove, pulsa + QPoint(60, 40),
+                                Qt::NoButton, Qt::LeftButton);
+    QMouseEvent r1 = mouseEvent(QEvent::MouseButtonRelease, pulsa + QPoint(60, 40),
+                                Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &p1);
+    QCoreApplication::sendEvent(vista, &m1);
+    QCoreApplication::sendEvent(vista, &r1);
+    QCOMPARE(w.bearingLine(id)->labelOffsetPx, QPointF(60.0, -60.0));
+
+    // El mapa no se desplazo con el arrastre (era el rotulo, no el fondo).
+    QVERIFY(qAbs(w.center().latitude() - centro.latitude()) < 1e-9);
+    QVERIFY(qAbs(w.center().longitude() - centro.longitude()) < 1e-9);
 }
 
 void TstMapWidget::areaLabelHangsFromFirstVertex()

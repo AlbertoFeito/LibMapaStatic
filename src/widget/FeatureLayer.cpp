@@ -254,9 +254,9 @@ void FeatureLayer::draw(QCPPainter *painter)
     drawDraft(painter);
 }
 
-// Pinta UNA entidad completa: cada parte de su geometria (punto o trazado), los
-// tiradores de vertices si esta seleccionada/editable (solo una parte) y su
-// etiqueta (junto al punto, o en el centro del rectangulo que la contiene toda).
+// Pinta UNA entidad completa: cada parte de su geometria (punto o trazado) y los
+// tiradores de vertices si esta seleccionada/editable (solo una parte). Su
+// etiqueta la pinta aparte drawLabels, en la capa de rotulos.
 void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
                                bool selected) const
 {
@@ -280,11 +280,8 @@ void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
     if (f.kind == GeometryKind::Polyline)
         drawEndpoints(painter, f, selected);
 
-    if (f.style.labelVisible && !f.name.isEmpty()) {
-        const QPointF base = labelAnchorScreen(f);
-        if (!base.isNull())
-            drawLabel(painter, f, base);
-    }
+    // La etiqueta NO se pinta aqui: va en la capa de rotulos (LabelLayer), por
+    // encima de anillos, marcaciones y objetivos (ver drawLabels).
 }
 
 // Dibuja una entidad de tipo PUNTO: su icono si lo tiene, o un circulo con el
@@ -674,6 +671,43 @@ QRectF FeatureLayer::labelBoxFor(const MapFeature &f, const QPointF &base,
 
     const QPointF tl = base + hueco + f.style.labelOffsetPx;
     return QRectF(tl, QSizeF(w, h)).adjusted(-3, -2, 3, 2);
+}
+
+// Pinta las etiquetas de TODAS las entidades visibles, directamente sobre el
+// lienzo (coordenadas de pantalla). Las llama LabelLayer, que vive encima de la
+// capa de objetivos: asi ningun anillo, marcacion ni objetivo tapa un rotulo.
+// Respeta el orden de las capas (la ultima, encima), su visibilidad y rango de
+// zoom. Descarta enseguida las entidades sin rotulo: con miles de entidades es
+// lo que mas se repite.
+void FeatureLayer::drawLabels(QPainter *painter) const
+{
+    QCustomPlot *plot = parentPlot();
+    if (!plot || !m_model || !m_toAxis)
+        return;
+
+    const MapView *vista = qobject_cast<MapView *>(plot);
+    const int zoomActual = vista ? vista->zoom() : -1;
+    const QRectF visible = visibleAxisRect();
+
+    painter->save();
+    painter->setFont(plot->font());          // la misma fuente que usa labelAt()
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    for (const LayerInfo &capa : m_model->layers()) {
+        if (!capa.visible)
+            continue;
+        if (zoomActual >= 0 && !capaVisibleAZoom(capa, zoomActual))
+            continue;
+        m_model->forEachInLayer(capa.id, [&](const MapFeature &f) {
+            if (!f.style.labelVisible || f.name.isEmpty() || !f.visible
+                || !featureInView(f, visible))
+                return true;
+            const QPointF base = labelAnchorScreen(f);
+            if (!base.isNull())
+                drawLabel(painter, f, base);
+            return true;
+        });
+    }
+    painter->restore();
 }
 
 // Dibuja la etiqueta (nombre) de una entidad colgando de 'base', con un fondo
