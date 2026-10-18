@@ -156,6 +156,11 @@ struct BearingLine {
     double lengthMeters = 0.0;
     QColor color = QColor(0x29, 0x62, 0xff);
     bool label = true;
+    //! Desplazamiento del rotulo («045° · 5.2 NM») respecto al centro de la linea,
+    //! en pixeles. Se cambia arrastrandolo con el raton (o con
+    //! MapWidget::setBearingLabelOffset); si es distinto de cero, una linea guia
+    //! lo une a la marcacion.
+    QPointF labelOffsetPx;
 };
 
 //! Que lineas marcan su primer y su ultimo punto (MapWidget::setRouteEndpoints).

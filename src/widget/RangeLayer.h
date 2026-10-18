@@ -65,6 +65,23 @@ public:
      * iguales, la ultima anadida.
      */
     qint64 markAt(const QPointF &pixel, double tolPx = 6.0) const;
+    /*!
+     * \brief Marcacion cuyo ROTULO cae bajo el pixel (el ultimo pintado gana), o -1.
+     *
+     * Usa las cajas de la ultima pasada de dibujo, para acertar justo donde se ve
+     * el rotulo.
+     */
+    qint64 bearingLabelAt(const QPointF &pixel) const;
+    //! Desplaza el rotulo de una marcacion (pixeles, relativo a su centro). false
+    //! si no existe esa marcacion.
+    bool setBearingLabelOffset(qint64 id, const QPointF &offsetPx);
+    /*!
+     * \brief Pinta los rotulos acumulados por la ultima pasada de \ref draw.
+     *
+     * Rotulos de anillos (distancia, nombre) y de marcaciones, con la linea guia
+     * de los desplazados. Lo llama LabelLayer, por encima de objetivos y entidades.
+     */
+    void drawLabels(QCPPainter *painter) const;
     bool isEmpty() const { return m_rings.isEmpty() && m_bearings.isEmpty(); }
 
     /*!
@@ -91,9 +108,10 @@ private:
     QPointF dentroDeVista(const QPointF &ideal, const QPolygonF &curva) const;
     QPointF bordeDeVista(const QPointF &desde, const QPointF &hasta) const;
     void drawRings(QCPPainter *painter, const RangeRings &r) const;
-    void drawBearing(QCPPainter *painter, const BearingLine &l) const;
-    void label(QCPPainter *painter, const QPointF &center, const QString &txt,
-               const QColor &color) const;
+    void drawBearing(QCPPainter *painter, qint64 id, const BearingLine &l) const;
+    //! Anota un rotulo para pintarlo despues, encima de todo (drawLabels).
+    void label(const QPointF &anchor, const QString &txt, const QColor &color,
+               const QPointF &offset = QPointF(), qint64 bearingId = -1) const;
     void repintar();
 
     TargetModel *m_targets = nullptr;
@@ -103,6 +121,18 @@ private:
     qint64 m_nextId = 1;
     QMap<qint64, RangeRings> m_rings;        //!< Ordenados: dibujo estable.
     QMap<qint64, BearingLine> m_bearings;
+
+    //! Rotulo pendiente de pintar: lo anota draw() y lo pinta drawLabels().
+    struct PendingLabel {
+        QPointF anchor;       //!< Punto al que cuelga (centro de la caja si no hay offset).
+        QString text;
+        QColor color;
+        QPointF offset;       //!< Desplazamiento en pixeles respecto a \a anchor.
+        qint64 bearingId;     //!< Marcacion a la que pertenece, o -1 (anillos).
+    };
+    mutable QVector<PendingLabel> m_pending;
+    //! Cajas de los rotulos de marcacion de la ultima pasada, para bearingLabelAt.
+    mutable QVector<std::pair<qint64, QRectF>> m_bearingLabelBoxes;
 };
 
 } // namespace libmapa

@@ -98,6 +98,12 @@ MapView::MapView(TileService *service, QWidget *parent)
     m_targetLayer->setAxisMapper(
         [](const QGeoCoordinate &c) { return MapView::toAxis(c); });
 
+    // ROTULOS de entidades, anillos y marcaciones: en la misma capa buffered, pero
+    // creados los ULTIMOS para quedar por encima de todo (un anillo o una
+    // marcacion no deben tapar el nombre de una zona). Se repintan con los objetivos.
+    m_labelLayer = new LabelLayer(this, m_featureLayer, m_rangeLayer);
+    m_labelLayer->setLayer(QStringLiteral("targets"));
+
     // Capa de COBERTURA, encima de todo: una mancha de diagnostico (que teselas
     // de un zoom hay en la BD). Oculta por defecto; la enciende fill_map.
     addLayer(QStringLiteral("coverage"), layer(QStringLiteral("targets")),
@@ -613,7 +619,8 @@ void MapView::actualizarCursorHover(const QPoint &pos)
 
     Qt::CursorShape c = Qt::ArrowCursor;
     if (m_tool == MapTool::None) {
-        if (m_featureLayer->labelAt(pos) >= 0 || (m_targetLayer && m_targetLayer->labelAt(pos) >= 0)) {
+        if (m_featureLayer->labelAt(pos) >= 0 || (m_targetLayer && m_targetLayer->labelAt(pos) >= 0)
+            || (m_rangeLayer && m_rangeLayer->bearingLabelAt(QPointF(pos)) >= 0)) {
             c = Qt::SizeAllCursor;
         } else if (m_targetLayer && (!m_targetLayer->clusterAt(pos).isEmpty() || targetAt(pos) >= 0)) {
             c = Qt::PointingHandCursor;
@@ -971,6 +978,20 @@ void MapView::mousePressEvent(QMouseEvent *event)
             // Prioridad 1: un clic sobre la CAJA DE ETIQUETA empieza a arrastrarla
             // (de entidad o de objetivo). El rotulo se mueve aparte de su punto;
             // como el offset es relativo, al mover el punto la etiqueta lo sigue.
+            // El rotulo de una marcacion se pinta por encima de los demas, asi que
+            // tambien se prueba el primero.
+            const qint64 blab = m_rangeLayer ? m_rangeLayer->bearingLabelAt(QPointF(event->pos()))
+                                             : -1;
+            if (blab >= 0) {
+                BearingLine linea;
+                if (m_rangeLayer->bearing(blab, &linea)) {
+                    m_dragLabelBearing = blab;
+                    m_dragLabelStartPx = event->pos();
+                    m_dragLabelStartOffset = linea.labelOffsetPx;
+                    setCursor(Qt::SizeAllCursor);
+                    break;
+                }
+            }
             const qint64 flab = m_featureLayer->labelAt(event->pos());
             if (flab >= 0) {
                 m_dragLabelFeature = flab;
@@ -1223,6 +1244,12 @@ void MapView::mouseMoveEvent(QMouseEvent *event)
         event->accept();
         return;
     }
+    if (m_dragLabelBearing >= 0) {
+        m_rangeLayer->setBearingLabelOffset(m_dragLabelBearing,
+            m_dragLabelStartOffset + QPointF(event->pos() - m_dragLabelStartPx));
+        event->accept();
+        return;
+    }
 
     // Arrastre de una entidad draggable: la mueve en el modelo (no-op si la app
     // la recreo) y avisa con la coordenada para que la app actualice su estado.
@@ -1355,6 +1382,13 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
     }
     if (izq && m_dragLabelTarget >= 0) {
         m_dragLabelTarget = -1;
+        unsetCursor();
+        m_hoverSet = false;
+        event->accept();
+        return;
+    }
+    if (izq && m_dragLabelBearing >= 0) {
+        m_dragLabelBearing = -1;
         unsetCursor();
         m_hoverSet = false;
         event->accept();

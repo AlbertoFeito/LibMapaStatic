@@ -651,6 +651,14 @@ public:
     qint64 featureLabelAt(const QPoint &pixel) const;
     //! Objetivo cuyo ROTULO dibujado cae bajo el pixel, o -1.
     qint64 targetLabelAt(const QPoint &pixel) const;
+    //! Marcacion (\ref addBearingLine) cuyo ROTULO dibujado cae bajo el pixel, o -1.
+    //! Usa lo pintado en el ultimo repintado: en un mapa que aun no se ha mostrado
+    //! no hay rotulos que acertar.
+    qint64 bearingLabelAt(const QPoint &pixel) const;
+    //! Desplaza el rotulo de una marcacion respecto al centro de su linea (px).
+    //! Una linea guia lo une a la marcacion. En pantalla se hace arrastrandolo
+    //! con el raton. false si el id no es de una marcacion.
+    bool setBearingLabelOffset(qint64 id, const QPointF &offsetPx);
 
     //! Fija el desplazamiento de la etiqueta de una entidad (px) y lo persiste.
     //! false si el id no existe.
