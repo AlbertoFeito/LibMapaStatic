@@ -44,22 +44,24 @@ git pull
 (Cuando esa rama se fusione, `git checkout main` y `git pull`.)
 
 ## 2. Instalar libmapa en `C:\libmapa\qt6`
-Ya existe `build-qt6`, así que **no hace falta repetir `mkdir` ni `qmake`**:
+Con `build-qt6` **vacía** (la primera vez, o tras borrarla) hace falta `qmake`,
+que es quien crea los `Makefile`; sin él `mingw32-make` dice
+`No targets specified and no makefile found`:
+```bat
+cd /d D:\QtPro\LibMapaStatic\build-qt6
+qmake ..\qmake\libmapa\libmapa.pro
+mingw32-make -j4
+mingw32-make install
+```
+Cuando `build-qt6` ya tiene sus `Makefile`, para reinstalar basta:
 ```bat
 cd /d D:\QtPro\LibMapaStatic\build-qt6
 mingw32-make -j4
 mingw32-make install
 ```
-Si algo se queda raro (o cambiaste ficheros del `.pro`), empieza de cero:
-```bat
-cd /d D:\QtPro\LibMapaStatic
-rmdir /s /q build-qt6
-mkdir build-qt6
-cd build-qt6
-qmake ..\qmake\libmapa\libmapa.pro
-mingw32-make -j4
-mingw32-make install
-```
+Para empezar de cero otra vez: `rmdir /s /q build-qt6`, `mkdir build-qt6` y los
+cuatro comandos de arriba.
+
 Reinstala **cada vez que cambie el código de la librería** (por ejemplo al
 traer una rama nueva). Comprueba el resultado:
 ```bat
@@ -67,7 +69,7 @@ dir /b C:\libmapa\qt6
 dir /b C:\libmapa\qt6\lib
 dir /b C:\libmapa\qt6\bin
 ```
-Debe haber `libmapa.pri`, `lib\libmapa_core.a`, `lib\libmapa_widget.a`,
+Debe haber `libmapa.pri`, `lib\libmapa_core.a`, `lib\libmapa_widget.a` (y las `d` de Debug),
 `bin\check_data.exe` y `share\libmapa\desplegar.bat`.
 
 ### Comprobar el paquete de datos
