@@ -209,6 +209,22 @@ Debe abrirse la ventana con el mapa. Así pruebas sin tener que desplegar.
 > desplegar (paso 5) ese problema desaparece, porque el script deja `datos\`
 > junto al `.exe`.
 
+### 3.3 bis. Todos los ejemplos de una vez (CMake)
+
+Cada ejemplo de `examples/` usa la librería **instalada**, nunca sus fuentes.
+Para compilarlos todos juntos (y de paso comprobar que la instalación sirve):
+
+```bat
+cmake -S examples -B build-examples -DCMAKE_PREFIX_PATH="C:/libmapa/qt6;C:/Qt/6.11.2/mingw_64"
+cmake --build build-examples
+```
+
+Con qmake: abre `examples\examples.pro` en Qt Creator con el mismo kit.
+En Linux/CI, `herramientas/probar_instalacion.sh <prefijo>` hace todo: mira que
+el prefijo tenga lo prometido, crea un paquete de datos mínimo, compila los
+ejemplos y arranca `app_minima --comprobar` y `check_data`. Un ejemplo nuevo se
+apunta en `examples/CMakeLists.txt` y `examples/examples.pro`.
+
 ### 3.4 Comprobar que compila
 
 Pulsa **Ejecutar** (el triángulo verde). Funciona en Debug y en Release.

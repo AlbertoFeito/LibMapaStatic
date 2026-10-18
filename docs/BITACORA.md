@@ -5984,3 +5984,25 @@ propia aplicación.
   27 tests en verde (24 sin QCustomPlot).
 - **Sin probar a mano:** el diálogo de abrir fichero de la demo (no hay forma de teclear
   en el contenedor); sí está probado todo lo que hay detrás.
+
+## 150. Contrato de instalación: los ejemplos usan la librería instalada
+
+Antes de desarrollar varias aplicaciones de ejemplo, se asegura cómo la usarán: se instala
+una vez y cada app la encuentra con `find_package`, sin tocar las fuentes.
+
+- **Comprobado a mano** (Linux, Qt 6.4): compilar, `cmake --install` a un prefijo, y
+  compilar `app_minima` y `app_seguimiento` contra él. Copiando el prefijo a otra ruta
+  los ejemplos siguen enlazando (el `Config` no guarda rutas absolutas). 27 tests en verde.
+- **`herramientas/probar_instalacion.sh <prefijo>`**: mira que el prefijo tenga el
+  `Config`, las bibliotecas, las cabeceras y `check_data`; fabrica un paquete de datos
+  mínimo (una pirámide de teselas de 1×1 px, sin red, con `python3`); compila TODOS los
+  ejemplos contra el prefijo; y arranca `app_minima --comprobar` y `check_data`. La
+  atribución del paquete es obligatoria: sin ella `--comprobar` sale con 1 (lo cazó la
+  primera ejecución).
+- **`examples/CMakeLists.txt`** y **`examples/examples.pro`**: compilan todos los ejemplos
+  de una vez. Es un proyecto aparte, no un `add_subdirectory` de la raíz: cada ejemplo
+  hace su propio `find_package`, así que compilarlos prueba la instalación de verdad. Un
+  ejemplo nuevo se apunta en ambos ficheros.
+- **CI:** tras los tests, instala en un prefijo y ejecuta el script (Qt 5 y Qt 6).
+- **Docs:** apartado 3.3 bis de `DESPLIEGUE.md` y README.
+- **Sin probar:** el camino qmake y los `.bat` (no hay qmake ni Windows en el contenedor).
