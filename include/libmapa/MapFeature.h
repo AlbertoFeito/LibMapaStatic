@@ -194,6 +194,12 @@ struct LayerInfo
     QString displayName;
     bool visible = true;
     bool editable = true;
+    //! ¿Se pueden seleccionar con el ratón las entidades de la capa (clic y
+    //! rótulo)? Las capas fijas del paquete (overlays) vienen en \c false: son
+    //! decoración de fondo, y un polígono grande (una provincia) se llevaba el clic
+    //! que era de las rutas o los puntos de encima. Lo demás sigue funcionando
+    //! (consultas, exportar, dibujarla): solo no se elige con el ratón.
+    bool selectable = true;
     //! Orden de dibujo: mayor se pinta encima.
     int zOrder = 0;
     int featureCount = 0;

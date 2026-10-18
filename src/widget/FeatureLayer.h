@@ -58,7 +58,12 @@ public:
     void setDraftCursor(const QPoint &pixel, bool visible);
 
     //! Entidad bajo un punto de la pantalla, o -1. La mas cercana gana.
-    qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+    //! Con \a incluirNoSeleccionables = false (lo que usa el raton para elegir,
+    //! arrastrar y poner el cursor) se saltan las capas con \c LayerInfo::selectable
+    //! falso (las fijas del paquete); con true se miran todas: es la consulta «que
+    //! hay debajo», para un tooltip o una lectura de cota, sin elegir nada.
+    qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0,
+                     bool incluirNoSeleccionables = false) const;
 
     //! Entidad cuya CAJA DE ETIQUETA cae bajo el pixel, o -1 (la de encima gana).
     //! Permite seleccionar/arrastrar el rotulo por separado de la geometria.

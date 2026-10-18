@@ -472,15 +472,11 @@ public:
                 qCWarning(lcMapaRender) << "Capa fija" << ov.id << "no cargada:" << motivo;
                 continue;
             }
-            // El .geo es decoracion fija (no seleccionable); la BD vectorial
-            // conserva entidades seleccionables (p. ej. para leer la cota).
-            if (!esDb) {
-                if (auto f = modelo->feature(fid)) {
-                    f->selectable = false;
-                    modelo->updateFeature(*f);
-                }
-            }
             modelo->setLayerEditable(ov.id, false);
+            // Decoracion de fondo: ocultas y sin poder elegirse con el raton salvo
+            // que el mapa.json lo pida ("visible" / "selectable").
+            modelo->setLayerVisible(ov.id, ov.visible);
+            modelo->setLayerSelectable(ov.id, ov.selectable);
             modelo->setLayerZOrder(ov.id, ov.zOrder);
             modelo->setLayerZoomRange(ov.id, ov.minZoom, ov.maxZoom);
         }
@@ -1179,6 +1175,13 @@ QVector<LayerInfo> MapWidget::featureLayers() const
 bool MapWidget::setFeatureLayerVisible(const QString &id, bool visible)
 {
     return d->view ? d->view->overlayModel()->setLayerVisible(id, visible)
+                   : false;
+}
+
+// Permite o impide seleccionar con el raton las entidades de una capa.
+bool MapWidget::setFeatureLayerSelectable(const QString &id, bool selectable)
+{
+    return d->view ? d->view->overlayModel()->setLayerSelectable(id, selectable)
                    : false;
 }
 
@@ -2094,7 +2097,9 @@ void MapWidget::clearSelection()
 qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx) const
 {
     d->syncGeometry();
-    return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx) : -1;
+    // Consulta «que hay debajo»: mira tambien las capas fijas no seleccionables
+    // (para un tooltip o una lectura de cota); elegir con el raton no las alcanza.
+    return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx, true) : -1;
 }
 
 // Todo lo que hay bajo un pixel, cada cosa por separado (ver MapHit).
@@ -2104,10 +2109,13 @@ MapHit MapWidget::hitTest(const QPoint &pixel) const
     h.pixel = pixel;
     if (!d->view)
         return h;
+    d->syncGeometry();
     h.coordinate = d->view->coordinateAt(pixel);
     h.targetId = targetAt(pixel);
     h.clusterTargets = targetClusterAt(pixel);
-    h.featureId = featureAt(pixel);
+    // Lo que se puede ELEGIR bajo el cursor (el menu contextual no ofrece acciones
+    // sobre una provincia de fondo): sin las capas fijas no seleccionables.
+    h.featureId = d->view ? d->view->featureLayer()->featureAt(pixel) : -1;
     if (d->view->rangeLayer())
         h.rangeMarkId = d->view->rangeLayer()->markAt(pixel);
     const qint64 sel = d->view->overlayModel()->selectedId();

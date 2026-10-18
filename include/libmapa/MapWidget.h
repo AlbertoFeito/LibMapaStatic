@@ -246,6 +246,16 @@ public:
     bool removeFeatureLayer(const QString &id);
     QVector<LayerInfo> featureLayers() const;
     bool setFeatureLayerVisible(const QString &id, bool visible);
+    /*!
+     * \brief Permite o impide elegir con el ratón las entidades de una capa.
+     *
+     * Las capas fijas del paquete (overlays) arrancan NO seleccionables y ocultas:
+     * son decoración de fondo (provincias, aguas, curvas de nivel) y un polígono
+     * grande se llevaba el clic de lo que hay encima. Una app que quiera pincharlas
+     * las activa con esto (o con \c "selectable": true en el overlay del mapa.json);
+     * y las muestra con \ref setFeatureLayerVisible. Ver \c LayerInfo::selectable.
+     */
+    bool setFeatureLayerSelectable(const QString &id, bool selectable);
     bool setFeatureLayerZOrder(const QString &id, int zOrder);
 
     //! Fija el rango de zoom [minZoom, maxZoom] en que la capa se dibuja y se
@@ -635,7 +645,10 @@ public:
     void selectFeature(qint64 id);
     void clearSelection();
 
-    //! Entidad bajo un punto de la pantalla, o -1.
+    //! Entidad bajo un punto de la pantalla, o -1. Es una CONSULTA (tooltips,
+    //! lecturas de cota): mira tambien las capas fijas del paquete aunque no sean
+    //! seleccionables (provincias, curvas...) y no cambia la seleccion. Lo que se
+    //! puede ELEGIR con el raton es lo que devuelve \ref hitTest.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
     /*!
      * \brief Todo lo que hay bajo un pixel: objetivo suelto, grupo de

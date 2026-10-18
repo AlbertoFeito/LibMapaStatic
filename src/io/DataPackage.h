@@ -50,6 +50,10 @@ struct DataPackage
         int zOrder = 0;
         int minZoom = -1;        //!< Zoom mínimo para dibujarla (−1 = sin límite).
         int maxZoom = -1;        //!< Zoom máximo para dibujarla (−1 = sin límite).
+        //! ¿Se ve al abrir? Por defecto NO: son capas de fondo que la app enciende.
+        bool visible = false;
+        //! ¿Se puede elegir con el ratón? Por defecto NO (decoración fija).
+        bool selectable = false;
         FeatureStyle style;
     };
 

@@ -33,17 +33,6 @@ void Ventana::quitarResultadosAnalisis()
     m_ultimo = Analisis::Ninguno;
 }
 
-// Al iniciar, los overlays del paquete arrancan OCULTOS (no cargan el
-// sistema). El operador los enciende desde el panel de capas.
-void Ventana::ocultarOverlaysAlIniciar()
-{
-    // Los overlays del paquete se cargan como capas NO editables; las capas
-    // de usuario sí lo son. Ocultamos las no editables (los overlays).
-    for (const LayerInfo &capa : m_mapa->featureLayers())
-        if (!capa.editable)
-            m_mapa->setFeatureLayerVisible(capa.id, false);
-}
-
 // Repone el borrador por defecto (sin tipo de dominio, sin tope de
 // vértices, estilo por defecto). Lo usa volverANavegar al desarmar el alta.
 void Ventana::reponerBorrador()

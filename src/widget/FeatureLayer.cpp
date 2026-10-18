@@ -752,6 +752,8 @@ qint64 FeatureLayer::labelAt(const QPoint &pixel) const
             continue;
         if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
             continue;
+        if (!capas[i].selectable)
+            continue;               // capa fija del paquete: no se elige con el raton
         qint64 acierto = -1;
         m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
             if (!f.visible || !f.selectable || !f.style.labelVisible || f.name.isEmpty())
@@ -792,7 +794,8 @@ double FeatureLayer::distanceToSegment(const QPointF &p, const QPointF &a,
 // dentro de la tolerancia, o -1. Recorre de la capa mas alta a la mas baja (lo de
 // arriba gana) y prueba parte a parte; para poligonos, caer DENTRO del area es un
 // acierto directo. En cuanto una capa da un acierto, no baja mas.
-qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
+qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
+                               bool incluirNoSeleccionables) const
 {
     if (!m_model)
         return -1;
@@ -813,6 +816,8 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx) const
             continue;
         if (zoomActual >= 0 && !capaVisibleAZoom(capas[i], zoomActual))
             continue;               // no seleccionable fuera de su rango de zoom
+        if (!capas[i].selectable && !incluirNoSeleccionables)
+            continue;               // capa fija del paquete: no se elige con el raton
 
         m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
             if (!f.visible || !f.selectable)
