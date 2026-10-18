@@ -252,6 +252,8 @@ En Qt Creator basta con abrir el `CMakeLists.txt`.
 
 ### Usarla desde otra aplicación
 
+> Comandos con las rutas reales del PC de desarrollo: [`docs/MIS_RUTAS.md`](docs/MIS_RUTAS.md).
+>
 > **Guía paso a paso, sin conocimientos previos:
 > [`docs/DESPLIEGUE.md`](docs/DESPLIEGUE.md)**: compilar la librería,
 > integrarla en una app qmake y llevarla a otro PC, con Qt 6 o con Qt 5.14.

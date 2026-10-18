@@ -6006,3 +6006,12 @@ una vez y cada app la encuentra con `find_package`, sin tocar las fuentes.
 - **CI:** tras los tests, instala en un prefijo y ejecuta el script (Qt 5 y Qt 6).
 - **Docs:** apartado 3.3 bis de `DESPLIEGUE.md` y README.
 - **Sin probar:** el camino qmake y los `.bat` (no hay qmake ni Windows en el contenedor).
+
+## 151. Hoja de rutas del PC de desarrollo
+
+Para no depender de la memoria al instalar y desplegar, `docs/MIS_RUTAS.md` recoge los
+comandos con las rutas reales de este PC (Qt 6.11.2 en `C:\Qt`, libmapa en
+`C:\libmapa\qt6`, paquete en `D:\QtPro\Recursos`): ponerse en la rama, reinstalar la
+librería desde `build-qt6`, comprobar el paquete con `check_data`, compilar `examples.pro`,
+desplegar con `desplegar.bat` y probar con `--comprobar`. Solo documentación; las rutas
+salen de un listado que pegó el usuario, no se han ejecutado aquí (no hay Windows).

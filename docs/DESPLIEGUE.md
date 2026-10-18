@@ -21,6 +21,9 @@ internet**.
 Los pasos 0, 1 y 2 se hacen **una sola vez** por PC. Del 3 al 6 son los de cada
 vez que entregas una versión nueva (y si no has tocado nada, el 3 ya está).
 
+> ¿Instalas y despliegas en **el PC de Alberto** (`D:\QtPro`, `C:\libmapa\qt6`)? Los
+> comandos con sus rutas reales están en [`MIS_RUTAS.md`](MIS_RUTAS.md).
+
 > ¿Solo quieres la versión corta para **Qt 5**? Está en
 > [`RESUMEN_QT5.md`](RESUMEN_QT5.md) (misma carpeta). Esta guía es la detallada.
 
