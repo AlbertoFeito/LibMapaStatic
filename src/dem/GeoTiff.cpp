@@ -840,6 +840,41 @@ Block GeoTiffImage::Impl::decodeBlock(int index) const
     return out;
 }
 
+// Recorre los bloques de la primera banda y clasifica los que no se leerían bien.
+GeoTiffBlockReport GeoTiffImage::verifyBlocks() const
+{
+    GeoTiffBlockReport r;
+    if (!d || !d->open)
+        return r;
+    QFile f(d->path);
+    r.fileSize = f.size();
+    r.total = d->blocksPerBand;
+    const int across = d->lay.tiled ? (d->lay.width + d->lay.tileW - 1) / d->lay.tileW : 1;
+    for (int i = 0; i < d->blocksPerBand; ++i) {
+        const int col0 = d->lay.tiled ? (i % across) * d->lay.tileW : 0;
+        const int row0 = d->lay.tiled ? (i / across) * d->lay.tileH : i * d->lay.tileH;
+        QString motivo;
+        if (i >= d->offsets.size() || i >= d->counts.size()) {
+            ++r.outOfFile;
+            motivo = QStringLiteral("sin entrada en la tabla de bloques");
+        } else if (d->counts[i] == 0) {
+            ++r.sparse;
+            continue;                       // disperso: no es un error, pero se cuenta
+        } else if (qint64(d->offsets[i] + d->counts[i]) > r.fileSize) {
+            ++r.outOfFile;
+            motivo = QStringLiteral("sus datos pasan del final del fichero (descarga cortada)");
+        } else if (!d->decodeBlock(i).ok) {
+            ++r.undecodable;
+            motivo = QStringLiteral("no se pudo descomprimir (compresión %1)").arg(d->lay.compression);
+        } else {
+            continue;
+        }
+        if (r.problems.size() < 20)
+            r.problems << QStringLiteral("bloque %1 (col %2, fila %3): %4").arg(i).arg(col0).arg(row0).arg(motivo);
+    }
+    return r;
+}
+
 // Libera de la caché compartida los bloques de esta imagen al cerrarse.
 GeoTiffImage::Impl::~Impl()
 {

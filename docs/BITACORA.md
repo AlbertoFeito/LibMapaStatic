@@ -5907,3 +5907,21 @@ transparente (en Copernicus el mar vale 0). Uso:
 
 Se descartó la rama de ortofotos (herramienta `ortho_to_tiles`): por ahora no aporta
 nada al usuario. Queda guardada en la rama local `backup-ortofotos` / PR #11.
+
+## 147. `geotiff_check`: detectar GeoTIFF cortados o dañados
+
+El relieve de Copernicus del usuario salió con un hueco rectangular al este de la
+isla, aunque estaban los 42 cuadros. La lista de ficheros cubría toda la tierra de
+Cuba (los que faltan son mar abierto, que Copernicus casi no publica), así que no era
+un cuadro ausente. Los bordes rectos (~30 km de alto, 70–96 km de ancho) encajan con
+bloques internos de 1024×1024 píxeles: un bloque cuyo dato falta o no se puede
+descomprimir se lee como «sin dato» y no da ningún aviso. Se sospecha una descarga
+cortada en `N20 W075`/`N19 W075`, pero no se pudo confirmar sin los ficheros.
+
+- `GeoTiffImage::verifyBlocks()` recorre los bloques de la primera banda sin pasar por
+  la caché y cuenta los vacíos (tamaño 0, legítimos), los que caen más allá del final
+  del fichero y los que no se descomprimen, con la posición de los primeros.
+- Herramienta **`geotiff_check <fichero|carpeta>…`**: una línea por fichero (`ok`/`MAL`,
+  tamaño, extensión, nº de bloques) y los bloques con problema. Código de salida 1 si
+  alguno falla. Probada con los cuadros reales y con uno truncado a propósito.
+- Test `verifyBlocksFindsDamage` en `tst_geotiff` (sano y cortado). 26 tests en verde.
