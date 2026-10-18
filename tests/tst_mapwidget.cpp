@@ -69,6 +69,7 @@ private slots:
     //! elevacion puede venir de un GeoTIFF (fichero o carpeta).
     void mbtilesLayerRendersInTheWidget();
     void geotiffElevationThroughTheWidget();
+    void placeSearchThroughTheWidget();
 
     void navigationKeepsCenter();
     void zoomIsClampedToRecommendedRange();
@@ -520,6 +521,45 @@ void TstMapWidget::mbtilesLayerRendersInTheWidget()
 // La elevacion puede venir de un GeoTIFF suelto o de una carpeta de ellos, tanto
 // por la configuracion como en caliente; el resto de la API (cota, visibilidad)
 // funciona igual que con las bases de siempre.
+// Busqueda de lugares a traves del widget: sin indice no hay nada; con el de
+// prueba (de MapConfig o en caliente) se busca sin tildes y goToPlace centra el
+// mapa con el zoom del tipo de lugar, sin pasar del maximo de la capa.
+void TstMapWidget::placeSearchThroughTheWidget()
+{
+    const QString lugares = QStringLiteral(LIBMAPA_TESTDATA) + QStringLiteral("/places/lugares_prueba.sqlitedb");
+
+    MapWidget sin(baseConfig(m_jsonPath));
+    QVERIFY(sin.isReady());
+    QVERIFY(!sin.hasPlaces());
+    QVERIFY(sin.searchPlaces(QStringLiteral("santiago")).isEmpty());
+
+    MapConfig cfg = baseConfig(m_jsonPath);
+    cfg.placesDbFile = lugares;
+    MapWidget w(cfg);
+    QVERIFY(w.isReady());
+    QVERIFY(w.hasPlaces());
+    const QVector<Place> r = w.searchPlaces(QStringLiteral("SANTIAGO de"));
+    QCOMPARE(r.size(), 1);
+    QCOMPARE(r.first().name, QStringLiteral("Santiago de Cuba"));
+
+    w.goToPlace(r.first());
+    QVERIFY(std::fabs(w.center().latitude() - 20.0247) < 1e-3);
+    QVERIFY(std::fabs(w.center().longitude() + 75.8295) < 1e-3);
+    QVERIFY(w.zoom() <= w.maxZoom());
+    QVERIFY(w.zoom() <= r.first().suggestedZoom());
+
+    Place invalido;                                  // sin coordenada: no mueve nada
+    const QGeoCoordinate antes = w.center();
+    w.goToPlace(invalido);
+    QCOMPARE(w.center(), antes);
+
+    w.setPlacesDb(QString());                        // en caliente: se quita
+    QVERIFY(!w.hasPlaces());
+    sin.setPlacesDb(lugares);                        // y se pone
+    QVERIFY(sin.hasPlaces());
+    QCOMPARE(sin.searchPlaces(QStringLiteral("baracoa")).size(), 1);
+}
+
 void TstMapWidget::geotiffElevationThroughTheWidget()
 {
     // Un cerro cónico de 1° x 1° en (20..21 N, -78..-77 E): cota = 1000 - distancia al

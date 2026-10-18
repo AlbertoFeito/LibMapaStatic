@@ -30,6 +30,7 @@ namespace libmapa {
  *       "start":    { "layer", "center": [lat, lon], "zoom" },
  *       "datasets": [ ...igual que en datasets.json... ],
  *       "elevation":{ "file": "dem.sqlitedb" (o un .tif)  }   o   { "dir": "hgt" } (de .hgt o .tif),
+ *       "places":   { "file": "lugares.sqlitedb" },
  *       "overlays": [ { "id", "name", "file": "x.geo", "zOrder",
  *                       "style": {"lineColor","fillColor","lineWidth"} } ],
  *       "features": { "file": "entidades.db", "seed": "entidades_iniciales.db" }
@@ -62,6 +63,8 @@ struct DataPackage
 
     QString elevationFile;       //!< BD de elevacion o GeoTIFF (absoluta), o vacio.
     QString elevationDir;        //!< Carpeta de .hgt o GeoTIFF (absoluta), o vacio.
+
+    QString placesFile;          //!< BD de busqueda de lugares (absoluta), o vacio.
 
     QVector<Overlay> overlays;
 

@@ -352,6 +352,11 @@ void Ventana::construirMenuYBarra()
     accFiltro->setStatusTip(tr("Mostrar solo los objetivos de ciertos tipos, velocidades "
                                "o dentro de zonas vigiladas."));
     connect(accFiltro, &QAction::triggered, this, &Ventana::filtrarObjetivos);
+    // Buscar un lugar por nombre (índice sin conexión del paquete).
+    auto *accBuscar = mVer->addAction(tr("Buscar lugar..."));
+    accBuscar->setShortcut(QKeySequence(QStringLiteral("Ctrl+K")));
+    accBuscar->setStatusTip(tr("Escribe el nombre de una ciudad, aeropuerto, bahía... y el mapa va allí."));
+    connect(accBuscar, &QAction::triggered, this, &Ventana::enfocarBuscador);
     // Agrupar objetivos: con cientos en pantalla, al alejar el zoom se
     // dibujan como círculos con el número; pinchar uno lo amplía.
     auto *accAgrupar = mVer->addAction(tr("Agrupar objetivos al alejar"));
@@ -507,6 +512,7 @@ void Ventana::construirMenuYBarra()
     tb->addSeparator();
     tb->addAction(m_accAbrir);
     tb->addAction(m_accGuardar);
+    crearBuscador(tb);
 
     // --- Barra secundaria: terreno y datos (actividad aparte, 2ª fila) ---
     addToolBarBreak();   // fuerza una fila nueva: no se amontona con la de arriba

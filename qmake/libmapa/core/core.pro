@@ -43,6 +43,7 @@ SOURCES += \
     $$ROOT/src/geo/TrackReplay.cpp \
     $$ROOT/src/io/DataPackage.cpp \
     $$ROOT/src/io/PackageCheck.cpp \
+    $$ROOT/src/io/PlaceIndex.cpp \
     $$ROOT/src/dem/GridElevation.cpp \
     $$ROOT/src/dem/HgtElevation.cpp \
     $$ROOT/src/dem/SqliteElevation.cpp \

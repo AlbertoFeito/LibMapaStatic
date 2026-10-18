@@ -140,6 +140,9 @@ add_library(libmapa_core STATIC
     include/libmapa/DataPackage.h
     src/io/PackageCheck.cpp
     src/io/PackageCheck.h
+    src/io/PlaceIndex.cpp
+    src/io/PlaceIndex.h
+    include/libmapa/Places.h
 
     src/dem/IElevationSource.h
     src/dem/GridElevation.cpp
@@ -260,7 +263,7 @@ if(LIBMAPA_BUILD_DEMO AND LIBMAPA_HAVE_QCP)
         demo/Ventana.h demo/Ventana.cpp
         demo/VentanaMenus.cpp demo/VentanaPanel.cpp demo/VentanaDibujo.cpp
         demo/VentanaElevacion.cpp demo/VentanaFicheros.cpp demo/VentanaObjetivos.cpp
-        demo/VentanaContexto.cpp demo/VentanaTarjeta.cpp)
+        demo/VentanaContexto.cpp demo/VentanaTarjeta.cpp demo/VentanaBuscar.cpp)
     target_link_libraries(demo PRIVATE libmapa_widget Qt${QT_VERSION_MAJOR}::PrintSupport)
     # El demo dibuja el perfil con QCustomPlot (ya compilado dentro de
     # libmapa_widget); su cabecera va como SYSTEM para que nuestros -W... no la marquen.
@@ -408,6 +411,9 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_mapdecor)
     libmapa_add_test(tst_vectorformats)
     libmapa_add_test(tst_coordinates)
+    libmapa_add_test(tst_places)
+    target_compile_definitions(tst_places PRIVATE
+        LIBMAPA_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
 
@@ -430,6 +436,8 @@ if(LIBMAPA_BUILD_TESTS)
         target_include_directories(tst_mapwidget
             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
         target_include_directories(tst_mapwidget SYSTEM PRIVATE ${LIBMAPA_QCP_DIR})
+        target_compile_definitions(tst_mapwidget PRIVATE
+            LIBMAPA_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
         add_test(NAME tst_mapwidget COMMAND tst_mapwidget)
 
         add_executable(tst_targetmodel tests/tst_targetmodel.cpp)

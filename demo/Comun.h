@@ -35,6 +35,7 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
+#include <QStringListModel>
 #include <QProgressDialog>
 #include <QMainWindow>
 #include <QMenu>
