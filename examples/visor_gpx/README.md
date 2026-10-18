@@ -10,13 +10,14 @@ recorridos**: senderismo, post-análisis de una misión, revisión de un track d
 |---|---|
 | Abrir un fichero como capa y encuadrarlo | `MapWidget::importVectorFile`, `fitBounds` |
 | Inicio (verde) y fin (rojo) de cada ruta | `setRouteEndpoints(RouteEndpoints::Routes)` |
-| Longitud y perfil de elevación al pinchar una ruta | `featureSelected`, `pathLength`, `elevationProfile` |
+| Longitud y perfil de elevación de la ruta seleccionada (la primera al abrir; otra, pinchándola) | `featureSelected`, `pathLength`, `elevationProfile` |
 | Reproducir un GPX con horas (play, pausa, ir a una hora, velocidad) | `TrackPlayer` |
 | Exportar la vista a PDF o imagen, con título y atribución | `exportView` |
 
 Todo en un solo fichero, [`main.cpp`](main.cpp), pensado para leerse de arriba abajo.
 El perfil de elevación solo sale si el paquete de datos trae elevación (SRTM,
-GeoTIFF o `.sqlitedb`); sin ella, la gráfica lo dice.
+GeoTIFF o `.sqlitedb`, la clave `"elevation"` de `mapa.json`) y esta cubre la ruta;
+si no, la gráfica lo dice.
 
 ## Probarlo
 
@@ -28,8 +29,9 @@ visor_gpx D:\QtPro\Recursos examples\visor_gpx\ruta_ejemplo.gpx
 
 - **Menú Archivo → Abrir ruta…** carga otro fichero; **Exportar vista…** guarda PDF o imagen.
 - Con un GPX con horas aparece la barra de reproducción.
-- `--comprobar` no abre ventana: dice qué ha leído y sale con 0 si todo está bien
-  (lo usa `herramientas/probar_instalacion.sh`).
+- `--comprobar` no abre ventana: dice qué ha leído, el perfil de la primera ruta
+  si hay elevación, y sale con 0 si todo está bien (lo usa
+  `herramientas/probar_instalacion.sh`).
 - `--captura=imagen.png` abre la ventana, guarda una imagen y sale.
 
 `ruta_ejemplo.gpx` son datos sintéticos (una ruta planificada y un track con

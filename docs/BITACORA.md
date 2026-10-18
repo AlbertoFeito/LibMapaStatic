@@ -6072,3 +6072,11 @@ de ~400 líneas y trae su README, su `.pro` y un modo `--comprobar` sin ventana.
   camino qmake.
 - **Siguientes del plan**: `buscador_lugares`, `medidor_campo`, `monitor_trafico`,
   `vigilancia_zonas`, `analisis_terreno`, `editor_capas`, `cliente_telemetria`.
+- **Corrección tras probarlo en el PC (misma sección 153):** el perfil no salía y la
+  gráfica decía lo mismo sin ruta seleccionada que con una ruta sin datos de elevación, así que
+  no se sabía por qué. Ahora el mensaje distingue los casos (ninguna ruta seleccionada, la
+  entidad no es una línea, o «sin datos de elevación: el paquete no trae `elevation` o no cubre
+  la ruta»), y al abrir un fichero se selecciona sola la primera ruta para que el perfil salga de
+  entrada. `--comprobar` imprime también el perfil de la primera ruta (ascenso, descenso y
+  cotas). Probado con un paquete de prueba con un `.hgt` sintético de La Habana
+  (ascenso 57 m, cotas 318–375 m) y sin elevación (lo dice).

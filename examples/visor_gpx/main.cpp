@@ -11,9 +11,10 @@
 //
 //   visor_gpx [paquete de datos] [fichero.gpx|.kml|.geojson]   (paquete por defecto: <exe>/datos)
 //   visor_gpx <paquete> <fichero> --comprobar
-//        -> sin ventana: dice qué ha leído y sale con 0 si todo está bien.
+//        -> sin ventana: dice qué ha leído (y el perfil de la primera ruta, si el
+//           paquete trae elevación) y sale con 0 si todo está bien.
 //   visor_gpx <paquete> <fichero> --captura=imagen.png
-//        -> abre la ventana, guarda una imagen de ella y sale (para documentar).
+//        -> abre la ventana con la primera ruta seleccionada, guarda una imagen y sale.
 
 #include <libmapa/Coordinates.h>
 #include <libmapa/MapWidget.h>
@@ -65,10 +66,12 @@ public:
         setMinimumHeight(110);
     }
 
-    // Cambia el perfil a dibujar (inválido = sin datos) y repinta.
-    void setPerfil(const ElevationProfile &perfil)
+    // Cambia el perfil a dibujar y repinta. Si no hay datos que dibujar, se
+    // muestra \a mensaje en su lugar (por qué falta el perfil).
+    void setPerfil(const ElevationProfile &perfil, const QString &mensaje = QString())
     {
         m_perfil = perfil;
+        m_mensaje = mensaje;
         update();
     }
 
@@ -83,8 +86,9 @@ protected:
                               && std::isfinite(m_perfil.maxElevation);
         if (!hayDatos) {
             p.setPen(palette().color(QPalette::Mid));
-            p.drawText(rect(), Qt::AlignCenter,
-                       tr("Selecciona una ruta (con elevación en el paquete) para ver su perfil"));
+            p.drawText(rect().adjusted(12, 0, -12, 0), Qt::AlignCenter | Qt::TextWordWrap,
+                       m_mensaje.isEmpty() ? tr("Pincha una ruta para ver su perfil de elevación")
+                                           : m_mensaje);
             return;
         }
         const QRectF zona = rect().adjusted(54, 8, -10, -18);
@@ -119,6 +123,7 @@ protected:
 
 private:
     ElevationProfile m_perfil;
+    QString m_mensaje;
 };
 
 // Ventana con el mapa, la barra de reproducción (solo si el GPX trae horas) y
@@ -198,6 +203,7 @@ public:
         }
         statusBar()->showMessage(tr("%1: %2 entidades, %3 km en rutas")
             .arg(QFileInfo(ruta).fileName()).arg(numEntidades()).arg(kmEnRutas(), 0, 'f', 2));
+        seleccionarPrimeraRuta();     // que el perfil salga de entrada (luego se pincha otra)
         return true;
     }
 
@@ -213,6 +219,19 @@ public:
                 for (const auto &parte : f.outlines())
                     total += pathLength(parte);
         return total / 1000.0;
+    }
+
+    // Selecciona la primera línea de la capa abierta, como si se pinchara (así
+    // salen su longitud y su perfil). Devuelve su perfil, o uno vacío si no hay.
+    ElevationProfile seleccionarPrimeraRuta()
+    {
+        for (const MapFeature &f : m_mapa->featuresInLayer(kCapa))
+            if (f.kind == GeometryKind::Polyline && f.outlines().size() > 0
+                && f.outlines().first().size() > 1) {
+                m_mapa->selectFeature(f.id);
+                return m_mapa->elevationProfile(f.outlines().first());
+            }
+        return ElevationProfile();
     }
 
     // ¿El fichero abierto trae horas (se puede reproducir)?
@@ -292,16 +311,21 @@ private:
     {
         const auto f = id >= 0 ? m_mapa->feature(id) : std::nullopt;
         if (!f || f->kind != GeometryKind::Polyline || f->outlines().isEmpty()) {
-            m_perfil->setPerfil(ElevationProfile());
+            m_perfil->setPerfil(ElevationProfile(),
+                                f ? tr("«%1» no es una línea: el perfil es solo de rutas y tracks").arg(f->name)
+                                  : QString());
             return;
         }
         const QVector<QGeoCoordinate> camino = f->outlines().first();
         const ElevationProfile perfil = m_mapa->elevationProfile(camino);
-        m_perfil->setPerfil(perfil);
+        const bool conCotas = perfil.isValid() && std::isfinite(perfil.minElevation);
+        m_perfil->setPerfil(perfil, conCotas ? QString()
+            : tr("Sin datos de elevación para esta ruta: el paquete no trae elevación "
+                 "(\"elevation\" en mapa.json) o la ruta cae fuera de la zona que cubre."));
         QString texto = tr("%1: %2 km, %3 puntos")
             .arg(f->name.isEmpty() ? tr("Ruta") : f->name)
             .arg(pathLength(camino) / 1000.0, 0, 'f', 2).arg(camino.size());
-        if (perfil.isValid() && std::isfinite(perfil.minElevation))
+        if (conCotas)
             texto += tr(" · ↑ %1 m ↓ %2 m · cotas %3–%4 m").arg(qRound(perfil.gain))
                          .arg(qRound(perfil.loss)).arg(qRound(perfil.minElevation))
                          .arg(qRound(perfil.maxElevation));
@@ -380,6 +404,12 @@ int main(int argc, char *argv[])
         out << "entidades: " << ventana.numEntidades() << "\n";
         out << "km en rutas: " << QString::number(ventana.kmEnRutas(), 'f', 2) << "\n";
         out << "con horas: " << (ventana.conHoras() ? "si" : "no") << "\n";
+        const ElevationProfile perfil = ventana.seleccionarPrimeraRuta();
+        const bool conCotas = perfil.isValid() && std::isfinite(perfil.minElevation);
+        out << "perfil de elevacion: " << (conCotas ? "si" : "no (el paquete no trae elevacion, o no cubre la ruta)") << "\n";
+        if (conCotas)
+            out << "ascenso/descenso: " << qRound(perfil.gain) << " / " << qRound(perfil.loss)
+                << " m, cotas " << qRound(perfil.minElevation) << " a " << qRound(perfil.maxElevation) << " m\n";
         return (listo && ventana.numEntidades() > 0) ? 0 : 1;
     }
     ventana.show();
