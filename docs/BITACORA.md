@@ -6100,3 +6100,29 @@ de ~400 líneas y trae su README, su `.pro` y un modo `--comprobar` sin ventana.
   y el track en rojo (por el atributo `gpx_kind` que pone el lector). Y la capa del fichero se marca
   como temporal (`setFeatureLayerTransient`): sin eso, un paquete con `"features"` (base de entidades con
   guardado automático) guardaría ahí lo abierto en el visor.
+
+## 154. Segunda aplicación de la serie: `editor_rutas`
+
+Al probar `visor_gpx` salió la pregunta de si las rutas se pueden crear: el visor solo lee, a propósito.
+El complemento es un ejemplo aparte, `examples/editor_rutas`, para que cada uno enseñe una cosa.
+
+- **`examples/editor_rutas`**: dibuja una ruta clic a clic (`MapTool::DrawPolyline`, estilo con
+  `setDraftStyle` sobre una capa propia activa con `setActiveFeatureLayer`), edita vértices
+  (`MapTool::EditFeature`), deshace y rehace (`undo`/`redo`), pone nombre al crear, muestra la
+  longitud de la seleccionada en vivo y guarda a GPX, KML o GeoJSON (`exportVectorFile`; el formato
+  lo da la extensión) con aviso de cambios sin guardar (título con `*`, pregunta al cerrar o abrir).
+  Con `MapConfig::autosaveFeatures = false` nada se escribe solo en la base de entidades del paquete.
+  Aplica la lección de la sección 153: la capa de rutas va con orden de dibujo alto (por encima del
+  paquete) para que sus provincias seleccionables no roben el clic.
+- **`--comprobar`** crea una ruta por código, la guarda a GPX, la vuelve a leer en otra capa y exige
+  los mismos puntos, la misma longitud (< 1 m) y el mismo nombre. Entra en
+  `herramientas/probar_instalacion.sh` (CI, Qt 5 y 6), en `examples/CMakeLists.txt` y en `examples.pro`.
+- **Hallazgo**: la librería escribe las líneas a GPX siempre como `<trk>` (no hay escritor de
+  `<rte>`), así que una ruta planificada guardada vuelve como track. Documentado en el README del
+  ejemplo; si hiciera falta, sería un cambio de la librería.
+- **Verificado** en el contenedor: compila con `-Wall -Wextra` sin avisos; `--comprobar` da 3 puntos y
+  2.73 km al ir y volver; con un programa de prueba FUERA del repositorio y clics simulados sobre la
+  ventana: dibujar con tres clics y doble clic crea una ruta de 3 vértices, el diálogo de nombre la
+  nombra, el título pasa a `*`, deshacer quita primero el nombre y luego la ruta (dos pasos, porque
+  nombrar es una edición aparte), rehacer la devuelve y guardar escribe un GPX correcto y quita el
+  `*`. **Sin probar**: arrastrar vértices con el ratón, el aviso al cerrar y el camino qmake.
