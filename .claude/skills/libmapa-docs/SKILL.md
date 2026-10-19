@@ -68,6 +68,6 @@ Deben pasar los 24 (21 si no hay QCustomPlot). Cambios solo de documentación (.
 necesitan build.
 
 ## 5. Commit + push
-En la rama `claude/fervent-mccarthy-v9rl6d` (nunca `main`). Mensaje en español
-explicando el porqué, cerrado con la atribución que indica `CLAUDE.md`. Luego `git push -u origin claude/fervent-mccarthy-v9rl6d` (reintenta
+En la rama de la tarea, `claude/<tema>` (nunca `main`; ver «Rama y commits» de `CLAUDE.md`). Mensaje en español
+explicando el porqué, cerrado con la atribución que indica `CLAUDE.md`. Luego `git push -u origin claude/<tema>` (reintenta
 con backoff si hay 503). Nunca pongas un identificador de modelo en el repo.
