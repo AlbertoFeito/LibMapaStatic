@@ -6,8 +6,8 @@
 //   - Inicio y fin de cada ruta marcados (setRouteEndpoints).
 //   - Ruta seleccionada (la primera al abrir, o la que se pinche): su longitud y,
 //     si el paquete trae elevación, su perfil con ascenso y descenso
-//     (elevationProfile). Las capas del paquete (provincias, curvas de nivel)
-//     no le quitan la selección: la capa de rutas va por encima de ellas.
+//     (elevationProfile). Las capas fijas del paquete (provincias, curvas de nivel)
+//     no son seleccionables, así que no le quitan la selección a la ruta.
 //   - Si el GPX trae horas, reproducirlo en el tiempo (TrackPlayer).
 //   - Exportar la vista a PDF o imagen (exportView).
 //
@@ -51,8 +51,9 @@ namespace {
 const QString kCapa = QStringLiteral("fichero");
 
 // Orden de dibujo de esa capa: por encima de las capas del paquete (provincias,
-// curvas de nivel...), que traen entidades seleccionables. Si quedara debajo, un
-// clic dentro de una provincia la seleccionaría a ella y no a la ruta.
+// curvas de nivel...). Las capas fijas del paquete ya no son seleccionables por
+// defecto, así que no roban el clic; el orden alto es una red de seguridad por si
+// un mapa.json las declara con "selectable": true.
 const int kOrdenCapa = 1000;
 
 // Hora para mostrar: UTC, que es en la que viajan los GPX.

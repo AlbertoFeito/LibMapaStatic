@@ -40,9 +40,9 @@ leer y comprueba que es la misma (lo usa `herramientas/probar_instalacion.sh`).
 - La librería escribe las líneas a GPX como **`<trk>`** (recorrido), no como `<rte>`
   (ruta planificada). Se vuelven a leer sin pérdida, pero otro programa las verá como tracks.
 - Un GPX no guarda estilo; KML y GeoJSON sí.
-- La capa de rutas va con un orden de dibujo alto a propósito: las capas del paquete
-  (provincias, curvas) tienen entidades seleccionables y, si quedaran por encima, un clic
-  seleccionaría la provincia y no la ruta.
+- La capa de rutas va con un orden de dibujo alto: las capas fijas del paquete (provincias,
+  curvas) ya no son seleccionables por defecto, pero si un `mapa.json` las declara con
+  `"selectable": true` y quedaran por encima, un clic seleccionaría la provincia y no la ruta.
 
 ## Compilar
 

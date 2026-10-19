@@ -128,6 +128,10 @@ void TstDataPackage::fullManifest()
     const DataPackage::Overlay &ov = p->overlays.first();
     QCOMPARE(ov.id, QStringLiteral("aguas"));
     QCOMPARE(ov.zOrder, 5);
+    // Capa fija de fondo: sin "visible" ni "selectable" en el manifiesto, ni se ve al
+    // abrir ni se elige con el raton.
+    QVERIFY(!ov.visible);
+    QVERIFY(!ov.selectable);
     QCOMPARE(ov.style.lineColor, QColor(0x15, 0x65, 0xc0));
     QCOMPARE(ov.style.fillColor.alpha(), 0x33);
     QCOMPARE(ov.style.lineWidth, 3.0);

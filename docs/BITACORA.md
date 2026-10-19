@@ -6153,3 +6153,30 @@ de un callejero offline o de una utilidad de coordenadas.
   sale como resultado y centra donde toca; `100%` encuentra «100% Cubano» (comodín literal); `zzz` no da
   nada; un clic en el mapa copia la coordenada al portapapeles. **Sin probar**: con el índice real
   de Cuba (el del PC del usuario, `lugares.sqlitedb`), y el camino qmake.
+
+## 156. Las capas fijas del paquete arrancan ocultas y no seleccionables
+
+Al probar los ejemplos con el paquete de Cuba, un clic en el mapa seleccionaba una provincia
+(primero en `visor_gpx`, sección 153, y el usuario vio que seguía pasando). El visor y el editor lo
+esquivaron con un orden de dibujo alto, pero la causa es de la librería, y el usuario pidió dejarlo
+establecido: las capas `overlays` son decoración fija, no deben verse al iniciar ni
+poder elegirse con el ratón; para editarlas, en todo caso, una herramienta aparte.
+
+- **`LayerInfo::selectable`** (nueva bandera de capa, `true` por defecto) y
+  `MapWidget::setFeatureLayerSelectable`. `FeatureLayer::featureAt` (la que usa el ratón para elegir,
+  arrastrar y poner el cursor) y `labelAt` saltan las capas no seleccionables.
+- **Overlays del paquete: `visible` y `selectable` en falso por defecto**; en el `mapa.json` se
+  activan con `"visible": true` y `"selectable": true` en la entrada del overlay (`DataPackage::Overlay`).
+  Se quita el `selectable = false` por entidad que se ponía solo a los `.geo`: la bandera de capa
+  cubre `.geo` y `.sqlitedb` (las curvas de nivel, con miles de entidades, no hay que recorrerlas).
+- **Consulta frente a selección:** `MapWidget::featureAt` (público) sigue viendo las capas fijas aunque no
+  sean seleccionables, porque la demo la usa para el tooltip de las curvas (la cota) y eso no elige nada;
+  `hitTest`, que alimenta el menú contextual, solo devuelve lo que se puede elegir.
+- **Demo:** quitado `ocultarOverlaysAlIniciar` (la librería ya lo hace).
+- **Tests:** 3 nuevos o ampliados en `tst_mapwidget` (la capa fija sale oculta, bloqueada y no
+  seleccionable; el `mapa.json` la activa y la API la cambia; un polígono de una capa no seleccionable
+  no se lleva el clic ni sale en `hitTest` pero `featureAt` lo ve, y al activarla el clic lo elige) y
+  una comprobación en `tst_datapackage`. 27 en verde (24 sin QCustomPlot).
+- **Cambio de comportamiento:** una app que contase con ver los overlays al abrir, o con
+  seleccionarlos, debe ahora pedirlo. Los ejemplos `visor_gpx`, `editor_rutas` y `buscador_lugares` siguen
+  funcionando tal cual (su capa con orden 1000 ya no hace falta, pero no estorba).

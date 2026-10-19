@@ -313,6 +313,18 @@ bool OverlayModel::setLayerEditable(const QString &id, bool editable)
     return true;
 }
 
+// Permite o impide seleccionar con el raton las entidades de una capa (clic y
+// rotulo). false si no existe.
+bool OverlayModel::setLayerSelectable(const QString &id, bool selectable)
+{
+    auto it = m_layers.find(id);
+    if (it == m_layers.end())
+        return false;
+    it->selectable = selectable;
+    emit layersChanged();
+    return true;
+}
+
 // Cambia el orden Z (de pintado) de una capa. false si no existe.
 bool OverlayModel::setLayerZOrder(const QString &id, int z)
 {

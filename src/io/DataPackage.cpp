@@ -169,6 +169,8 @@ std::optional<DataPackage> DataPackage::load(const QString &path, QString *error
         ov.zOrder = o.value(QStringLiteral("zOrder")).toInt(0);
         ov.minZoom = o.value(QStringLiteral("minZoom")).toInt(-1);
         ov.maxZoom = o.value(QStringLiteral("maxZoom")).toInt(-1);
+        ov.visible = o.value(QStringLiteral("visible")).toBool(false);
+        ov.selectable = o.value(QStringLiteral("selectable")).toBool(false);
 
         const QJsonObject st = o.value(QStringLiteral("style")).toObject();
         ov.style.lineColor = readColor(st, QStringLiteral("lineColor"), ov.style.lineColor);

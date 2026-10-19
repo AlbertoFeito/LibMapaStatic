@@ -39,8 +39,9 @@ using namespace libmapa;
 
 namespace {
 
-// Capa donde viven las rutas, por encima de las del paquete (provincias, curvas...):
-// si quedara debajo, un clic dentro de una provincia la seleccionaría a ella.
+// Capa donde viven las rutas, por encima de las del paquete (provincias, curvas...).
+// Esas capas fijas ya no son seleccionables por defecto, así que no roban el clic;
+// el orden alto es una red de seguridad por si un mapa.json las declara "selectable".
 const QString kCapa = QStringLiteral("rutas");
 const int kOrdenCapa = 1000;
 

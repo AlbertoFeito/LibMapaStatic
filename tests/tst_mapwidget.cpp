@@ -258,6 +258,10 @@ private slots:
     //! Solo con dataDir: capas base, arranque, capa fija bloqueada y entidades;
     //! la capa fija no se guarda ni se duplica al reabrir.
     void opensDataPackageWithOneSetting();
+    //! "visible" y "selectable" del overlay en mapa.json los activan; por defecto no.
+    void packageOverlaysCanBeMadeVisibleAndSelectable();
+    //! Una capa no seleccionable no roba el clic, pero featureAt la sigue viendo.
+    void unselectableLayerDoesNotStealTheClick();
     void autosaveFeaturesFalseSkipsPackagePersistence();
     //! Lo rellenado a mano en MapConfig gana sobre el paquete.
     void explicitConfigWinsOverPackage();
@@ -3634,8 +3638,16 @@ void TstMapWidget::opensDataPackageWithOneSetting()
 
         const QVector<MapFeature> fijas = w.featuresInLayer(QStringLiteral("corredores"));
         QCOMPARE(fijas.size(), 1);
-        QVERIFY(!fijas.first().selectable);
         QVERIFY(!w.canUndo());                 // cargar la capa fija no se "deshace"
+
+        // Capa fija: bloqueada, oculta y sin poder elegirse con el raton (decoracion).
+        for (const LayerInfo &capa : w.featureLayers()) {
+            if (capa.id != QStringLiteral("corredores"))
+                continue;
+            QVERIFY(!capa.editable);
+            QVERIFY(!capa.visible);
+            QVERIFY(!capa.selectable);
+        }
 
         QVERIFY(w.addFeature(puntoDe(QStringLiteral("Propia"), 22.0, -80.0)) > 0);
         w.saveFeaturesNow();
@@ -3654,6 +3666,96 @@ void TstMapWidget::opensDataPackageWithOneSetting()
     QVERIFY(w2.isReady());
     QCOMPARE(w2.featuresInLayer(QStringLiteral("corredores")).size(), 1);
     QCOMPARE(w2.featureCount(), 2);           // la propia + la fija, sin duplicar
+}
+
+// Con "visible": true y "selectable": true en el overlay del mapa.json, la capa fija
+// sale visible y elegible; sin ellos (el caso normal) sale oculta y no elegible.
+void TstMapWidget::packageOverlaysCanBeMadeVisibleAndSelectable()
+{
+    const QString entidades = m_dir.filePath(QStringLiteral("paquete_flags.db"));
+    QFile::remove(entidades);
+    MapConfig cfg;
+    cfg.dataDir = makePackage(QStringLiteral("paquete_flags"), entidades);
+    cfg.cacheMiB = 32;
+    cfg.debounceMs = 0;
+
+    const auto capaFija = [](const MapWidget &w) {
+        for (const LayerInfo &c : w.featureLayers())
+            if (c.id == QStringLiteral("corredores"))
+                return c;
+        return LayerInfo();
+    };
+    {
+        MapWidget w(cfg);
+        QVERIFY(w.isReady());
+        QVERIFY(!capaFija(w).visible);
+        QVERIFY(!capaFija(w).selectable);
+    }
+
+    // Se reescribe el mapa.json pidiendo las dos cosas.
+    const QString json = cfg.dataDir + QStringLiteral("/mapa.json");
+    QFile f(json);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    f.close();
+    QJsonArray overlays = root.value(QStringLiteral("overlays")).toArray();
+    QJsonObject ov = overlays.first().toObject();
+    ov[QStringLiteral("visible")] = true;
+    ov[QStringLiteral("selectable")] = true;
+    overlays[0] = ov;
+    root[QStringLiteral("overlays")] = overlays;
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    f.write(QJsonDocument(root).toJson());
+    f.close();
+
+    MapWidget w2(cfg);
+    QVERIFY(w2.isReady());
+    QVERIFY(capaFija(w2).visible);
+    QVERIFY(capaFija(w2).selectable);
+    QVERIFY(!capaFija(w2).editable);          // fija sigue siendo fija
+
+    // Y la API lo cambia en caliente.
+    QVERIFY(w2.setFeatureLayerSelectable(QStringLiteral("corredores"), false));
+    QVERIFY(!capaFija(w2).selectable);
+    QVERIFY(!w2.setFeatureLayerSelectable(QStringLiteral("no_existe"), true));
+}
+
+// Un poligono grande en una capa NO seleccionable (una provincia de fondo) no se lleva
+// el clic ni sale en hitTest, pero featureAt (consulta, p. ej. un tooltip) lo sigue
+// viendo. Al volver la capa seleccionable, el clic si lo elige.
+void TstMapWidget::unselectableLayerDoesNotStealTheClick()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setZoom(12);
+    auto *v = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(v != nullptr);
+
+    w.addFeatureLayer(QStringLiteral("fondo"), QStringLiteral("Fondo"), 50);
+    QVERIFY(w.setFeatureLayerSelectable(QStringLiteral("fondo"), false));
+    MapFeature prov;
+    prov.kind = GeometryKind::Polygon;
+    prov.layerId = QStringLiteral("fondo");
+    prov.name = QStringLiteral("Provincia");
+    prov.geometry = { v->coordinateAt(QPoint(50, 50)), v->coordinateAt(QPoint(750, 50)),
+                      v->coordinateAt(QPoint(750, 550)), v->coordinateAt(QPoint(50, 550)) };
+    const qint64 id = w.addFeature(prov);
+    QVERIFY(id > 0);
+
+    // Sin poder elegirse: el clic dentro no la selecciona ni sale en hitTest...
+    clic(v, QPoint(400, 300));
+    QCOMPARE(w.selectedFeature(), qint64(-1));
+    QCOMPARE(w.hitTest(QPoint(400, 300)).featureId, qint64(-1));
+    QCOMPARE(w.featureLabelAt(QPoint(400, 300)), qint64(-1));
+    // ...pero la consulta la ve (un tooltip o una lectura de cota).
+    QCOMPARE(w.featureAt(QPoint(400, 300)), id);
+
+    // Seleccionable otra vez: el clic la elige.
+    QVERIFY(w.setFeatureLayerSelectable(QStringLiteral("fondo"), true));
+    clic(v, QPoint(400, 300));
+    QCOMPARE(w.selectedFeature(), id);
+    QCOMPARE(w.hitTest(QPoint(400, 300)).featureId, id);
 }
 
 // Con autosaveFeatures=false (guardado explicito) y un paquete: NO se usa el

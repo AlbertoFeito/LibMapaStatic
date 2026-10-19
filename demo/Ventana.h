@@ -44,7 +44,6 @@ private:
     void limpiarAnalisis();
     void quitarResultadosAnalisis();
 
-    void ocultarOverlaysAlIniciar();
 
     void reponerBorrador();
 

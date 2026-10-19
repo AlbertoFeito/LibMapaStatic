@@ -16,8 +16,8 @@ recorridos**: senderismo, post-análisis de una misión, revisión de un track d
 
 Un GPX puede traer **rutas planificadas** (`<rte>`, líneas rectas entre puntos de paso) y
 **tracks grabados** (`<trk>`, el recorrido real con horas): el visor pinta las primeras en
-**azul** y los segundos en **rojo**. Las capas del paquete (provincias, curvas de nivel) no
-le quitan la selección a la ruta. Lo abierto no se guarda en la base de entidades.
+**azul** y los segundos en **rojo**. Las capas fijas del paquete (provincias, curvas de nivel)
+no son seleccionables, así que no le quitan la selección a la ruta. Lo abierto no se guarda en la base de entidades.
 
 Todo en un solo fichero, [`main.cpp`](main.cpp), pensado para leerse de arriba abajo.
 El perfil de elevación solo sale si el paquete de datos trae elevación (SRTM,

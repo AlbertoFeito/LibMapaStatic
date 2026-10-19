@@ -75,7 +75,6 @@ Ventana::Ventana(const QString &origen, bool esPaquete,
     }
 
     reconstruirPanel();
-    ocultarOverlaysAlIniciar();   // los overlays arrancan ocultos (no cargan)
 
     // Tema elegido por el usuario (recordado en QSettings; claro por defecto).
     aplicarTema(QSettings().value(QStringLiteral("tema/oscuro"), false).toBool());
