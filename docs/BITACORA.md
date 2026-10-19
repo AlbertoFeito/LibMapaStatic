@@ -6180,3 +6180,34 @@ poder elegirse con el ratón; para editarlas, en todo caso, una herramienta apar
 - **Cambio de comportamiento:** una app que contase con ver los overlays al abrir, o con
   seleccionarlos, debe ahora pedirlo. Los ejemplos `visor_gpx`, `editor_rutas` y `buscador_lugares` siguen
   funcionando tal cual (su capa con orden 1000 ya no hace falta, pero no estorba).
+
+## 157. Cuarta aplicación de la serie: `medidor_campo`
+
+Medir sobre el mapa es lo que más repite cualquier app (parcelas, tramos, áreas de búsqueda), y la
+librería ya lo traía (`MapTool::Measure`, `MapTool::MeasureArea`, `polygonArea`, `pathLength`,
+marcaciones), pero sin un ejemplo que junte las piezas. `examples/medidor_campo/` (~545 líneas, un solo
+`main.cpp`) es esa plantilla, y la primera de la serie que parte de `main` ya con todo lo anterior
+fusionado (#18 a #21).
+
+- **Distancia:** `measurementFinished` se convierte en una **marcación** (`addBearingLine`) que se queda
+  dibujada con su rótulo «097° · 4286 NM», arrastrable. Dos puntos iguales no anotan nada (la librería
+  devuelve -1 y la app lo dice en la barra de estado).
+- **Superficie:** `areaMeasured` deja un polígono en una capa propia y temporal (`medidas`, orden 1000,
+  `selectable = false`); el contorno nativo se quita con `clearAreaSelection` **fuera** de la señal
+  (`QTimer::singleShot(0)`), para no tocar el estado de `MapView` mientras sigue emitiendo.
+- **Lista y unidades:** las medidas se guardan en metros y metros² y las unidades solo se aplican al
+  mostrarlas. Distancia: métrico o náutico (`setScaleBarUnits`, así los rótulos del mapa y la lista
+  coinciden); superficie: ha, km², m², acres, y el rótulo del polígono (`A1 · 1.23 ha`) se actualiza con
+  `updateFeature`. Suma de distancias y de superficies, borrar una o todas, y **Copiar tabla** con
+  tabuladores. Las millas terrestres se dejaron fuera a propósito: la escala gráfica no las tiene y los
+  rótulos del mapa no podrían seguirlas.
+- **Portabilidad:** `QButtonGroup::buttonClicked(int)` ya no existe en Qt 6 (y `idClicked` llega con 5.15),
+  así que se usa la señal con `QAbstractButton*` y `id(boton)`, igual en Qt 5.14 y 6.
+- **`--comprobar`:** rectángulo de 0,1° × 0,1° frente a la fórmula esférica (113,50 km² contra 113,77:
+  0,24 %, dentro del 0,5 % que se deja por usar esfera y no elipsoide), línea de 0,5° de meridiano
+  (55,60 km, rumbo 0°), la marcación dibujada mide lo mismo, suma, tabla y borrado. Entra en
+  `herramientas/probar_instalacion.sh` y en `examples/CMakeLists.txt` / `examples.pro` (CI, Qt 5 y 6).
+- **Verificado** en el contenedor con un programa fuera del repositorio y clics reales sobre la ventana:
+  dos clics con la herramienta de distancia dan una fila y una marcación; tres clics y doble clic con la de
+  superficie dan una fila y un polígono; cambiar a millas náuticas reescribe la lista; borrar quita la fila y
+  su marca del mapa. **Sin probar**: con el paquete real de Cuba en el PC del usuario y el camino qmake.
