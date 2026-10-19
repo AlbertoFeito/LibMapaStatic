@@ -10,7 +10,7 @@
 #    2. fabrica un paquete de datos minimo (teselas de 1 px y, si esta en el repo,
 #       el indice de lugares de prueba; sin red);
 #    3. compila TODOS los ejemplos (examples/CMakeLists.txt) contra el prefijo;
-#    4. arranca app_minima, visor_gpx, editor_rutas y buscador_lugares con
+#    4. arranca app_minima, visor_gpx, editor_rutas, buscador_lugares y medidor_campo con
 #       --comprobar, y check_data, sobre ese paquete.
 #
 #  Uso:   herramientas/probar_instalacion.sh <prefijo de instalacion> [carpeta de trabajo]
@@ -121,5 +121,10 @@ EDITOR="$(find "$TRABAJO/ejemplos" -type f -name editor_rutas -perm -u+x | head 
 BUSCADOR="$(find "$TRABAJO/ejemplos" -type f -name buscador_lugares -perm -u+x | head -1)"
 [ -n "$BUSCADOR" ] || fallo "no se encuentra buscador_lugares compilado"
 "$BUSCADOR" "$PAQ" --comprobar || fallo "buscador_lugares --comprobar no sale con 0"
+
+# medidor_campo: mide un rectangulo y una linea conocidos y comprueba areas, sumas y borrado.
+MEDIDOR="$(find "$TRABAJO/ejemplos" -type f -name medidor_campo -perm -u+x | head -1)"
+[ -n "$MEDIDOR" ] || fallo "no se encuentra medidor_campo compilado"
+"$MEDIDOR" "$PAQ" --comprobar || fallo "medidor_campo --comprobar no sale con 0"
 
 echo "OK: la instalacion en $PREFIJO sirve a los ejemplos"
