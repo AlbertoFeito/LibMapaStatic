@@ -52,6 +52,7 @@
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QProgressBar>
@@ -286,6 +287,39 @@ static AngulosPerfil angulosPerfil(const Analisis &a, double alturaA, double alt
     return r;
 }
 
+// Elige el rango vertical (grados) de la gráfica de ángulos. Sin zoom, abarca el cierre y B (sin contar el primer
+// 3 % del trayecto: pegado a A el terreno cae a decenas de grados y aplastaría todo). Con zoom automático se centra
+// en lo que decide si B se ve, la diferencia entre el ángulo de B y el cierre justo antes de B: la ventana mide
+// ±4 veces esa diferencia (mínimo ±0,5°) alrededor de los dos valores, de modo que 0,15° de margen se ve
+// como una separación clara en vez de una línea pegada. Lo que cae fuera (la subida inicial del cierre) se recorta.
+static void ejeAngulos(const AngulosPerfil &ang, double D, bool zoom, double *aMin, double *aMax)
+{
+    // El rango completo: el cierre y B, y el terreno salvo el primer 3 % del trayecto.
+    *aMin = std::min(ang.anguloB, ang.cierre.last().y());
+    *aMax = std::max(ang.anguloB, ang.cierre.last().y());
+    for (int i = 0; i < ang.terreno.size(); ++i) {
+        if (ang.terreno[i].x() < 0.03 * D)
+            continue;
+        *aMin = std::min({ *aMin, ang.terreno[i].y(), ang.cierre[i].y() });
+        *aMax = std::max({ *aMax, ang.terreno[i].y(), ang.cierre[i].y() });
+    }
+    const double margen = std::max(0.3, 0.08 * (*aMax - *aMin));
+    *aMin -= margen;
+    *aMax += margen;
+    if (!zoom)
+        return;
+    // La ventana del zoom. Si no es más estrecha que el rango completo (B muy por debajo del cierre, p. ej.), no
+    // aporta nada y se queda el completo.
+    const double hueco = std::abs(ang.anguloB - ang.cierreAntesB);
+    const double h = std::max(0.5, 4.0 * hueco);
+    const double zMin = std::min(ang.anguloB, ang.cierreAntesB) - h;
+    const double zMax = std::max(ang.anguloB, ang.cierreAntesB) + h;
+    if (zMax - zMin < *aMax - *aMin) {
+        *aMin = zMin;
+        *aMax = zMax;
+    }
+}
+
 // Dibuja el perfil de elevación entre A y B con la recta de la visual encima, y debajo, con el mismo eje
 // de distancias, el ÁNGULO DE CIERRE visto desde A. El terreno se dibuja «efectivo»: su cota más el
 // abombamiento de la Tierra a esa distancia, d·(D−d)/(2·k·R), de modo que la visual es una recta y lo que
@@ -301,6 +335,10 @@ public:
 
     explicit PerfilWidget(QWidget *parent = nullptr) : QWidget(parent) { setMinimumHeight(300); }
 
+    // Zoom automático de la gráfica de ángulos (por omisión sí); un doble clic encima lo alterna.
+    void setZoomAngulos(bool on) { m_zoomAngulos = on; update(); }
+    bool zoomAngulos() const { return m_zoomAngulos; }
+
     // Cambia lo que se dibuja y repinta. Sin perfil, se muestra \a mensaje (por qué falta).
     void setDatos(const Analisis &a, double alturaA, double alturaB, const QString &mensaje)
     {
@@ -312,6 +350,9 @@ public:
     }
 
 protected:
+    // Un doble clic alterna el zoom automático de los ángulos.
+    void mouseDoubleClickEvent(QMouseEvent *) override { setZoomAngulos(!m_zoomAngulos); }
+
     // Dibuja el terreno efectivo, la visual, las antenas y el punto crítico, y debajo la gráfica de ángulos.
     void paintEvent(QPaintEvent *) override
     {
@@ -401,18 +442,8 @@ protected:
         const AngulosPerfil ang = angulosPerfil(m_a, m_alturaA, m_alturaB);
         if (!ang.valido)
             return;
-        // El eje se ajusta al cierre y a B, sin contar el primer 3 % del trayecto: pegado a A el terreno cae a
-        // decenas de grados bajo el horizonte y aplastaría todo lo demás (la curva se recorta al marco).
-        double aMin = std::min(ang.anguloB, ang.cierre.last().y()), aMax = std::max(ang.anguloB, ang.cierre.last().y());
-        for (int i = 0; i < ang.terreno.size(); ++i) {
-            if (ang.terreno[i].x() < 0.03 * D)
-                continue;
-            aMin = std::min({ aMin, ang.terreno[i].y(), ang.cierre[i].y() });
-            aMax = std::max({ aMax, ang.terreno[i].y(), ang.cierre[i].y() });
-        }
-        const double margen = std::max(0.3, 0.08 * (aMax - aMin));
-        aMin -= margen;
-        aMax += margen;
+        double aMin = 0.0, aMax = 0.0;
+        ejeAngulos(ang, D, m_zoomAngulos, &aMin, &aMax);
         const auto aPantallaAng = [&](double d, double grados) {
             return QPointF(zonaAng.left() + zonaAng.width() * d / D,
                            zonaAng.bottom() - zonaAng.height() * (grados - aMin) / (aMax - aMin));
@@ -462,8 +493,10 @@ protected:
                    tr("%1 km").arg(D / 1000.0, 0, 'f', 2));
         p.setPen(palette().color(QPalette::Mid));
         p.drawText(QRectF(zonaAng.left(), zonaAng.top() - 20, zonaAng.width(), 16), Qt::AlignLeft | Qt::AlignVCenter,
-                   fontMetrics().elidedText(tr("Ángulo de cierre desde A (azul) · B a %1° · cierre antes de B: %2°")
-                                                .arg(ang.anguloB, 0, 'f', 2).arg(ang.cierreAntesB, 0, 'f', 2),
+                   fontMetrics().elidedText(tr("Ángulo de cierre desde A (azul) · B a %1° · cierre antes de B: %2° · %3")
+                                                .arg(ang.anguloB, 0, 'f', 2).arg(ang.cierreAntesB, 0, 'f', 2)
+                                                .arg(m_zoomAngulos ? tr("zoom en B (2 clics: todo)")
+                                                                   : tr("todo (2 clics: zoom en B)")),
                                             Qt::ElideRight, int(zonaAng.width())));
     }
 
@@ -471,6 +504,7 @@ private:
     Analisis m_a;
     double m_alturaA = 0.0;
     double m_alturaB = 0.0;
+    bool m_zoomAngulos = true;
     QString m_mensaje;
 };
 
@@ -1844,6 +1878,30 @@ static int comprobar(Ventana &v)
     verificar(QStringLiteral("el ángulo de cierre solo sube (es el máximo acumulado) y acaba en el máximo del terreno"),
               monotono && std::abs(ap.cierre.last().y() - maxTerreno) < 1e-9 && ap.cierreAntesB > 0.5);
     verificar(QStringLiteral("con B a 10 m su ángulo queda por debajo del cierre (lo tapa la loma)"), ap.anguloB < ap.cierreAntesB);
+    // Zoom automático: la ventana se centra en B y el cierre justo antes de B, y es mucho más estrecha que el rango completo.
+    double zMin = 0.0, zMax = 0.0, tMin = 0.0, tMax = 0.0;
+    ejeAngulos(ap, v.ultimoAnalisis().perfil.totalDistanceM, true, &zMin, &zMax);
+    ejeAngulos(ap, v.ultimoAnalisis().perfil.totalDistanceM, false, &tMin, &tMax);
+    out << "      eje de ángulos: con zoom " << QString::number(zMin, 'f', 2) << "° a " << QString::number(zMax, 'f', 2)
+        << "°; completo " << QString::number(tMin, 'f', 2) << "° a " << QString::number(tMax, 'f', 2) << "°\n";
+    verificar(QStringLiteral("con zoom el eje contiene a B y al cierre antes de B y nunca es más ancho que el completo (con B muy tapado, el zoom no ayuda y queda el completo)"),
+              zMin < ap.anguloB && zMax > ap.anguloB && zMin < ap.cierreAntesB && zMax > ap.cierreAntesB
+              && (zMax - zMin) <= (tMax - tMin) + 1e-9);
+    // El caso de la captura del usuario: B apenas por encima del cierre (−18,12° frente a −18,27°). Con el zoom, el margen
+    // de 0,15° ocupa al menos una octava parte del eje; sin él, una pequeña fracción.
+    AngulosPerfil justo = ap;
+    justo.anguloB = -18.12;
+    justo.cierreAntesB = -18.27;
+    justo.cierre.last().setY(-18.27);
+    double jMin = 0.0, jMax = 0.0, jtMin = 0.0, jtMax = 0.0;
+    ejeAngulos(justo, 3420.0, true, &jMin, &jMax);
+    ejeAngulos(justo, 3420.0, false, &jtMin, &jtMax);
+    verificar(QStringLiteral("con B 0,15° sobre el cierre, el margen ocupa %1 % del eje con zoom (y %2 % sin él)")
+                  .arg(100.0 * 0.15 / (jMax - jMin), 0, 'f', 0).arg(100.0 * 0.15 / (jtMax - jtMin), 0, 'f', 1),
+              0.15 / (jMax - jMin) > 0.1 && 0.15 / (jtMax - jtMin) < 0.1);
+    verificar(QStringLiteral("el zoom está activo por omisión"), v.perfil()->zoomAngulos());
+    v.perfil()->setZoomAngulos(false);
+    v.perfil()->setZoomAngulos(true);
     v.perfil()->resize(900, 340);
     verificar(QStringLiteral("el widget dibuja la gráfica del ángulo de cierre (%1 píxeles de su azul)")
                   .arg(contarPixeles(v.perfil()->grab().toImage(), PerfilWidget::colorCierre())),

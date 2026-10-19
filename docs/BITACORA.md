@@ -6427,3 +6427,16 @@ secundaria, y ángulos de cierre hasta la distancia máxima seleccionada en los 
   dock *Ángulos de cierre (360°)* al lado del perfil, tres términos nuevos en el glosario (18).
 - `--comprobar`: 61 comprobaciones (eran 34), todas verdes. **Sin probar:** con el `cuba_dem.sqlitedb` del usuario
   (picos del Turquino, rendimiento de la malla con 20-50 km de radio).
+
+### 160 (ajuste). Zoom automático en la gráfica de ángulos del perfil
+
+Con datos reales (A en el Turquino, B a 3,4 km al sur) todos los ángulos son negativos y la escala vertical iba de −47° a −16°:
+B (−18,12°) y el cierre antes de B (−18,27°) quedaban pegados y el margen de 0,15° no se veía. El usuario pidió zoom automático.
+
+- **Regla.** El eje se centra en lo que decide la visibilidad (`ejeAngulos`): ventana de ±4 veces la diferencia entre el ángulo de
+  B y el cierre antes de B, con mínimo ±0,5°. Lo que cae fuera (la subida inicial del cierre) se recorta al marco. Si la ventana
+  saldría más ancha que el rango completo (B muy tapado: en la demostración, 1,4° de diferencia), no mejora nada y se deja el
+  completo. Doble clic en el perfil alterna zoom/todo; la leyenda dice cuál está activo.
+- **Comprobado.** Con una diferencia de 0,15°, el margen ocupa un 11 % del eje con zoom y un 0,7 % sin él; el eje con zoom
+  siempre contiene a B y al cierre y nunca es más ancho que el completo. Visualmente, con B a 0,03° sobre el cierre las dos
+  líneas se separan con claridad (antes eran una sola). `--comprobar`: 65 comprobaciones.

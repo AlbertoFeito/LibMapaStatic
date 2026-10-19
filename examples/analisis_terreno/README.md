@@ -45,6 +45,11 @@ hasta una distancia: el máximo, a lo largo del trayecto, de la elevación del t
 - **Debajo del perfil**, con el mismo eje de distancias: el ángulo del terreno (marrón claro), el ángulo de cierre
   acumulado (azul) y el ángulo con que se ve B (línea de trazos y punto: azul si queda por encima del cierre, rojo si lo
   tapa el terreno). Decide igual que `lineOfSight`; `--comprobar` lo verifica con B a 10, 100, 300, 500, 700 y 900 m.
+  **Zoom automático** (por omisión; doble clic en el perfil lo alterna): el eje vertical se centra en lo que decide si B
+  se ve, la diferencia entre el ángulo de B y el cierre justo antes de B, con una ventana de ±4 veces esa diferencia
+  (mínimo ±0,5°). Con B apenas por encima del cierre (0,15° de margen) el margen ocupa un ~11 % del eje en vez de un
+  0,7 %; si B está muy tapado, la ventana saldría más ancha que el rango completo y se deja el completo. La subida
+  inicial del cierre queda fuera del marco (se recorta).
 - **En los 360°** (panel *Ángulos de cierre*, al lado del perfil): por azimut, el horizonte hasta el alcance elegido
   (`ViewshedRay::horizonDeg`), con el máximo (rojo, la dirección más cerrada), el mínimo (verde, la más despejada) y una
   línea hacia B. Se rellena al pulsar **Calcular zona visible**, que ya lanza el viewshed. Sobre mar abierto sale el
