@@ -1,8 +1,8 @@
 // medidor_campo - medir distancias, rumbos y superficies sobre el mapa con libmapa.
 //
-// Sexto ejemplo de la serie (el editor_rutas fue el cuarto, el buscador el quinto). Es la base de cualquier app de «medir sobre el
-// plano»: topografía ligera, parcelas, planificación de tramos, estimar un área
-// de búsqueda. Enseña:
+// Sexto ejemplo de la serie (tras editor_rutas y buscador_lugares). Es la base de
+// cualquier app de «medir sobre el plano»: topografía ligera, parcelas,
+// planificación de tramos, estimar un área de búsqueda. Enseña:
 //   - Medir una distancia y su rumbo en dos clics (MapTool::Measure, señal
 //     measurementFinished) y DEJARLA dibujada como una marcación (addBearingLine),
 //     con su rótulo «045° · 5.2 NM» que se arrastra con el ratón.
