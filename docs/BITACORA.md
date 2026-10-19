@@ -6211,3 +6211,50 @@ fusionado (#18 a #21).
   dos clics con la herramienta de distancia dan una fila y una marcación; tres clics y doble clic con la de
   superficie dan una fila y un polígono; cambiar a millas náuticas reescribe la lista; borrar quita la fila y
   su marca del mapa. **Sin probar**: con el paquete real de Cuba en el PC del usuario y el camino qmake.
+
+## 158. Quinta aplicación de la serie: `monitor_trafico`
+
+Seguir contactos en tiempo real es el caso de uso principal de la librería, y `app_seguimiento` solo lo
+enseña como un recorrido por el API (tres buques y un menú). Una app de verdad necesita además lo que se
+echa en falta al intentar convertir ese ejemplo en producto: **ver qué hay en una tabla**, **saber qué se
+ha dejado de oír** y **entender los términos** que muestra la pantalla. `examples/monitor_trafico/` (~870
+líneas, un solo `main.cpp`) es esa plantilla. El usuario pidió expresamente un **glosario de los términos
+que se utilicen**, dentro de la interfaz.
+
+- **Tabla de contactos** (panel inferior): propio arriba y el resto ordenado por distancia, con rumbo,
+  velocidad, distancia, CPA, TCPA y estado (`Activo`, `Alerta`, `Perdido`). CPA y TCPA vienen de
+  `targetCpa` con la velocidad y el rumbo que da el feed (`setTargetVelocity`).
+- **Selección enlazada:** elegir una fila selecciona el contacto y dibuja la marcación del propio hasta él
+  (una sola, la anterior se quita); pinchar un contacto en el mapa (`targetClicked`) elige su fila.
+- **Contactos perdidos:** sin partes durante 90 s (tiempo simulado) pasan a `Perdido`: se atenúan en el mapa
+  con un `TargetFilter::predicate` sobre el atributo `estado` (`dim = true`), pierden el CPA y no dibujan
+  marcación; a los 5 min se borran. Es lo que hay que hacer con cualquier feed real. El umbral es «más de»,
+  no «al menos»: a 90 s justos sigue activo.
+- **Alertas** en un registro con hora: proximidad (0,5 NM en 15 min), zona vigilada (entra y sale) y la
+  pérdida y el borrado de contactos. Filtro por tipo y agrupar al alejar.
+- **Glosario** (panel derecho, *Ayuda → Glosario*, F1): 20 términos con buscador por nombre o por palabra
+  de la definición, y la definición de cada columna también como ayuda al pasar el ratón por su cabecera.
+  **Una prueba impide que se quede atrás:** `--comprobar` falla si alguna cabecera de la tabla o algún
+  término de la interfaz no tiene su definición. Quien reutilice el ejemplo y añada una columna con un
+  término nuevo tiene que definirlo.
+- **Feed simulado** (clase `Simulador`): ocho contactos con rumbo y velocidad fijos y un reloj simulado
+  de 30 s por segundo real. Uno viene de proa contra el propio (CPA casi 0) y otro se queda sin señal. Para
+  conectar un decodificador real basta llamar a `Ventana::recibir` con cada parte; el README lo explica.
+- **Fallo real encontrado al mirar la captura, no por los tests:** el aviso de zona salía como
+  «Zona restringida: entra» sin el nombre. Las señales de zona y de proximidad llegan *dentro* de
+  `addTarget`/`updateTarget`, antes de que la aplicación haya apuntado el id del contacto recién creado, así que
+  una tabla `id → nombre` rellenada tras `addTarget` aún no lo tiene. Se lee el nombre del propio objetivo del mapa
+  (`target(id)->label`), y `--comprobar` verifica ahora que los avisos de zona llevan nombre. Vale también
+  para cualquier app que reaccione a esas señales.
+- **Prueba (`--comprobar`):** 8 contactos y glosario completo; tabla de 8 filas, propio arriba y orden por
+  distancia; el frontal da CPA 0,00 NM y TCPA 14,5 min (5 NM a 10 + 10 kn = 15 min menos los 30 s ya
+  pasados) y está en `Alerta`; elegir una fila selecciona y reemplaza la marcación; el filtro «aeronave»
+  atenúa 6 contactos (8 menos el propio y el helicóptero); `Pesquero 2` sigue activo a 90 s, está `Perdido`
+  pasado ese umbral y se borra pasados 300 s. Entra en `herramientas/probar_instalacion.sh`,
+  `examples/CMakeLists.txt` y `examples.pro` (CI, Qt 5 y 6). Mis tres primeros fallos fueron errores de la
+  prueba, no del ejemplo: una cuenta mal hecha (6 atenuados y no 5), un `—` comparado como Latin-1 con
+  `QLatin1String` (hay que usar `QStringLiteral` con UTF-8) y el umbral de borrado, que exige «más de» 300 s.
+- **Verificado** en el contenedor con un programa fuera del repositorio sobre la ventana real: clic sobre un
+  contacto del mapa (en su píxel real, comprobado con `targetAt`) lo selecciona y elige su fila; el buscador
+  del glosario filtra «cpa» a 5 términos; captura de la ventana revisada. **Sin probar**: con el paquete real
+  de Cuba en el PC del usuario, con un feed real y el camino qmake.

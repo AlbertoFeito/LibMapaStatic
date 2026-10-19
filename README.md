@@ -292,6 +292,7 @@ Todos los ejemplos juntos: `cmake -S examples -B build-examples -DCMAKE_PREFIX_P
 [`examples/editor_rutas`](examples/editor_rutas) es su complemento (~385 líneas): dibujar rutas con el ratón, editar vértices, deshacer y guardar a GPX/KML/GeoJSON con aviso de cambios sin guardar.
 [`examples/buscador_lugares`](examples/buscador_lugares) busca sitios por nombre o por coordenada (UTM, MGRS...) sin internet y copia la coordenada bajo el cursor (~295 líneas).
 [`examples/medidor_campo`](examples/medidor_campo) mide distancias con su rumbo y superficies con su perímetro, las deja dibujadas, las lista con totales, cambia de unidades al vuelo y copia la tabla (~545 líneas).
+[`examples/monitor_trafico`](examples/monitor_trafico) sigue contactos (buques y aeronaves) en tiempo real: tabla viva con CPA/TCPA, contactos perdidos, alertas, selección enlazada con el mapa y un glosario de términos en la propia interfaz (~870 líneas).
 [`examples/app_seguimiento`](examples/app_seguimiento) se compila igual y enseña
 el API de objetivos en ~220 líneas: buques simulados, zona vigilada, alerta
 CPA/TCPA, anillos y demora, filtro, agrupación, medir superficie, exportar vista
