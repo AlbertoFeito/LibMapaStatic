@@ -88,16 +88,22 @@ struct Analisis {
     bool hayElevacion = false;
 };
 
-// Lo que dice la zona visible desde A: su superficie y sus alcances mayor y menor.
+// Lo que dice la zona visible desde A: cuánto del círculo se ve, cuánto se esconde y cuánto no tiene dato,
+// lo más lejos que se ve y dónde está la zona ciega más cercana (el terreno que se esconde primero, p. ej.
+// la ladera bajo el borde de una cumbre).
 struct ZonaVisible {
     bool valida = false;
     int rayos = 0;
-    double areaKm2 = 0.0;
+    int tramos = 0;               // tramos visibles, sumados todos los rayos
+    int tramosOcultos = 0;
+    double areaKm2 = 0.0;         // suma de lo que se ve, tramo a tramo
     double porcentaje = 0.0;      // de la superficie del círculo de alcance
-    double alcanceMaxM = 0.0;
+    double porcentajeOculto = 0.0;
+    double porcentajeSinDato = 0.0;   // lo que ni se ve ni se sabe que se esconde (sin cota)
+    double alcanceMaxM = 0.0;     // el punto visible más lejano
     double azimutMaxDeg = 0.0;
-    double alcanceMinM = 0.0;
-    double azimutMinDeg = 0.0;
+    double zonaCiegaM = -1.0;     // distancia a la que antes empieza a no verse algo (-1: no hay zona ciega)
+    double azimutCiegaDeg = 0.0;
 };
 
 // Una entrada del glosario: el término y su definición.
@@ -141,9 +147,13 @@ static QVector<Termino> glosario()
                       "calcula con un radio efectivo de 4/3 del de la Tierra (k = 4/3), que es la refracción "
                       "estándar.") },
         { QObject::tr("Zona visible"),
-          QObject::tr("Hasta dónde se ve, desde A, un objetivo a la altura elegida, en cada dirección. Se calcula "
-                      "con 360 rayos (viewshed). El dibujo es la zona ininterrumpida desde A: más allá de una "
-                      "loma puede haber terreno visible que no se pinta.") },
+          QObject::tr("Lo que se ve desde A de un objetivo a la altura elegida, tramo a tramo en cada dirección "
+                      "(viewshed de 360 rayos). Azul = visible, amarillo = oculto; lo que no tiene dato queda sin "
+                      "pintar. Un marcador señala el punto visible más lejano.") },
+        { QObject::tr("Zona ciega"),
+          QObject::tr("Terreno cercano que no se ve desde A porque queda por debajo del horizonte del observador: "
+                      "por ejemplo, la ladera justo debajo del borde de una cumbre redondeada. Más lejos puede "
+                      "volver a verse (las tierras bajas).") },
         { QObject::tr("Alcance"),
           QObject::tr("La distancia máxima que se analiza desde A en cada dirección. Un alcance mayor tarda más.") },
         { QObject::tr("Azimut"),
@@ -152,8 +162,8 @@ static QVector<Termino> glosario()
           QObject::tr("Pintar el terreno como si le diera el sol desde una dirección, para ver las lomas y los "
                       "valles. Se calcula en vivo del modelo de elevación.") },
         { QObject::tr("Terreno de demostración"),
-          QObject::tr("Un relieve inventado (una loma de 300 m en medio de una llanura suave) para probar la "
-                      "aplicación sin datos reales.") },
+          QObject::tr("Un relieve inventado (una loma de 300 m, un pico redondeado de 900 m y un cerro, en una "
+                      "llanura suave) para probar la aplicación sin datos reales.") },
     };
 }
 
@@ -165,7 +175,7 @@ static QStringList terminosEnPantalla()
         QObject::tr("Observador (A)"), QObject::tr("Objetivo (B)"), QObject::tr("Altura de antena"),
         QObject::tr("Cota"), QObject::tr("Modelo de elevación (DEM)"), QObject::tr("Línea de vista"),
         QObject::tr("Holgura"), QObject::tr("Perfil de elevación"), QObject::tr("Curvatura y refracción"),
-        QObject::tr("Zona visible"), QObject::tr("Alcance"), QObject::tr("Azimut"),
+        QObject::tr("Zona visible"), QObject::tr("Zona ciega"), QObject::tr("Alcance"), QObject::tr("Azimut"),
         QObject::tr("Relieve sombreado"), QObject::tr("Terreno de demostración"),
     };
 }
@@ -187,7 +197,9 @@ static bool crearTerrenoDemostracion(const QString &dir)
             const double loma = 300.0 * std::exp(-0.5 * std::pow((lon + 82.5) / 0.02, 2.0));
             const double cerro = 120.0 * std::exp(-0.5 * (std::pow((lon + 82.75) / 0.03, 2.0)
                                                           + std::pow((lat - 23.3) / 0.03, 2.0)));
-            const double cota = 10.0 + 20.0 * (lat - 23.0) + loma + cerro;
+            const double pico = 880.0 * std::exp(-0.5 * (std::pow((lon + 82.25) / 0.02, 2.0)
+                                                         + std::pow((lat - 23.75) / 0.02, 2.0)));
+            const double cota = 10.0 + 20.0 * (lat - 23.0) + loma + cerro + pico;
             qToBigEndian<qint16>(qint16(std::lround(cota)), p + (qint64(fila) * lado + col) * 2);
         }
     }
@@ -244,7 +256,7 @@ protected:
             maximo = std::max(maximo, e);
         }
         const double rango = std::max(maximo - minimo, 1.0);
-        const QRectF zona = rect().adjusted(58, 12, -14, -22);
+        const QRectF zona = rect().adjusted(58, 26, -14, -22);
         const auto aPantalla = [&](double d, double cota) {
             return QPointF(zona.left() + zona.width() * d / D,
                            zona.bottom() - zona.height() * (cota - minimo) / rango);
@@ -292,7 +304,7 @@ protected:
             p.drawEllipse(aPantalla(d, cota), 7.0, 7.0);
         }
         p.setPen(palette().color(QPalette::Mid));
-        p.drawText(QRectF(zona.left() + 6, zona.top(), zona.width() * 0.6, 16), Qt::AlignLeft,
+        p.drawText(QRectF(zona.left(), 4, zona.width(), 16), Qt::AlignLeft | Qt::AlignVCenter,
                    tr("Terreno más la curvatura de la Tierra (k = 4/3): las cotas del eje son «efectivas»"));
         p.setPen(palette().color(QPalette::Text));
         p.drawText(QRectF(0, zona.top() - 8, 54, 14), Qt::AlignRight, tr("%1 m").arg(qRound(maximo)));
@@ -375,6 +387,13 @@ public:
             m_mapa->updateFeature(*f);
         }
         analizar();
+    }
+
+    // Elige el alcance (km) y la altura del objetivo (m) de la zona visible, sin calcularla.
+    void ponerZona(double alcanceKm, double alturaObjetivo)
+    {
+        m_alcance->setValue(alcanceKm);
+        m_alturaObjetivo->setValue(alturaObjetivo);
     }
 
     // Las alturas de las antenas de A y B (metros sobre el terreno), y recalcula.
@@ -486,52 +505,125 @@ public:
             return z;
         }
 
-        // Una cuña por azimut: hasta donde llega la zona ininterrumpida desde A. Los puntos van de
-        // azimut en azimut, así que forman un polígono en estrella alrededor de A.
-        QVector<QGeoCoordinate> contorno;
-        z.alcanceMaxM = -1.0;
-        z.alcanceMinM = std::numeric_limits<double>::max();
-        for (const ViewshedRay &r : vs.rays) {
-            contorno << m_a.atDistanceAndAzimuth(r.visibilityReachM, r.azimuthDeg);
-            if (r.visibilityReachM > z.alcanceMaxM) {
-                z.alcanceMaxM = r.visibilityReachM;
-                z.azimutMaxDeg = r.azimuthDeg;
+        // Zona de visibilidad REAL, como en la demo: una cuña (trozo de corona circular) por cada TRAMO de cada
+        // rayo, de donde empieza a verse (o a esconderse) a donde acaba, en la franja de azimut del rayo (± medio
+        // paso). Todas las cuñas de un mismo tipo son partes de UNA entidad: AZUL = visible, AMARILLO = oculto;
+        // lo que no tiene dato se deja sin pintar. Se pinta TODO lo visible, también lo que reaparece tras una
+        // loma o una cima.
+        const double mediaFranja = 0.5 * 360.0 / double(vs.rays.size());
+        const auto cuñasDe = [&](const QVector<VisibleRange> &tramos, double azimut, double *areaM2) {
+            QVector<QVector<QGeoCoordinate>> cuñas;
+            for (const VisibleRange &t : tramos) {
+                if (t.endM - t.startM < 1.0)
+                    continue;                           // un tramo de menos de un metro no se ve ni importa
+                const double d0 = std::max(t.startM, 1.0);
+                const QVector<QGeoCoordinate> cuña = {
+                    m_a.atDistanceAndAzimuth(d0, azimut - mediaFranja),
+                    m_a.atDistanceAndAzimuth(t.endM, azimut - mediaFranja),
+                    m_a.atDistanceAndAzimuth(t.endM, azimut + mediaFranja),
+                    m_a.atDistanceAndAzimuth(d0, azimut + mediaFranja),
+                };
+                *areaM2 += polygonArea(cuña);
+                cuñas.append(cuña);
             }
-            if (r.visibilityReachM < z.alcanceMinM) {
-                z.alcanceMinM = r.visibilityReachM;
-                z.azimutMinDeg = r.azimuthDeg;
+            return cuñas;
+        };
+        QVector<QVector<QGeoCoordinate>> cuñasVisibles, cuñasOcultas;
+        double areaVisibleM2 = 0.0, areaOcultaM2 = 0.0;
+        z.alcanceMaxM = -1.0;
+        for (const ViewshedRay &r : vs.rays) {
+            cuñasVisibles += cuñasDe(r.visibleRanges, r.azimuthDeg, &areaVisibleM2);
+            cuñasOcultas += cuñasDe(r.hiddenRanges, r.azimuthDeg, &areaOcultaM2);
+            for (const VisibleRange &t : r.visibleRanges) {
+                if (t.endM > z.alcanceMaxM) {
+                    z.alcanceMaxM = t.endM;
+                    z.azimutMaxDeg = r.azimuthDeg;
+                }
+            }
+            // La zona ciega más cercana: donde acaba el primer tramo, si acaba antes del alcance.
+            const double fin = r.visibleRanges.isEmpty() ? 0.0 : r.visibleRanges.first().endM;
+            const bool ciega = r.visibleRanges.isEmpty() || fin < vp.maxRangeM - 2.0 * vp.stepMeters;
+            if (ciega && (z.zonaCiegaM < 0.0 || fin < z.zonaCiegaM)) {
+                z.zonaCiegaM = fin;
+                z.azimutCiegaDeg = r.azimuthDeg;
             }
         }
+        const double circuloKm2 = M_PI * std::pow(vp.maxRangeM / 1000.0, 2.0);
         z.rayos = int(vs.rays.size());
-        z.areaKm2 = polygonArea(contorno) / 1.0e6;
-        z.porcentaje = 100.0 * z.areaKm2 / (M_PI * std::pow(vp.maxRangeM / 1000.0, 2.0));
+        z.tramos = int(cuñasVisibles.size());
+        z.tramosOcultos = int(cuñasOcultas.size());
+        z.areaKm2 = areaVisibleM2 / 1.0e6;
+        z.porcentaje = 100.0 * z.areaKm2 / circuloKm2;
+        z.porcentajeOculto = 100.0 * areaOcultaM2 / 1.0e6 / circuloKm2;
+        z.porcentajeSinDato = std::max(0.0, 100.0 - z.porcentaje - z.porcentajeOculto);
         z.valida = true;
 
-        MapFeature poligono;
-        poligono.kind = GeometryKind::Polygon;
-        poligono.layerId = kCapaZona;
-        poligono.geometry = contorno;
-        poligono.selectable = false;
-        poligono.style.lineColor = QColor(46, 125, 50);
-        poligono.style.fillColor = QColor(46, 125, 50, 70);
-        poligono.style.lineWidth = 2.0;
-        poligono.style.labelVisible = false;
-        m_idZona = m_mapa->addFeature(poligono);
+        const auto pintarCuñas = [this](const QVector<QVector<QGeoCoordinate>> &cuñas, const QString &tipo,
+                                        const QString &nombre, const QColor &relleno) {
+            if (cuñas.isEmpty())
+                return;
+            MapFeature zona;
+            zona.layerId = kCapaZona;
+            zona.kind = GeometryKind::Polygon;
+            zona.type = tipo;
+            zona.name = nombre;
+            zona.parts = cuñas;                         // una sola entidad con todas las cuñas
+            zona.geometry = cuñas.first();
+            zona.style.lineColor = QColor(0, 0, 0, 0);  // sin borde por cuña: solo el relleno
+            zona.style.fillColor = relleno;
+            zona.style.labelVisible = false;
+            zona.selectable = false;
+            m_mapa->addFeature(zona);
+        };
+        // Lo oculto primero (debajo) y lo visible encima, como en la demo.
+        pintarCuñas(cuñasOcultas, QStringLiteral("zona_oculta"), tr("Oculto"), QColor(0xff, 0xc1, 0x07, 90));
+        pintarCuñas(cuñasVisibles, QStringLiteral("zona_visibilidad"), tr("Visible a %1 m").arg(vp.targetHeight, 0, 'f', 0),
+                    QColor(0x42, 0xa5, 0xf5, 80));
+
+        // La máxima visibilidad: el punto visible más lejano, unido a A por una línea y con su distancia.
+        if (z.alcanceMaxM > 0.0) {
+            const QGeoCoordinate lejano = m_a.atDistanceAndAzimuth(z.alcanceMaxM, z.azimutMaxDeg);
+            MapFeature linea;
+            linea.layerId = kCapaZona;
+            linea.kind = GeometryKind::Polyline;
+            linea.type = QStringLiteral("maxima_visibilidad_linea");
+            linea.geometry = { m_a, lejano };
+            linea.style.lineColor = QColor(0x0d, 0x47, 0xa1);
+            linea.style.lineWidth = 1.5;
+            linea.style.labelVisible = false;
+            linea.selectable = false;
+            m_mapa->addFeature(linea);
+            MapFeature punto;
+            punto.layerId = kCapaZona;
+            punto.kind = GeometryKind::Point;
+            punto.type = QStringLiteral("maxima_visibilidad");
+            punto.name = tr("Máx. %1 km").arg(z.alcanceMaxM / 1000.0, 0, 'f', 1);
+            punto.geometry = { lejano };
+            punto.style.pointRadiusPx = 6.0;
+            punto.style.lineColor = QColor(0x0d, 0x47, 0xa1);
+            punto.style.fillColor = QColor(0x42, 0xa5, 0xf5);
+            punto.selectable = false;
+            m_mapa->addFeature(punto);
+        }
         m_ultimaZona = z;
-        m_textoZona->setText(tr("Se ve el %1 % del círculo de %2 km (%3 km²).\nMayor alcance: %4 km al azimut %5°.\n"
-                                "Menor alcance: %6 km al azimut %7°.")
-            .arg(z.porcentaje, 0, 'f', 0).arg(m_alcance->value(), 0, 'f', 0).arg(z.areaKm2, 0, 'f', 0)
-            .arg(z.alcanceMaxM / 1000.0, 0, 'f', 1).arg(qRound(z.azimutMaxDeg))
-            .arg(z.alcanceMinM / 1000.0, 0, 'f', 1).arg(qRound(z.azimutMinDeg)));
+        const QString ciega = z.zonaCiegaM >= 0.0
+            ? tr("Zona ciega más cercana: a %1 km de A, al azimut %2°.")
+                  .arg(z.zonaCiegaM / 1000.0, 0, 'f', 1).arg(qRound(z.azimutCiegaDeg))
+            : tr("Sin zona ciega: se ve todo hasta el alcance.");
+        m_textoZona->setText(tr("Del círculo de %1 km: visible %2 %, oculto %3 %, sin dato %4 %. (%5 km² visibles, en %6 tramos.)\n"
+                                "Máxima visibilidad: %7 km, al azimut %8°.\n%9\nAzul = visible, amarillo = oculto.")
+            .arg(m_alcance->value(), 0, 'f', 0).arg(z.porcentaje, 0, 'f', 0).arg(z.porcentajeOculto, 0, 'f', 0)
+            .arg(z.porcentajeSinDato, 0, 'f', 0).arg(z.areaKm2, 0, 'f', 0).arg(z.tramos)
+            .arg(z.alcanceMaxM / 1000.0, 0, 'f', 1).arg(qRound(z.azimutMaxDeg)).arg(ciega));
         return z;
     }
 
-    // Quita del mapa la zona visible dibujada, si la hay.
+    // Quita del mapa todo lo de la zona visible (las cuñas azules y amarillas, la línea y el marcador de la
+    // máxima visibilidad): la capa es solo suya. Hay que vaciarla entera y no quitar «la» entidad, porque la
+    // zona son varias; si no, cada cálculo iría apilando las del anterior.
     void borrarZonaVisible()
     {
-        if (m_idZona >= 0)
-            m_mapa->removeFeature(m_idZona);
-        m_idZona = -1;
+        m_mapa->clearFeatureLayer(kCapaZona);
         m_ultimaZona = ZonaVisible();
         m_textoZona->setText(tr("Elige el alcance y pulsa «Calcular zona visible»."));
     }
@@ -553,6 +645,7 @@ public:
     qint64 idA() const { return m_idA; }
     qint64 idB() const { return m_idB; }
     QString textoVisualActual() const { return m_textoVisual->text(); }
+    QString textoZonaActual() const { return m_textoZona->text(); }
     QListWidget *listaGlosario() const { return m_listaGlosario; }
 
 private:
@@ -833,12 +926,22 @@ private:
     QDockWidget *m_dockGlosario = nullptr;
     QTemporaryDir m_demoDir;                  // el terreno de demostración, mientras viva la ventana
     QGeoCoordinate m_a, m_b;
-    qint64 m_idA = -1, m_idB = -1, m_idZona = -1;
+    qint64 m_idA = -1, m_idB = -1;
     bool m_pidiendoA = true;
     bool m_cancelar = false;
     Analisis m_ultimo;
     ZonaVisible m_ultimaZona;
 };
+
+// Entidades de la capa de la zona visible con ese \a tipo (zona_visibilidad, zona_oculta, maxima_visibilidad...).
+static QVector<MapFeature> entidadesDeZona(MapWidget *mapa, const QString &tipo)
+{
+    QVector<MapFeature> v;
+    for (const MapFeature &f : mapa->featuresInLayer(kCapaZona))
+        if (f.type == tipo)
+            v.append(f);
+    return v;
+}
 
 // Cuántos píxeles de \a imagen tienen exactamente el color \a c.
 static int contarPixeles(const QImage &imagen, const QColor &c)
@@ -935,12 +1038,14 @@ static int comprobar(Ventana &v)
 
     // --- Zona visible desde A: la loma la recorta hacia el este ---
     const ZonaVisible z = v.calcularZonaVisible();
-    out << "      zona visible: " << z.rayos << " rayos, " << QString::number(z.areaKm2, 'f', 0) << " km² ("
-        << QString::number(z.porcentaje, 'f', 0) << " %), alcance " << QString::number(z.alcanceMinM / 1000.0, 'f', 1) << ".."
-        << QString::number(z.alcanceMaxM / 1000.0, 'f', 1) << " km, mín. al azimut " << QString::number(z.azimutMinDeg, 'f', 0) << "°\n";
+    out << "      zona visible: " << z.rayos << " rayos, " << z.tramos << " tramos, " << QString::number(z.areaKm2, 'f', 0)
+        << " km² (" << QString::number(z.porcentaje, 'f', 0) << " %), lo más lejos " << QString::number(z.alcanceMaxM / 1000.0, 'f', 1)
+        << " km, zona ciega desde " << QString::number(z.zonaCiegaM / 1000.0, 'f', 1) << " km al azimut "
+        << QString::number(z.azimutCiegaDeg, 'f', 0) << "°, oculto " << QString::number(z.porcentajeOculto, 'f', 0)
+        << " %, sin dato " << QString::number(z.porcentajeSinDato, 'f', 1) << " %\n";
     verificar(QStringLiteral("la zona visible se calcula con 360 rayos"), z.valida && z.rayos == 360);
-    verificar(QStringLiteral("el menor alcance (~12 km) es hacia el este, donde está la loma"),
-              z.alcanceMinM > 11000.0 && z.alcanceMinM < 13500.0 && z.azimutMinDeg > 80.0 && z.azimutMinDeg < 100.0);
+    verificar(QStringLiteral("la zona ciega más cercana (~12 km) es hacia el este, donde está la loma"),
+              z.zonaCiegaM > 11000.0 && z.zonaCiegaM < 13500.0 && z.azimutCiegaDeg > 80.0 && z.azimutCiegaDeg < 100.0);
 
     // La zona no llega a los 20 km del alcance ni siquiera en el llano: la curvatura de la Tierra pone el
     // horizonte radioeléctrico de un ojo a 10 m y un objetivo a 2 m en √(2·k·R·10)+√(2·k·R·2) ≈ 18,8 km.
@@ -979,9 +1084,78 @@ static int comprobar(Ventana &v)
     }
     verificar(QStringLiteral("el alcance de la zona visible concuerda con lineOfSight en 5 azimuts (se ve justo antes, no justo después)"),
               coherente);
-    verificar(QStringLiteral("la zona queda dibujada en el mapa"), v.mapa()->featuresInLayer(kCapaZona).size() == 1);
+    const auto visibles = entidadesDeZona(v.mapa(), QStringLiteral("zona_visibilidad"));
+    const auto ocultas = entidadesDeZona(v.mapa(), QStringLiteral("zona_oculta"));
+    const auto maximo = entidadesDeZona(v.mapa(), QStringLiteral("maxima_visibilidad"));
+    verificar(QStringLiteral("como en la demo: una entidad azul (visible) y otra amarilla (oculto), una cuña por tramo"),
+              visibles.size() == 1 && ocultas.size() == 1 && visibles.first().outlines().size() == z.tramos
+              && ocultas.first().outlines().size() == z.tramosOcultos
+              && visibles.first().style.fillColor == QColor(0x42, 0xa5, 0xf5, 80)
+              && ocultas.first().style.fillColor == QColor(0xff, 0xc1, 0x07, 90));
+    verificar(QStringLiteral("la máxima visibilidad se pinta: un marcador en el punto visible más lejano (a la distancia de lo más lejos que se ve)"),
+              maximo.size() == 1 && maximo.first().name.contains(QStringLiteral("Máx"))
+              && std::abs(v.puntoA().distanceTo(maximo.first().geometry.first()) - z.alcanceMaxM) < 100.0);
+    verificar(QStringLiteral("visible + oculto + sin dato suman el 100 % del círculo (y casi todo tiene dato)"),
+              std::abs(z.porcentaje + z.porcentajeOculto + z.porcentajeSinDato - 100.0) < 0.01 && z.porcentajeSinDato < 5.0);
     v.borrarZonaVisible();
     verificar(QStringLiteral("borrar la zona la quita del mapa"), v.mapa()->featuresInLayer(kCapaZona).isEmpty());
+
+    // --- Desde la cima de un pico redondeado, la zona visible NO es solo el primer tramo ---
+    // Caso real (el Pico Turquino, con el 0 % del primer intento): desde una cumbre redondeada no se ve la
+    // ladera justo bajo su borde (zona ciega), pero sí las tierras bajas de lejos. El pico de la demostración
+    // (880 m, σ = 2 km, en 23.75, -82.25) lo reproduce: con el ojo a 20 m y un objetivo a 10 m el primer
+    // tramo llega a ~0,8 km y el terreno vuelve a verse desde ~9,8 km hasta el alcance.
+    const QGeoCoordinate cima(23.75, -82.25);
+    v.fijarPunto(true, cima);
+    v.ponerAlturas(20.0, 10.0);
+    v.ponerZona(20.0, 10.0);
+    const ZonaVisible zp = v.calcularZonaVisible();
+    ViewshedParams pp;
+    pp.maxRangeM = 20000.0;
+    pp.observerHeight = 20.0;
+    pp.targetHeight = 10.0;
+    pp.stepMeters = 30.0;
+    const Viewshed vsp = v.mapa()->viewshed(cima, pp);
+    QVector<QGeoCoordinate> estrella;                    // lo que pintaba el primer intento: solo el primer tramo
+    for (const ViewshedRay &r : vsp.rays)
+        estrella << cima.atDistanceAndAzimuth(r.visibilityReachM, r.azimuthDeg);
+    const double areaPrimerTramoKm2 = polygonArea(estrella) / 1.0e6;
+    out << "      desde la cima: cota " << QString::number(v.mapa()->elevationAt(cima), 'f', 0) << " m, zona ciega desde "
+        << QString::number(zp.zonaCiegaM / 1000.0, 'f', 2) << " km, se ve el " << QString::number(zp.porcentaje, 'f', 0)
+        << " % (" << QString::number(zp.areaKm2, 'f', 0) << " km², en " << zp.tramos << " tramos); solo el primer tramo serían "
+        << QString::number(areaPrimerTramoKm2, 'f', 1) << " km²; oculto " << QString::number(zp.porcentajeOculto, 'f', 0)
+        << " %, sin dato " << QString::number(zp.porcentajeSinDato, 'f', 1) << " %\n";
+    verificar(QStringLiteral("la cima de la demostración está a ~905 m"),
+              std::abs(v.mapa()->elevationAt(cima) - 905.0) < 10.0);
+    verificar(QStringLiteral("la zona ciega empieza a unos 0,8 km de la cima (el borde de la cumbre)"),
+              zp.valida && zp.zonaCiegaM > 600.0 && zp.zonaCiegaM < 1000.0);
+    verificar(QStringLiteral("más lejos las tierras bajas vuelven a verse: ~76 % del círculo, no el 0 % del primer tramo"),
+              zp.porcentaje > 60.0 && zp.porcentaje < 90.0 && zp.alcanceMaxM > 19000.0 && areaPrimerTramoKm2 < 5.0
+              && zp.areaKm2 > 100.0 * areaPrimerTramoKm2);
+    bool reaparece = true;
+    for (int az : { 45, 90, 200, 300 })
+        for (const ViewshedRay &r : vsp.rays)
+            if (std::lround(r.azimuthDeg) == az)
+                reaparece = reaparece && r.visibleRanges.size() == 2;
+    verificar(QStringLiteral("en cada rayo hay dos tramos visibles (la cima y las tierras bajas)"), reaparece);
+    bool coherentePico = true;                           // y lineOfSight dice lo mismo: se ve, no se ve, se ve
+    for (int az : { 45, 90, 200, 300 }) {
+        const auto cerca = v.mapa()->lineOfSight(cima, cima.atDistanceAndAzimuth(300.0, az), 20.0, 10.0);
+        const auto medio = v.mapa()->lineOfSight(cima, cima.atDistanceAndAzimuth(3000.0, az), 20.0, 10.0);
+        const auto lejos = v.mapa()->lineOfSight(cima, cima.atDistanceAndAzimuth(17000.0, az), 20.0, 10.0);
+        coherentePico = coherentePico && cerca.isValid() && cerca.clear && medio.isValid() && !medio.clear
+                        && lejos.isValid() && lejos.clear;
+    }
+    verificar(QStringLiteral("lineOfSight lo confirma en 4 azimuts: a 300 m se ve, a 3 km no, a 17 km sí"), coherentePico);
+    verificar(QStringLiteral("lo oculto entre la cima y las tierras bajas se pinta de amarillo: ~24 % del círculo"),
+              zp.porcentajeOculto > 15.0 && zp.porcentajeOculto < 30.0 && zp.porcentajeSinDato < 3.0
+              && entidadesDeZona(v.mapa(), QStringLiteral("zona_oculta")).size() == 1);
+    verificar(QStringLiteral("el texto de la zona habla de la máxima visibilidad y de la zona ciega"),
+              v.textoZonaActual().contains(QStringLiteral("Máxima visibilidad")) && v.textoZonaActual().contains(QStringLiteral("Zona ciega")));
+    v.borrarZonaVisible();
+    v.fijarPunto(true, QGeoCoordinate(23.50, -82.62));
+    v.ponerAlturas(10.0, 10.0);
+    v.ponerZona(20.0, 2.0);
 
     // --- Un punto fuera de los datos: no se inventa nada ---
     v.fijarPunto(true, QGeoCoordinate(23.50, -84.50));

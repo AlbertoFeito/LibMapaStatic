@@ -16,7 +16,7 @@ llanura), de modo que se puede probar sin datos reales.
 | Cota del terreno en un punto (y bajo el cursor) | `elevationAt` |
 | ¿Se ven A y B? Holgura y punto que bloquea | `lineOfSight`, `LineOfSightParams`, `LineOfSightResult` |
 | Perfil del terreno entre A y B | `elevationProfile`, `ElevationProfileParams`, `ElevationProfile` |
-| Zona visible desde A, con progreso y cancelación | `viewshed`, `ViewshedParams`, `ViewshedProgress`, `ViewshedRay::visibilityReachM` |
+| Zona visible desde A, con progreso y cancelación | `viewshed`, `ViewshedParams`, `ViewshedProgress`, `ViewshedRay::visibleRanges` y `hiddenRanges` |
 | Superficie de la zona | `polygonArea` (`Coordinates.h`) |
 | Puntos que se arrastran con el ratón | `MapFeature::draggable`, señal `featureDragMovedTo` |
 | Fijar un punto con un clic | `setActiveTool(MapTool::PickPoint)`, señal `pointPicked` |
@@ -41,10 +41,25 @@ sobre `lineOfSight` (la visibilidad solo mejora al subir la antena): unas 16 lla
 
 ## La zona visible
 
-`viewshed` lanza 360 rayos desde A. Cada rayo dice **hasta dónde se ve un objetivo a la altura elegida**. El dibujo
-usa `visibilityReachM`: **la zona ininterrumpida desde A**. Eso es una simplificación que conviene conocer: detrás
-de una loma puede haber terreno visible otra vez (`visibleRanges` lo da con todos sus tramos), que aquí **no se pinta**.
-Para dibujar también esos tramos, recorre `ray.visibleRanges` y pinta una cuña por tramo.
+`viewshed` lanza 360 rayos desde A. Cada rayo dice **qué tramos se ven y cuáles se esconden** de un objetivo a la
+altura elegida (`visibleRanges` y `hiddenRanges`). El dibujo es **el mismo que el de la demo**: una cuña por cada
+tramo de cada rayo, todas las de un tipo como partes de **una sola entidad** (**azul = visible**, **amarillo =
+oculto**; lo oculto va debajo y lo visible encima; lo que no tiene dato queda sin pintar). Además se pinta **la máxima
+visibilidad**: un marcador en el punto visible más lejano, unido a A por una línea y con su distancia.
+
+El texto de debajo dice el porcentaje del círculo que se ve, el que se esconde y el que no tiene dato, la máxima
+visibilidad y dónde está la **zona ciega** más cercana.
+
+### Por qué no basta con `visibilityReachM`
+
+La primera versión de este ejemplo pintaba solo `visibilityReachM`, **el primer tramo contiguo desde A**. Con datos
+reales dio un resultado imposible: desde el **Pico Turquino** (1973 m, el punto más alto de Cuba) decía «se ve el 0 %,
+máximo 0,4 km». No era un fallo del cálculo, sino de lo que se miraba: desde una cumbre redondeada **no se ve la ladera
+justo bajo su borde** (la zona ciega), pero **sí las tierras bajas de lejos**. Esos segundos tramos eran justo lo que se
+ignoraba. Con el pico de 880 m de la demostración (`23.75, -82.25`), un observador a 20 m y un objetivo a 10 m, cada
+rayo tiene dos tramos: de 0 a ~0,8 km (la cima) y de ~9,8 km al alcance (el llano). Se ve el **74 %** del círculo; el
+primer tramo solo suponía 2 km² de los 931 km² visibles. `lineOfSight` coincide punto a punto: a 300 m se ve, a 3 km no
+y a 17 km sí.
 
 Dos cosas que sorprenden la primera vez y que son correctas:
 
@@ -66,7 +81,9 @@ demostración**: centra el mapa en la loma y pone A y B a cada lado.
 
 - **Antenas a 10 m:** el terreno bloquea a ~12 km (le faltan unos 300 m) y la app dice que con la antena de B a unos
   617 m se vería.
-- **Calcular zona visible (V):** unos 970–980 km² con alcance de 20 km, recortada hacia el este por la loma.
+- **Calcular zona visible (V):** con la loma, unos 980 km² visibles (78 %) con alcance de 20 km, recortada hacia el este.
+  Para ver la zona ciega, pon A en el pico (`23.75, -82.25`) con la antena a 20 m y el objetivo a 10 m: se ve el 74 %, con un
+  disco amarillo de ~9,8 km de radio alrededor de la cumbre.
 - **Relieve sombreado:** la loma se ve como tal. El azimut del sol se mueve con el deslizador.
 
 `--comprobar` no abre ventana: crea el terreno sintético y comprueba la cota de la cresta, la línea de vista
@@ -76,9 +93,9 @@ la zona visible, un punto fuera de los datos y el glosario (lo usa `herramientas
 
 ## El glosario
 
-Panel **Glosario** (*Ayuda → Glosario*, tecla F1) con los 14 términos que usa la ventana: observador y objetivo,
+Panel **Glosario** (*Ayuda → Glosario*, tecla F1) con los 15 términos que usa la ventana: observador y objetivo,
 altura de antena, cota, modelo de elevación (DEM), línea de vista, holgura, perfil de elevación, curvatura y
-refracción, zona visible, alcance, azimut, relieve sombreado y terreno de demostración. `--comprobar` verifica que
+refracción, zona visible, zona ciega, alcance, azimut, relieve sombreado y terreno de demostración. `--comprobar` verifica que
 todo término que la ventana muestra está definido.
 
 ## Detalles que conviene saber

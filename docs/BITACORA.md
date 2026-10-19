@@ -6327,9 +6327,11 @@ puntos arrastrables, la visual en vivo, el perfil, la zona visible y un terreno 
   antena); el texto la da redondeada al metro hacia arriba. La prueba comprueba la coherencia: con esa altura se ve y
   con 2 m menos no.
 - **Zona visible:** `viewshed` de 360 rayos con progreso y cancelación (`ViewshedProgress` que procesa eventos y
-  devuelve `false` al pulsar «Cancelar»); se dibuja como el polígono en estrella de `visibilityReachM` y se
-  informa de su superficie (`polygonArea`) y de los alcances mayor y menor. **Limitación documentada:** es la zona
-  ininterrumpida desde A; el terreno visible tras una loma (`visibleRanges`) no se pinta, y el README dice cómo hacerlo.
+  devuelve `false` al pulsar «Cancelar»). Se pinta **como en la demo** (`Ventana::analizarViewshed`): una cuña por
+  cada tramo de cada rayo, **una entidad con todas las cuñas como partes** por tipo, **azul = visible** y **amarillo =
+  oculto** (lo oculto debajo), y lo que no tiene dato sin pintar. Además, **la máxima visibilidad**: un marcador en el
+  punto visible más lejano, unido a A por una línea (esto último es adición mía; la demo solo da el alcance máximo en el
+  texto). El texto informa de visible, oculto y sin dato (% del círculo), de la máxima visibilidad y de la zona ciega.
 - **Sin elevación, lo dice y ofrece un terreno de demostración:** un `.hgt` sintético (SRTM3, 1201², big-endian)
   escrito en una carpeta temporal, con una llanura que sube 20 m por grado, una loma de 300 m en lon -82.5 y un cerro
   de 120 m; así el ejemplo se prueba sin datos reales y `--comprobar` es determinista. Relieve sombreado con
@@ -6337,7 +6339,7 @@ puntos arrastrables, la visual en vivo, el perfil, la zona visible y un terreno 
 - **Rendimiento medido** (contenedor de pruebas, Release): la altura mínima de antena tarda 13 ms y recalcular visual y perfil
   al arrastrar un punto, 15 ms (fluido en vivo); la zona visible de 20 km con 360 rayos, 0,3 s. Alcances de cientos de km no
   se han medido; por eso el cálculo trae progreso y cancelación.
-- **Glosario** en la interfaz (14 términos, buscable, F1) con la misma comprobación que en los dos ejemplos
+- **Glosario** en la interfaz (15 términos, buscable, F1) con la misma comprobación que en los dos ejemplos
   anteriores: `--comprobar` falla si un término que la ventana muestra no está definido.
 - **El resultado que no esperaba, y que era correcto:** mi primera prueba pedía que la zona visible fuera el 80–92 %
   del círculo de 20 km y salió el 78 %; antes de tocar la expectativa miré por azimut. Hacia el oeste el alcance era
@@ -6359,3 +6361,33 @@ puntos arrastrables, la visual en vivo, el perfil, la zona visible y un terreno 
   vuelve a Navegar; capturas revisadas. La casilla del relieve refleja el estado aunque se active por código.
   **Sin probar**: con el paquete real de Cuba (`cuba_dem.sqlitedb`) en el PC del usuario, con GeoTIFF, con alcances
   de cientos de km y el camino qmake. Con el paquete mínimo del CI el mapa se ve como el mundo entero.
+
+### 160 (addendum). Corrección tras probar con datos reales: el Pico Turquino daba «0 %»
+
+El usuario abrió el ejemplo con su `cuba_dem.sqlitedb` y puso A en el **Pico Turquino** (cota 1973 m, antena 20 m,
+objetivo 10 m, alcance 20 km). La línea de vista A–B salió bien (clara, holgura 12 m a 0,1 km de A: el terreno cae en
+picado), pero la zona visible decía **«se ve el 0 % del círculo, mayor alcance 0,4 km, menor 0,1 km»**: imposible desde el
+punto más alto de Cuba. Preguntó «¿es posible eso?». **No lo era, y el fallo era mío.**
+
+- **Causa.** El ejemplo pintaba y medía solo `ViewshedRay::visibilityReachM`, el **primer tramo contiguo** desde A (la
+  documentación de la librería ya lo dice, y yo había dejado «documentada» esa limitación en el README). Desde una cumbre
+  redondeada **no se ve la ladera justo bajo su borde** (zona ciega: queda por debajo del horizonte del observador), pero
+  **sí las tierras bajas de lejos**. Esos segundos tramos eran lo que se ignoraba, y con datos reales la «simplificación»
+  daba un resultado sin sentido.
+- **Reproducción antes de arreglar.** Añadí al terreno de demostración un pico redondeado de 880 m (σ = 2 km, en 23.75,
+  -82.25). Con el ojo a 20 m y el objetivo a 10 m, la librería da en cada rayo **dos tramos visibles**: de 0 a 0,75 km y de
+  9,75 a 19,98 km; `lineOfSight` coincide (a 300 m se ve, a 3 km no, a 17 km sí). Es decir, el cálculo estaba bien; lo que
+  fallaba era qué se mostraba.
+- **Arreglo.** La zona se pinta y se mide como en la demo (todos los tramos, visibles y ocultos), con el marcador de la
+  máxima visibilidad. En el pico: **se ve el 74 %** (931 km², en 720 tramos) y se oculta el 25 %; el primer tramo solo habría
+  sido 2 km². Se añade el término «Zona ciega» al glosario (15 términos) y el texto informa de ella.
+- **Otro fallo que cazaron las pruebas al tocar esto:** `borrarZonaVisible` quitaba una sola entidad, pero la zona pasó a ser
+  varias (azul, amarilla, línea y marcador): **cada cálculo habría ido apilando las del anterior**. Ahora vacía la capa entera
+  (es solo de la zona).
+- **Pruebas nuevas (`--comprobar`):** desde la cima (cota 905 m) la zona ciega empieza a ~0,8 km; se ve entre el 60 y el 90 %
+  del círculo (74 % medido) frente a 2 km² del primer tramo; en 4 azimuts hay exactamente dos tramos y `lineOfSight` dice
+  se ve / no se ve / se ve a 300 m / 3 km / 17 km; lo oculto (~25 %) se pinta en amarillo; una entidad azul y otra amarilla con una
+  cuña por tramo y los colores de la demo; el marcador de máxima visibilidad cae a la distancia correcta; visible + oculto +
+  sin dato suman el 100 %. La leyenda del perfil pasó a una banda propia: con terreno alto a la izquierda se pisaba con la curva.
+- **No se hizo:** las opciones de la demo «mar = 0» (`voidElevation`) y «sin curvatura». Con la costa de Cuba, el mar sin
+  dato queda sin pintar; si hace falta analizar objetivos sobre el agua, es poner `voidElevation = 0` en `ViewshedParams`.
