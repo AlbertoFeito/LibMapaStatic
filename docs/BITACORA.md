@@ -6258,3 +6258,53 @@ que se utilicen**, dentro de la interfaz.
   contacto del mapa (en su píxel real, comprobado con `targetAt`) lo selecciona y elige su fila; el buscador
   del glosario filtra «cpa» a 5 términos; captura de la ventana revisada. **Sin probar**: con el paquete real
   de Cuba en el PC del usuario, con un feed real y el camino qmake.
+
+## 159. Sexta aplicación de la serie: `vigilancia_zonas`
+
+`watchZone` y las señales de entrada y salida ya estaban en la librería y se usan en `app_seguimiento` y en
+`monitor_trafico`, pero siempre con una zona fija. Una app que vigila de verdad necesita lo que se cuelga de
+esas señales: **que el operador dibuje sus zonas, que cada zona tenga sus reglas, que quede un historial** y
+que todo se pueda guardar. `examples/vigilancia_zonas/` (~1220 líneas, un solo `main.cpp`) es esa plantilla.
+
+- **Reglas por zona, de la aplicación, no de la librería:** avisar al entrar, avisar al salir y avisar si un
+  contacto pasa más de N minutos dentro (la *permanencia*). Se guardan como `MapFeature::attributes`
+  (`avisar_entrada`, `avisar_salida`, `max_min`), así que **viajan en el GeoJSON** sin tocar la librería, y el
+  contorno cambia de color según la regla más grave (rojo, naranja, azul, gris si solo registra).
+- **Historial de eventos** (`Entra`, `Sale`, `Permanencia`) con hora, zona, contacto, permanencia y aviso; filtro
+  «Solo avisos»; **exportación a CSV** (`hora_utc;zona;contacto;evento;permanencia_min;aviso`, separado por `;`,
+  hora en UTC ISO). Se anotan todos los hechos y el aviso lo marca la regla.
+- **Permanencia:** al entrar se guarda desde cuándo está dentro cada par (contacto, zona); al salir se calcula y
+  se anota, y un temporizador avisa **una sola vez** si se pasa del máximo mientras sigue dentro.
+- **Dibujar y editar:** `MapTool::DrawPolygon` con `featureCreated` → diálogo de nombre y reglas (si se cancela,
+  la zona se borra) → `watchZone`. Editar la forma con `EditFeature` reevalúa quién queda dentro y la librería
+  emite las entradas y salidas que provoque: no hace falta código propio.
+- **Guardar y abrir** las zonas (`exportVectorFile` / `importVectorFile`), con `autosaveFeatures = false`. Al abrir se
+  recolorean según las reglas leídas y se vuelven a vigilar.
+- **Glosario** en la interfaz (14 términos, buscable, F1, y como ayuda en las cabeceras de las dos tablas), con la
+  misma comprobación de `monitor_trafico`: `--comprobar` falla si una cabecera o un término de la ventana no está
+  definido.
+- **Un orden que importa:** los contadores de una zona se crean **antes** de `watchZone`, porque esa llamada ya
+  emite una entrada por cada contacto que esté dentro; al revés, esas entradas se perderían. Y el nombre del
+  contacto se lee de su objetivo del mapa (`target(id)->label`), no de una tabla propia, por lo mismo que en el
+  monitor: las señales llegan dentro de `addTarget`/`updateTarget`.
+- **Tres fallos míos, ninguno de la librería:** (1) el escenario del simulador: el Remolcador seguía hacia el este y
+  a los 40 min entraba en el Fondeadero (la librería hacía lo correcto: lo vi en el historial impreso); ahora se
+  detiene a los 20 min, fuera de todo. (2) La captura enseñó «Avisa al entrar **Â·** al salir»: un `QLatin1String`
+  con el carácter `·` (UTF-8) se lee como Latin-1; es el mismo error que en `monitor_trafico` con `—`, así que
+  queda una comprobación del texto y un `grep` limpio en los ejemplos. (3) Las columnas de la tabla de zonas, repartidas
+  a partes iguales, cortaban «Zona restringida» y las reglas; ahora el texto largo se lleva el sobrante.
+- **Prueba (`--comprobar`):** 23 comprobaciones sobre tres zonas de ejemplo y cinco contactos: el que ya está dentro al
+  vigilar produce su entrada; Remolcador sale del Puerto con aviso tras ~10 min; Pesquero 1 entra en la zona
+  restringida con aviso y sale tras ~30 min sin él; Carguero A, parado en el Fondeadero, da UN aviso de permanencia
+  a los 30 min; Pesquero 2 lo cruza en ~20 min sin aviso; Carguero B no da ningún evento; 8 eventos y 3 avisos en
+  total, y los contadores y el «dentro» coinciden. Mover el Fondeadero hace salir a Carguero A (35 min dentro) y
+  devolverlo lo vuelve a meter; cambiar reglas las guarda y recolorea; dibujar una zona pide reglas y la vigila,
+  y cancelar la borra; borrarla la deja de vigilar; el CSV tiene cabecera, 6 columnas por fila y la fila del
+  Remolcador completa; guardar, borrar y abrir devuelve las tres zonas con sus reglas y otra vez vigiladas. Entra
+  en `herramientas/probar_instalacion.sh`, `examples/CMakeLists.txt` y `examples.pro` (CI, Qt 5 y 6). Para no
+  depender de `QTextStream::setCodec` (distinto en Qt 5 y 6) el CSV se escribe como bytes UTF-8.
+- **Verificado** en el contenedor con un programa fuera del repositorio sobre la ventana real: 4 clics y un doble clic
+  con `DrawPolygon` crean una zona (con las reglas de una petición simulada), que queda vigilada y anota las 5
+  entradas de los contactos que había dentro; elegir una fila de la tabla de zonas la selecciona en el mapa; captura
+  de la ventana revisada. **Sin probar**: con el paquete real de Cuba en el PC del usuario, con un feed real, el
+  diálogo de reglas a mano (la prueba lo sustituye) y el camino qmake.
