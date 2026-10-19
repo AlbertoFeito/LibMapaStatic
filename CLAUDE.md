@@ -4,9 +4,16 @@ Guía para cualquier sesión de Claude Code que trabaje en este repo. Son las
 reglas que ya venimos aplicando; respétalas siempre.
 
 ## Rama y commits
-- **Trabaja SIEMPRE en la rama `claude/fervent-mccarthy-v9rl6d`.** Nunca commitees a
-  `main`. Si el checkout arranca en `main` (contenedor nuevo), recupera la rama:
-  `git fetch origin claude/fervent-mccarthy-v9rl6d && git reset --hard origin/claude/fervent-mccarthy-v9rl6d`.
+- **Una rama por tarea, nunca `main`.** Cada trabajo nuevo sale de `main` actualizado
+  en una rama `claude/<tema>` (p. ej. `claude/app-medidor-campo`):
+  `git fetch origin main && git checkout -B claude/<tema> origin/main`.
+  Si la sesión ya trae una rama asignada, esa es la que se usa. No se reutiliza una
+  rama cuyo PR ya se fusionó: el trabajo siguiente es una rama nueva desde `main`.
+- Cada rama acaba en un **PR en borrador contra `main`**; el usuario lo prueba, lo marca
+  como listo y lo fusiona. Claude **nunca fusiona**. Evita apilar una rama sobre otra
+  sin fusionar; si hace falta, dilo en el PR con el orden de fusión (así se hizo en #18 a #21).
+- **Registro de ramas:** al abrir una rama nueva, añade su línea a la tabla de
+  «Ramas y PR» de más abajo (nombre, PR y para qué sirve); al fusionarse, no se borra.
 - Antes de commitear, si puede haber otra sesión, `git fetch` y ponte al día.
 - Mensajes de commit en español, claros, explicando el porqué.
 - **Cierra cada commit** con la línea de atribución
@@ -15,8 +22,25 @@ reglas que ya venimos aplicando; respétalas siempre.
   añaden además su línea `Claude-Session: <url de la sesión>`.
 - Fuera de esa línea final del commit, **nunca** pongas un identificador de
   modelo en commits, PRs, comentarios de código ni ningún artefacto del repo.
-- `git push -u origin claude/fervent-mccarthy-v9rl6d`; si el push da un 503
+- `git push -u origin claude/<tema>`; si el push da un 503
   transitorio del servicio de credenciales, reintenta con backoff (2,4,8,16 s).
+
+## Ramas y PR
+Historial de las ramas de trabajo (todas fusionadas en `main`). Añade aquí la siguiente.
+
+| Rama | PR | Para qué |
+|---|---|---|
+| `refactor-libmapa` | #1 | Refactor de libmapa |
+| `claude/sharp-goodall-dt7hh5` | #2–#7 | Elevación, descarga de teselas, paquete de datos sin conexión, seguimiento de objetivos, análisis de elevación y demo |
+| `claude/fervent-mccarthy-v9rl6d` | #8–#14 | Alertas, anillos y marcaciones, medir superficie, GeoTIFF/MBTiles, búsqueda de lugares, capa base en caliente (rama larga anterior) |
+| `claude/apps-ejemplo` | #15, #17 | Contrato de instalación (`probar_instalacion.sh`, `examples/` en bloque, CI); #17 lleva a `main` lo de #16 |
+| `claude/etiquetas-arriba` | #16 | Rótulos encima de todo (`LabelLayer`) y rótulo de marcación movible |
+| `claude/app-visor-gpx` | #18 | Ejemplo `visor_gpx` |
+| `claude/app-editor-rutas` | #19 | Ejemplo `editor_rutas` |
+| `claude/app-buscador-lugares` | #20 | Ejemplo `buscador_lugares` |
+| `claude/overlays-fijos` | #21 | Capas fijas del paquete ocultas y no seleccionables |
+| `claude/app-medidor-campo` | #22 | Ejemplo `medidor_campo` |
+| `claude/claude-md-ramas` | (este) | Regla de ramas y registro en `CLAUDE.md` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
