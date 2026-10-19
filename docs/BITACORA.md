@@ -6391,3 +6391,39 @@ punto más alto de Cuba. Preguntó «¿es posible eso?». **No lo era, y el fall
   sin dato suman el 100 %. La leyenda del perfil pasó a una banda propia: con terreno alto a la izquierda se pisaba con la curva.
 - **No se hizo:** las opciones de la demo «mar = 0» (`voidElevation`) y «sin curvatura». Con la costa de Cuba, el mar sin
   dato queda sin pintar; si hace falta analizar objetivos sobre el agua, es poner `voidElevation = 0` en `ViewshedParams`.
+
+### 160 (ampliación). Mar a 0, coordenadas escritas, 10 picos y ángulos de cierre
+
+Tras ver la corrección, el usuario pidió: «pon el mar en 0 y mantén la curvatura, así es más real; permite introducir las
+coordenadas de A y B; agrega los 10 picos máximos en 10 km de radio, y ángulos de cierre en el perfil o como gráfica
+secundaria, y ángulos de cierre hasta la distancia máxima seleccionada en los 360°». Va en la misma rama y PR
+(`claude/app-analisis-terreno`), porque es el mismo ejemplo y aún no estaba fusionado.
+
+- **Mar = 0.** Casilla marcada por omisión: `voidElevation = 0` en el perfil, la línea de vista, la bisección de altura
+  y el viewshed; y `cotaEn()` aplica la misma regla a las cotas que muestra (sin dato o negativa = 0). La curvatura no se
+  toca (k = 4/3). Efecto colateral buscado: un punto fuera de los datos pasa a ser mar y no «sin dato»; la prueba que
+  esperaba lo segundo se hizo con la casilla desmarcada y se añadió la del caso nuevo. Cambiar la casilla borra la zona y
+  los picos, porque eran de la otra regla.
+- **Coordenadas.** Dos cajas con `parseCoordinate` (decimal, sexagesimal con O, UTM, MGRS), que mueven el punto y centran
+  el mapa; texto inválido = caja roja y punto intacto. Al arrastrar el punto la caja se reescribe (sin disparar su propia
+  edición, con `QSignalBlocker`). Solo se centra si la posición cambió más de 1 m: `editingFinished` también salta al perder
+  el foco con el mismo texto.
+- **Ángulo de cierre en el perfil.** La librería ya devolvía `horizonDeg` por rayo; para el perfil A–B el ejemplo calcula
+  `atan2(z − ojoA − d²/(2·k·R), d)` por muestra y su máximo acumulado (`angulosPerfil`), en una gráfica con el mismo eje de
+  distancias bajo el perfil. Es la misma pregunta que `lineOfSight` dicha en ángulos, así que se **verifica contra
+  `lineOfSight`** con B a 10, 100, 300, 500, 700 y 900 m: coinciden. Primera versión: el primer paso (30 m de A) cae a −20° y
+  aplastaba la escala; ahora el eje ignora el primer 3 % del trayecto y la curva se recorta al marco.
+- **Ángulos de cierre en los 360°.** Gráfica por azimut (`CierresWidget`), alimentada por el mismo viewshed que la zona
+  visible (`ViewshedRay::horizonDeg`), con el máximo, el mínimo y el azimut hacia B. Comprobación física independiente:
+  sobre mar abierto, 10 m de ojo y 10 km de alcance, el horizonte cae a atan((−h − R²/(2·k·Rt))/R) = **−0,091°** y la
+  librería da −0,091° en los 360 azimuts.
+- **Picos.** Malla alrededor de A, máximos locales estrictos (sin celdas del borde ni junto a huecos), orden por cota y
+  separación mínima de radio/10; para cada uno, distancia, azimut, ángulo y línea de vista. 10 km en ~50 ms. Para probarlo
+  hace falta saber la respuesta: un terreno de 12 conos de 400 a 950 m en un anillo de 6 km. Primer intento con colinas
+  gaussianas: se solapaban (los vecinos sumaban ~23 m), la cima de una gaussiana **no se ve desde lejos** (su hombro la
+  tapa; era mi modelo, no la función) y la cota entera por la malla creaba «picos» de 1 m en las colas. Con conos de punta
+  afilada salen los 10 esperados (950 … 500, a 6 km, en sus azimuts, todos visibles) y con radio 5 km, ninguno.
+- **Interfaz.** Panel izquierdo en un `QScrollArea` (ya no cabía), tabla de picos (clic centra, doble clic pone B ahí),
+  dock *Ángulos de cierre (360°)* al lado del perfil, tres términos nuevos en el glosario (18).
+- `--comprobar`: 61 comprobaciones (eran 34), todas verdes. **Sin probar:** con el `cuba_dem.sqlitedb` del usuario
+  (picos del Turquino, rendimiento de la malla con 20-50 km de radio).

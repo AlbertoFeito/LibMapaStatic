@@ -20,6 +20,9 @@ llanura), de modo que se puede probar sin datos reales.
 | Superficie de la zona | `polygonArea` (`Coordinates.h`) |
 | Puntos que se arrastran con el ratón | `MapFeature::draggable`, señal `featureDragMovedTo` |
 | Fijar un punto con un clic | `setActiveTool(MapTool::PickPoint)`, señal `pointPicked` |
+| Ángulo de cierre en los 360° | `ViewshedRay::horizonDeg`, `ViewshedRay::peaks` |
+| Mar a nivel 0 (huecos y fondo marino = 0 m) | `voidElevation` en `ElevationProfileParams`, `LineOfSightParams`, `ViewshedParams` |
+| Escribir las coordenadas de A y B | `parseCoordinate`, `formatCoordinate` (`Coordinates.h`) |
 | Relieve sombreado | `setHillshadeVisible`, `setHillshadeSun` |
 | Qué elevación hay cargada | `elevationDescription`, `elevationWarnings`, `setElevationDir` |
 
@@ -32,6 +35,43 @@ distancia, `d·(D−d)/(2·k·R)` con k = 4/3 (la refracción estándar), de mod
 corta es exactamente lo que bloquea. Por eso las cotas del eje son «efectivas» y la cima de una loma de 320 m sale
 unos metros más alta en un trayecto largo. La visual es **azul** si hay vista y **roja** si no; el círculo marca el
 punto que bloquea (o, si hay vista, el de menor holgura).
+
+## Ángulos de cierre
+
+El **ángulo de cierre** es, visto desde A, la elevación (en grados sobre el horizonte) de lo más alto que tapa el cielo
+hasta una distancia: el máximo, a lo largo del trayecto, de la elevación del terreno, bajando la curvatura
+`d²/(2·k·R)`. Un objetivo se ve si queda **por encima** de ese ángulo. Hay dos vistas:
+
+- **Debajo del perfil**, con el mismo eje de distancias: el ángulo del terreno (marrón claro), el ángulo de cierre
+  acumulado (azul) y el ángulo con que se ve B (línea de trazos y punto: azul si queda por encima del cierre, rojo si lo
+  tapa el terreno). Decide igual que `lineOfSight`; `--comprobar` lo verifica con B a 10, 100, 300, 500, 700 y 900 m.
+- **En los 360°** (panel *Ángulos de cierre*, al lado del perfil): por azimut, el horizonte hasta el alcance elegido
+  (`ViewshedRay::horizonDeg`), con el máximo (rojo, la dirección más cerrada), el mínimo (verde, la más despejada) y una
+  línea hacia B. Se rellena al pulsar **Calcular zona visible**, que ya lanza el viewshed. Sobre mar abierto sale el
+  **hundimiento del horizonte**: con el ojo a 10 m y 10 km de alcance, `atan((−h − R²/(2·k·Rt)) / R)` = **−0,091°**,
+  y la prueba lo reproduce.
+
+## Los 10 picos alrededor de A
+
+*Buscar picos* muestrea la cota en una malla alrededor de A (paso = radio/150, mínimo 30 m), toma las celdas sin
+ninguna vecina más alta y con alguna más baja, y las recorre de la más alta a la más baja aceptando solo las que quedan
+a más de **una décima del radio** de las ya aceptadas (si no, saldrían diez puntos de la misma cresta). De cada pico
+da la cota, la distancia y el azimut desde A, el **ángulo** con que se ve desde el ojo de A y si **se ve** (línea de
+vista a un objetivo de la altura elegida en la zona visible). Se marcan en el mapa (naranja = se ve, gris = lo tapa el
+terreno). *Clic* en una fila centra el mapa; *doble clic* pone B en esa cima. Con 10 km tarda ~50 ms. Al mover A la
+lista se vacía, porque ya no es suya. Con datos reales, el ruido del modelo crea picos minúsculos, pero se quedan
+fuera: gana siempre el más alto de cada entorno. Las celdas del borde del círculo no cuentan (no se sabe si siguen
+subiendo).
+
+## Escribir las coordenadas y el mar a 0
+
+Las cajas *Coordenada de A/B* aceptan lo que entiende `parseCoordinate`: decimal (`23.1136, -82.3666`), sexagesimal
+(`23°06'48"N 82°21'59"O`), UTM o MGRS. Al pulsar Intro el punto se mueve y el mapa se centra; si no se entiende, la caja
+se pone roja y el punto no se toca. Al arrastrar el punto, la caja se actualiza.
+
+**Mar = 0** (marcado por omisión) pasa `voidElevation = 0` a todos los cálculos: donde no hay cota (el mar) o es negativa
+(el fondo marino) cuenta 0 m, así que el agua es una superficie lisa y no tapa nada en la costa, y un punto sin datos se
+trata como mar. **La curvatura se mantiene.** Desmarcado, esos lugares quedan «sin dato».
 
 ## «¿Qué altura necesita la antena de B?»
 
@@ -86,16 +126,18 @@ demostración**: centra el mapa en la loma y pone A y B a cada lado.
   disco amarillo de ~9,8 km de radio alrededor de la cumbre.
 - **Relieve sombreado:** la loma se ve como tal. El azimut del sol se mueve con el deslizador.
 
-`--comprobar` no abre ventana: crea el terreno sintético y comprueba la cota de la cresta, la línea de vista
-bloqueada y clara, el perfil, la altura mínima de antena (con su coherencia: con esa altura se ve, con 2 m menos no),
-la zona visible, un punto fuera de los datos y el glosario (lo usa `herramientas/probar_instalacion.sh`).
+`--comprobar` no abre ventana: crea el terreno sintético (y otro de 12 conos conocidos para los picos) y comprueba la
+cota de la cresta, la línea de vista bloqueada y clara, el perfil, la altura mínima de antena (con su coherencia: con
+esa altura se ve, con 2 m menos no), la zona visible, las coordenadas escritas, los ángulos de cierre, los 10 picos,
+un punto fuera de los datos y el glosario (lo usa `herramientas/probar_instalacion.sh`).
 `--captura=imagen.png` guarda una imagen de la ventana con la zona calculada.
 
 ## El glosario
 
-Panel **Glosario** (*Ayuda → Glosario*, tecla F1) con los 15 términos que usa la ventana: observador y objetivo,
-altura de antena, cota, modelo de elevación (DEM), línea de vista, holgura, perfil de elevación, curvatura y
-refracción, zona visible, zona ciega, alcance, azimut, relieve sombreado y terreno de demostración. `--comprobar` verifica que
+Panel **Glosario** (*Ayuda → Glosario*, tecla F1) con los 18 términos que usa la ventana: observador y objetivo,
+altura de antena, cota, modelo de elevación (DEM), línea de vista, holgura, perfil de elevación, ángulo de cierre, pico,
+nivel del mar (mar = 0), curvatura y refracción, zona visible, zona ciega, alcance, azimut, relieve sombreado y terreno
+de demostración. `--comprobar` verifica que
 todo término que la ventana muestra está definido.
 
 ## Detalles que conviene saber
@@ -103,9 +145,9 @@ todo término que la ventana muestra está definido.
 - **Sin cota no se decide.** Si falta el dato en A, en B o en parte del trayecto, `lineOfSight` devuelve un resultado no
   válido y la app lo dice («Sin dato de elevación…») en vez de inventar una respuesta. Lo mismo con la zona visible si
   no hay cota en A.
-- **El mar.** Por omisión (`voidElevation` = NaN) los huecos se saltan y la batimetría negativa cuenta como terreno. Para
-  analizar objetivos sobre el agua, pon `voidElevation = 0` en `LineOfSightParams` / `ViewshedParams`: el fondo marino no
-  tapa una visual de superficie.
+- **El mar.** La casilla «Mar = 0» (marcada) pone `voidElevation = 0`: el fondo marino no tapa una visual de superficie
+  y un punto sin datos cuenta como mar. Desmarcada (`voidElevation` = NaN) los huecos se saltan y la batimetría negativa
+  cuenta como terreno.
 - **Rendimiento** (medido en el contenedor de pruebas, compilación Release; en tu PC variará). Recalcular la visual y
   el perfil al arrastrar un punto tarda **15 ms** en el trayecto de 24 km, así que es fluido en vivo. La zona visible de
   20 km con 360 rayos tarda **0,3 s**; el tiempo crece con el alcance, por eso el cálculo trae barra de progreso y botón
