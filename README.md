@@ -294,6 +294,7 @@ Todos los ejemplos juntos: `cmake -S examples -B build-examples -DCMAKE_PREFIX_P
 [`examples/medidor_campo`](examples/medidor_campo) mide distancias con su rumbo y superficies con su perímetro, las deja dibujadas, las lista con totales, cambia de unidades al vuelo y copia la tabla (~545 líneas).
 [`examples/monitor_trafico`](examples/monitor_trafico) sigue contactos (buques y aeronaves) en tiempo real: tabla viva con CPA/TCPA, contactos perdidos, alertas, selección enlazada con el mapa y un glosario de términos en la propia interfaz (~870 líneas).
 [`examples/vigilancia_zonas`](examples/vigilancia_zonas) vigila zonas dibujadas con el ratón: reglas de aviso (al entrar, al salir, permanencia máxima), historial de eventos con exportación a CSV, guardar y abrir las zonas (GeoJSON) y glosario en la interfaz (~1220 líneas).
+[`examples/analisis_terreno`](examples/analisis_terreno) analiza el relieve: línea de vista entre dos puntos arrastrables con su perfil y la curvatura de la Tierra, altura de antena necesaria, zona visible desde un punto (viewshed), relieve sombreado y glosario, con un terreno de demostración incluido (~1050 líneas).
 [`examples/app_seguimiento`](examples/app_seguimiento) se compila igual y enseña
 el API de objetivos en ~220 líneas: buques simulados, zona vigilada, alerta
 CPA/TCPA, anillos y demora, filtro, agrupación, medir superficie, exportar vista

@@ -6308,3 +6308,54 @@ que todo se pueda guardar. `examples/vigilancia_zonas/` (~1220 líneas, un solo 
   entradas de los contactos que había dentro; elegir una fila de la tabla de zonas la selecciona en el mapa; captura
   de la ventana revisada. **Sin probar**: con el paquete real de Cuba en el PC del usuario, con un feed real, el
   diálogo de reglas a mano (la prueba lo sustituye) y el camino qmake.
+
+## 160. Séptima aplicación de la serie: `analisis_terreno`
+
+El análisis de elevación (`elevationProfile`, `lineOfSight`, `viewshed`, relieve sombreado) es de lo más potente
+de la librería y de lo que menos se ha enseñado como aplicación: las pruebas lo cubren, pero nadie lo ha usado
+con un ratón. `examples/analisis_terreno/` (~1050 líneas, un solo `main.cpp`) lo pone en manos de una persona: dos
+puntos arrastrables, la visual en vivo, el perfil, la zona visible y un terreno de demostración.
+
+- **Línea de vista en vivo:** A (observador) y B (objetivo) son `MapFeature` con `draggable = true`; la señal
+  `featureDragMovedTo` recalcula `lineOfSight` y `elevationProfile` con la altura de las dos antenas. También se
+  fijan con un clic (`PickPoint`). El texto dice si hay vista y con qué holgura, o dónde bloquea y qué falta.
+- **Perfil que explica el porqué:** se dibuja el terreno **más el abombamiento** `d·(D−d)/(2·k·R)` (k = 4/3), así la
+  visual es una recta y lo que la corta es lo que bloquea; azul si hay vista, roja si no, con un círculo en el punto
+  crítico. Una leyenda dice que las cotas del eje son «efectivas» (al ver la captura, «328 m» junto a una cresta de
+  320 m parecía una incoherencia).
+- **«¿Qué altura necesita la antena de B?»:** una bisección sobre `lineOfSight` (la visibilidad solo mejora al subir la
+  antena); el texto la da redondeada al metro hacia arriba. La prueba comprueba la coherencia: con esa altura se ve y
+  con 2 m menos no.
+- **Zona visible:** `viewshed` de 360 rayos con progreso y cancelación (`ViewshedProgress` que procesa eventos y
+  devuelve `false` al pulsar «Cancelar»); se dibuja como el polígono en estrella de `visibilityReachM` y se
+  informa de su superficie (`polygonArea`) y de los alcances mayor y menor. **Limitación documentada:** es la zona
+  ininterrumpida desde A; el terreno visible tras una loma (`visibleRanges`) no se pinta, y el README dice cómo hacerlo.
+- **Sin elevación, lo dice y ofrece un terreno de demostración:** un `.hgt` sintético (SRTM3, 1201², big-endian)
+  escrito en una carpeta temporal, con una llanura que sube 20 m por grado, una loma de 300 m en lon -82.5 y un cerro
+  de 120 m; así el ejemplo se prueba sin datos reales y `--comprobar` es determinista. Relieve sombreado con
+  interruptor y azimut del sol.
+- **Rendimiento medido** (contenedor de pruebas, Release): la altura mínima de antena tarda 13 ms y recalcular visual y perfil
+  al arrastrar un punto, 15 ms (fluido en vivo); la zona visible de 20 km con 360 rayos, 0,3 s. Alcances de cientos de km no
+  se han medido; por eso el cálculo trae progreso y cancelación.
+- **Glosario** en la interfaz (14 términos, buscable, F1) con la misma comprobación que en los dos ejemplos
+  anteriores: `--comprobar` falla si un término que la ventana muestra no está definido.
+- **El resultado que no esperaba, y que era correcto:** mi primera prueba pedía que la zona visible fuera el 80–92 %
+  del círculo de 20 km y salió el 78 %; antes de tocar la expectativa miré por azimut. Hacia el oeste el alcance era
+  18,84 km y no 20: **la curvatura de la Tierra pone el horizonte de un ojo a 10 m y un objetivo a 2 m en
+  √(2kR·10)+√(2kR·2) = 18,86 km**, que yo había olvidado. Con ese círculo menos el casquete tras la loma
+  (18,84²·acos(12,24/18,84) − 12,24·√(18,84²−12,24²) ≈ 132 km² de 1115) sale 983 km², y la librería da 978. Tampoco
+  llega a 20 km en el llano porque el objetivo está por debajo del horizonte. Las comprobaciones ahora son
+  esas tres y no un porcentaje inventado: alcance al oeste = horizonte teórico (±600 m), superficie entre 950 y 1020
+  km², y **coherencia con `lineOfSight` en 5 azimuts** (el último punto visible del rayo se ve y 60 m después no).
+- **Prueba (`--comprobar`):** sin elevación, la visual lo dice y la zona no se calcula; con el terreno de demostración,
+  cota de la cresta 320 m y del llano 20 m; A–B a 24,47 km; con antenas de 10 m el terreno bloquea a 12,24 km con
+  298,8 m de falta; el perfil tiene 817 muestras y llega a 320 m, y el widget dibuja el terreno (36 000 píxeles de
+  su color); altura mínima de B = 617 m y coherente; con B a 700 m hay vista y holgura positiva; arrastrar A
+  recalcula; la zona tiene 360 rayos, alcance mínimo ~12 km al este; un punto fuera de los datos da «Sin dato» y no
+  zona; el relieve se enciende; el glosario define lo que se muestra. Entra en `herramientas/probar_instalacion.sh`,
+  `examples/CMakeLists.txt` y `examples.pro` (CI, Qt 5 y 6).
+- **Verificado** en el contenedor con un programa fuera del repositorio sobre la ventana real: arrastrar B con el
+  ratón (pulsar, mover, soltar) lo mueve y recalcula; fijar A con `PickPoint` y un clic lo mueve y la herramienta
+  vuelve a Navegar; capturas revisadas. La casilla del relieve refleja el estado aunque se active por código.
+  **Sin probar**: con el paquete real de Cuba (`cuba_dem.sqlitedb`) en el PC del usuario, con GeoTIFF, con alcances
+  de cientos de km y el camino qmake. Con el paquete mínimo del CI el mapa se ve como el mundo entero.
