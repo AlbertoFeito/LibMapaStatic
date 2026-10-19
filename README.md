@@ -290,6 +290,7 @@ nombres `libmapa::core` / `libmapa::widget`.
 Todos los ejemplos juntos: `cmake -S examples -B build-examples -DCMAKE_PREFIX_PATH=<prefijo>` (o `examples/examples.pro` con qmake); `herramientas/probar_instalacion.sh <prefijo>` comprueba la instalación de punta a punta y es lo que corre CI.
 [`examples/visor_gpx`](examples/visor_gpx) es un visor de rutas GPX/KML/GeoJSON (~400 líneas): encuadre, inicio y fin, perfil de elevación, reproducción con horas y exportación a PDF.
 [`examples/editor_rutas`](examples/editor_rutas) es su complemento (~385 líneas): dibujar rutas con el ratón, editar vértices, deshacer y guardar a GPX/KML/GeoJSON con aviso de cambios sin guardar.
+[`examples/buscador_lugares`](examples/buscador_lugares) busca sitios por nombre o por coordenada (UTM, MGRS...) sin internet y copia la coordenada bajo el cursor (~295 líneas).
 [`examples/app_seguimiento`](examples/app_seguimiento) se compila igual y enseña
 el API de objetivos en ~220 líneas: buques simulados, zona vigilada, alerta
 CPA/TCPA, anillos y demora, filtro, agrupación, medir superficie, exportar vista

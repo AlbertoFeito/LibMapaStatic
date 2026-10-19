@@ -6126,3 +6126,30 @@ El complemento es un ejemplo aparte, `examples/editor_rutas`, para que cada uno 
   nombra, el título pasa a `*`, deshacer quita primero el nombre y luego la ruta (dos pasos, porque
   nombrar es una edición aparte), rehacer la devuelve y guardar escribe un GPX correcto y quita el
   `*`. **Sin probar**: arrastrar vértices con el ratón, el aviso al cerrar y el camino qmake.
+
+## 155. Tercera aplicación de la serie: `buscador_lugares`
+
+Ejemplo de la búsqueda de lugares sin conexión (sección 148) y de las coordenadas UTM/MGRS: la base
+de un callejero offline o de una utilidad de coordenadas.
+
+- **`examples/buscador_lugares`**: cuadro de búsqueda con la lista de resultados que se rellena al
+  escribir (`searchPlaces`: sin tildes ni mayúsculas, ciudades antes que aldeas, todas las palabras);
+  Intro o un clic van al lugar con el zoom que le toca (`goToPlace`) y lo marcan con un pin en una
+  capa temporal por encima del paquete. Lo escrito también se lee como coordenada en cualquier
+  formato (`parseCoordinate`: decimal, grados y minutos, UTM, MGRS) y sale como primer resultado.
+  La coordenada bajo el cursor se muestra en el formato elegido (`formatCoordinate`) y un clic la copia
+  al portapapeles. Ctrl+K enfoca el cuadro. Sin `"places"` en el `mapa.json` sigue sirviendo para
+  coordenadas y lo avisa.
+- **`--comprobar`**: busca «guantanamo» (debe encontrar «Guantánamo»), lee una coordenada MGRS y
+  comprueba la ida y vuelta. **Hallazgo propio, no de la librería:** MGRS con 5 cifras es una rejilla
+  de 1 m y trunca, así que formatear y releer pierde hasta √2 ≈ 1,4 m; mi primera tolerancia (1 m)
+  daba un falso fallo, ahora es de 2 m.
+- **`herramientas/probar_instalacion.sh`** ahora mete en su paquete de prueba el índice de lugares de
+  `tests/data/places` (si está) y arranca el buscador; `examples/CMakeLists.txt` y `examples.pro` lo
+  incluyen (CI, Qt 5 y 6).
+- **Verificado** en el contenedor, con un programa de prueba FUERA del repositorio y eventos reales
+  sobre la ventana: `guantanamo` da 3 resultados (ciudad, caserío, bahía) y Intro centra en
+  20.1444, -75.2092 a zoom 12; `bahia guan` da solo la bahía (todas las palabras); una coordenada MGRS
+  sale como resultado y centra donde toca; `100%` encuentra «100% Cubano» (comodín literal); `zzz` no da
+  nada; un clic en el mapa copia la coordenada al portapapeles. **Sin probar**: con el índice real
+  de Cuba (el del PC del usuario, `lugares.sqlitedb`), y el camino qmake.
