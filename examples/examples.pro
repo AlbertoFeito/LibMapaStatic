@@ -8,4 +8,4 @@
 #-------------------------------------------------------------------
 
 TEMPLATE = subdirs
-SUBDIRS += app_minima app_seguimiento
+SUBDIRS += app_minima app_seguimiento visor_gpx

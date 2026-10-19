@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="libmapa visor_gpx (datos de ejemplo)" xmlns="http://www.topografix.com/GPX/1/1">
+ <metadata><name>Ruta de ejemplo</name><desc>Datos sinteticos para probar el visor</desc></metadata>
+ <rte><name>Ruta planificada</name><type>planificada</type>
+  <rtept lat="23.136000" lon="-82.354000"/>
+  <rtept lat="23.142000" lon="-82.348000"/>
+  <rtept lat="23.150000" lon="-82.342000"/>
+  <rtept lat="23.158000" lon="-82.340000"/>
+ </rte>
+ <trk><name>Track grabado</name><type>caminata</type><trkseg>
+  <trkpt lat="23.139000" lon="-82.359000"><time>2026-10-03T12:00:00Z</time></trkpt>
+  <trkpt lat="23.141558" lon="-82.357928"><time>2026-10-03T12:01:00Z</time></trkpt>
+  <trkpt lat="23.144064" lon="-82.356518"><time>2026-10-03T12:02:00Z</time></trkpt>
+  <trkpt lat="23.146466" lon="-82.354783"><time>2026-10-03T12:03:00Z</time></trkpt>
+  <trkpt lat="23.148716" lon="-82.352746"><time>2026-10-03T12:04:00Z</time></trkpt>
+  <trkpt lat="23.150770" lon="-82.350437"><time>2026-10-03T12:05:00Z</time></trkpt>
+  <trkpt lat="23.152589" lon="-82.347893"><time>2026-10-03T12:06:00Z</time></trkpt>
+  <trkpt lat="23.154140" lon="-82.345159"><time>2026-10-03T12:07:00Z</time></trkpt>
+  <trkpt lat="23.155398" lon="-82.342285"><time>2026-10-03T12:08:00Z</time></trkpt>
+  <trkpt lat="23.156345" lon="-82.339322"><time>2026-10-03T12:09:00Z</time></trkpt>
+  <trkpt lat="23.156972" lon="-82.336326"><time>2026-10-03T12:10:00Z</time></trkpt>
+  <trkpt lat="23.157278" lon="-82.333354"><time>2026-10-03T12:11:00Z</time></trkpt>
+  <trkpt lat="23.157271" lon="-82.330461"><time>2026-10-03T12:12:00Z</time></trkpt>
+  <trkpt lat="23.156967" lon="-82.327701"><time>2026-10-03T12:13:00Z</time></trkpt>
+  <trkpt lat="23.156390" lon="-82.325122"><time>2026-10-03T12:14:00Z</time></trkpt>
+  <trkpt lat="23.155573" lon="-82.322771"><time>2026-10-03T12:15:00Z</time></trkpt>
+  <trkpt lat="23.154553" lon="-82.320686"><time>2026-10-03T12:16:00Z</time></trkpt>
+  <trkpt lat="23.153373" lon="-82.318899"><time>2026-10-03T12:17:00Z</time></trkpt>
+  <trkpt lat="23.152081" lon="-82.317433"><time>2026-10-03T12:18:00Z</time></trkpt>
+  <trkpt lat="23.150728" lon="-82.316305"><time>2026-10-03T12:19:00Z</time></trkpt>
+  <trkpt lat="23.149366" lon="-82.315519"><time>2026-10-03T12:20:00Z</time></trkpt>
+  <trkpt lat="23.148048" lon="-82.315074"><time>2026-10-03T12:21:00Z</time></trkpt>
+  <trkpt lat="23.146825" lon="-82.314956"><time>2026-10-03T12:22:00Z</time></trkpt>
+  <trkpt lat="23.145747" lon="-82.315145"><time>2026-10-03T12:23:00Z</time></trkpt>
+ </trkseg></trk>
+</gpx>
