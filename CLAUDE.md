@@ -26,7 +26,7 @@ reglas que ya venimos aplicando; respétalas siempre.
   transitorio del servicio de credenciales, reintenta con backoff (2,4,8,16 s).
 
 ## Ramas y PR
-Historial de las ramas de trabajo (todas fusionadas en `main`). Añade aquí la siguiente.
+Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su PR sigue abierto). Añade aquí la siguiente.
 
 | Rama | PR | Para qué |
 |---|---|---|
@@ -40,7 +40,8 @@ Historial de las ramas de trabajo (todas fusionadas en `main`). Añade aquí la 
 | `claude/app-buscador-lugares` | #20 | Ejemplo `buscador_lugares` |
 | `claude/overlays-fijos` | #21 | Capas fijas del paquete ocultas y no seleccionables |
 | `claude/app-medidor-campo` | #22 | Ejemplo `medidor_campo` |
-| `claude/claude-md-ramas` | (este) | Regla de ramas y registro en `CLAUDE.md` |
+| `claude/claude-md-ramas` | #23 | Regla de ramas y registro en `CLAUDE.md` |
+| `claude/app-monitor-trafico` | #24 | Ejemplo `monitor_trafico` (tabla de contactos, perdidos, alertas y glosario) |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
