@@ -42,6 +42,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/app-medidor-campo` | #22 | Ejemplo `medidor_campo` |
 | `claude/claude-md-ramas` | #23 | Regla de ramas y registro en `CLAUDE.md` |
 | `claude/app-monitor-trafico` | #24 | Ejemplo `monitor_trafico` (tabla de contactos, perdidos, alertas y glosario) |
+| `claude/app-vigilancia-zonas` | (en curso) | Ejemplo `vigilancia_zonas` (zonas con reglas de aviso, historial de eventos, CSV y GeoJSON) |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
