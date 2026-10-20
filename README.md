@@ -12,7 +12,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 27 tests (24 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 30 tests (27 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt`, una base de datos `.sqlitedb` empaquetable **o GeoTIFF** (un fichero o una carpeta; cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
@@ -295,6 +295,8 @@ Todos los ejemplos juntos: `cmake -S examples -B build-examples -DCMAKE_PREFIX_P
 [`examples/monitor_trafico`](examples/monitor_trafico) sigue contactos (buques y aeronaves) en tiempo real: tabla viva con CPA/TCPA, contactos perdidos, alertas, selección enlazada con el mapa y un glosario de términos en la propia interfaz (~870 líneas).
 [`examples/vigilancia_zonas`](examples/vigilancia_zonas) vigila zonas dibujadas con el ratón: reglas de aviso (al entrar, al salir, permanencia máxima), historial de eventos con exportación a CSV, guardar y abrir las zonas (GeoJSON) y glosario en la interfaz (~1220 líneas).
 [`examples/analisis_terreno`](examples/analisis_terreno) analiza el relieve: línea de vista entre dos puntos arrastrables con su perfil y la curvatura de la Tierra, altura de antena necesaria, zona visible desde un punto (viewshed), ángulos de cierre (a lo largo del perfil y en los 360°), los 10 picos más altos alrededor de A, coordenadas de A y B escritas a mano, mar a nivel 0, relieve sombreado y glosario, con un terreno de demostración incluido (~2000 líneas).
+[`libtelemetria`](libtelemetria) es una **biblioteca aparte** que decodifica (y codifica) NMEA 0183 y AIS: RMC, GGA, VTG, HDT y los mensajes AIS de tipos 1, 2, 3, 5, 18, 19 y 24, con reensamblado de mensajes de varias frases y contadores del enlace. Solo usa Qt Core, no sabe nada de mapas ni de red, y se instala en el mismo prefijo que libmapa (`find_package(libtelemetria)`).
+[`examples/emisor_nmea`](examples/emisor_nmea) simula un receptor NMEA/AIS con cinco barcos (y ruido: sumas malas, frases cortadas) y lo emite por UDP o a un fichero; y [`examples/cliente_telemetria`](examples/cliente_telemetria) lo recibe: barco propio y contactos AIS en el mapa, datos estáticos fundidos por MMSI, contactos perdidos, calidad del enlace, reproducción de capturas y glosario (~570 y ~1300 líneas).
 [`examples/app_seguimiento`](examples/app_seguimiento) se compila igual y enseña
 el API de objetivos en ~220 líneas: buques simulados, zona vigilada, alerta
 CPA/TCPA, anillos y demora, filtro, agrupación, medir superficie, exportar vista
@@ -698,13 +700,15 @@ src/
   io/                ficheros .geo, manifiesto del paquete (mapa.json) y su comprobación
   widget/            MapView (QCustomPlot), capas de dibujo (teselas,
                      entidades, objetivos, cobertura) y sus modelos
-tests/               27 tests (24 sin QCustomPlot)
+tests/               27 tests de libmapa (24 sin QCustomPlot); libtelemetria/tests, 3 más
 tools/               herramientas de línea de comandos (incl. fill_tiles / fill_map)
 demo/                aplicación de ejemplo (clase Ventana repartida por tema en Ventana*.cpp)
 examples/app_minima/ plantilla de producto que usa la librería instalada (CMake y qmake)
 examples/app_seguimiento/ ejemplo del API de objetivos con la librería instalada
+libtelemetria/       biblioteca aparte: decodificador de NMEA 0183 y AIS (solo Qt Core; ver su README)
 cmake/               libmapaConfig.cmake.in (para find_package)
-qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri)
+qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri; instala también libtelemetria)
+qmake/libtelemetria/ libtelemetria con qmake (+ telemetria.pri)
 qmake/*.pro          herramientas sueltas con qmake
 herramientas/        probar_instalacion.sh (instalación + ejemplos); desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete;
                      osm_costa_a_sqlitedb.py: costa de OSM -> máscara de tierra (--water-mask)

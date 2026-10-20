@@ -68,6 +68,7 @@
   <li>Módulo <b>tiles</b> — motor de teselas</li>
   <li>Módulo <b>widget</b> — el mapa en pantalla</li>
   <li>Módulo <b>io</b> — ficheros .geo</li>
+  <li><b>libtelemetria</b> — decodificador de NMEA 0183 y AIS (biblioteca aparte)</li>
   <li>Flujos de interacción entre objetos</li>
   <li>Codificación de teselas (la matemática)</li>
   <li>Herramientas desarrolladas</li>
@@ -582,6 +583,35 @@ obstáculo con su distancia); y el viewshed sombrea <b>azul lo visible y amarill
 oculto</b>, con opción de tratar el mar/sin dato como cota 0.</p>
 
 <!-- ===================== 9. FLUJOS ===================== -->
+<h2 class="sec">8d · <span class="mono">libtelemetria</span> — decodificador de NMEA 0183 y AIS</h2>
+<p>Una <b>biblioteca aparte</b> (carpeta <code>libtelemetria/</code>), no un módulo de libmapa: convertir líneas de
+texto en datos no tiene nada que ver con teselas ni ventanas, y así la usa cualquier app sin arrastrar el mapa.
+Depende <b>solo de Qt Core</b> (el <code>CMakeLists.txt</code> se detiene si alguien le añade Network, Gui, Sql,
+Positioning o libmapa) y no hace E/S: se le dan bytes y devuelve datos. Namespace <code>telemetria</code>; se enlaza
+con <code>telemetria::telemetria</code> y se instala en el <b>mismo prefijo</b> que libmapa
+(<code>find_package(libtelemetria)</code>; con qmake, <code>telemetria.pri</code> junto a <code>libmapa.pri</code>).</p>
+<ul>
+  <li><span class="cls">Sentence / parseSentence</span> <span class="tag">include/telemetria/Nmea.h</span>: separa una línea
+  en dirección, emisor, tipo y campos (los vacíos cuentan) y comprueba la <b>suma de comprobación</b> (XOR). Dice por
+  qué rechaza una línea y cuál debería ser la suma. <code>formatSentence</code> hace lo inverso.</li>
+  <li><span class="cls">Rmc, Gga, Vtg, Hdt</span> + <code>decodeXxx</code> / <code>formatXxx</code>: posición, velocidad y rumbo
+  propios. Campos ausentes = NaN (no se inventa nada); estado V de la RMC = sin fijado; la coordenada se redondea con enteros
+  para no escribir «60.0000» minutos.</li>
+  <li><span class="cls">AisMessage / decodeAis / encodeAis</span> <span class="tag">include/telemetria/Ais.h</span>: tipos 1, 2, 3
+  (posición clase A), 5 (estáticos clase A, dos frases), 18 y 19 (clase B) y 24 (estáticos clase B, partes A y B). «No disponible»
+  (181°, 91°, 1023, 3600, 511) se decodifica como NaN/−1, no como dato. Un tipo que no se decodifica devuelve solo tipo y MMSI.</li>
+  <li><span class="cls">AisAssembler</span>: reensambla los mensajes de varias frases por (secuencia, canal), con memoria acotada
+  (32 pendientes) y contando los fragmentos perdidos.</li>
+  <li><span class="cls">Decoder</span> <span class="tag">include/telemetria/Decoder.h</span>: lo que usa una app. <code>feed</code> para
+  un flujo (TCP, fichero: la línea a medias espera), <code>feedDatagram</code> para UDP (cada datagrama trae líneas completas).
+  Devuelve <code>Event</code>s (Rmc, Gga, Vtg, Hdt, Ais con <code>ownShip</code> para !AIVDO, Bad, Ignored) y lleva
+  <code>DecoderStats</code>: líneas, decodificadas, suma mala, mal formadas, ignoradas, AIS completos/no soportados, fragmentos perdidos.</li>
+</ul>
+<p><b>Verificación:</b> 3 tests (<code>tst_nmea</code>, <code>tst_ais</code>, <code>tst_decoder</code>). Las sumas publicadas de RMC (6A), GGA (47) y
+VTG (48) y el mensaje AIS de la documentación de gpsd (MMSI 477553000, 47.582833° N, 122.345833° O, suma 5C) salen exactos; el resto,
+ida y vuelta de todos los tipos. Apps de ejemplo: <code>emisor_nmea</code> (simula y codifica) y <code>cliente_telemetria</code>
+(decodifica y dibuja con libmapa).</p>
+
 <h2 class="sec">9 · Flujos de interacción entre objetos</h2>
 
 <h3>9.1 · Pintar el mapa mientras navegas</h3>

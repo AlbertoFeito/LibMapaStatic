@@ -44,6 +44,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/app-monitor-trafico` | #24 | Ejemplo `monitor_trafico` (tabla de contactos, perdidos, alertas y glosario) |
 | `claude/app-vigilancia-zonas` | #25 | Ejemplo `vigilancia_zonas` (zonas con reglas de aviso, historial de eventos, CSV y GeoJSON) |
 | `claude/app-analisis-terreno` | #26 | Ejemplo `analisis_terreno` (línea de vista, perfil, zona visible y terreno de demostración) |
+| `claude/app-cliente-telemetria` | #27 | `libtelemetria` (biblioteca aparte: decodificador NMEA 0183 y AIS) y los ejemplos `emisor_nmea` y `cliente_telemetria` |
 | `claude/docs-quitar-mundo` | #28 | Quita de `docs/MIS_RUTAS.md` la nota pendiente de la capa `mundo` |
 
 ## Estilo de código
@@ -64,7 +65,8 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
   No mezcles uno con otro ni cambies el de Qt 6 para cubrir Qt 5.
 - La librería se compila también **con qmake** (`qmake/libmapa/core|widget`).
   Si añades o quitas un `.cpp` (o una cabecera con `Q_OBJECT`) en
-  `CMakeLists.txt`, haz lo mismo en `core.pro` o `widget.pro`.
+  `CMakeLists.txt`, haz lo mismo en `core.pro` o `widget.pro`. Lo mismo con
+  `libtelemetria/CMakeLists.txt` y `qmake/libtelemetria/telemetria.pro`.
 
 ## QCustomPlot
 - Es GPLv3 y **está en `.gitignore`**: no se commitea. Versión usada: **2.1.1**.
@@ -80,6 +82,16 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
   sin depender de zlib externa → compila en cualquier sitio (incl. Qt MinGW).
 - Por eso `project()` habilita **C** además de CXX; a `miniz.c` se le pone `-w`
   (es de terceros) y los avisos solo-C++ se limitan a CXX con generator expressions.
+
+## libtelemetria (biblioteca aparte)
+- Decodificador/codificador de **NMEA 0183 y AIS** en `libtelemetria/` (namespace `telemetria`, target
+  `telemetria::telemetria`). **Solo Qt Core**: ni red, ni Gui, ni mapa, ni E/S (se le dan bytes y devuelve datos);
+  su `CMakeLists.txt` se detiene si alguien le añade esas dependencias. La red y el mapa los pone la aplicación.
+- Se instala en el **mismo prefijo** que libmapa (`find_package(libtelemetria)`; con qmake, `telemetria.pri` junto a
+  `libmapa.pri`; `qmake/libmapa/libmapa.pro` compila e instala las dos).
+- Todo decodificador nuevo se prueba con un **dato publicado por una fuente independiente** (una frase con su suma de
+  comprobación, un mensaje AIS de la documentación de gpsd...) además de con la ida y vuelta del codificador propio, que
+  no demuestra nada por sí sola.
 
 ## Arquitectura (respétala)
 - **Fachada:** `MapWidget` (API pública en `include/libmapa/`) oculta QCustomPlot.
@@ -100,7 +112,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
   (`tile.openstreetmap.org`): está prohibido.
 
 ## Verificación antes de commitear código
-- Compila y pasa **todos los tests** (27 ahora; 24 sin QCustomPlot): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
+- Compila y pasa **todos los tests** (30 ahora, 3 de ellos de libtelemetria; 27 sin QCustomPlot): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
   en el contenedor). Un push verde vale más que tres especulativos.
 - Contenedor nuevo sin Qt: `sudo apt-get update && sudo apt-get install -y
   qt6-base-dev qt6-positioning-dev`, y recupera QCustomPlot (arriba).
