@@ -365,7 +365,7 @@ public:
     bool escuchar(quint16 puerto)
     {
         parar();
-        if (!m_socket.bind(QHostAddress::AnyIPv4, puerto, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+        if (!m_socket.bind(QHostAddress(QHostAddress::AnyIPv4), puerto, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
             statusBar()->showMessage(tr("No se puede escuchar el puerto %1: %2").arg(puerto).arg(m_socket.errorString()), 8000);
             registrar(tr("Error: no se puede escuchar el puerto %1 (%2)").arg(puerto).arg(m_socket.errorString()));
             actualizarEnlace();

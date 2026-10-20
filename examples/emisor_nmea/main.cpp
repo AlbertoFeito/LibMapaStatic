@@ -492,7 +492,7 @@ int comprobar()
 
     // La salida por UDP: un datagrama a localhost llega entero.
     QUdpSocket receptor;
-    const bool escucha = receptor.bind(QHostAddress::LocalHost, 0);
+    const bool escucha = receptor.bind(QHostAddress(QHostAddress::LocalHost), quint16(0));   // explícito: con Qt 5, (enum, 0) es ambiguo con bind(quint16, BindMode)
     verificar(QStringLiteral("se puede abrir un socket UDP en localhost"), escucha);
     if (escucha) {
         Salida salida;
