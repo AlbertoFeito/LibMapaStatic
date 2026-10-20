@@ -26,7 +26,8 @@ una **captura** (`.nmea`) y trae un escenario de demostración.
 - **Enlace** (izquierda): puerto UDP y botón *Escuchar/Parar*, estado, «último dato hace X s», los **contadores del decodificador** y
   las frases por segundo (promedio de 5 s).
 - **Barco propio**: posición, SOG, COG, rumbo de la proa (HDT), calidad del fijado, satélites y HDOP. *Centrar el mapa en mi barco*
-  lo sigue.
+  (**desmarcado por omisión**, como en la demo, donde el mapa está quieto y los barcos se mueven sobre él) lo mantiene a la vista:
+  recentra solo cuando el barco sale de la zona central de la ventana, no a cada dato, y si arrastras el mapa se desmarca solo.
 - **Contactos AIS** (abajo): MMSI, nombre, tipo, clase A/B, SOG, COG, distancia y marcación desde el propio, estado de navegación, edad y
   estado (Activo/Perdido), ordenados por distancia. Al pasar el ratón por cada cabecera sale su definición del glosario.
 - **Registro**: sumas malas y frases descartadas, contactos perdidos y borrados, cambios de escucha. *Anotar todas las frases* lo

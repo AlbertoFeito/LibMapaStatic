@@ -6528,3 +6528,18 @@ Después, en el PC del usuario, `emisor_nmea` dio `'utcDateTime' was not declare
 `libtelemetria` de la instalación anterior (`C:/libmapa/qt6/include/telemetria`), que no tenían la función. Es el desfase normal entre una
 biblioteca instalada y un ejemplo más nuevo, pero el mensaje no lo decía. Ahora `telemetria_export.h` define `TELEMETRIA_API_LEVEL` (2) y los dos
 ejemplos exigen ese nivel con un `#error` que dice «reinstálala»; una instalación anterior al nivel (sin la macro) cae en ese mensaje claro.
+
+### 161 (ajuste). El mapa temblaba y no se dejaba mover con «Centrar el mapa en mi barco»
+
+El usuario, probando emisor y cliente en su PC: «el mapa salta constantemente por la horizontal y no me deja moverlo», y «cuando está
+seleccionado centrar en mi barco es peor». Y preguntó en qué se diferencia de la demo, que no hacía esos saltos.
+- **Diferencia.** Los contactos se dibujan igual (`addTarget`/`updateTarget`; el simulador de la demo hace lo mismo en `pasoSimulacion`). Lo que
+  la demo **no** hace es mover el mapa: solo hace `setCenter` ante una acción de la persona. Yo recentraba en el barco propio con **cada RMC**
+  (1 por segundo, 10 con `--escala=10`) y con la casilla marcada **por omisión**: el mapa se deslizaba bajo el barco sin parar y volvía a
+  agarrarse cada vez que se intentaba arrastrar.
+- **Arreglo.** Desmarcada por omisión (como la demo); marcada, recentra solo cuando el barco sale de la zona central (el 35 % del medio ancho
+  de la ventana, con `metersPerPixel`); arrastrar el mapa con el ratón la desmarca (`centerChanged` con un botón pulsado, y no si el centro lo
+  movió el propio seguimiento); marcarla recentra al momento. 8 comprobaciones nuevas en `--comprobar` (no sigue por omisión; sigue al marcar; un
+  desplazamiento de 100 m no mueve el mapa; uno de 40 km lo recentra; el arrastre la desmarca; sin ratón no; desmarcada se queda donde se puso;
+  re-marcar recentra). **Sin probar:** la sensación en una ventana real en el PC del usuario, y el arrastre real (el contenedor no tiene ratón:
+  se probó la lógica con `alCambiarCentro(arrastrando)`).

@@ -350,6 +350,15 @@ public:
         crearPaneles(puerto > 0 ? puerto : kPuertoPorOmision);
         crearMenus();
         connect(&m_socket, &QUdpSocket::readyRead, this, [this] { leerSocket(); });
+        connect(m_mapa, &MapWidget::centerChanged, this,
+                [this](const QGeoCoordinate &) { alCambiarCentro(QApplication::mouseButtons() != Qt::NoButton); });
+        connect(m_seguir, &QCheckBox::toggled, this, [this](bool on) {
+            if (on && m_propio.hayPosicion) {
+                m_centrando = true;
+                m_mapa->setCenter(m_propio.posicion);
+                m_centrando = false;
+            }
+        });
         connect(&m_reloj, &QTimer::timeout, this, [this] { tic(); });
         m_reloj.start(1000);
         if (puerto >= 0)
@@ -601,6 +610,17 @@ public:
             delete m_registro->takeItem(m_registro->count() - 1);
     }
 
+    // El mapa cambió de centro. Si fue porque la persona lo arrastra con el ratón (\a arrastrando) y no porque lo recentre el
+    // seguimiento, deja de seguir al barco propio: quien mueve el mapa quiere verlo donde lo pone. Volver a marcar la casilla
+    // lo recentra y sigue de nuevo.
+    void alCambiarCentro(bool arrastrando)
+    {
+        if (!arrastrando || m_centrando || !m_seguir->isChecked())
+            return;
+        m_seguir->setChecked(false);
+        statusBar()->showMessage(tr("Has movido el mapa: ya no se centra en tu barco (marca «Centrar el mapa en mi barco» para seguirlo)."), 8000);
+    }
+
     // Pone el reloj a una hora fija (para las pruebas: así se simula el paso del tiempo sin esperar).
     void fijarReloj(const QDateTime &hora) { m_relojFalso = hora; }
     // La hora de la que dependen las edades: la del reloj fijado o, si no, la actual.
@@ -612,6 +632,7 @@ public:
     const telemetria::DecoderStats &estadisticas() const { return m_decodificador.stats(); }
     quint64 datagramas() const { return m_datagramas; }
     QTableWidget *tabla() const { return m_tabla; }
+    QCheckBox *casillaSeguir() const { return m_seguir; }
     QListWidget *listaGlosario() const { return m_listaGlosario; }
     QString textoPropio() const { return m_textoPropio->text(); }
     QString textoEstadisticas() const { return m_textoEstadisticas->text(); }
@@ -757,7 +778,20 @@ private:
         if (std::isfinite(m_propio.sogKn) && std::isfinite(m_propio.cogDeg))
             m_mapa->setTargetVelocity(m_propio.id, knotsToMetersPerSecond(m_propio.sogKn), m_propio.cogDeg);
         if (m_seguir->isChecked())
-            m_mapa->setCenter(m_propio.posicion);
+            seguirPropio();
+    }
+
+    // Mantiene el barco propio a la vista SIN mover el mapa a cada dato: solo lo recentra cuando el barco sale de la
+    // zona central (el 35 % del medio ancho de la ventana). Centrar a cada RMC (a 1 Hz, o a 10 Hz con --escala) hace
+    // que el mapa tiemble sin parar y no deje moverlo con el ratón.
+    void seguirPropio()
+    {
+        const double mitadMetros = 0.5 * std::min(m_mapa->width(), m_mapa->height()) * m_mapa->metersPerPixel();
+        if (m_mapa->center().distanceTo(m_propio.posicion) <= 0.35 * mitadMetros)
+            return;
+        m_centrando = true;
+        m_mapa->setCenter(m_propio.posicion);
+        m_centrando = false;
     }
 
     // Atenúa en el mapa los contactos perdidos (el propio pasa siempre).
@@ -864,7 +898,8 @@ private:
         m_textoPropio->setWordWrap(true);
         col->addWidget(m_textoPropio);
         m_seguir = new QCheckBox(tr("Centrar el mapa en mi barco"), this);
-        m_seguir->setChecked(true);
+        m_seguir->setToolTip(tr("Mantiene el barco a la vista: recentra el mapa solo cuando sale de la zona central. "
+                                "Si arrastras el mapa, se desmarca sola."));
         m_verboso = new QCheckBox(tr("Anotar todas las frases en el registro"), this);
         col->addWidget(m_seguir);
         col->addWidget(m_verboso);
@@ -979,6 +1014,7 @@ private:
     QLabel *m_contador = nullptr;
     QCheckBox *m_seguir = nullptr;
     QCheckBox *m_verboso = nullptr;
+    bool m_centrando = false;                 // el centro lo está moviendo el seguimiento, no la persona
     QTableWidget *m_tabla = nullptr;
     QListWidget *m_registro = nullptr;
     QListWidget *m_listaGlosario = nullptr;
@@ -1103,8 +1139,46 @@ static int comprobar(Ventana &v)
               && celda(v.tabla(), 2, 8) == QStringLiteral("Navegando a motor") && celda(v.tabla(), 2, 10) == QStringLiteral("Activo"));
     verificar(QStringLiteral("cada cabecera de la tabla tiene su ayuda del glosario"),
               v.tabla()->horizontalHeaderItem(6)->toolTip().contains(QStringLiteral("1852")));
-    verificar(QStringLiteral("seguir el barco propio centra el mapa en él (cuando el paquete tiene zoom suficiente)"),
+    verificar(QStringLiteral("por omisión el mapa NO sigue al barco: tras recibir su posición (a 15 km) sigue en el centro inicial"),
+              !v.casillaSeguir()->isChecked()
+              && (v.mapa()->zoom() < 8 || v.mapa()->center().distanceTo(QGeoCoordinate(23.20, -82.45)) < 200.0));
+    v.casillaSeguir()->setChecked(true);
+    verificar(QStringLiteral("marcar «Centrar el mapa en mi barco» lo centra en él (cuando el paquete tiene zoom suficiente)"),
               v.mapa()->zoom() < 8 || v.mapa()->center().distanceTo(yo.posicion) < 200.0);
+    // El seguimiento no mueve el mapa a cada dato (eso lo hacía temblar y no dejaba moverlo): un barco que se mueve poco dentro
+    // de la zona central no lo toca; uno que sale de ella, lo recentra.
+    const QGeoCoordinate centroAntes = v.mapa()->center();
+    telemetria::Rmc poco;
+    poco.valid = true;
+    poco.time = t0.time();
+    poco.utc = t0;
+    poco.lat = 23.20;
+    poco.lon = -82.599;                                       // ~100 m al este
+    poco.sogKn = 10.0;
+    poco.cogDeg = 90.0;
+    v.recibirDatagrama(telemetria::formatRmc(poco) + "\r\n");
+    verificar(QStringLiteral("un barco que se mueve ~100 m no mueve el mapa"),
+              v.mapa()->zoom() < 8 || v.mapa()->center().distanceTo(centroAntes) < 1.0);
+    poco.lon = -82.20;                                        // ~40 km: fuera de la ventana
+    v.recibirDatagrama(telemetria::formatRmc(poco) + "\r\n");
+    verificar(QStringLiteral("uno que sale de la zona central recentra el mapa en él"),
+              v.mapa()->zoom() < 8 || v.mapa()->center().distanceTo(QGeoCoordinate(23.20, -82.20)) < 200.0);
+    v.alCambiarCentro(false);
+    verificar(QStringLiteral("un cambio de centro sin ratón (zoom, programa) no desactiva el seguimiento"),
+              v.casillaSeguir()->isChecked());
+    v.alCambiarCentro(true);
+    verificar(QStringLiteral("arrastrar el mapa con el ratón desactiva el seguimiento (y deja moverlo)"),
+              !v.casillaSeguir()->isChecked());
+    poco.lon = -82.10;
+    v.recibirDatagrama(telemetria::formatRmc(poco) + "\r\n");
+    verificar(QStringLiteral("con el seguimiento desactivado el mapa se queda donde la persona lo puso"),
+              v.mapa()->zoom() < 8 || v.mapa()->center().distanceTo(QGeoCoordinate(23.20, -82.20)) < 200.0);
+    v.casillaSeguir()->setChecked(true);
+    verificar(QStringLiteral("volver a marcar la casilla recentra el mapa en el barco"),
+              v.mapa()->zoom() < 8 || v.mapa()->center().distanceTo(QGeoCoordinate(23.20, -82.10)) < 200.0);
+    // Se devuelve el barco a su sitio de antes para el resto de la prueba.
+    poco.lon = -82.60;
+    v.recibirDatagrama(telemetria::formatRmc(poco) + "\r\n");
 
     // --- El nombre llega ANTES que la posición, y un mensaje de dos frases en dos datagramas ---
     AisMessage estatico;
