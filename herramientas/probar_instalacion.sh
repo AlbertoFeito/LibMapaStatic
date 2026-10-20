@@ -10,8 +10,10 @@
 #    2. fabrica un paquete de datos minimo (teselas de 1 px y, si esta en el repo,
 #       el indice de lugares de prueba; sin red);
 #    3. compila TODOS los ejemplos (examples/CMakeLists.txt) contra el prefijo;
-#    4. arranca app_minima, visor_gpx, editor_rutas, buscador_lugares, medidor_campo, monitor_trafico, vigilancia_zonas y analisis_terreno con
-#       --comprobar, y check_data, sobre ese paquete.
+#    4. arranca app_minima, visor_gpx, editor_rutas, buscador_lugares, medidor_campo, monitor_trafico, vigilancia_zonas,
+#       analisis_terreno, emisor_nmea y cliente_telemetria con --comprobar, y check_data, sobre ese paquete.
+#
+#  libtelemetria (decodificador NMEA/AIS) se instala en el mismo prefijo que libmapa: tambien se comprueba aqui.
 #
 #  Uso:   herramientas/probar_instalacion.sh <prefijo de instalacion> [carpeta de trabajo]
 #  Antes: cmake --install <build> --prefix <prefijo>
@@ -48,6 +50,13 @@ for f in lib/cmake/libmapa/libmapaConfig.cmake \
 done
 ls "$PREFIJO"/lib/libmapa_core.* >/dev/null 2>&1   || fallo "falta libmapa_core"
 ls "$PREFIJO"/lib/libmapa_widget.* >/dev/null 2>&1 || fallo "falta libmapa_widget"
+for f in lib/cmake/libtelemetria/libtelemetriaConfig.cmake \
+         lib/cmake/libtelemetria/libtelemetriaTargets.cmake \
+         include/telemetria/Decoder.h \
+         include/telemetria/Ais.h; do
+    [ -e "$PREFIJO/$f" ] || fallo "falta $f en el prefijo (libtelemetria)"
+done
+ls "$PREFIJO"/lib/libtelemetria.* >/dev/null 2>&1 || fallo "falta libtelemetria"
 
 # --- 2. Paquete de datos minimo ----------------------------------------
 echo "== 2/4 Paquete de datos minimo"
@@ -141,5 +150,15 @@ VIGILANCIA="$(find "$TRABAJO/ejemplos" -type f -name vigilancia_zonas -perm -u+x
 TERRENO="$(find "$TRABAJO/ejemplos" -type f -name analisis_terreno -perm -u+x | head -1)"
 [ -n "$TERRENO" ] || fallo "no se encuentra analisis_terreno compilado"
 "$TERRENO" "$PAQ" --comprobar || fallo "analisis_terreno --comprobar no sale con 0"
+
+# emisor_nmea: simula 120 s de NMEA/AIS, lo decodifica con libtelemetria y manda un datagrama UDP por localhost.
+EMISOR="$(find "$TRABAJO/ejemplos" -type f -name emisor_nmea -perm -u+x | head -1)"
+[ -n "$EMISOR" ] || fallo "no se encuentra emisor_nmea compilado"
+"$EMISOR" --comprobar || fallo "emisor_nmea --comprobar no sale con 0"
+
+# cliente_telemetria: barco propio, contactos AIS, ruido, mensaje publicado de referencia, UDP real, captura y glosario.
+CLIENTE="$(find "$TRABAJO/ejemplos" -type f -name cliente_telemetria -perm -u+x | head -1)"
+[ -n "$CLIENTE" ] || fallo "no se encuentra cliente_telemetria compilado"
+"$CLIENTE" "$PAQ" --comprobar || fallo "cliente_telemetria --comprobar no sale con 0"
 
 echo "OK: la instalacion en $PREFIJO sirve a los ejemplos"

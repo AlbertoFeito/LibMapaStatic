@@ -18,7 +18,10 @@ project(libmapa_examples LANGUAGES CXX)
 # Fallo claro y una sola vez si la libreria no esta instalada (o si falta el
 # widget, que necesitan todos).
 find_package(libmapa REQUIRED)
+# libtelemetria (decodificador NMEA/AIS) va instalada junto a libmapa: la usan emisor_nmea y cliente_telemetria.
+find_package(libtelemetria REQUIRED)
 
-foreach(_ejemplo app_minima app_seguimiento visor_gpx editor_rutas buscador_lugares medidor_campo monitor_trafico vigilancia_zonas analisis_terreno)
+foreach(_ejemplo app_minima app_seguimiento visor_gpx editor_rutas buscador_lugares medidor_campo monitor_trafico vigilancia_zonas analisis_terreno
+                 emisor_nmea cliente_telemetria)
     add_subdirectory(${_ejemplo})
 endforeach()

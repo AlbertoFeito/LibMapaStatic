@@ -6440,3 +6440,75 @@ B (−18,12°) y el cierre antes de B (−18,27°) quedaban pegados y el margen 
 - **Comprobado.** Con una diferencia de 0,15°, el margen ocupa un 11 % del eje con zoom y un 0,7 % sin él; el eje con zoom
   siempre contiene a B y al cierre y nunca es más ancho que el completo. Visualmente, con B a 0,03° sobre el cierre las dos
   líneas se separan con claridad (antes eran una sola). `--comprobar`: 65 comprobaciones.
+
+## 161. Una biblioteca nueva, `libtelemetria`, y las aplicaciones `emisor_nmea` y `cliente_telemetria`
+
+El plan era un ejemplo, `cliente_telemetria`: recibir NMEA 0183 y AIS por UDP y pintarlo en el mapa. Al plantear cómo, el usuario
+propuso **hacer el decodificador como biblioteca aparte** en vez de meterlo en el ejemplo. Tiene razón, y por tres motivos:
+decodificar texto en datos no tiene nada que ver con teselas ni ventanas; el cliente, el emisor, una herramienta de consola o un
+test lo usan igual; y un decodificador dentro de un ejemplo es código que cada producto copiaría.
+
+### La biblioteca (`libtelemetria/`)
+
+- **Aparte de libmapa, solo Qt Core.** Sin red, sin Gui, sin mapa y **sin E/S**: se le dan bytes y devuelve eventos. Su
+  `CMakeLists.txt` se detiene si alguien le añade Network, Gui, Sql, Positioning o libmapa (como la guarda de red de libmapa).
+  Se compila sola (`cmake -S libtelemetria`) o metida en la raíz (`LIBMAPA_BUILD_TELEMETRIA`, activa) y se **instala en el mismo
+  prefijo** que libmapa: `find_package(libtelemetria)` → `telemetria::telemetria`; con qmake, `telemetria.pri` junto a
+  `libmapa.pri`, y `qmake/libmapa/libmapa.pro` compila e instala las dos.
+- **`Nmea.h`**: `parseSentence` (dirección, emisor, tipo, campos —los vacíos cuentan— y suma de comprobación, que se exige y de
+  la que dice cuál debería ser), `formatSentence`, y RMC, GGA, VTG y HDT con su decodificador y codificador. Campo vacío = NaN.
+- **`Ais.h`**: tipos 1, 2, 3, 5 (dos frases), 18, 19 y 24 (partes A y B); `AisAssembler` para los mensajes de varias frases
+  (por secuencia y canal, memoria acotada); etiquetas en español del tipo de barco y del estado de navegación. «No disponible»
+  (181°, 91°, 1023, 3600, 511) es NaN/−1 y no un dato. Un tipo no soportado devuelve solo tipo y MMSI.
+- **`Decoder.h`**: `feed` (flujo; la línea a medias espera), `feedDatagram` (UDP), `feedLine`; devuelve `Event` y lleva
+  `DecoderStats` (líneas, decodificadas, suma mala, mal formadas, ignoradas, AIS completos/no soportados, fragmentos perdidos).
+
+### Cómo se comprobó que decodifica bien
+
+Un codificador y un decodificador del mismo autor que solo se prueban entre sí pueden estar equivocados de acuerdo. Por eso los
+tests incluyen datos de **fuente independiente**:
+- Las sumas publicadas de las frases de ejemplo más usadas (`GPRMC…*6A`, `GPGGA…*47`, `GPVTG…*48`) salen exactas.
+- El mensaje AIS de la documentación de gpsd (`!AIVDM,1,1,,B,177KQJ5000G?tO`K>RA1wUbN0TKH,0*5C`) da MMSI 477553000, 47.582833° N,
+  122.345833° O, rumbo 51°, proa 181°, segundo 15, amarrado: el diseño de bits (6+2+30+4+8+10+1+28+27+12+9+6…) salió bien a la primera,
+  y la suma 5C también.
+- Aparte, ida y vuelta de cada tipo con coordenadas negativas y extremas (complemento a dos de 28 y 27 bits), reensamblado fuera de
+  orden y entrelazado, cargas malas y el decodificador de flujo con líneas partidas y ruido.
+
+Lo que **no** está probado: un receptor AIS real, ni una captura real larga. El diseño de bits de los tipos 5, 18, 19 y 24 está
+verificado por la ida y vuelta, no por un mensaje publicado de cada uno (solo el tipo 1 lo tiene).
+
+### Los ejemplos
+
+- **`emisor_nmea`** (sin libmapa ni ventana): cinco barcos frente a La Habana (el propio, un carguero de frente, un pesquero de
+  clase B, un petrolero y un remolcador que se calla a los 90 s) y ruido (suma mala cada 20 s, GSV cada 40 s, frase cortada cada
+  60 s). Por UDP, agrupado o no, o a un fichero. Su `--comprobar` decodifica lo emitido con la propia biblioteca y lo compara con lo
+  simulado: el ruido inyectado es exactamente lo que se cuenta (6/2/3) y ningún fragmento se pierde.
+- **`cliente_telemetria`** (libmapa + libtelemetria + Qt Network): `QUdpSocket` → `Decoder` → barco propio (RMC/GGA/VTG/HDT, o `!AIVDO`
+  si no hay GPS) y contactos AIS **fundidos por MMSI** (la posición y el nombre llegan en mensajes distintos y en cualquier orden),
+  tabla ordenada por distancia con la marcación, contactos perdidos a los 60 s y borrados a los 5 min (reaparecen si vuelven),
+  contadores del enlace, registro, reproducción de capturas y glosario (23 términos). **48 comprobaciones**, entre ellas el mensaje
+  de gpsd a través del cliente, la distancia de la tabla contra el cálculo a mano y **un datagrama UDP real por localhost**.
+- **De punta a punta:** los dos binarios hablando por UDP en el contenedor (emisor a escala ×10, cliente con `--puerto` y
+  `--captura`): 508 líneas, 489 decodificadas, 5 sumas malas y 2 mal formadas (lo que el emisor inyectó), 3 ignoradas, 89 mensajes
+  AIS, los cuatro contactos con nombre, tipo y clase, y el propio moviéndose.
+
+### Fallos propios por el camino
+
+- **Primer borrador del cliente, incompleto**: me dejé una función a medias (`c.classB();`) antes de enviarlo y faltaban la prueba y
+  el `main`; el filtro de escritura lo rechazó y lo reescribí entero antes de compilarlo.
+- **La «frase cortada» del emisor no se cortaba**: `formatRmc(Rmc())` con hora inválida da una RMC vacía de 21 caracteres, y
+  `left(25)` no la cortaba. Resultado: una frase válida contada como decodificada. La prueba que cuenta las cortadas lo cazó.
+- **Mis expectativas de contadores estaban mal** en dos tests del decodificador (los mensajes AIS cuentan como «decodificadas»; la
+  frase vacía no cuenta como línea); se corrigieron los tests, no el código.
+- **Compilando sola**, `libtelemetria` no encontraba los `.moc` de los tests (faltaba `CMAKE_AUTOMOC`, que la raíz sí pone) y
+  `-Wconversion` daba dos avisos (`qsizetype` → `int` de Qt 6).
+- **Al tocar la raíz**: el `add_subdirectory` va al final, tras `LIBMAPA_INSTALL`, para heredar la instalación y los avisos.
+
+### Verificación
+
+Compilación completa de la raíz con `libtelemetria` dentro: **30 tests** (27 + 3), todos en verde y sin avisos;
+`herramientas/probar_instalacion.sh` pasa con libmapa y libtelemetria en el mismo prefijo (comprueba además
+`libtelemetriaConfig.cmake`, las cabeceras y `libtelemetria.a`) y arranca `emisor_nmea` y `cliente_telemetria` con `--comprobar`;
+`telemetria.pro` y `emisor_nmea.pro` se compilan con qmake e instalan (la comprobación del emisor pasa). `docs/arquitectura.html` y
+su PDF tienen la sección 8d. **Sin probar:** un receptor o una captura reales, TCP/serie (no existen), el camino qmake de
+`cliente_telemetria` en el PC del usuario con MinGW, y el despliegue con Qt Network.

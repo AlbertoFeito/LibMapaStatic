@@ -17,6 +17,10 @@
 
 TEMPLATE = subdirs
 
-SUBDIRS = core widget check_data
+SUBDIRS = core widget check_data telemetria
 widget.depends = core
 check_data.depends = core
+
+# libtelemetria (decodificador NMEA/AIS): independiente de libmapa, pero se instala con ella en el
+# mismo prefijo para que una app encuentre las dos. Tambien se puede compilar sola (telemetria.pro).
+telemetria.file = $$PWD/../libtelemetria/telemetria.pro
