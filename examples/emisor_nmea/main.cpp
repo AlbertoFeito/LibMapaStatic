@@ -34,12 +34,12 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>
-#include <QHostAddress>
+#include <QtNetwork/QHostAddress>
 #include <QMap>
-#include <QNetworkDatagram>
+#include <QtNetwork/QNetworkDatagram>
 #include <QTextStream>
 #include <QTimer>
-#include <QUdpSocket>
+#include <QtNetwork/QUdpSocket>
 
 #include <algorithm>
 #include <cmath>
@@ -391,7 +391,7 @@ int comprobar()
         todoOk = todoOk && ok;
     };
 
-    const QDateTime inicio(QDate(2026, 10, 19), QTime(12, 0, 0), Qt::UTC);
+    const QDateTime inicio = utcDateTime(QDate(2026, 10, 19), QTime(12, 0, 0));
     Simulador sim(inicio);
     QList<QByteArray> captura;
     for (int s = 0; s < 120; ++s)

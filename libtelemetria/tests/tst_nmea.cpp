@@ -109,7 +109,7 @@ void TstNmea::rmcSample()
     QVERIFY(qAbs(r.lon - (11.0 + 31.0 / 60.0)) < 1e-9);
     QCOMPARE(r.sogKn, 22.4);
     QCOMPARE(r.cogDeg, 84.4);
-    QCOMPARE(r.utc, QDateTime(QDate(1994, 3, 23), QTime(12, 35, 19), Qt::UTC));
+    QCOMPARE(r.utc, utcDateTime(QDate(1994, 3, 23), QTime(12, 35, 19)));
     QCOMPARE(r.magVarDeg, -3.1);                  // W = negativa
 }
 
@@ -169,7 +169,7 @@ void TstNmea::formatRoundTrips()
     Rmc r;
     r.valid = true;
     r.time = QTime(23, 59, 58, 120);
-    r.utc = QDateTime(QDate(2026, 10, 19), r.time, Qt::UTC);
+    r.utc = utcDateTime(QDate(2026, 10, 19), r.time);
     r.lat = -33.865143;
     r.lon = -70.123456;
     r.sogKn = 12.3;

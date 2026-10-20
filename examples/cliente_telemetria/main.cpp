@@ -49,7 +49,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QNetworkDatagram>
+#include <QtNetwork/QNetworkDatagram>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -60,7 +60,7 @@
 #include <QTextStream>
 #include <QThread>
 #include <QTimer>
-#include <QUdpSocket>
+#include <QtNetwork/QUdpSocket>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -1039,7 +1039,7 @@ static int comprobar(Ventana &v)
     };
     verificar(QStringLiteral("mapa listo"), v.mapa()->isReady());
     v.detenerReloj();
-    const QDateTime t0(QDate(2026, 10, 19), QTime(12, 0, 0), Qt::UTC);
+    const QDateTime t0 = telemetria::utcDateTime(QDate(2026, 10, 19), QTime(12, 0, 0));
     v.fijarReloj(t0);
 
     // --- Sin datos: no se inventa nada ---
@@ -1206,7 +1206,7 @@ static int comprobar(Ventana &v)
     telemetria::Rmc r;
     r.valid = true;
     r.time = QTime(12, 5, 30);
-    r.utc = QDateTime(t0.date(), r.time, Qt::UTC);
+    r.utc = telemetria::utcDateTime(t0.date(), r.time);
     r.lat = 23.25;
     r.lon = -82.55;
     r.sogKn = 11.0;

@@ -1,6 +1,10 @@
 #include "telemetria/Nmea.h"
 
 #include <QDate>
+#include <QtGlobal>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+#include <QTimeZone>
+#endif
 
 #include <cmath>
 
@@ -108,6 +112,16 @@ QByteArray timeField(const QTime &t)
 
 } // namespace
 
+// Fecha y hora UTC sin el constructor obsoleto de Qt 6.9 (con Qt anterior a 6.5 no existe QTimeZone::UTC).
+QDateTime utcDateTime(const QDate &date, const QTime &time)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    return QDateTime(date, time, QTimeZone::UTC);
+#else
+    return QDateTime(date, time, Qt::UTC);
+#endif
+}
+
 // XOR de todos los bytes entre el inicio y el '*'.
 quint8 nmeaChecksum(const QByteArray &body)
 {
@@ -194,7 +208,7 @@ bool decodeRmc(const Sentence &s, Rmc *out)
     r.cogDeg = fieldNumber(s.fields, 7);
     const QDate date = parseDate(fieldText(s.fields, 8));
     if (date.isValid() && r.time.isValid())
-        r.utc = QDateTime(date, r.time, Qt::UTC);
+        r.utc = utcDateTime(date, r.time);
     const double var = fieldNumber(s.fields, 9);
     if (std::isfinite(var))
         r.magVarDeg = fieldText(s.fields, 10) == "W" ? -var : var;

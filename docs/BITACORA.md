@@ -6513,3 +6513,13 @@ Compilación completa de la raíz con `libtelemetria` dentro: **30 tests** (27 +
 `emisor_nmea.pro` y `cliente_telemetria.pro` compilan y pasan su `--comprobar` (Qt 6 en el contenedor). `docs/arquitectura.html` y
 su PDF tienen la sección 8d. **Sin probar:** un receptor o una captura reales, TCP/serie (no existen), qmake con Qt 5 y con MinGW en
 el PC del usuario, y el despliegue con Qt Network.
+
+### 161 (ajuste). Avisos de Qt 6.11 en los dos ejemplos nuevos
+
+Al compilar en el PC del usuario (Qt 6.11.2 MinGW), `emisor_nmea` y `cliente_telemetria` dieron avisos `-Wdeprecated-declarations`:
+`QDateTime(QDate, QTime, Qt::TimeSpec)` está obsoleto desde Qt 6.9 («pass QTimeZone instead»). Con Qt 6.4 del contenedor no avisaba, y la CI
+(Qt 5 y Qt 6 de Ubuntu) tampoco. `QTimeZone::UTC`, que lo sustituye, solo existe desde Qt 6.5, así que no vale un simple cambio: la biblioteca
+ofrece `telemetria::utcDateTime(fecha, hora)` con el `#if` y la usan `Rmc::utc`, los tests y los dos ejemplos. Las inclusiones de red de
+los ejemplos pasan a `<QtNetwork/QUdpSocket>` (la ruta con módulo) para que el modelo de código de Qt Creator las encuentre aunque no tenga
+el directorio de QtNetwork en su lista. **Sin reproducir:** los errores `'QHostAddress' file not found` que mostró Qt Creator; el compilador sí
+llegó a las líneas 342-535 del emisor (dio avisos en la 394), así que eran del modelo de código (clang) y no del compilador, pero es una inferencia.

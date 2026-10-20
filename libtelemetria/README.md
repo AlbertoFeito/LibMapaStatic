@@ -51,6 +51,8 @@ const DecoderStats &s = decodificador.stats();   // líneas, suma mala, ignorada
   mensajes debe fundir por MMSI; `cliente_telemetria` enseña cómo.
 - **Memoria acotada.** Una fuente que empieza mensajes de varias frases y no los termina no hace crecer el ensamblador
   más allá de 32 pendientes, y una línea de más de 4096 bytes sin salto se corta como mal formada.
+- **Fechas en UTC sin avisos.** `QDateTime(fecha, hora, Qt::UTC)` está obsoleto desde Qt 6.9 y `QTimeZone::UTC` no existe antes de la 6.5:
+  `utcDateTime(fecha, hora)` hace lo correcto con cada Qt (Rmc::utc la usa, y los ejemplos también).
 - **No hay hilos ni señales.** Si se usa desde varios hilos, un `Decoder` por hilo.
 
 ## Cómo se verificó

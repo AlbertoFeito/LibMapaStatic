@@ -17,6 +17,13 @@ namespace telemetria {
 inline double notAvailable() { return std::numeric_limits<double>::quiet_NaN(); }
 
 /*!
+ * \brief Fecha y hora en UTC. Existe porque \c QDateTime(fecha, hora, Qt::UTC) esta obsoleto desde Qt 6.9
+ *        (avisa al compilar) y \c QTimeZone::UTC, que lo sustituye, no existe antes de Qt 6.5: asi el mismo
+ *        codigo vale con Qt 5.14, 5.15 y 6.x sin avisos.
+ */
+TELEMETRIA_EXPORT QDateTime utcDateTime(const QDate &date, const QTime &time);
+
+/*!
  * \brief Suma de comprobacion de NMEA 0183: el XOR de todos los bytes del
  *        \a body, que es lo que hay entre el '$' (o '!') y el '*'.
  */
