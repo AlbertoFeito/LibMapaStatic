@@ -31,6 +31,10 @@
 
 #include <telemetria/Decoder.h>
 
+#if !defined(TELEMETRIA_API_LEVEL) || TELEMETRIA_API_LEVEL < 2
+#  error "La libtelemetria instalada es anterior a este ejemplo: reinstalala (qmake/libmapa/libmapa.pro o qmake/libtelemetria/telemetria.pro y make install; con CMake, cmake --install)."
+#endif
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>

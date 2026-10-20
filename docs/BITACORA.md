@@ -6523,3 +6523,8 @@ ofrece `telemetria::utcDateTime(fecha, hora)` con el `#if` y la usan `Rmc::utc`,
 los ejemplos pasan a `<QtNetwork/QUdpSocket>` (la ruta con módulo) para que el modelo de código de Qt Creator las encuentre aunque no tenga
 el directorio de QtNetwork en su lista. **Sin reproducir:** los errores `'QHostAddress' file not found` que mostró Qt Creator; el compilador sí
 llegó a las líneas 342-535 del emisor (dio avisos en la 394), así que eran del modelo de código (clang) y no del compilador, pero es una inferencia.
+
+Después, en el PC del usuario, `emisor_nmea` dio `'utcDateTime' was not declared`: había traído el ejemplo nuevo pero seguía con las cabeceras de
+`libtelemetria` de la instalación anterior (`C:/libmapa/qt6/include/telemetria`), que no tenían la función. Es el desfase normal entre una
+biblioteca instalada y un ejemplo más nuevo, pero el mensaje no lo decía. Ahora `telemetria_export.h` define `TELEMETRIA_API_LEVEL` (2) y los dos
+ejemplos exigen ese nivel con un `#error` que dice «reinstálala»; una instalación anterior al nivel (sin la macro) cae en ese mensaje claro.
