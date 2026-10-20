@@ -33,11 +33,11 @@ jobs:
           - name: Qt6
             qt_packages: >-
               qt6-base-dev qt6-base-dev-tools qt6-positioning-dev
-              libqt6sql6-sqlite
+              libqt6sql6-sqlite qt6-serialport-dev
           - name: Qt5
             qt_packages: >-
               qtbase5-dev qtbase5-dev-tools qtpositioning5-dev
-              libqt5sql5-sqlite
+              libqt5sql5-sqlite libqt5serialport5-dev
 
     steps:
       - name: Clonar el repositorio

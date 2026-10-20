@@ -6543,3 +6543,46 @@ seleccionado centrar en mi barco es peor». Y preguntó en qué se diferencia de
   desplazamiento de 100 m no mueve el mapa; uno de 40 km lo recentra; el arrastre la desmarca; sin ratón no; desmarcada se queda donde se puso;
   re-marcar recentra). **Sin probar:** la sensación en una ventana real en el PC del usuario, y el arrastre real (el contenedor no tiene ratón:
   se probó la lógica con `alCambiarCentro(arrastrando)`).
+
+## 162. `cliente_telemetria` por TCP y por puerto serie
+
+El ejemplo recibía solo por UDP. Muchos aparatos reales no emiten así: los receptores AIS de red, AIS-catcher o gpsd sirven un **flujo TCP**, y
+los GPS y los AIS «de cable» hablan por un **puerto serie**. El usuario pidió añadir ese modo («si tu aparato no emite por UDP») y se fue a dormir
+con el encargo de terminarlo; esto se hizo sin revisión suya. La biblioteca **no cambia** (el `Decoder` ya tenía `feed` para flujos y
+`feedDatagram` para UDP): no hay que reinstalar `libtelemetria`.
+
+### Qué hace
+
+- **Tres fuentes** con el mismo decodificador, elegidas en el panel *Enlace* (y por línea de comandos: `--puerto=`, `--tcp=host:puerto`,
+  `--serie=COM3[,baudios]`): UDP (`feedDatagram`), TCP como cliente (`QTcpSocket`) y puerto serie (`QSerialPort`, 8N1, solo lectura, 4800-115200).
+- **Reconexión automática** (cada 3 s) del TCP y del serie: si el servidor no está, si se corta o si se desenchufa el cable, el panel dice «Sin conexión con…
+  reintentando cada 3 s (N intentos)», el registro lo anota el primer intento y luego uno de cada diez (no se llena), y al volver sigue solo. `parar()`
+  cancela el reintento. Se detecta con `stateChanged` (TCP) en vez de las señales de error, que cambian entre Qt 5.14, 5.15 y 6.
+- **Una frase a medias no se pega a la siguiente conexión:** al parar o caerse el enlace se entrega lo que hubiera como mal formado
+  (`feedDatagram` vacío).
+- **El serie es OPCIONAL.** Qt Serial Port es un módulo adicional (en el instalador de Qt de Windows, «Additional Libraries»); hacerlo obligatorio
+  habría roto la compilación a quien no lo tenga marcado. `CMakeLists.txt` lo busca con `QUIET` y `.pro` usa `qtHaveModule(serialport)`; sin él, el
+  cliente compila con UDP y TCP y la opción «Puerto serie» sale desactivada con su explicación.
+- **`emisor_nmea --tcp=PUERTO`**: hace de servidor TCP (varios clientes, olvida al que se va). **No emite por serie**; para probar el serie en
+  un PC hace falta un par de puertos virtuales (com0com, `socat`).
+- Glosario con tres términos más (TCP, Puerto serie, Baudios): 26.
+
+### Comprobado (contenedor, Qt 6.4 y Linux)
+
+- **TCP real** en `--comprobar` (`QTcpServer` en localhost): conectar, media frase que no hace nada y el resto que la completa, un tipo 5 de dos frases y un
+  tipo 1 en un solo bloque, el corte del servidor (se anota y se programa el reintento), la **reconexión a los ~3 s**, que por la conexión nueva sigue
+  llegando todo, que **`parar` no reconecta** y un servidor que no existe.
+- **Puerto serie** con un pseudoterminal (`posix_openpt`) que hace de cable: abrir a 38400, frase partida en dos escrituras, parar, y un puerto que no existe.
+  Solo corre en Linux y con el módulo presente; sin él, la prueba comprueba que `abrirSerie` dice que no está.
+- **De punta a punta** con los dos binarios por TCP: el cliente arrancó antes que el emisor (reintentó), recibió los cuatro contactos con nombre y,
+  al acabar el emisor, volvió a mostrar «Sin conexión… reintentando».
+- qmake (`cliente_telemetria.pro` con `libmapa.pro`/`telemetria.pro` instalados): compila con `serialport` y pasa `--comprobar`. El aviso de «reinstala
+  `libtelemetria`» saltó de verdad con un prefijo de qmake anterior: hizo su trabajo.
+- La CI instala ahora `qt6-serialport-dev` y `libqt5serialport5-dev` para compilar y probar también la rama del serie con Qt 5 y Qt 6.
+
+### Sin probar
+
+- **Aparatos reales:** el TCP contra AIS-catcher, gpsd o un conversor serie-red; el serie con un GPS/AIS físico y con Windows (`COM3`): no se ha
+  ejecutado nunca allí. El pseudoterminal de Linux no es un puerto USB: p. ej. no ejercita el desenchufado (`ResourceError`) ni los errores de velocidad.
+- Qt Serial Port **del PC del usuario**: si su kit no lo trae, el cliente compilará sin serie (por diseño), pero esa rama no se ha compilado aquí.
+- Formatos serie distintos de 8N1 y control de flujo; TCP servidor, TLS y autenticación.

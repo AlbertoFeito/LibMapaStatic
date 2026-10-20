@@ -26,6 +26,7 @@ decodifica) cada 40 s y una frase cortada cada 60 s. Un cliente decente lo cuent
 
 ```
 emisor_nmea [--host=127.0.0.1] [--puerto=10110] [--escala=1] [--duracion=0] [--agrupar]
+emisor_nmea --tcp=10110 [--escala=1] [--duracion=0]
 emisor_nmea --salida=captura.nmea [--duracion=120]
 emisor_nmea --comprobar
 ```
@@ -34,6 +35,8 @@ emisor_nmea --comprobar
 - `--duracion=S`: termina a los S segundos simulados (0 = hasta cerrar).
 - `--agrupar`: todas las frases de un segundo en un solo datagrama, separadas por saltos de línea, como hacen muchos
   multiplexores. Por omisión va una frase por datagrama.
+- `--tcp=PUERTO`: en vez de UDP, hace de **servidor TCP** y manda las frases (un flujo de líneas) a los clientes que se conecten, como un
+  receptor AIS de red; para el modo TCP de `cliente_telemetria`. Acepta varios clientes y olvida al que se va.
 - `--salida=fichero`: en vez de la red, escribe la captura en un fichero (120 s simulados por omisión), que se reproduce
   con `cliente_telemetria --reproducir=fichero`.
 
@@ -61,7 +64,8 @@ llegan tal cual, uno por frase o agrupados.
 ## Límites
 
 - Los barcos se mueven en **línea recta** a rumbo y velocidad constantes, sin cartografía: pueden atravesar tierra.
-- Solo UDP y fichero. No hay TCP ni puerto serie.
+- UDP, servidor TCP (`--tcp=PUERTO`) y fichero. **No emite por puerto serie**: para probar el serie del cliente hace falta un par de
+  puertos virtuales (com0com en Windows, `socat` en Linux) y puentear a uno de ellos el servidor TCP o la captura; esa ruta no está probada.
 - No es una verificación independiente del decodificador (codifica y decodifica la misma biblioteca): por eso las pruebas de
   libtelemetria usan además el mensaje AIS publicado en la documentación de gpsd y las sumas de frases publicadas.
 

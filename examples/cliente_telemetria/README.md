@@ -12,7 +12,9 @@ una **captura** (`.nmea`) y trae un escenario de demostración.
 
 | Función | API |
 |---|---|
-| Escuchar un puerto UDP | `QUdpSocket` (Qt Network; la pone la aplicación) |
+| Escuchar un puerto UDP (cada datagrama trae líneas completas) | `QUdpSocket` (Qt Network; la pone la aplicación) → `Decoder::feedDatagram` |
+| Conectarse como cliente TCP, con reconexión (un flujo: las frases llegan partidas) | `QTcpSocket` → `Decoder::feed` |
+| Abrir un puerto serie (COM3, /dev/ttyUSB0), 8N1, a 4800-115200 baudios, con reintento si se desenchufa | `QSerialPort` (Qt Serial Port, **opcional**) → `Decoder::feed` |
 | Decodificar lo que llega | `telemetria::Decoder::feedDatagram` / `feed`, `Event`, `DecoderStats` |
 | Barco propio a partir de RMC, GGA, VTG y HDT; y de `!AIVDO` si no hay GPS | `Event::Kind::Rmc/Gga/Vtg/Hdt`, `Event::ownShip` |
 | Fundir los mensajes AIS por MMSI (posición y estáticos llegan por separado) | `AisMessage` (`hasPosition`, `name`, `shipType`, `lengthM`...) |
@@ -23,8 +25,9 @@ una **captura** (`.nmea`) y trae un escenario de demostración.
 
 ## La ventana
 
-- **Enlace** (izquierda): puerto UDP y botón *Escuchar/Parar*, estado, «último dato hace X s», los **contadores del decodificador** y
-  las frases por segundo (promedio de 5 s).
+- **Enlace** (izquierda): la **fuente de datos** (UDP, TCP o puerto serie) con sus campos (puerto; servidor y puerto; puerto serie y baudios)
+  y el botón *Escuchar / Conectar / Abrir* (*Parar* si hay enlace), el estado («Conectado por TCP a…», «Sin conexión con…: reintentando
+  cada 3 s (N intentos)»…), «último dato hace X s», los **contadores del decodificador** y las frases por segundo (promedio de 5 s).
 - **Barco propio**: posición, SOG, COG, rumbo de la proa (HDT), calidad del fijado, satélites y HDOP. *Centrar el mapa en mi barco*
   (**desmarcado por omisión**, como en la demo, donde el mapa está quieto y los barcos se mueven sobre él) lo mantiene a la vista:
   recentra solo cuando el barco sale de la zona central de la ventana, no a cada dato, y si arrastras el mapa se desmarca solo.
@@ -32,7 +35,7 @@ una **captura** (`.nmea`) y trae un escenario de demostración.
   estado (Activo/Perdido), ordenados por distancia. Al pasar el ratón por cada cabecera sale su definición del glosario.
 - **Registro**: sumas malas y frases descartadas, contactos perdidos y borrados, cambios de escucha. *Anotar todas las frases* lo
   vuelca todo.
-- **Glosario** (*Ayuda → Glosario*, F1): 23 términos, buscable. `--comprobar` verifica que todo lo que la ventana muestra está definido.
+- **Glosario** (*Ayuda → Glosario*, F1): 26 términos, buscable. `--comprobar` verifica que todo lo que la ventana muestra está definido.
 
 ## Cómo se tratan los datos
 
@@ -58,19 +61,31 @@ emisor_nmea --escala=10                                    (otra consola)
 o sin red, con una captura: `emisor_nmea --salida=captura.nmea` y luego `cliente_telemetria <paquete> --reproducir=captura.nmea`
 (o *Archivo → Reproducir una captura NMEA*). Sin nada, *Archivo → Cargar el escenario de demostración* pone el propio y tres contactos.
 
-Un receptor real: configurarlo para emitir UDP a la IP de este PC y a ese puerto. Un solo programa a la vez puede escuchar un puerto
-(si falla, la barra de estado dice por qué).
+Por TCP, el emisor hace de servidor: `emisor_nmea --tcp=10110 --escala=10` y `cliente_telemetria <paquete> --tcp=127.0.0.1:10110` (o la fuente
+*TCP* del panel). Da igual cuál se arranque primero: el cliente reintenta cada 3 s hasta que el servidor está, y se reconecta solo si se corta.
+
+Por puerto serie: `cliente_telemetria <paquete> --serie=COM3,38400` (o la fuente *Puerto serie*; la lista trae los que ve el sistema y se puede
+escribir otro). El **baudio** debe ser el del receptor: 4800 en NMEA 0183 clásico (GPS) y 38400 en AIS; con otro llegan frases rotas y sube «Suma mala».
+Si el kit de Qt no trae el módulo **Qt Serial Port** (en el instalador de Qt de Windows es un «Additional Library» que hay que marcar), el cliente
+compila igual con solo UDP y TCP y la fuente «Puerto serie» sale desactivada.
+
+Un receptor real: configurarlo para emitir UDP a la IP de este PC y a ese puerto, o hacer de servidor TCP (y poner aquí su IP), o conectarlo por
+cable. Un solo programa a la vez puede escuchar un puerto UDP o abrir un puerto serie (si falla, la barra de estado dice por qué).
 
 `--comprobar` no abre ventana ni usa el puerto 10110: abre un puerto libre y comprueba, con tramas conocidas, el propio, la tabla
 (ordenada por distancia y con la distancia comprobada a mano), la fusión de estáticos, el **mensaje AIS publicado en la documentación de gpsd**
 (MMSI 477553000, 47.582833° N, 122.345833° O), el ruido, el contacto perdido y su borrado, **un datagrama UDP real por localhost**,
-una captura en fichero y el glosario (lo usa `herramientas/probar_instalacion.sh`). `--captura=imagen.png [--espera=3]` guarda una
-imagen; con `--puerto=` o `--reproducir=` fotografía lo que llegue por ahí.
+**una conexión TCP real** (una frase partida en dos escrituras, varias frases en un bloque, el corte del servidor, la reconexión a los 3 s y que
+parar no reconecta), **un puerto serie** (un pseudoterminal hace de cable; solo en Linux y si el kit trae Qt Serial Port), una captura en
+fichero y el glosario (lo usa `herramientas/probar_instalacion.sh`). `--captura=imagen.png [--espera=3]` guarda una imagen; con `--puerto=`,
+`--tcp=`, `--serie=` o `--reproducir=` fotografía lo que llegue por ahí.
 
 ## Límites
 
-- **Solo UDP y fichero.** Muchas fuentes AIS por red son TCP (por ejemplo, AIS-catcher): `Decoder::feed` ya vale para un flujo, falta
-  el `QTcpSocket`.
+- **UDP, TCP cliente, puerto serie y fichero.** No hay TCP servidor (un receptor que se conecte a este programa), ni TLS, ni autenticación, ni
+  control de flujo del puerto serie (solo lectura, 8N1: lo habitual en NMEA; otros formatos como 7E1 no se pueden elegir).
+- **El puerto serie y el TCP contra aparatos reales NO están probados:** el serie, con un pseudoterminal de Linux; el TCP, contra el emisor y
+  contra un servidor de prueba, no contra AIS-catcher, gpsd ni un conversor serie-red. En Windows el serie no se ha ejecutado nunca.
 - Solo los tipos AIS que entiende la biblioteca (1, 2, 3, 5, 18, 19, 24). Los demás (estaciones base, ayudas a la navegación...) se
   cuentan como «ignoradas».
 - **Probado con el emisor y con un mensaje publicado, no con un receptor ni una captura reales.**

@@ -22,6 +22,17 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Network)
 add_executable(cliente_telemetria main.cpp)
 target_link_libraries(cliente_telemetria PRIVATE libmapa::widget telemetria::telemetria Qt${QT_VERSION_MAJOR}::Network)
 
+# El puerto serie es OPCIONAL: Qt Serial Port es un modulo adicional (en el instalador de Qt de Windows hay que marcarlo
+# en «Additional Libraries»). Si no esta, el cliente compila igual, solo UDP y TCP, y la opcion «Puerto serie» sale desactivada.
+find_package(Qt${QT_VERSION_MAJOR} QUIET COMPONENTS SerialPort)
+if(Qt${QT_VERSION_MAJOR}SerialPort_FOUND)
+    target_link_libraries(cliente_telemetria PRIVATE Qt${QT_VERSION_MAJOR}::SerialPort)
+    target_compile_definitions(cliente_telemetria PRIVATE TELEMETRIA_CON_SERIE)
+    message(STATUS "cliente_telemetria: con puerto serie (Qt SerialPort)")
+else()
+    message(STATUS "cliente_telemetria: sin Qt SerialPort, solo UDP y TCP")
+endif()
+
 # Aplicacion de ventana en Windows (sin consola negra detras).
 if(WIN32)
     set_target_properties(cliente_telemetria PROPERTIES WIN32_EXECUTABLE ON)
