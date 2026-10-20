@@ -44,7 +44,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/app-monitor-trafico` | #24 | Ejemplo `monitor_trafico` (tabla de contactos, perdidos, alertas y glosario) |
 | `claude/app-vigilancia-zonas` | #25 | Ejemplo `vigilancia_zonas` (zonas con reglas de aviso, historial de eventos, CSV y GeoJSON) |
 | `claude/app-analisis-terreno` | #26 | Ejemplo `analisis_terreno` (línea de vista, perfil, zona visible y terreno de demostración) |
-| `claude/app-cliente-telemetria` | (PR) | `libtelemetria` (biblioteca aparte: decodificador NMEA 0183 y AIS) y los ejemplos `emisor_nmea` y `cliente_telemetria` |
+| `claude/app-cliente-telemetria` | #27 | `libtelemetria` (biblioteca aparte: decodificador NMEA 0183 y AIS) y los ejemplos `emisor_nmea` y `cliente_telemetria` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).

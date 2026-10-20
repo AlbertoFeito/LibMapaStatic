@@ -6509,6 +6509,7 @@ verificado por la ida y vuelta, no por un mensaje publicado de cada uno (solo el
 Compilación completa de la raíz con `libtelemetria` dentro: **30 tests** (27 + 3), todos en verde y sin avisos;
 `herramientas/probar_instalacion.sh` pasa con libmapa y libtelemetria en el mismo prefijo (comprueba además
 `libtelemetriaConfig.cmake`, las cabeceras y `libtelemetria.a`) y arranca `emisor_nmea` y `cliente_telemetria` con `--comprobar`;
-`telemetria.pro` y `emisor_nmea.pro` se compilan con qmake e instalan (la comprobación del emisor pasa). `docs/arquitectura.html` y
-su PDF tienen la sección 8d. **Sin probar:** un receptor o una captura reales, TCP/serie (no existen), el camino qmake de
-`cliente_telemetria` en el PC del usuario con MinGW, y el despliegue con Qt Network.
+`libmapa.pro` (que instala libmapa **y** libtelemetria en el mismo prefijo) compila e instala con qmake, y con esa instalación
+`emisor_nmea.pro` y `cliente_telemetria.pro` compilan y pasan su `--comprobar` (Qt 6 en el contenedor). `docs/arquitectura.html` y
+su PDF tienen la sección 8d. **Sin probar:** un receptor o una captura reales, TCP/serie (no existen), qmake con Qt 5 y con MinGW en
+el PC del usuario, y el despliegue con Qt Network.
