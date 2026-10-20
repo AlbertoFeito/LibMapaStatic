@@ -46,7 +46,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/app-analisis-terreno` | #26 | Ejemplo `analisis_terreno` (línea de vista, perfil, zona visible y terreno de demostración) |
 | `claude/app-cliente-telemetria` | #27 | `libtelemetria` (biblioteca aparte: decodificador NMEA 0183 y AIS) y los ejemplos `emisor_nmea` y `cliente_telemetria` |
 | `claude/docs-quitar-mundo` | #28 | Quita de `docs/MIS_RUTAS.md` la nota pendiente de la capa `mundo` |
-| `claude/cliente-tcp-serie` | (PR) | `cliente_telemetria` por TCP (cliente, con reconexión) y por puerto serie (opcional); `emisor_nmea --tcp` |
+| `claude/cliente-tcp-serie` | #29 | `cliente_telemetria` por TCP (cliente, con reconexión) y por puerto serie (opcional); `emisor_nmea --tcp` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
