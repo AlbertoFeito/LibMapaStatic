@@ -15,6 +15,13 @@
 QT += widgets network
 CONFIG += c++17
 
+# El puerto serie es OPCIONAL: Qt Serial Port es un modulo adicional (en el instalador de Qt de Windows, «Additional
+# Libraries»). Si el kit no lo trae, compila igual con solo UDP y TCP y «Puerto serie» sale desactivado.
+qtHaveModule(serialport) {
+    QT += serialport
+    DEFINES += TELEMETRIA_CON_SERIE
+}
+
 TARGET = cliente_telemetria
 TEMPLATE = app
 SOURCES += main.cpp

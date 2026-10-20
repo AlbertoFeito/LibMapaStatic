@@ -147,7 +147,7 @@ Si quieres instalarla en otra carpeta, escribe `qmake ..\qmake\libmapa\libmapa.p
 > NMEA 0183 y AIS, aparte de libmapa) en la misma carpeta: `telemetria.pri`, `include\telemetria\*.h` y
 > `lib\libtelemetria.a`. Una app que la use añade una línea más a su `.pro`:
 > `include(C:/libmapa/qt$${QT_MAJOR_VERSION}/telemetria.pri)`. Con CMake, `cmake --install` deja las dos y
-> `find_package(libtelemetria)` la encuentra. Si la app lee la red (como `cliente_telemetria`), necesita `QT += network`.
+> `find_package(libtelemetria)` la encuentra. Si la app lee la red (como `cliente_telemetria`), necesita `QT += network`. Si usa un puerto serie, `QT += serialport`: el módulo **Qt Serial Port** es un componente adicional del instalador de Qt para Windows («Additional Libraries»); `cliente_telemetria` lo detecta (`qtHaveModule(serialport)`) y, si falta, compila sin la opción de puerto serie.
 
 > **¿Tu aplicación usa CMake en vez de qmake?** Entonces compila e instala la
 > librería con CMake (`cmake --install <build> --prefix C:/libmapa/qt6`) y en

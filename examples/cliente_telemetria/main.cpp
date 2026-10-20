@@ -3,7 +3,10 @@
 // Décimo ejemplo de la serie. Es lo que sustituye al «feed» simulado de monitor_trafico en un
 // producto real: escucha un puerto UDP (o reproduce una captura), decodifica las frases con
 // libtelemetria y pone en el mapa el barco propio y los contactos AIS. Lo que enseña:
-//   - Escuchar un puerto UDP con QUdpSocket y pasar cada datagrama a `telemetria::Decoder`.
+//   - Tres FUENTES de datos, con el mismo decodificador: un puerto UDP (QUdpSocket; cada datagrama trae líneas
+//     completas), una conexión TCP como cliente (QTcpSocket; un flujo, con reconexión automática: es lo que dan
+//     AIS-catcher, gpsd o un conversor serie-red) y un PUERTO SERIE (QSerialPort; el receptor conectado por
+//     cable, a 4800 o 38400 baudios). El serie solo está si el kit trae el módulo Qt Serial Port.
 //   - Qué hacer con lo que sale: RMC/GGA/VTG/HDT mueven el BARCO PROPIO; los mensajes AIS de los
 //     demás (posición, nombre, tipo, tamaño) van llegando por separado y se FUSIONAN en un solo
 //     contacto por MMSI; un mensaje de dos frases puede llegar en dos datagramas.
@@ -15,15 +18,17 @@
 //   - Reproducir una CAPTURA (`.nmea`) igual que si llegara en vivo, y un escenario de demostración.
 //   - Un GLOSARIO en la interfaz con los términos de la ventana.
 //
-//   cliente_telemetria [paquete de datos] [--puerto=10110] [--reproducir=captura.nmea]
+//   cliente_telemetria [paquete de datos] [--puerto=10110 | --tcp=host:puerto | --serie=COM3[,38400]]
+//                      [--reproducir=captura.nmea]
 //   cliente_telemetria <paquete> --comprobar
 //        -> sin ventana: alimenta el cliente con tramas conocidas (entre ellas un mensaje AIS publicado
-//           de referencia), por llamada directa, por un socket UDP real y desde un fichero, y comprueba
+//           de referencia), por llamada directa, por un socket UDP real, por una conexión TCP real (con corte y
+//           reconexión), por un puerto serie (un pseudoterminal, en Linux) y desde un fichero, y comprueba
 //           el barco propio, la tabla, los contactos, la fusión de datos estáticos, los contadores del
 //           enlace, el contacto perdido y su borrado, y que el glosario define lo que se usa.
 //   cliente_telemetria <paquete> --captura=imagen.png [--espera=3]
 //        -> abre la ventana, guarda una imagen a los 3 s (o a los que diga --espera) y sale. Con el escenario
-//           de demostración; si se da --puerto o --reproducir, con lo que llegue por ahí (p. ej. de emisor_nmea).
+//           de demostración; si se da --puerto, --tcp, --serie o --reproducir, con lo que llegue por ahí.
 //
 // La pareja para probarlo sin hardware es `emisor_nmea` (otro ejemplo): lo que él emite, esto lo escucha.
 
@@ -39,6 +44,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDockWidget>
 #include <QElapsedTimer>
 #include <QFile>
@@ -54,8 +60,11 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QtNetwork/QNetworkDatagram>
+#include <QtNetwork/QTcpServer>
+#include <QtNetwork/QTcpSocket>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -71,6 +80,16 @@
 #include <cmath>
 #include <cstring>
 
+#ifdef TELEMETRIA_CON_SERIE
+#  include <QtSerialPort/QSerialPort>
+#  include <QtSerialPort/QSerialPortInfo>
+#endif
+#ifdef Q_OS_UNIX
+#  include <fcntl.h>
+#  include <stdlib.h>
+#  include <unistd.h>
+#endif
+
 using namespace libmapa;
 using telemetria::AisMessage;
 using telemetria::Event;
@@ -85,6 +104,10 @@ const double kPerdidoSeg = 60.0;
 const double kBorrarSeg = 300.0;
 // Puerto UDP habitual de NMEA 0183 sobre red.
 const int kPuertoPorOmision = 10110;
+// Segundos entre intentos de reconexión de una conexión TCP o de un puerto serie que se ha caído.
+const int kReconexionMs = 3000;
+// Velocidades habituales: NMEA 0183 clásico va a 4800 baudios y AIS a 38400.
+const int kBaudiosPorOmision = 38400;
 
 // El barco que lleva el receptor, a partir de RMC, GGA, VTG y HDT.
 struct Propio {
@@ -163,8 +186,20 @@ static QVector<Termino> glosario()
           QObject::tr("Forma de mandar datos por red sin establecer conexión: cada datagrama sale y puede llegar, o no. "
                       "Muchos receptores y multiplexores NMEA lo emiten a un puerto (por omisión, el 10110).") },
         { QObject::tr("Puerto"),
-          QObject::tr("El número (1-65535) por el que este programa escucha. Debe ser el mismo al que emite el "
-                      "receptor. Solo un programa a la vez puede escuchar un puerto.") },
+          QObject::tr("El número (1-65535) por el que este programa escucha (UDP) o al que se conecta (TCP). Debe ser el "
+                      "del receptor. Solo un programa a la vez puede escuchar un puerto UDP.") },
+        { QObject::tr("TCP"),
+          QObject::tr("Forma de comunicar por red con una conexión que se mantiene abierta y entrega los datos en orden, "
+                      "como un flujo continuo (una frase puede llegar partida). Aquí el programa es el CLIENTE: se conecta "
+                      "a un servidor (un receptor AIS por red, AIS-catcher, gpsd...) y, si la conexión se corta, vuelve a "
+                      "intentarlo cada 3 s.") },
+        { QObject::tr("Puerto serie"),
+          QObject::tr("El cable por el que muchos receptores GPS y AIS entregan las frases (COM3 en Windows, /dev/ttyUSB0 "
+                      "en Linux). Solo un programa a la vez puede abrirlo. Si se desenchufa, el programa lo reabre cuando "
+                      "vuelve. Necesita que el kit de Qt traiga el módulo Qt Serial Port.") },
+        { QObject::tr("Baudios"),
+          QObject::tr("La velocidad del puerto serie, en símbolos por segundo. Debe ser la del receptor: 4800 en NMEA 0183 "
+                      "clásico (GPS) y 38400 en AIS. Con la velocidad equivocada llegan frases rotas: sube «Suma mala».") },
         { QObject::tr("Frase"),
           QObject::tr("Una línea NMEA: `$GPRMC,...*6A`. Lleva un tipo (RMC, GGA, VDM...) y campos separados por comas.") },
         { QObject::tr("Suma de comprobación"),
@@ -230,7 +265,8 @@ static QVector<Termino> glosario()
 static QStringList terminosEnPantalla()
 {
     QStringList l = {
-        QObject::tr("NMEA 0183"), QObject::tr("UDP"), QObject::tr("Puerto"), QObject::tr("Frase"),
+        QObject::tr("NMEA 0183"), QObject::tr("UDP"), QObject::tr("TCP"), QObject::tr("Puerto serie"),
+        QObject::tr("Baudios"), QObject::tr("Puerto"), QObject::tr("Frase"),
         QObject::tr("Suma de comprobación"), QObject::tr("RMC"), QObject::tr("GGA, VTG y HDT"),
         QObject::tr("Calidad del fijado"), QObject::tr("AIS"), QObject::tr("Mensaje de varias frases"),
         QObject::tr("Frases por segundo"), QObject::tr("Captura"),
@@ -350,6 +386,7 @@ public:
         crearPaneles(puerto > 0 ? puerto : kPuertoPorOmision);
         crearMenus();
         connect(&m_socket, &QUdpSocket::readyRead, this, [this] { leerSocket(); });
+        conectarFuentes();
         connect(m_mapa, &MapWidget::centerChanged, this,
                 [this](const QGeoCoordinate &) { alCambiarCentro(QApplication::mouseButtons() != Qt::NoButton); });
         connect(m_seguir, &QCheckBox::toggled, this, [this](bool on) {
@@ -373,6 +410,19 @@ public:
     // Para las pruebas: quita el reloj real y se avanza a mano con tic().
     void detenerReloj() { m_reloj.stop(); }
 
+    // De dónde llegan los datos: nada, un puerto UDP, una conexión TCP (como cliente) o un puerto serie.
+    enum class Fuente { Ninguna, Udp, Tcp, Serie };
+
+    // ¿Esta compilación incluye el módulo Qt Serial Port (el puerto serie)?
+    static bool tieneSerie()
+    {
+#ifdef TELEMETRIA_CON_SERIE
+        return true;
+#else
+        return false;
+#endif
+    }
+
     // Empieza a escuchar el puerto UDP \a puerto (0 = uno libre). Falso, y lo dice en la barra de estado,
     // si no se puede (por ejemplo, otro programa lo tiene).
     bool escuchar(quint16 puerto)
@@ -384,25 +434,98 @@ public:
             actualizarEnlace();
             return false;
         }
+        m_fuenteActiva = Fuente::Udp;
+        if (puerto > 0)
+            m_puerto->setValue(puerto);
+        m_fuente->setCurrentIndex(0);
         registrar(tr("Escuchando en UDP %1").arg(m_socket.localPort()));
         actualizarEnlace();
         return true;
     }
 
-    // Deja de escuchar.
+    // Se conecta como CLIENTE TCP a \a host:\a puerto. La conexión es asíncrona: devuelve si se pudo EMPEZAR (los datos de
+    // entrada no vacíos) y el estado real sale en el panel y en el registro. Si el servidor no está o la conexión
+    // se corta, lo reintenta cada kReconexionMs hasta que se pare.
+    bool conectarTcp(const QString &host, quint16 puerto)
+    {
+        parar();
+        if (host.trimmed().isEmpty() || puerto == 0) {
+            statusBar()->showMessage(tr("Para conectar por TCP hace falta un servidor y un puerto."), 6000);
+            return false;
+        }
+        m_fuenteActiva = Fuente::Tcp;
+        m_tcpHost = host.trimmed();
+        m_tcpPuerto = puerto;
+        m_intentos = 0;
+        m_host->setText(m_tcpHost);
+        m_puertoTcp->setValue(puerto);
+        m_fuente->setCurrentIndex(1);
+        registrar(tr("Conectando por TCP a %1:%2...").arg(m_tcpHost).arg(m_tcpPuerto));
+        m_tcp.connectToHost(m_tcpHost, m_tcpPuerto);
+        actualizarEnlace();
+        return true;
+    }
+
+    // Abre el puerto serie \a nombre (COM3, /dev/ttyUSB0...) a \a baudios, 8N1, solo lectura. Falso si esta compilación no
+    // trae Qt Serial Port o no se da el nombre; si el puerto no se puede abrir (no existe, lo tiene otro programa) lo
+    // dice y lo reintenta cada kReconexionMs: así también se recupera cuando se desenchufa y se vuelve a enchufar.
+    bool abrirSerie(const QString &nombre, int baudios)
+    {
+        parar();
+#ifdef TELEMETRIA_CON_SERIE
+        if (nombre.trimmed().isEmpty()) {
+            statusBar()->showMessage(tr("Para abrir un puerto serie hace falta su nombre (COM3, /dev/ttyUSB0...)."), 6000);
+            return false;
+        }
+        m_fuenteActiva = Fuente::Serie;
+        m_serieNombre = nombre.trimmed();
+        m_baudios = baudios > 0 ? baudios : kBaudiosPorOmision;
+        m_intentos = 0;
+        m_serie->setEditText(m_serieNombre);
+        m_baudiosCombo->setCurrentText(QString::number(m_baudios));
+        m_fuente->setCurrentIndex(2);
+        return abrirSerieAhora();
+#else
+        Q_UNUSED(nombre)
+        Q_UNUSED(baudios)
+        statusBar()->showMessage(tr("Esta compilación no incluye Qt Serial Port: no hay puerto serie."), 8000);
+        registrar(tr("Error: esta compilación no incluye Qt Serial Port (QT += serialport)"));
+        return false;
+#endif
+    }
+
+    // Deja de recibir, sea la fuente que sea. Una frase a medias de la fuente anterior se entrega como mal formada
+    // (si no, se pegaría a la primera de la siguiente).
     void parar()
     {
-        if (m_socket.state() == QAbstractSocket::BoundState) {
+        const bool habia = m_fuenteActiva != Fuente::Ninguna;
+        m_fuenteActiva = Fuente::Ninguna;           // antes de cerrar: las señales de cierre no deben reconectar
+        m_reconectar.stop();
+        if (m_socket.state() == QAbstractSocket::BoundState)
             m_socket.close();
-            registrar(tr("Escucha detenida"));
-        }
+        if (m_tcp.state() != QAbstractSocket::UnconnectedState)
+            m_tcp.abort();
+#ifdef TELEMETRIA_CON_SERIE
+        if (m_puertoSerie.isOpen())
+            m_puertoSerie.close();
+#endif
+        procesar(m_decodificador.feedDatagram(QByteArray()));
+        if (habia)
+            registrar(tr("Enlace detenido"));
         actualizarEnlace();
     }
 
-    // El puerto en el que se escucha (0 si no se escucha).
+    Fuente fuenteActiva() const { return m_fuenteActiva; }
+    // ¿Hay una conexión TCP establecida?
+    bool tcpConectado() const { return m_tcp.state() == QAbstractSocket::ConnectedState; }
+    // Intentos de reconexión sin éxito desde la última vez que hubo enlace.
+    int intentosReconexion() const { return m_intentos; }
+
+    // El puerto UDP en el que se escucha (0 si la fuente no es UDP o no se escucha).
     quint16 puertoLocal() const
     {
-        return m_socket.state() == QAbstractSocket::BoundState ? m_socket.localPort() : quint16(0);
+        return m_fuenteActiva == Fuente::Udp && m_socket.state() == QAbstractSocket::BoundState ? m_socket.localPort()
+                                                                                                : quint16(0);
     }
 
     // Lo que llega por el socket: cada datagrama, a la entrada.
@@ -417,6 +540,13 @@ public:
     {
         ++m_datagramas;
         procesar(m_decodificador.feedDatagram(datos));
+    }
+
+    // Un trozo de un flujo (TCP, puerto serie): no trae líneas completas, y la última espera al siguiente trozo.
+    void recibirFlujo(const QByteArray &datos)
+    {
+        ++m_datagramas;
+        procesar(m_decodificador.feed(datos));
     }
 
     // Reproduce una captura NMEA como si llegara en vivo: unas 40 líneas cada 50 ms. Falso si no se puede leer.
@@ -635,6 +765,9 @@ public:
     QCheckBox *casillaSeguir() const { return m_seguir; }
     QListWidget *listaGlosario() const { return m_listaGlosario; }
     QString textoPropio() const { return m_textoPropio->text(); }
+    QString textoEstadoEnlace() const { return m_estado->text(); }
+    QString textoBotonEnlace() const { return m_botonEscuchar->text(); }
+    int indiceFuente() const { return m_fuente->currentIndex(); }
     QString textoEstadisticas() const { return m_textoEstadisticas->text(); }
     QStringList registro() const
     {
@@ -645,6 +778,121 @@ public:
     }
 
 private:
+    // Cablea los sockets de TCP y el puerto serie: los datos van al decodificador y la pérdida del enlace, al reintento.
+    void conectarFuentes()
+    {
+        m_reconectar.setSingleShot(true);
+        connect(&m_reconectar, &QTimer::timeout, this, [this] { reintentar(); });
+        connect(&m_tcp, &QTcpSocket::connected, this, [this] {
+            m_intentos = 0;
+            registrar(tr("Conectado por TCP a %1:%2").arg(m_tcpHost).arg(m_tcpPuerto));
+            actualizarEnlace();
+        });
+        connect(&m_tcp, &QTcpSocket::readyRead, this, [this] { recibirFlujo(m_tcp.readAll()); });
+        // stateChanged en vez de las señales de error: sirve igual en Qt 5.14, 5.15 y 6, y cubre el servidor que no
+        // está, el que cierra y la red que cae (todo acaba en «desconectado»).
+        connect(&m_tcp, &QTcpSocket::stateChanged, this, [this](QAbstractSocket::SocketState estado) {
+            if (estado == QAbstractSocket::UnconnectedState && m_fuenteActiva == Fuente::Tcp)
+                alPerderFuente(tr("TCP %1:%2").arg(m_tcpHost).arg(m_tcpPuerto), m_tcp.errorString());
+            else
+                actualizarEnlace();
+        });
+#ifdef TELEMETRIA_CON_SERIE
+        connect(&m_puertoSerie, &QSerialPort::readyRead, this, [this] { recibirFlujo(m_puertoSerie.readAll()); });
+        connect(&m_puertoSerie, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError error) {
+            // Sobre todo ResourceError: el dispositivo desapareció (se desenchufó el cable USB).
+            if (error == QSerialPort::NoError || error == QSerialPort::TimeoutError || m_fuenteActiva != Fuente::Serie
+                || !m_puertoSerie.isOpen())
+                return;
+            const QString motivo = m_puertoSerie.errorString();
+            m_puertoSerie.close();
+            alPerderFuente(tr("Puerto serie %1").arg(m_serieNombre), motivo);
+        });
+#endif
+    }
+
+    // El enlace de TCP o serie no está (no se pudo abrir o se cayó): entrega lo que hubiera a medias, lo anota (el primer
+    // intento y luego uno de cada diez, para no llenar el registro) y programa el siguiente intento.
+    void alPerderFuente(const QString &quien, const QString &motivo)
+    {
+        procesar(m_decodificador.feedDatagram(QByteArray()));
+        if (m_intentos % 10 == 0)
+            registrar(tr("%1: sin enlace (%2). Reintento cada %3 s").arg(quien, motivo).arg(kReconexionMs / 1000));
+        ++m_intentos;
+        m_reconectar.start(kReconexionMs);
+        actualizarEnlace();
+    }
+
+    // Un intento de reconexión: vuelve a conectar el TCP o a abrir el puerto serie, si la fuente sigue siendo esa.
+    void reintentar()
+    {
+        if (m_fuenteActiva == Fuente::Tcp && m_tcp.state() == QAbstractSocket::UnconnectedState)
+            m_tcp.connectToHost(m_tcpHost, m_tcpPuerto);
+#ifdef TELEMETRIA_CON_SERIE
+        else if (m_fuenteActiva == Fuente::Serie && !m_puertoSerie.isOpen())
+            abrirSerieAhora();
+#endif
+    }
+
+#ifdef TELEMETRIA_CON_SERIE
+    // Abre m_serieNombre a m_baudios (8N1, solo lectura). Si no puede, lo deja para el reintento.
+    bool abrirSerieAhora()
+    {
+        m_puertoSerie.setPortName(m_serieNombre);
+        m_puertoSerie.setBaudRate(m_baudios);
+        m_puertoSerie.setDataBits(QSerialPort::Data8);
+        m_puertoSerie.setParity(QSerialPort::NoParity);
+        m_puertoSerie.setStopBits(QSerialPort::OneStop);
+        m_puertoSerie.setFlowControl(QSerialPort::NoFlowControl);
+        if (!m_puertoSerie.open(QIODevice::ReadOnly)) {
+            statusBar()->showMessage(tr("No se puede abrir %1: %2").arg(m_serieNombre, m_puertoSerie.errorString()), 8000);
+            alPerderFuente(tr("Puerto serie %1").arg(m_serieNombre), m_puertoSerie.errorString());
+            return false;
+        }
+        m_intentos = 0;
+        registrar(tr("Puerto serie %1 abierto a %2 baudios").arg(m_serieNombre).arg(m_baudios));
+        actualizarEnlace();
+        return true;
+    }
+
+    // Rellena la lista de puertos serie con los que ve el sistema (se puede escribir otro nombre a mano).
+    void refrescarPuertosSerie()
+    {
+        const QString actual = m_serie->currentText();
+        m_serie->clear();
+        for (const QSerialPortInfo &info : QSerialPortInfo::availablePorts())
+            m_serie->addItem(info.portName());
+        m_serie->setEditText(actual);
+    }
+#endif
+
+    // El texto de estado de la fuente activa.
+    QString textoFuente() const
+    {
+        switch (m_fuenteActiva) {
+        case Fuente::Udp:
+            return m_socket.state() == QAbstractSocket::BoundState ? tr("Escuchando en UDP %1").arg(m_socket.localPort())
+                                                                   : tr("Parado");
+        case Fuente::Tcp:
+            if (m_tcp.state() == QAbstractSocket::ConnectedState)
+                return tr("Conectado por TCP a %1:%2").arg(m_tcpHost).arg(m_tcpPuerto);
+            if (m_reconectar.isActive())
+                return tr("Sin conexión con %1:%2: reintentando cada %3 s (%4 intentos)")
+                    .arg(m_tcpHost).arg(m_tcpPuerto).arg(kReconexionMs / 1000).arg(m_intentos);
+            return tr("Conectando a %1:%2...").arg(m_tcpHost).arg(m_tcpPuerto);
+        case Fuente::Serie:
+#ifdef TELEMETRIA_CON_SERIE
+            if (m_puertoSerie.isOpen())
+                return tr("Puerto serie %1 abierto a %2 baudios").arg(m_serieNombre).arg(m_baudios);
+#endif
+            return tr("Puerto serie %1 no disponible: reintentando cada %2 s (%3 intentos)")
+                .arg(m_serieNombre).arg(kReconexionMs / 1000).arg(m_intentos);
+        case Fuente::Ninguna:
+            break;
+        }
+        return tr("Parado");
+    }
+
     // Cómo se llama un contacto en los avisos: su nombre o, si aún no se sabe, su MMSI.
     static QString rotulo(const Contacto &c)
     {
@@ -810,9 +1058,10 @@ private:
     {
         if (!m_estado)
             return;
-        const bool escuchando = m_socket.state() == QAbstractSocket::BoundState;
-        m_estado->setText(escuchando ? tr("Escuchando en UDP %1").arg(m_socket.localPort()) : tr("Parado"));
-        m_botonEscuchar->setText(escuchando ? tr("Parar") : tr("Escuchar"));
+        m_estado->setText(textoFuente());
+        static const QString verbos[] = { QObject::tr("Escuchar"), QObject::tr("Conectar"), QObject::tr("Abrir") };
+        m_botonEscuchar->setText(m_fuenteActiva != Fuente::Ninguna ? tr("Parar")
+                                                                   : verbos[qBound(0, m_fuente->currentIndex(), 2)]);
         const telemetria::DecoderStats &s = m_decodificador.stats();
         double tasa = 0.0;
         for (const double v : m_tasa)
@@ -821,7 +1070,7 @@ private:
         m_ultimo->setText(m_ultimoDato.isValid() ? tr("Último dato hace %1 s").arg(m_ultimoDato.secsTo(ahora()))
                                                  : tr("Sin datos todavía"));
         m_textoEstadisticas->setText(
-            tr("Frases por segundo: %1\nDatagramas: %2 · líneas: %3\nDecodificadas: %4\nSuma mala: %5 · mal formadas: %6\n"
+            tr("Frases por segundo: %1\nRecepciones: %2 · líneas: %3\nDecodificadas: %4\nSuma mala: %5 · mal formadas: %6\n"
                "Ignoradas: %7\nAIS completos: %8 (no soportados: %9)\nFragmentos perdidos: %10")
                 .arg(tasa, 0, 'f', 1).arg(m_datagramas).arg(s.lines).arg(s.decoded).arg(s.badChecksum).arg(s.malformed)
                 .arg(s.ignored).arg(s.aisMessages).arg(s.aisUnsupported).arg(s.aisLost));
@@ -874,16 +1123,67 @@ private:
         // --- Enlace y barco propio ---
         auto *izquierda = new QWidget(this);
         auto *col = new QVBoxLayout(izquierda);
-        auto *fila = new QHBoxLayout;
-        m_puerto = new QSpinBox(this);
-        m_puerto->setRange(1, 65535);
-        m_puerto->setValue(puerto);
-        m_puerto->setToolTip(termino(QObject::tr("Puerto")));
+        m_fuente = new QComboBox(this);
+        m_fuente->addItem(tr("UDP (escuchar un puerto)"), int(Fuente::Udp));
+        m_fuente->addItem(tr("TCP (conectar a un servidor)"), int(Fuente::Tcp));
+        m_fuente->addItem(tr("Puerto serie"), int(Fuente::Serie));
+        m_fuente->setToolTip(tr("De dónde llegan las frases: %1\n\n%2\n\n%3")
+                                 .arg(termino(QObject::tr("UDP")), termino(QObject::tr("TCP")), termino(QObject::tr("Puerto serie"))));
+        col->addWidget(new QLabel(tr("Fuente de datos:"), this));
+        col->addWidget(m_fuente);
+        m_campos = new QStackedWidget(this);
+        {   // UDP: el puerto en el que se escucha.
+            auto *pagina = new QWidget(this);
+            auto *f = new QHBoxLayout(pagina);
+            f->setContentsMargins(0, 0, 0, 0);
+            m_puerto = new QSpinBox(this);
+            m_puerto->setRange(1, 65535);
+            m_puerto->setValue(puerto);
+            m_puerto->setToolTip(termino(QObject::tr("Puerto")));
+            f->addWidget(new QLabel(tr("Puerto UDP:"), this));
+            f->addWidget(m_puerto);
+            m_campos->addWidget(pagina);
+        }
+        {   // TCP: el servidor y su puerto.
+            auto *pagina = new QWidget(this);
+            auto *f = new QHBoxLayout(pagina);
+            f->setContentsMargins(0, 0, 0, 0);
+            m_host = new QLineEdit(QStringLiteral("127.0.0.1"), this);
+            m_host->setToolTip(termino(QObject::tr("TCP")));
+            m_puertoTcp = new QSpinBox(this);
+            m_puertoTcp->setRange(1, 65535);
+            m_puertoTcp->setValue(kPuertoPorOmision);
+            m_puertoTcp->setToolTip(termino(QObject::tr("Puerto")));
+            f->addWidget(new QLabel(tr("Servidor:"), this));
+            f->addWidget(m_host, 1);
+            f->addWidget(m_puertoTcp);
+            m_campos->addWidget(pagina);
+        }
+        {   // Puerto serie: el nombre (con los que ve el sistema) y los baudios.
+            auto *pagina = new QWidget(this);
+            auto *f = new QHBoxLayout(pagina);
+            f->setContentsMargins(0, 0, 0, 0);
+            m_serie = new QComboBox(this);
+            m_serie->setEditable(true);
+            m_serie->setToolTip(termino(QObject::tr("Puerto serie")));
+            m_baudiosCombo = new QComboBox(this);
+            for (const int b : { 4800, 9600, 19200, 38400, 57600, 115200 })
+                m_baudiosCombo->addItem(QString::number(b));
+            m_baudiosCombo->setCurrentText(QString::number(kBaudiosPorOmision));
+            m_baudiosCombo->setToolTip(termino(QObject::tr("Baudios")));
+            f->addWidget(new QLabel(tr("Puerto:"), this));
+            f->addWidget(m_serie, 1);
+            f->addWidget(m_baudiosCombo);
+            f->addWidget(new QLabel(tr("baudios"), this));
+            if (!tieneSerie()) {
+                pagina->setEnabled(false);
+                pagina->setToolTip(tr("Esta compilación no incluye el módulo Qt Serial Port (QT += serialport)."));
+            }
+            m_campos->addWidget(pagina);
+        }
+        col->addWidget(m_campos);
         m_botonEscuchar = new QPushButton(tr("Escuchar"), this);
-        fila->addWidget(new QLabel(tr("Puerto UDP:"), this));
-        fila->addWidget(m_puerto);
-        fila->addWidget(m_botonEscuchar);
-        col->addLayout(fila);
+        col->addWidget(m_botonEscuchar);
         m_estado = new QLabel(this);
         m_ultimo = new QLabel(this);
         m_textoEstadisticas = new QLabel(this);
@@ -907,11 +1207,24 @@ private:
         auto *dockIzq = new QDockWidget(tr("Enlace"), this);
         dockIzq->setWidget(izquierda);
         addDockWidget(Qt::LeftDockWidgetArea, dockIzq);
+        connect(m_fuente, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int i) {
+            m_campos->setCurrentIndex(i);
+#ifdef TELEMETRIA_CON_SERIE
+            if (i == 2)
+                refrescarPuertosSerie();
+#endif
+            actualizarEnlace();
+        });
         connect(m_botonEscuchar, &QPushButton::clicked, this, [this] {
-            if (m_socket.state() == QAbstractSocket::BoundState)
+            if (m_fuenteActiva != Fuente::Ninguna) {
                 parar();
-            else
-                escuchar(quint16(m_puerto->value()));
+                return;
+            }
+            switch (m_fuente->currentIndex()) {
+            case 0: escuchar(quint16(m_puerto->value())); break;
+            case 1: conectarTcp(m_host->text(), quint16(m_puertoTcp->value())); break;
+            default: abrirSerie(m_serie->currentText(), m_baudiosCombo->currentText().toInt()); break;
+            }
         });
 
         // --- Tabla de contactos y registro, en pestañas ---
@@ -993,6 +1306,17 @@ private:
 
     MapWidget *m_mapa = nullptr;
     QUdpSocket m_socket;
+    QTcpSocket m_tcp;
+    QTimer m_reconectar;                      // el siguiente intento de TCP o de puerto serie
+    Fuente m_fuenteActiva = Fuente::Ninguna;
+    QString m_tcpHost;
+    quint16 m_tcpPuerto = 0;
+    QString m_serieNombre;
+    int m_baudios = kBaudiosPorOmision;
+    int m_intentos = 0;
+#ifdef TELEMETRIA_CON_SERIE
+    QSerialPort m_puertoSerie;
+#endif
     telemetria::Decoder m_decodificador;
     QTimer m_reloj;
     QTimer m_reproductor;
@@ -1006,6 +1330,12 @@ private:
     Propio m_propio;
     QMap<quint32, Contacto> m_contactos;      // por MMSI
     QSpinBox *m_puerto = nullptr;
+    QComboBox *m_fuente = nullptr;
+    QStackedWidget *m_campos = nullptr;
+    QLineEdit *m_host = nullptr;
+    QSpinBox *m_puertoTcp = nullptr;
+    QComboBox *m_serie = nullptr;
+    QComboBox *m_baudiosCombo = nullptr;
     QPushButton *m_botonEscuchar = nullptr;
     QLabel *m_estado = nullptr;
     QLabel *m_ultimo = nullptr;
@@ -1294,6 +1624,133 @@ static int comprobar(Ventana &v)
     verificar(QStringLiteral("un datagrama UDP mandado a localhost mueve el barco propio (se recibe por el socket, no por llamada)"),
               llego && v.datagramas() == antesUdp + 1 && v.propio().sogKn == 11.0 && v.propio().cogDeg == 45.0);
 
+    // --- TCP: el cliente se conecta a un servidor, recibe un FLUJO (frases partidas, varias en un bloque) y se reconecta ---
+    QTcpServer servidor;
+    verificar(QStringLiteral("se abre un servidor TCP de prueba en localhost"),
+              servidor.listen(QHostAddress(QHostAddress::LocalHost), 0));
+    verificar(QStringLiteral("sin servidor o sin puerto no se intenta conectar"),
+              !v.conectarTcp(QString(), 5) && !v.conectarTcp(QStringLiteral("127.0.0.1"), 0)
+              && v.fuenteActiva() == Ventana::Fuente::Ninguna);
+    verificar(QStringLiteral("conectarTcp empieza la conexión: la fuente es TCP, el selector y el botón lo reflejan"),
+              v.conectarTcp(QStringLiteral("127.0.0.1"), servidor.serverPort()) && v.fuenteActiva() == Ventana::Fuente::Tcp
+              && v.indiceFuente() == 1 && v.textoBotonEnlace() == QStringLiteral("Parar"));
+    const bool aceptada = esperar(3000, [&] { return servidor.hasPendingConnections(); });
+    QTcpSocket *conexion = aceptada ? servidor.nextPendingConnection() : nullptr;
+    verificar(QStringLiteral("el servidor acepta la conexión y el cliente se da por conectado (y lo dice en el panel)"),
+              aceptada && esperar(3000, [&] { return v.tcpConectado(); })
+              && v.textoEstadoEnlace().contains(QStringLiteral("Conectado por TCP")));
+    telemetria::Rmc rt;
+    rt.valid = true;
+    rt.time = QTime(12, 6, 0);
+    rt.utc = telemetria::utcDateTime(t0.date(), rt.time);
+    rt.lat = 23.30;
+    rt.lon = -82.40;
+    rt.sogKn = 7.0;
+    rt.cogDeg = 30.0;
+    const QByteArray fraseTcp = telemetria::formatRmc(rt) + "\r\n";
+    if (conexion) {
+        conexion->write(fraseTcp.left(20));
+        conexion->flush();
+    }
+    esperar(300, [] { return false; });                      // deja que llegue (y se vea que no hace nada)
+    verificar(QStringLiteral("la mitad de una frase no mueve nada: en un flujo la línea espera al resto"),
+              std::abs(v.propio().posicion.latitude() - 23.30) > 1e-3);
+    if (conexion) {
+        conexion->write(fraseTcp.mid(20));
+        conexion->flush();
+    }
+    verificar(QStringLiteral("al llegar el resto del flujo se completa la frase y mueve el barco propio"),
+              esperar(3000, [&] { return std::abs(v.propio().posicion.latitude() - 23.30) < 1e-5; }) && v.propio().sogKn == 7.0);
+    AisMessage porTcp;
+    porTcp.type = 5;
+    porTcp.mmsi = 323000177;
+    porTcp.name = QStringLiteral("POR TCP");
+    porTcp.shipType = 80;
+    AisMessage posTcp;
+    posTcp.type = 1;
+    posTcp.mmsi = 323000177;
+    posTcp.lat = 23.40;
+    posTcp.lon = -82.30;
+    posTcp.sogKn = 5.0;
+    posTcp.cogDeg = 90.0;
+    QByteArray bloque;
+    for (const QByteArray &f : telemetria::encodeAis(porTcp, 'A', 4))
+        bloque += f + "\r\n";
+    bloque += telemetria::encodeAis(posTcp).first() + "\r\n";
+    if (conexion) {
+        conexion->write(bloque);
+        conexion->flush();
+    }
+    verificar(QStringLiteral("varias frases en un solo bloque (un tipo 5 de dos frases y un tipo 1) dan un contacto con nombre y posición"),
+              esperar(3000, [&] { return v.contactos().value(323000177).id >= 0; })
+              && v.contactos().value(323000177).nombre == QStringLiteral("POR TCP") && v.contactos().value(323000177).tipoBarco == 80);
+    if (conexion)
+        conexion->disconnectFromHost();
+    verificar(QStringLiteral("si el servidor corta, el cliente lo nota, lo anota y programa el reintento"),
+              esperar(3000, [&] { return !v.tcpConectado() && v.intentosReconexion() >= 1; })
+              && v.registro().join(QLatin1Char('\n')).contains(QStringLiteral("sin enlace"))
+              && v.textoEstadoEnlace().contains(QStringLiteral("reintentando")));
+    const bool vuelve2 = esperar(8000, [&] { return servidor.hasPendingConnections(); });
+    QTcpSocket *conexion2 = vuelve2 ? servidor.nextPendingConnection() : nullptr;
+    verificar(QStringLiteral("a los ~3 s se reconecta solo: el servidor ve una conexión nueva y el cliente lo da por conectado"),
+              vuelve2 && esperar(3000, [&] { return v.tcpConectado(); }) && v.intentosReconexion() == 0);
+    rt.lat = 23.31;
+    rt.time = QTime(12, 7, 0);
+    if (conexion2) {
+        conexion2->write(telemetria::formatRmc(rt) + "\r\n");
+        conexion2->flush();
+    }
+    verificar(QStringLiteral("y por la conexión nueva sigue llegando todo"),
+              esperar(3000, [&] { return std::abs(v.propio().posicion.latitude() - 23.31) < 1e-5; }));
+    v.parar();
+    verificar(QStringLiteral("parar corta la conexión y NO reconecta (ni el servidor ve otra tras 3,5 s)"),
+              v.fuenteActiva() == Ventana::Fuente::Ninguna && !v.tcpConectado() && !esperar(3500, [&] { return servidor.hasPendingConnections(); })
+              && v.textoBotonEnlace() == QStringLiteral("Conectar"));
+    // Un servidor que no existe: lo intenta, lo dice una vez y sigue reintentando hasta que se pare.
+    servidor.close();
+    verificar(QStringLiteral("con el servidor caído el cliente lo anota y reintenta (sin llenar el registro)"),
+              v.conectarTcp(QStringLiteral("127.0.0.1"), 9) && esperar(3000, [&] { return v.intentosReconexion() >= 1; })
+              && v.textoEstadoEnlace().contains(QStringLiteral("127.0.0.1:9")));
+    v.parar();
+
+#ifdef TELEMETRIA_CON_SERIE
+#  ifdef Q_OS_UNIX
+    // --- Puerto serie: un pseudoterminal hace de cable (un extremo lo escribe el programa de prueba; el otro lo abre el cliente) ---
+    const int maestro = ::posix_openpt(O_RDWR | O_NOCTTY);
+    const bool ptyOk = maestro >= 0 && ::grantpt(maestro) == 0 && ::unlockpt(maestro) == 0;
+    const QString esclavo = ptyOk ? QString::fromLocal8Bit(::ptsname(maestro)) : QString();
+    verificar(QStringLiteral("se crea un pseudoterminal que hace de puerto serie (%1)").arg(esclavo), ptyOk && !esclavo.isEmpty());
+    if (ptyOk) {
+        verificar(QStringLiteral("abrirSerie abre el puerto a 38400 baudios y lo dice en el panel"),
+                  v.abrirSerie(esclavo, 38400) && v.fuenteActiva() == Ventana::Fuente::Serie && v.indiceFuente() == 2
+                  && v.textoEstadoEnlace().contains(QStringLiteral("38400")));
+        rt.lat = 23.32;
+        rt.time = QTime(12, 8, 0);
+        const QByteArray fraseSerie = telemetria::formatRmc(rt) + "\r\n";
+        const ssize_t mitad = ::write(maestro, fraseSerie.constData(), size_t(fraseSerie.size() / 2));
+        esperar(300, [] { return false; });
+        verificar(QStringLiteral("por el puerto serie también: media frase espera, y el resto la completa y mueve el barco"),
+                  mitad > 0 && std::abs(v.propio().posicion.latitude() - 23.32) > 1e-3
+                  && ::write(maestro, fraseSerie.constData() + fraseSerie.size() / 2, size_t(fraseSerie.size() - fraseSerie.size() / 2)) > 0
+                  && esperar(3000, [&] { return std::abs(v.propio().posicion.latitude() - 23.32) < 1e-5; }));
+        v.parar();
+        verificar(QStringLiteral("parar cierra el puerto serie"), v.fuenteActiva() == Ventana::Fuente::Ninguna
+                  && v.textoBotonEnlace() == QStringLiteral("Abrir"));
+        ::close(maestro);
+    }
+    verificar(QStringLiteral("un puerto serie que no existe no se abre, se anota y se reintenta"),
+              !v.abrirSerie(QStringLiteral("/dev/no_existe_telemetria"), 4800)
+              && v.registro().join(QLatin1Char('\n')).contains(QStringLiteral("no_existe_telemetria"))
+              && v.intentosReconexion() >= 1);
+    v.parar();
+#  endif
+    verificar(QStringLiteral("sin nombre de puerto no se abre"), !v.abrirSerie(QString(), 4800));
+#else
+    verificar(QStringLiteral("sin Qt Serial Port, abrirSerie dice que no está en esta compilación y no abre nada"),
+              !v.abrirSerie(QStringLiteral("COM3"), 4800) && !Ventana::tieneSerie()
+              && v.registro().join(QLatin1Char('\n')).contains(QStringLiteral("Qt Serial Port")));
+#endif
+
     // --- Una captura en fichero, reproducida como si llegara en vivo ---
     QTemporaryDir dir;
     QFile captura(dir.filePath(QStringLiteral("captura.nmea")));
@@ -1305,8 +1762,8 @@ static int comprobar(Ventana &v)
     }
     v.fijarReloj(t0.addSecs(330));
     verificar(QStringLiteral("se escribe una captura de ejemplo"), escrita);
-    verificar(QStringLiteral("se reproduce: 3 contactos más (el pesquero ya estaba) y vuelve a estar Activo"),
-              v.reproducir(captura.fileName()) && esperar(5000, [&] { return !v.reproduciendo(); }) && v.contactos().size() == 3
+    verificar(QStringLiteral("se reproduce: el carguero y el petrolero se suman al pesquero y al de TCP (4 contactos) y el pesquero vuelve a estar Activo"),
+              v.reproducir(captura.fileName()) && esperar(5000, [&] { return !v.reproduciendo(); }) && v.contactos().size() == 4
               && !v.contactos().value(323000103).perdido && v.contactos().value(323000101).nombre == QStringLiteral("HABANA STAR"));
     verificar(QStringLiteral("la captura se anota en el registro"),
               v.registro().join(QLatin1Char('\n')).contains(QStringLiteral("captura.nmea")));
@@ -1346,11 +1803,16 @@ int main(int argc, char *argv[])
     int puerto = kPuertoPorOmision;
     QString reproducirFichero, capturaDestino;
     bool puertoExplicito = false;
+    QString tcpArg, serieArg;
     int espera = 3;
     for (const QString &a : app.arguments().mid(1)) {
         if (a.startsWith(QLatin1String("--puerto="))) {
             puerto = a.mid(int(strlen("--puerto="))).toInt();
             puertoExplicito = true;
+        } else if (a.startsWith(QLatin1String("--tcp="))) {
+            tcpArg = a.mid(int(strlen("--tcp=")));
+        } else if (a.startsWith(QLatin1String("--serie="))) {
+            serieArg = a.mid(int(strlen("--serie=")));
         } else if (a.startsWith(QLatin1String("--espera="))) {
             espera = std::max(1, a.mid(int(strlen("--espera="))).toInt());
         } else if (a.startsWith(QLatin1String("--reproducir="))) {
@@ -1368,11 +1830,23 @@ int main(int argc, char *argv[])
 
     // Para las pruebas no se escucha de entrada (la prueba abre su propio puerto libre), ni para una captura
     // con el escenario de demostración. Una captura con --puerto sí escucha, para fotografiar un enlace real.
-    const bool demostracion = !capturaDestino.isEmpty() && !puertoExplicito && reproducirFichero.isEmpty();
-    Ventana ventana(datos, probando || demostracion ? -1 : puerto);
+    const bool otraFuente = !tcpArg.isEmpty() || !serieArg.isEmpty();
+    const bool demostracion = !capturaDestino.isEmpty() && !puertoExplicito && !otraFuente && reproducirFichero.isEmpty();
+    Ventana ventana(datos, probando || demostracion || otraFuente ? -1 : puerto);
     if (probando)
         return comprobar(ventana);
     ventana.show();
+    if (!tcpArg.isEmpty()) {
+        // host:puerto; el puerto es lo que sigue al último «:» (así vale también un nombre con ":" como una IPv6 entre corchetes).
+        const int dosPuntos = int(tcpArg.lastIndexOf(QLatin1Char(':')));
+        const QString host = dosPuntos > 0 ? tcpArg.left(dosPuntos) : tcpArg;
+        const int puertoTcp = dosPuntos > 0 ? tcpArg.mid(dosPuntos + 1).toInt() : kPuertoPorOmision;
+        ventana.conectarTcp(host, quint16(puertoTcp));
+    }
+    if (!serieArg.isEmpty()) {
+        const QStringList partes = serieArg.split(QLatin1Char(','));
+        ventana.abrirSerie(partes.value(0), partes.size() > 1 ? partes.at(1).toInt() : kBaudiosPorOmision);
+    }
     if (!reproducirFichero.isEmpty())
         ventana.reproducir(reproducirFichero);
     if (!capturaDestino.isEmpty()) {

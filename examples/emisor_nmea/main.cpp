@@ -18,11 +18,17 @@
 // cliente decodifica y una frase cortada. Un cliente decente cuenta todo eso y sigue.
 //
 //   emisor_nmea [--host=127.0.0.1] [--puerto=10110] [--escala=1] [--duracion=0] [--agrupar]
+//   emisor_nmea --tcp=10110 [--escala=1] [--duracion=0]
+//        -> en vez de UDP, hace de SERVIDOR TCP en ese puerto y manda las frases a los clientes que se conecten
+//           (como un receptor AIS de red o AIS-catcher): para probar el modo TCP de cliente_telemetria.
 //   emisor_nmea --salida=captura.nmea [--duracion=120]
 //        -> en vez de la red, escribe la captura en un fichero (para `cliente_telemetria --reproducir=`).
 //   emisor_nmea --comprobar
 //        -> sin red de verdad: simula 120 s, decodifica lo emitido con la propia biblioteca y comprueba
 //           barcos, nombres, posiciones, ruido y fragmentos; y manda un datagrama UDP por localhost.
+//
+// Un puerto serie no se emite desde aquí: con un par de puertos virtuales (com0com en Windows, `socat` en Linux) se
+// puentea el servidor TCP o un fichero --salida al extremo que lee el cliente.
 //
 // --escala=N hace que cada segundo real avance N segundos simulados (los barcos se mueven más rápido).
 // --duracion=S termina a los S segundos simulados (0 = hasta que se cierre). --agrupar manda todas las
@@ -41,6 +47,9 @@
 #include <QtNetwork/QHostAddress>
 #include <QMap>
 #include <QtNetwork/QNetworkDatagram>
+#include <QtNetwork/QTcpServer>
+#include <QtNetwork/QTcpSocket>
+#include <QElapsedTimer>
 #include <QTextStream>
 #include <QTimer>
 #include <QtNetwork/QUdpSocket>
@@ -350,11 +359,39 @@ struct Salida {
     bool agrupar = false;
     quint64 datagramas = 0;
     quint64 lineas = 0;
+    // Modo servidor TCP: las frases van a los clientes conectados, un flujo de líneas (como un receptor de red).
+    QTcpServer servidor;
+    QList<QTcpSocket *> clientes;
+
+    // Se pone a escuchar como servidor TCP en \a puerto (0 = uno libre) y acepta a quien se conecte. Falso si no puede.
+    bool servirTcp(quint16 puerto)
+    {
+        if (!servidor.listen(QHostAddress(QHostAddress::AnyIPv4), puerto))
+            return false;
+        QObject::connect(&servidor, &QTcpServer::newConnection, &servidor, [this] {
+            while (QTcpSocket *c = servidor.nextPendingConnection()) {
+                clientes.append(c);
+                QObject::connect(c, &QTcpSocket::disconnected, c, [this, c] {
+                    clientes.removeAll(c);
+                    c->deleteLater();
+                });
+            }
+        });
+        return true;
+    }
 
     // Entrega las frases de un segundo.
     void enviar(const QList<QByteArray> &frases)
     {
         lineas += quint64(frases.size());
+        if (servidor.isListening()) {
+            QByteArray todo;
+            for (const QByteArray &f : frases)
+                todo += f + "\r\n";
+            for (QTcpSocket *c : clientes)
+                c->write(todo);
+            return;
+        }
         if (fichero.isOpen()) {
             for (const QByteArray &f : frases)
                 fichero.write(f + "\r\n");
@@ -520,6 +557,38 @@ int comprobar()
                   agrupado == captura.at(0) + "\r\n" + captura.at(1) + "\r\n" && salida.datagramas == 3);
     }
 
+    // El servidor TCP: un cliente que se conecta recibe las frases como un flujo de líneas (las que se emiten, en orden).
+    {
+        Salida tcp;
+        const bool sirve = tcp.servirTcp(0);
+        verificar(QStringLiteral("el emisor puede hacer de servidor TCP en un puerto libre"), sirve);
+        if (sirve) {
+            QTcpSocket cliente;
+            cliente.connectToHost(QHostAddress::LocalHost, tcp.servidor.serverPort());
+            QElapsedTimer reloj;
+            reloj.start();
+            while (tcp.clientes.isEmpty() && reloj.elapsed() < 3000)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            verificar(QStringLiteral("acepta la conexión de un cliente"), tcp.clientes.size() == 1);
+            tcp.enviar({ captura.at(0), captura.at(1) });
+            tcp.enviar({ captura.at(2) });
+            QByteArray recibido;
+            const QByteArray esperado = captura.at(0) + "\r\n" + captura.at(1) + "\r\n" + captura.at(2) + "\r\n";
+            reloj.restart();
+            while (recibido.size() < esperado.size() && reloj.elapsed() < 3000) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+                recibido += cliente.readAll();
+            }
+            verificar(QStringLiteral("el cliente recibe las tres frases, en orden y con su salto de línea"), recibido == esperado);
+            cliente.disconnectFromHost();
+            reloj.restart();
+            while (!tcp.clientes.isEmpty() && reloj.elapsed() < 3000)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            verificar(QStringLiteral("al desconectarse el cliente, el servidor lo olvida y sigue emitiendo sin error"),
+                      tcp.clientes.isEmpty() && (tcp.enviar({ captura.at(0) }), true));
+        }
+    }
+
     out << (todoOk ? "TODO BIEN\n" : "HAY FALLOS\n");
     return todoOk ? 0 : 1;
 }
@@ -542,6 +611,7 @@ int main(int argc, char *argv[])
     const double escala = std::max(0.1, opcion(args, QStringLiteral("escala"), QStringLiteral("1")).toDouble());
     const int duracion = opcion(args, QStringLiteral("duracion"), QStringLiteral("0")).toInt();
     const QString destino = opcion(args, QStringLiteral("salida"));
+    const QString tcp = opcion(args, QStringLiteral("tcp"));
     QTextStream err(stderr);
     if (salida.host.isNull()) {
         err << "--host no es una direccion IP valida\n";
@@ -555,6 +625,10 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (!tcp.isEmpty() && !salida.servirTcp(quint16(tcp.toUInt()))) {
+        err << "No se puede escuchar el puerto TCP " << tcp << ": " << salida.servidor.errorString() << "\n";
+        return 2;
+    }
     Simulador sim(QDateTime::currentDateTimeUtc());
     if (!destino.isEmpty()) {
         // A un fichero no se espera: se genera la duracion pedida (o 120 s) de golpe.
@@ -564,8 +638,12 @@ int main(int argc, char *argv[])
         QTextStream(stdout) << salida.lineas << " lineas en " << destino << "\n";
         return 0;
     }
-    QTextStream(stdout) << "Emitiendo NMEA/AIS a " << salida.host.toString() << ":" << salida.puerto
-                        << " (escala x" << escala << "). Ctrl+C para parar.\n";
+    if (!tcp.isEmpty())
+        QTextStream(stdout) << "Sirviendo NMEA/AIS por TCP en el puerto " << salida.servidor.serverPort()
+                            << " (escala x" << escala << "). Ctrl+C para parar.\n";
+    else
+        QTextStream(stdout) << "Emitiendo NMEA/AIS a " << salida.host.toString() << ":" << salida.puerto
+                            << " (escala x" << escala << "). Ctrl+C para parar.\n";
     QTimer reloj;
     QObject::connect(&reloj, &QTimer::timeout, &app, [&] {
         for (int i = 0; i < int(std::lround(escala)); ++i)
