@@ -8,6 +8,8 @@
 #include "io/PlaceIndex.h"
 #include "libmapa/GeoFile.h"
 #include "tiles/RMapsTileSource.h"
+#include "vector/Gzip.h"
+#include "vector/MvtTile.h"
 
 #include <QBuffer>
 #include <QDir>
@@ -216,6 +218,16 @@ PackageCheck PackageCheck::run(const DataPackage &p, const Options &options)
             r.add(Severity::Error, d.id,
                   QStringLiteral("La base no tiene ninguna tesela en z=%1..%2 (revisa "
                                  "zFactor/zOffset y sValue).").arg(d.minZoom).arg(d.maxZoom));
+        } else if (d.vector) {
+            // Capa vectorial (MBTiles pbf): no es una imagen, se comprueba que
+            // sea un MVT legible; lo pinta VectorTileRenderer, sin plugins.
+            mvt::Tile tile;
+            QString motivo;
+            rep.imageFormat = Gzip::isGzip(muestra) ? QStringLiteral("mvt (gzip)")
+                                                    : QStringLiteral("mvt");
+            if (!mvt::decode(muestra, &tile, &motivo))
+                r.add(Severity::Error, d.id,
+                      QStringLiteral("Sus teselas vectoriales no se pueden leer: %1").arg(motivo));
         } else {
             QBuffer buffer(&muestra);
             buffer.open(QIODevice::ReadOnly);

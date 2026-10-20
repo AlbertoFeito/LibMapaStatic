@@ -50,6 +50,10 @@ QJsonObject TileDataset::toJson() const
     o[QStringLiteral("hasSColumn")]  = hasSColumn;
     if (mbtiles)
         o[QStringLiteral("format")] = QStringLiteral("mbtiles");
+    if (vector)
+        o[QStringLiteral("vector")] = true;
+    if (!vectorStyleFile.isEmpty())
+        o[QStringLiteral("vectorStyle")] = vectorStyleFile;
     return o;
 }
 
@@ -89,6 +93,8 @@ TileDataset TileDataset::fromJson(const QJsonObject &o)
     d.colS        = o.value(QStringLiteral("colS")).toString(d.colS);
     d.colImage    = o.value(QStringLiteral("colImage")).toString(d.colImage);
     d.hasSColumn  = o.value(QStringLiteral("hasSColumn")).toBool(d.hasSColumn);
+    d.vector      = o.value(QStringLiteral("vector")).toBool(false);
+    d.vectorStyleFile = o.value(QStringLiteral("vectorStyle")).toString();
     return d;
 }
 

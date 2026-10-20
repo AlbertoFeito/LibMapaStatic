@@ -47,6 +47,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/app-cliente-telemetria` | #27 | `libtelemetria` (biblioteca aparte: decodificador NMEA 0183 y AIS) y los ejemplos `emisor_nmea` y `cliente_telemetria` |
 | `claude/docs-quitar-mundo` | #28 | Quita de `docs/MIS_RUTAS.md` la nota pendiente de la capa `mundo` |
 | `claude/cliente-tcp-serie` | #29 | `cliente_telemetria` por TCP (cliente, con reconexión) y por puerto serie (opcional); `emisor_nmea --tcp` |
+| `claude/sweet-cray-74nz88` | (abierto) | MBTiles vectoriales (pbf/MVT): `src/vector/` (gzip, decodificador, estilo, renderizador), `vector_tile` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
@@ -77,10 +78,12 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 - Sin QCustomPlot, el núcleo (`libmapa_core`) compila y pasa sus tests; se queda
   fuera el widget, `fill_map`, `demo` y `render_map`.
 
-## miniz (descompresor gzip de `fill_hgt`)
+## miniz (descompresor gzip de `fill_hgt` y de las teselas vectoriales)
 - `third_party/miniz/miniz.{c,h}` es **dominio público** y **SÍ se commitea**
-  (al revés que QCustomPlot). Lo usa solo `fill_hgt` para descomprimir `.hgt.gz`
-  sin depender de zlib externa → compila en cualquier sitio (incl. Qt MinGW).
+  (al revés que QCustomPlot). Lo usan `fill_hgt` (`.hgt.gz`) y el núcleo
+  (`src/vector/Gzip.cpp`, teselas MVT en gzip de los MBTiles vectoriales), sin
+  depender de zlib externa → compila en cualquier sitio (incl. Qt MinGW). En el
+  núcleo va dentro de `libmapa_core` (CMake y `core.pro`), con su cabecera privada.
 - Por eso `project()` habilita **C** además de CXX; a `miniz.c` se le pone `-w`
   (es de terceros) y los avisos solo-C++ se limitan a CXX con generator expressions.
 
@@ -113,7 +116,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
   (`tile.openstreetmap.org`): está prohibido.
 
 ## Verificación antes de commitear código
-- Compila y pasa **todos los tests** (30 ahora, 3 de ellos de libtelemetria; 27 sin QCustomPlot): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
+- Compila y pasa **todos los tests** (31 ahora, 3 de ellos de libtelemetria; 28 sin QCustomPlot): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
   en el contenedor). Un push verde vale más que tres especulativos.
 - Contenedor nuevo sin Qt: `sudo apt-get update && sudo apt-get install -y
   qt6-base-dev qt6-positioning-dev`, y recupera QCustomPlot (arriba).

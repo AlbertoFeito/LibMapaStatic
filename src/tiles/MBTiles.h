@@ -21,9 +21,12 @@ namespace libmapa {
  * descarga…). Lo que hay aquí es solo la parte de «entender el fichero»: la
  * disposición de las columnas y la lectura de sus metadatos.
  *
- * Solo teselas ráster (PNG, JPEG, WebP). Las vectoriales (`pbf`/MVT) se
- * reconocen y se rechazan con un mensaje claro. WebP necesita que Qt tenga el
- * plugin de imágenes correspondiente.
+ * Teselas ráster (PNG, JPEG, WebP; WebP necesita el plugin de imágenes de Qt)
+ * y, además, VECTORIALES (`format = pbf`, Mapbox Vector Tile, normalmente en
+ * gzip, como los de OpenMapTiles): \c describe las reconoce, marca el dataset
+ * con \c TileDataset::vector y el \c TileLoader las pinta con
+ * \c VectorTileRenderer. Un fichero que dice ser vectorial pero cuyas teselas
+ * no se decodifican se rechaza con un mensaje claro.
  */
 namespace MBTiles {
 
@@ -44,10 +47,10 @@ void applyLayout(TileDataset &ds);
  * esquema, y del tamaño de una tesela real el lado en píxeles. Solo se toca lo
  * que NO esté en \a given, el objeto JSON del que salió el dataset: lo que el
  * usuario escribió a mano manda sobre lo detectado. Comprueba además que la
- * tabla tenga las columnas esperadas y que las teselas sean ráster.
+ * tabla tenga las columnas esperadas y si las teselas son imágenes o MVT.
  *
- * \return false si el fichero no se puede abrir, no es un MBTiles o es
- *         vectorial; el motivo queda en \a error. \a ds conserva la disposición
+ * \return false si el fichero no se puede abrir, no es un MBTiles o sus
+ *         teselas no se pueden leer; el motivo queda en \a error. \a ds conserva la disposición
  *         de MBTiles aunque falle.
  */
 bool describe(TileDataset &ds, const QJsonObject &given = QJsonObject(),

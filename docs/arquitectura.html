@@ -65,7 +65,7 @@
   <li>Tipos y modelos de datos</li>
   <li>Módulo <b>geo</b> — geodesia y teselas</li>
   <li>Módulo <b>db</b> — SQLite</li>
-  <li>Módulo <b>tiles</b> — motor de teselas</li>
+  <li>Módulo <b>tiles</b> — motor de teselas (6b: <b>vector</b>, MBTiles vectoriales)</li>
   <li>Módulo <b>widget</b> — el mapa en pantalla</li>
   <li>Módulo <b>io</b> — ficheros .geo</li>
   <li><b>libtelemetria</b> — decodificador de NMEA 0183 y AIS (biblioteca aparte)</li>
@@ -93,7 +93,7 @@ se pueda probar sin ventanas.</p>
   <li><b>Teselas base:</b> abre una o varias BD de teselas (OSM, satélite…), las cachea y las pinta fluido según navegas.</li>
   <li><b>Entidades:</b> dibuja y edita puntos/líneas/polígonos en capas, con guardado/carga en SQLite y carga de ficheros <code>.geo</code>.</li>
   <li><b>Objetivos móviles:</b> móviles con traza y etiqueta, actualizables varias veces por segundo, en una capa que se repinta sola. <b>Agnósticos del dominio</b>: cada objetivo lleva un <code>kind</code> y un juego de <code>attributes</code> libres (AIS, ADS-B, telemetría…) que la app rellena y la librería no interpreta, así el mismo modelo sirve a seguimiento naval, aéreo o de UAVs. La <b>simbología va por hooks</b>: la app registra un proveedor (<code>setTargetSymbolProvider</code>) que elige el icono de cada objetivo según su <code>kind</code>/estado; la librería lo coloca y lo gira por el rumbo, y sin proveedor usa un galón por defecto. <b>Escala a miles</b> (ADS-B regional): culling por vista, <b>nivel de detalle</b> (por encima de un presupuesto se apagan etiquetas y trazas, que a esa densidad son ilegibles), <b>declutter</b> de etiquetas (una por celda) y decimación de la traza.</li>
-  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa), elevación (<code>fill_hgt</code> descarga SRTM, <code>dem_to_db</code> lo empaqueta), <b>hornear relieve sombreado</b> del DEM a teselas (<code>dem_to_hillshade</code>, gris o <code>--colored</code> con batimetría, offline) y <b>generar curvas de nivel</b> del DEM como capa vectorial (<code>dem_to_contours</code>). Scripts aparte convierten datos de <b>OpenStreetMap</b> a capas de entidades: la <b>costa</b> (<code>osm_costa_a_sqlitedb.py</code>, máscara de tierra para <code>--water-mask</code> y overlay de costa) y las <b>divisiones administrativas</b> (<code>osm_divisiones_a_sqlitedb.py</code>, una entidad con nombre por provincia/municipio). La librería lee también <b>MBTiles</b> ráster (<code>probe_db</code> los detecta solos, o basta <code>id</code> + <code>filePath</code> en <code>datasets.json</code>) y elevación en <b>GeoTIFF</b>. Una capa base se puede <b>añadir en caliente</b> (<code>MapWidget::addBaseLayer</code> → <code>TileService::addDataset</code> + <code>TileLoader::addDataset</code>, que no vacía las fuentes ya abiertas). La <b>búsqueda de lugares</b> (<code>MapWidget::searchPlaces</code> / <code>goToPlace</code>) consulta un índice local <code>lugares.sqlitedb</code> (<code>PlaceIndex</code>, <code>"places"</code> en el manifiesto) generado por <code>osm_lugares_a_sqlitedb.py</code>.</li>
+  <li><b>Herramientas:</b> sondar una BD (<code>probe_db</code>), rasterizar vectores a teselas (<code>geo_to_tiles</code>), <b>descargar/rellenar</b> teselas de una fuente XYZ (<code>fill_tiles</code> consola y <code>fill_map</code> con mapa), elevación (<code>fill_hgt</code> descarga SRTM, <code>dem_to_db</code> lo empaqueta), <b>hornear relieve sombreado</b> del DEM a teselas (<code>dem_to_hillshade</code>, gris o <code>--colored</code> con batimetría, offline) y <b>generar curvas de nivel</b> del DEM como capa vectorial (<code>dem_to_contours</code>). Scripts aparte convierten datos de <b>OpenStreetMap</b> a capas de entidades: la <b>costa</b> (<code>osm_costa_a_sqlitedb.py</code>, máscara de tierra para <code>--water-mask</code> y overlay de costa) y las <b>divisiones administrativas</b> (<code>osm_divisiones_a_sqlitedb.py</code>, una entidad con nombre por provincia/municipio). La librería lee también <b>MBTiles</b> ráster y <b>vectoriales</b> (pbf/MVT, p. ej. OpenMapTiles; los pinta con un estilo, módulo <code>vector</code>) (<code>probe_db</code> los detecta solos, o basta <code>id</code> + <code>filePath</code> en <code>datasets.json</code>) y elevación en <b>GeoTIFF</b>. Una capa base se puede <b>añadir en caliente</b> (<code>MapWidget::addBaseLayer</code> → <code>TileService::addDataset</code> + <code>TileLoader::addDataset</code>, que no vacía las fuentes ya abiertas). La <b>búsqueda de lugares</b> (<code>MapWidget::searchPlaces</code> / <code>goToPlace</code>) consulta un índice local <code>lugares.sqlitedb</code> (<code>PlaceIndex</code>, <code>"places"</code> en el manifiesto) generado por <code>osm_lugares_a_sqlitedb.py</code>.</li>
 </ul>
 </div>
 
@@ -135,7 +135,7 @@ mapa visual. Las herramientas usan una u otra según necesiten pantalla.</p>
   <rect x="20" y="266" width="720" height="150" rx="8" fill="#eef0f4" stroke="#5b6b7b"/>
   <text x="30" y="286" fill="#39424e" font-weight="700">libmapa_core &nbsp;<tspan font-weight="400" font-size="9">(sin ventanas: Core · Gui · Sql · Positioning)</tspan></text>
   <g font-size="10">
-    <rect x="34" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="42" y="316" fill="#145374" font-weight="700">tiles</text><text x="42" y="332" font-size="8.5">TileService·Loader·Cache·Source·Planner·Probe</text>
+    <rect x="34" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="42" y="316" fill="#145374" font-weight="700">tiles · vector</text><text x="42" y="332" font-size="8.5">TileService·Loader·Cache·Source·Planner·Probe</text>
     <rect x="196" y="298" width="130" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="204" y="316" fill="#145374" font-weight="700">geo</text><text x="204" y="332" font-size="8.5">WebMercator·TileMatrix·Zone/ProximityMonitor</text>
     <rect x="338" y="298" width="150" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="346" y="316" fill="#145374" font-weight="700">db</text><text x="346" y="332" font-size="8.5">ConnectionPool·Schema·VectorRepository</text>
     <rect x="500" y="298" width="110" height="44" rx="5" fill="#fff" stroke="#aab6c2"/><text x="508" y="316" fill="#145374" font-weight="700">io · dem</text><text x="508" y="332" font-size="8.5">GeoFile · VectorFormats · Elevation</text>
@@ -370,7 +370,7 @@ esquema, relleno, bbox) analizando qué hay en la tabla. Es el cerebro de
 <i>o vista</i> <code>tiles</code>, y al detectar la tabla <code>metadata</code> fija por
 especificación el eje Y en <b>TMS</b> y el zoom estándar (<code>storedZ = logicalZ</code>),
 tomando la extensión de <code>metadata.bounds</code> — así se sondan <b>sin</b>
-<code>--ref-bbox</code>. Los MBTiles vectoriales (MVT/PBF) no se dibujan y se avisa.</p>
+<code>--ref-bbox</code>. Los MBTiles vectoriales (MVT/PBF) se marcan <code>vector</code> (ver 6b).</p>
 <p><b>MBTiles sin sondar</b> <span class="tag">src/tiles/MBTiles.h</span>: no hay un lector aparte —un MBTiles es una
 base con otras columnas (<code>zoom_level</code>, <code>tile_column</code>, <code>tile_row</code>,
 <code>tile_data</code>), TMS y sin <code>s</code>, justo lo que <code>RMapsTileSource</code> ya lee
@@ -379,6 +379,29 @@ parametrizado por <code>TileDataset</code>—. <code>MBTiles::applyLayout</code>
 entrada lleva <code>"format":"mbtiles"</code>, y <code>MBTiles::describe</code> completa del propio fichero lo que el
 JSON no diga (zooms, lado de tesela, nombre, esquema), también al cargar un paquete de datos. Lo escrito a mano
 manda, y las entradas ya existentes no cambian.</p>
+
+<!-- ===================== 6b. VECTOR ===================== -->
+<h2 class="sec">6b · Módulo <span class="mono">vector</span> — MBTiles vectoriales (pbf / MVT)</h2>
+<p>Un MBTiles con <code>format = pbf</code> (Mapbox Vector Tile 2.1, normalmente en gzip: OpenMapTiles,
+planetiler, tippecanoe) entra como cualquier otra capa base. La idea es que el resto del motor <b>no se entere</b>:
+el <code>TileLoader</code>, en su hilo, en vez de decodificar un PNG <b>pinta</b> la tesela vectorial a una
+<code>QImage</code> de <code>tileSize</code> (256&nbsp;px) con un estilo, y entrega <code>LoadedTile</code> como siempre.
+Caché, escalera de respaldo, cobertura, <code>addBaseLayer</code>, <code>check_data</code> y el cambio de capa
+funcionan sin cambios. Sin dependencias nuevas: ni libprotobuf ni zlib.</p>
+<table><tr><th>Pieza</th><th>Qué hace</th></tr>
+<tr><td class="mono">Gzip <span class="muted">vector/Gzip.h</span></td><td><code>inflateIfCompressed</code>: gzip (RFC 1952) o zlib (RFC 1950) con <b>miniz</b> (dominio público, el mismo de <code>fill_hgt</code>); lo que no está comprimido pasa intacto. Una tesela vacía (gzip de 0 bytes, el mar en OpenMapTiles) es válida.</td></tr>
+<tr><td class="mono">mvt::decode <span class="muted">vector/MvtTile.h</span></td><td>Lector de protobuf propio (varints, fijos, bloques) → <code>Tile</code> / <code>Layer</code> (nombre, extent, tablas de claves y valores) / <code>Feature</code> (tipo, tags, piezas en coordenadas de tesela). <code>decodeGeometry</code> interpreta MoveTo/LineTo/ClosePath en zigzag. Nunca lee fuera del buffer: un dato corrupto da error, no un cuelgue.</td></tr>
+<tr><td class="mono">VectorStyle <span class="muted">vector/VectorStyle.h</span></td><td>Fondo + reglas en orden (capa, filtro/exclusión por propiedad, zooms, tipo de geometría, relleno, trazo con grosor interpolado por zoom, borde, discontinuo, rótulo). <code>openMapTiles()</code> trae el estilo por defecto para ese esquema (JSON embebido, = <code>docs/estilo_vectorial.json</code>); <code>fromJson/fromFile</code> lee uno propio.</td></tr>
+<tr><td class="mono">VectorTileRenderer <span class="muted">vector/VectorTileRenderer.h</span></td><td>Pinta regla a regla con <code>QPainter</code> sobre <code>QImage</code> (una ruta por regla, relleno <code>WindingFill</code> para respetar huecos). Los rótulos van al final, sin solaparse, solo para puntos <b>dentro</b> de la tesela y desplazados para caber enteros: nada sale cortado ni repetido entre teselas. Reentrante; sin <code>QGuiApplication</code> omite los rótulos.</td></tr>
+</table>
+<p><b>Cómo se engancha.</b> <code>MBTiles::describe</code> decodifica una tesela real: si es MVT pone
+<code>TileDataset::vector</code> (un fichero que dice <code>pbf</code> pero no lo es se rechaza con su motivo).
+<code>TileDataset::vectorStyleFile</code> (<code>"vectorStyle"</code> en <code>datasets.json</code>/<code>mapa.json</code>,
+relativo al JSON y parte de <code>DataPackage::files()</code>) elige el estilo; si falta o no se lee, el de OpenMapTiles.
+<code>TileLoader::rendererFor</code> crea un renderizador por capa y <code>renderVector</code> reparte las teselas de una
+rejilla entre su hilo y un <code>QThreadPool</code> propio (núcleos − 2), abandonando si la petición caduca: una tesela
+z14 urbana (~8600 edificios) cuesta 50-130&nbsp;ms, mucho más que un PNG. Con <code>vector = false</code> (todo lo
+anterior) el camino es el de siempre, línea a línea.</p>
 
 <!-- ===================== 7. WIDGET ===================== -->
 <h2 class="sec">7 · Módulo <span class="mono">widget</span> — el mapa en pantalla</h2>
@@ -752,6 +775,7 @@ exactamente donde el mapa la espera.</div>
 <tr><td class="mono">probe_db</td><td>consola</td><td>Sonda una <code>.sqlitedb</code> y deduce su configuración; imprime el bloque para <code>datasets.json</code>.</td></tr>
 <tr><td class="mono">geo_to_tiles</td><td>consola (Gui)</td><td>Rasteriza un vector <code>.geo/.xyz</code> a una pirámide de teselas SQLite (capa base rápida).</td></tr>
 <tr><td class="mono">render_map</td><td>utilidad (widget)</td><td>Renderiza el mapa a imagen sin interacción (pruebas/verificación).</td></tr>
+<tr><td class="mono">vector_tile</td><td>consola (Gui)</td><td>Inspecciona un MBTiles vectorial (capas, claves, clases), pinta una vista a PNG con el estilo por defecto o uno propio y vuelca el estilo por defecto.</td></tr>
 <tr><td class="mono">bench_tiles</td><td>consola</td><td>Mide el rendimiento de lectura/caché de teselas.</td></tr>
 <tr><td class="mono">fill_tiles</td><td>consola</td><td>Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave.</td></tr>
 <tr><td class="mono">fill_map</td><td>ventana + mapa</td><td>Lo mismo pero visual: marca el área en el mapa, rango de zoom, barra de progreso.</td></tr>
@@ -817,6 +841,18 @@ distribuir, 1 = errores, 2 = argumentos mal; pensado para scripts.</p>
 <tr><td>--grid</td><td>Dibuja la rejilla <code>z/x/y</code> (verde = propia, rojo = respaldo escalado).</td></tr>
 <tr><td>--features</td><td>Superpone las entidades de un <code>.geo</code>.</td></tr>
 </table>
+
+<h3>vector_tile — inspeccionar y pintar un MBTiles vectorial</h3>
+<p class="mono" style="font-size:12px">vector_tile --mbtiles &lt;f.mbtiles&gt; (--info | --out &lt;vista.png&gt;) [--center lat,lon] [--zoom N] [--size AnchoxAlto] [--style estilo.json] · vector_tile --print-style</p>
+<table class="kv">
+<tr><td>--mbtiles</td><td>MBTiles vectorial (<code>format = pbf</code>).</td></tr>
+<tr><td>--info</td><td>Capas, nº de entidades por tipo, claves y valores de <code>class</code> de la tesela del centro.</td></tr>
+<tr><td>--out</td><td>Pinta la vista (mosaico de teselas de 256&nbsp;px) a PNG y dice cuánto tardó cada tesela.</td></tr>
+<tr><td>--center / --zoom / --size</td><td>Centro <code>lat,lon</code> (def. La Habana), zoom (def. 14) y tamaño (def. <code>1024x768</code>).</td></tr>
+<tr><td>--style</td><td>Estilo JSON propio en vez del de OpenMapTiles.</td></tr>
+<tr><td>--print-style</td><td>Vuelca el estilo por defecto, plantilla para uno propio.</td></tr>
+</table>
+<p>Necesita <code>QGuiApplication</code> para los rótulos: sin pantalla, <code>QT_QPA_PLATFORM=offscreen</code>.</p>
 
 <h3>bench_tiles — medir rendimiento de lectura</h3>
 <p class="mono" style="font-size:12px">bench_tiles --datasets &lt;datasets.json&gt; [--zoom N] [--width N] [--height N] [--center lat,lon] [--pans N]</p>

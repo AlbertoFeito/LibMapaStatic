@@ -123,6 +123,8 @@ std::optional<DataPackage> DataPackage::load(const QString &path, QString *error
     for (const QJsonValue &v : root.value(QStringLiteral("datasets")).toArray()) {
         TileDataset d = TileDataset::fromJson(v.toObject());
         d.filePath = resolve(base, d.filePath);
+        if (!d.vectorStyleFile.isEmpty())
+            d.vectorStyleFile = resolve(base, d.vectorStyleFile);
         if (d.mbtiles && QFileInfo::exists(d.filePath)) {      // zooms y lado desde el propio fichero
             QString aviso;
             if (!MBTiles::describe(d, v.toObject(), &aviso))
@@ -203,8 +205,10 @@ QStringList DataPackage::files() const
             out << f;
     };
     anadir(info.manifestPath);
-    for (const TileDataset &d : datasets)
+    for (const TileDataset &d : datasets) {
         anadir(d.filePath);
+        anadir(d.vectorStyleFile);      // el estilo de una capa vectorial viaja con ella
+    }
     anadir(elevationFile);
     if (!elevationDir.isEmpty())
         for (const QFileInfo &f : QDir(elevationDir).entryInfoList(

@@ -129,6 +129,17 @@ add_library(libmapa_core STATIC
     src/tiles/TileService.cpp
     src/tiles/TileService.h
 
+    # Teselas vectoriales (MBTiles pbf/MVT): gzip, decodificador y renderizador.
+    src/vector/Gzip.cpp
+    src/vector/Gzip.h
+    src/vector/MvtTile.cpp
+    src/vector/MvtTile.h
+    src/vector/VectorStyle.cpp
+    src/vector/VectorStyle.h
+    src/vector/VectorTileRenderer.cpp
+    src/vector/VectorTileRenderer.h
+    third_party/miniz/miniz.c
+
     src/io/GeoFile.cpp
     include/libmapa/GeoFile.h
     src/io/VectorFormats.cpp
@@ -183,6 +194,14 @@ target_link_libraries(libmapa_core
 )
 
 target_compile_definitions(libmapa_core PUBLIC LIBMAPA_STATIC)
+
+# miniz (dominio publico) infla las teselas vectoriales en gzip sin zlib externa,
+# igual que en fill_hgt. Su cabecera es privada del nucleo y su .c, de terceros,
+# se compila sin nuestros avisos.
+target_include_directories(libmapa_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz)
+if(NOT MSVC)
+    set_source_files_properties(third_party/miniz/miniz.c PROPERTIES COMPILE_OPTIONS "-w")
+endif()
 
 # -----------------------------------------------------------------------------
 # Widget de mapa. Requiere QCustomPlot, Widgets y PrintSupport.
@@ -281,6 +300,12 @@ if(LIBMAPA_BUILD_TOOLS)
     # Comprueba un paquete de datos (mapa.json) antes de distribuirlo.
     add_executable(check_data tools/check_data/main.cpp)
     target_link_libraries(check_data PRIVATE libmapa_core)
+
+    # Pinta teselas de un MBTiles vectorial (pbf) a PNG y vuelca el estilo por
+    # defecto. Necesita QGuiApplication para los rotulos: sin pantalla, con
+    # QT_QPA_PLATFORM=offscreen.
+    add_executable(vector_tile tools/vector_tile/main.cpp)
+    target_link_libraries(vector_tile PRIVATE libmapa_core)
 
     add_executable(bench_tiles tools/bench_tiles/main.cpp)
     target_link_libraries(bench_tiles PRIVATE libmapa_core)
@@ -405,6 +430,9 @@ if(LIBMAPA_BUILD_TESTS)
     libmapa_add_test(tst_sqliteelevation)
     libmapa_add_test(tst_geotiff)
     libmapa_add_test(tst_mbtiles)
+    libmapa_add_test(tst_vectortiles)
+    target_compile_definitions(tst_vectortiles PRIVATE
+        LIBMAPA_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
     target_compile_definitions(tst_geotiff PRIVATE
         LIBMAPA_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
     libmapa_add_test(tst_elevationanalysis)
@@ -536,7 +564,7 @@ if(LIBMAPA_INSTALL)
     # Herramientas de consola que existan en esta configuracion.
     foreach(_libmapa_tool check_data probe_db render_map dem_to_db fill_hgt
                           fill_tiles fill_map geo_to_tiles bench_tiles dem_to_hillshade
-                          dem_to_contours geotiff_check)
+                          dem_to_contours geotiff_check vector_tile)
         if(TARGET ${_libmapa_tool})
             install(TARGETS ${_libmapa_tool} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
         endif()

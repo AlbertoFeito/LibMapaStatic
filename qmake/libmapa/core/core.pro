@@ -38,6 +38,11 @@ SOURCES += \
     $$ROOT/src/tiles/TilePlanner.cpp \
     $$ROOT/src/tiles/TileLoader.cpp \
     $$ROOT/src/tiles/TileService.cpp \
+    $$ROOT/src/vector/Gzip.cpp \
+    $$ROOT/src/vector/MvtTile.cpp \
+    $$ROOT/src/vector/VectorStyle.cpp \
+    $$ROOT/src/vector/VectorTileRenderer.cpp \
+    $$ROOT/third_party/miniz/miniz.c \
     $$ROOT/src/io/GeoFile.cpp \
     $$ROOT/src/io/VectorFormats.cpp \
     $$ROOT/src/geo/TrackReplay.cpp \
@@ -52,6 +57,10 @@ SOURCES += \
     $$ROOT/src/dem/ElevationSources.cpp \
     $$ROOT/src/dem/ElevationAnalysis.cpp \
     $$ROOT/src/dem/Contours.cpp
+
+# miniz (dominio publico) infla las teselas vectoriales en gzip sin zlib
+# externa, igual que en fill_hgt.
+INCLUDEPATH += $$ROOT/third_party/miniz
 
 # Cabeceras con Q_OBJECT (para el MOC).
 HEADERS += \
