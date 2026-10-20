@@ -143,6 +143,12 @@ Solo hay que hacerlo la primera vez, o cuando cambie la librería.
 
 Si quieres instalarla en otra carpeta, escribe `qmake ..\qmake\libmapa\libmapa.pro PREFIX=D:/otra/carpeta`.
 
+> **libtelemetria.** Ese mismo `libmapa.pro` compila e instala también `libtelemetria` (el decodificador de
+> NMEA 0183 y AIS, aparte de libmapa) en la misma carpeta: `telemetria.pri`, `include\telemetria\*.h` y
+> `lib\libtelemetria.a`. Una app que la use añade una línea más a su `.pro`:
+> `include(C:/libmapa/qt$${QT_MAJOR_VERSION}/telemetria.pri)`. Con CMake, `cmake --install` deja las dos y
+> `find_package(libtelemetria)` la encuentra. Si la app lee la red (como `cliente_telemetria`), necesita `QT += network`.
+
 > **¿Tu aplicación usa CMake en vez de qmake?** Entonces compila e instala la
 > librería con CMake (`cmake --install <build> --prefix C:/libmapa/qt6`) y en
 > tu `CMakeLists.txt` usa `find_package(libmapa)`. Ver el README, apartado

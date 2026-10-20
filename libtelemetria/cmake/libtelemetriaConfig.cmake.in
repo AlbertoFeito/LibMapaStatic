@@ -1,0 +1,17 @@
+# libtelemetriaConfig.cmake - lo lee find_package(libtelemetria) en el proyecto que
+# usa la biblioteca. Busca el MISMO Qt con el que se compilo y carga el target
+# telemetria::telemetria.
+#
+#     find_package(libtelemetria REQUIRED)
+#     target_link_libraries(miapp PRIVATE telemetria::telemetria)
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# La biblioteca es estatica: el ejecutable final enlaza tambien Qt Core.
+find_dependency(Qt@QT_VERSION_MAJOR@ COMPONENTS Core)
+
+include("${CMAKE_CURRENT_LIST_DIR}/libtelemetriaTargets.cmake")
+
+check_required_components(libtelemetria)

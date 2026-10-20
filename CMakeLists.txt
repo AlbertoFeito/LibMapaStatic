@@ -545,3 +545,18 @@ if(LIBMAPA_INSTALL)
     install(FILES mapa.example.json herramientas/desplegar.bat
         DESTINATION ${CMAKE_INSTALL_DATADIR}/libmapa)
 endif()
+
+# -----------------------------------------------------------------------------
+# libtelemetria: decodificador de NMEA 0183 y AIS (carpeta libtelemetria/).
+#
+# Biblioteca aparte: no depende de libmapa ni de la interfaz, solo de Qt Core.
+# Se compila (y sus tests) con el resto y se instala en el mismo prefijo, para que
+# una aplicacion haga find_package(libmapa) y find_package(libtelemetria) bajo una
+# sola instalacion. Tambien se compila sola (cmake -S libtelemetria).
+# -----------------------------------------------------------------------------
+option(LIBMAPA_BUILD_TELEMETRIA "Compilar libtelemetria (decodificador NMEA/AIS)" ON)
+if(LIBMAPA_BUILD_TELEMETRIA)
+    set(LIBTELEMETRIA_BUILD_TESTS ${LIBMAPA_BUILD_TESTS})
+    set(LIBTELEMETRIA_INSTALL ${LIBMAPA_INSTALL})
+    add_subdirectory(libtelemetria)
+endif()
