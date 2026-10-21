@@ -1,5 +1,9 @@
 #include "tiles/MBTiles.h"
 
+#include "vector/Gzip.h"
+#include "vector/MvtTile.h"
+
+#include <QFile>
 #include <QFileInfo>
 #include <QImage>
 // Qt5 solo DECLARA QVariant en qsqlquery.h (Qt6 si lo incluye), asi que hay que
@@ -108,6 +112,55 @@ bool looksLikeRaster(const QByteArray &b)
            || b.startsWith("GIF8");
 }
 
+// Entero big-endian de 16 o 32 bits de la cabecera SQLite.
+quint32 beUInt(const QByteArray &b, int at, int bytes)
+{
+    quint32 v = 0;
+    for (int i = 0; i < bytes; ++i)
+        v = (v << 8) | quint8(b[at + i]);
+    return v;
+}
+
+// Comprueba, sin abrir la base, que el fichero sea un SQLite ENTERO: la firma de
+// los 16 primeros bytes y que mida lo que dice su cabecera (tamaño de página ×
+// número de páginas). Un MBTiles grande suele bajarse en partes y unirse a mano;
+// si falta una parte, se cortó la descarga o el servidor devolvió una página web,
+// SQLite lo abre igual y solo «no encuentra la tabla», un mensaje que despista.
+// Vacío si está bien (o si la cabecera no permite saberlo).
+QString sqliteFileProblem(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return QString();                     // lo dirá la apertura con su motivo
+    const qint64 size = f.size();
+    const QByteArray head = f.read(100);
+    if (head.size() < 100 || !head.startsWith(QByteArray("SQLite format 3\0", 16))) {
+        const QString start = QString::fromLatin1(head.left(15)).simplified();
+        return QStringLiteral("%1 no es una base de datos SQLite (%2 bytes; empieza por «%3»)%4. "
+                              "¿Descarga fallida? Vuelve a descargarlo y comprueba su MD5.")
+            .arg(path).arg(size).arg(start,
+                                     head.trimmed().startsWith('<')
+                                         ? QStringLiteral(": parece una página web, no el fichero")
+                                         : QString());
+    }
+    quint64 pageSize = beUInt(head, 16, 2);
+    if (pageSize == 1)
+        pageSize = 65536;
+    const quint32 pages = beUInt(head, 28, 4);
+    // El número de páginas solo es fiable si «version-valid-for» coincide con el
+    // contador de cambios (ficheros escritos por SQLite 3.7.0 o posterior).
+    if (pages == 0 || beUInt(head, 92, 4) != beUInt(head, 24, 4))
+        return QString();
+    const quint64 expected = pageSize * pages;
+    if (quint64(size) < expected)
+        return QStringLiteral("%1 está INCOMPLETO: mide %2 bytes y debería medir %3 (faltan %4 MB). "
+                              "¿Falta alguna parte al unirlo o se cortó la descarga? Vuelve a "
+                              "descargarlo y comprueba su MD5.")
+            .arg(path).arg(size).arg(expected)
+            .arg(double(expected - quint64(size)) / (1024.0 * 1024.0), 0, 'f', 1);
+    return QString();
+}
+
 } // namespace
 
 // Ver la cabecera: la extension .mbtiles, sin distinguir mayusculas.
@@ -138,6 +191,9 @@ bool describe(TileDataset &ds, const QJsonObject &given, QString *error)
 {
     if (!QFileInfo::exists(ds.filePath))
         return fail(error, QStringLiteral("No existe %1").arg(ds.filePath));
+    const QString broken = sqliteFileProblem(ds.filePath);
+    if (!broken.isEmpty())
+        return fail(error, broken);
 
     TempConnection conn(ds.filePath);
     if (!conn.isOpen())
@@ -157,9 +213,7 @@ bool describe(TileDataset &ds, const QJsonObject &given, QString *error)
 
     const QHash<QString, QString> meta = readMetadata(db);
     const QString format = meta.value(QStringLiteral("format")).toLower();
-    if (format == QLatin1String("pbf") || format == QLatin1String("mvt"))
-        return fail(error, QStringLiteral("%1 contiene teselas vectoriales (%2): solo se admiten "
-                                          "MBTiles ráster (png/jpg/webp)").arg(ds.filePath, format));
+    const bool declaredVector = format == QLatin1String("pbf") || format == QLatin1String("mvt");
 
     // Rango de zooms: lo declarado, o lo que hay.
     bool okMin = false, okMax = false;
@@ -175,18 +229,30 @@ bool describe(TileDataset &ds, const QJsonObject &given, QString *error)
         }
     }
 
-    // Una tesela real: confirma que es ráster y da el lado en píxeles.
+    // Una tesela real: dice si es ráster o vectorial y, si es imagen, su lado en
+    // píxeles. Una vectorial tiene que decodificarse como MVT de verdad: el
+    // `format` de metadata solo no basta (hay ficheros que mienten en los dos
+    // sentidos), y así un MBTiles roto se rechaza aquí con su motivo en vez de
+    // dejar el mapa en blanco.
     int tileSize = 0;
+    bool vector = false;
     QString imageProblem;
     q.prepare(QStringLiteral("SELECT tile_data FROM tiles WHERE zoom_level = :z LIMIT 1"));
     q.bindValue(QStringLiteral(":z"), maxZ);
     if (q.exec() && q.next()) {
         const QByteArray bytes = q.value(0).toByteArray();
-        if (bytes.startsWith("\x1f\x8b"))
-            return fail(error, QStringLiteral("%1 contiene teselas vectoriales (gzip/pbf): solo se "
-                                              "admiten MBTiles ráster").arg(ds.filePath));
-        const QImage img = QImage::fromData(bytes);
-        if (!img.isNull())
+        if (declaredVector || Gzip::isGzip(bytes)) {
+            mvt::Tile tile;
+            QString motivo;
+            const bool decoded = !looksLikeRaster(bytes) && mvt::decode(bytes, &tile, &motivo);
+            if (!decoded || (tile.layers.isEmpty() && !declaredVector))
+                return fail(error, QStringLiteral("%1 dice contener teselas vectoriales (%2) pero no se "
+                                                  "pueden decodificar como MVT: %3")
+                                       .arg(ds.filePath,
+                                            format.isEmpty() ? QStringLiteral("gzip") : format,
+                                            motivo.isEmpty() ? QStringLiteral("son imágenes") : motivo));
+            vector = true;
+        } else if (const QImage img = QImage::fromData(bytes); !img.isNull())
             tileSize = img.width();
         else if (looksLikeRaster(bytes))
             imageProblem = QStringLiteral("Qt no puede decodificar las teselas de %1 (¿falta el plugin "
@@ -208,6 +274,10 @@ bool describe(TileDataset &ds, const QJsonObject &given, QString *error)
         ds.recommendedMaxZoom = ds.maxZoom;
     if (free("tileSize") && tileSize > 0)
         ds.tileSize = tileSize;
+    // Las vectoriales no tienen lado propio: se pintan al de la rejilla (256 px
+    // por defecto), así la escala coincide con la de cualquier otra capa base.
+    if (free("vector"))
+        ds.vector = vector;
     if (free("scheme") && meta.value(QStringLiteral("scheme")).compare(QLatin1String("xyz"),
                                                                         Qt::CaseInsensitive) == 0)
         ds.scheme = TileScheme::XYZ;

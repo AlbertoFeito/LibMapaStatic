@@ -12,7 +12,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - Qt 5.14 / 5.15 / 6.x, MinGW / MSVC / GCC
 - QCustomPlot como motor de dibujo, encapsulado: **no aparece en la cabecera pública**
 - **Sin conexión**: todos los datos (teselas, elevación, capas fijas) van en un **paquete de datos** local, una carpeta con su manifiesto `mapa.json`. Internet solo se usa en las herramientas que preparan ese paquete
-- 30 tests (27 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
+- 31 tests (28 sin QCustomPlot), sin avisos del compilador con `-Wall -Wextra -Wconversion -Wold-style-cast`
 - Descarga las teselas que faltan de una fuente XYZ sin clave (`fill_tiles` / `fill_map`), reanudable, en paralelo, por rectángulo o polígono y con estimación de tamaño
 - Elevación del terreno desde ficheros SRTM `.hgt`, una base de datos `.sqlitedb` empaquetable **o GeoTIFF** (un fichero o una carpeta; cota bajo el cursor en `fill_map`)
 - Entidades (puntos/líneas/polígonos) con **persistencia automática**: `MapConfig.featuresDbFile` guarda lo dibujado y lo recarga al abrir (con un paquete y sin `featuresDbFile` se usa el del paquete). Para **guardado explícito** (cargar/guardar solo a mano), `MapConfig.autosaveFeatures = false`
@@ -31,6 +31,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Coordenadas UTM y MGRS** (`Coordinates.h`): conversión y formato en decimal, GMS, UTM y MGRS (al milímetro frente a PROJ), lectura de lo que escribe una persona en cualquiera de ellos, y cuadrícula UTM (`setGraticuleMode`)
 - **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión. El historial de los objetivos sale a **GPX con la hora de cada punto** (`exportTargetHistory`, releíble con `parseGpxTracks`)
 - **Exportar la vista** a imagen o PDF (`exportView`, `renderImage`): el mapa tal cual se ve, con título, pie (extensión, fecha UTC, atribución) y, en PDF, vectorial y con la escala de impresión 1:N
+- **MBTiles vectoriales (pbf / Mapbox Vector Tile)**: un `.mbtiles` de OpenMapTiles (como el de Cuba, z0-16) entra como capa base igual que uno ráster —por `datasets.json`, `mapa.json` o `addBaseLayer`—, sin conexión y sin dependencias nuevas. La librería decodifica cada tesela (gzip con miniz, protobuf propio) y la **pinta con un estilo** en el hilo de carga, en paralelo; caché, respaldo, cobertura y cambio de capa no notan la diferencia. Trae un estilo para el esquema OpenMapTiles (agua, usos del suelo, edificios, vías por categoría, límites, nombres de lugares) y admite uno propio en JSON (`"vectorStyle"`). Ver «MBTiles vectoriales» más abajo
 - **Añadir una capa base en caliente**: `MapWidget::addBaseLayer(fichero)` mete un `.mbtiles` o una base de teselas `.sqlitedb` como capa nueva con el mapa ya abierto (sin editar `datasets.json` ni reiniciar), y devuelve su id para activarla con `setBaseLayerId`. Detecta sola el esquema y el zoom, como `probe_db`. La demo lo trae en **Datos → Añadir capa base (teselas)…**
 - **Búsqueda de lugares sin conexión**: `searchPlaces("guantanamo")` devuelve ciudades, pueblos, aeropuertos, bahías, cabos, picos… ordenados (los que empiezan por lo escrito, y la ciudad antes que la aldea), sin distinguir tildes ni mayúsculas; `goToPlace` centra el mapa con el zoom que corresponde al tipo. El índice es un `lugares.sqlitedb` (`"places"` en `mapa.json` o `MapConfig::placesDbFile`) que genera `osm_lugares_a_sqlitedb.py` desde un export de OpenStreetMap. La demo lo usa en un campo de la barra (Ctrl+K)
 - **Medir superficie en pantalla** (`MapTool::MeasureArea`): se marca un polígono clic a clic y la superficie y el perímetro salen en vivo junto al cursor; al cerrarlo, `areaMeasured` da la medida
@@ -363,8 +364,7 @@ ráster PNG/JPG/WebP) sin tocar código, y `probe_db` los **detecta solos** —s
 necesidad de `--ref-bbox`—: reconoce la tabla/vista `tiles` (`zoom_level`,
 `tile_column`, `tile_row`, `tile_data`), fija el eje Y en **TMS** y el zoom
 estándar (`storedZ = logicalZ`) por especificación, y toma la extensión de la
-tabla `metadata`. Los MBTiles **vectoriales** (MVT/PBF) no se dibujan: la
-librería pinta teselas de imagen, no vectoriales (`probe_db` lo avisa).
+tabla `metadata`. Los MBTiles **vectoriales** (MVT/PBF) también: ver más abajo.
 
 ```bash
 probe_db --id mundo --file mapa.mbtiles --out datasets.json
@@ -403,6 +403,59 @@ a mano manda sobre lo detectado, y lo que ya tenías (bloques generados por
 Si el MBTiles tiene huecos grandes, pon `"typicalFill"` (p. ej. `0.4`) para que
 la escalera de respaldo se precargue.
 
+### MBTiles vectoriales (pbf)
+
+Un MBTiles con `format = pbf` (teselas **Mapbox Vector Tile**, normalmente en
+gzip: OpenMapTiles, planetiler, tippecanoe) se usa exactamente igual que uno
+ráster, con la misma entrada mínima:
+
+```json
+{ "id": "cuba", "filePath": "cuba-osm-z16.mbtiles" }
+```
+
+Al cargarlo, `MBTiles::describe` decodifica una tesela real, marca la capa como
+vectorial (`"vector": true`) y el cargador de teselas, en su hilo, la **pinta**
+a 256 px con un estilo en vez de leer un PNG. El resto del motor no cambia. Un
+fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motivo.
+
+- **Estilo por defecto:** el del esquema OpenMapTiles (colores tipo OSM Bright):
+  agua, bosques y usos del suelo, parques, edificios (z13+), vías por categoría
+  con borde, ferrocarril, límites por `admin_level`, aeropuertos y rótulos de
+  lugares, aguas y POI (`name:es`, `name` o `name:latin`, el primero que haya).
+- **Estilo propio:** `"vectorStyle": "estilo.json"` en la entrada del dataset
+  (relativo al JSON; viaja con el paquete). Formato sencillo: fondo y una lista de
+  reglas por capa con filtro, zooms, relleno, trazo, grosor por zoom y rótulo.
+  `docs/estilo_vectorial.json` es el estilo por defecto, para copiarlo y retocarlo
+  (`vector_tile --print-style` lo vuelca igual). No es el formato de Mapbox GL.
+- **Rótulos:** cada tesela se pinta por separado, así que solo se rotulan los
+  puntos que caen dentro de la tesela y el texto se desplaza para caber entero:
+  ningún nombre sale cortado ni repetido, a cambio de omitir algunos en los bordes.
+  Los nombres de calles (rótulos a lo largo de líneas) no se dibujan.
+- **Comprobar sin abrir la demo:** `vector_tile --mbtiles f.mbtiles --info`
+  (capas, claves y clases de la tesela de un punto) y `--out vista.png` (pinta
+  una vista con el estilo por defecto o `--style`). `check_data` reconoce las
+  capas vectoriales (`imagenes mvt (gzip)`).
+
+- **El mar:** algunos MBTiles **no traen polígonos de océano** (el de Cuba de
+  OpenMapTiles solo trae lagos y ríos), y entonces el mar sale del color de fondo,
+  igual que la tierra. Para pintarlo, se le da una **máscara de tierra**: la BD de
+  costa que hace `herramientas/osm_costa_a_sqlitedb.py` (la misma de
+  `dem_to_hillshade --water-mask` y de la capa «costa exacta»). Con ella, el fondo
+  de cada tesela es el mar (`"sea"` del estilo) y la tierra va encima (`"background"`):
+
+  ```json
+  { "id": "cuba", "filePath": "cuba-osm.mbtiles",
+    "landMask": "cuba_tierra.sqlitedb", "landLayer": "tierra" }
+  ```
+
+  `"landLayer"` es opcional (por defecto, todos los polígonos de la BD). Rutas
+  relativas al JSON; viaja con el paquete y `check_data` avisa si falta.
+
+El MBTiles de Cuba (`descargar-mbtiles.sh` / `.bat`: `cuba-osm-z16.mbtiles`,
+360 MB, z0-16, y `cuba-osm.mbtiles`, 913 MB, z0-17) no trae océano: ver la máscara
+de tierra arriba. Pintar una tesela z14 de La Habana
+(~8600 edificios) cuesta unos 50-130 ms; por eso se reparten entre varios hilos.
+
 ## Herramientas
 
 | | |
@@ -412,6 +465,7 @@ la escalera de respaldo se precargue.
 | `check_data` | Comprueba un paquete de datos antes de distribuirlo: ficheros, que abran, que sus imágenes se decodifiquen, cobertura por zoom en la zona y tamaño total |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
+| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style`; con `--land-mask` pinta además el mar) y vuelca el estilo por defecto (`--print-style`) |
 | `geo_to_tiles` | Rasteriza un fichero vectorial `.geo` a una base de teselas, para usarlo como capa base |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
@@ -751,6 +805,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 28 | Medir superficie y perímetro en pantalla (`MapTool::MeasureArea`, `areaMeasured`) |
 | 29 | Importar un fichero = una sola operación de deshacer; textos de Qt en español en la demo; filtro de objetivos (`setTargetFilter`) |
 | 30 | Agrupar objetivos al alejar el zoom (`setTargetClustering`, `targetClusterClicked`) |
+| 31 | MBTiles **vectoriales** (pbf/MVT, OpenMapTiles) como capa base: decodificador propio, estilo por defecto o JSON propio, pintado en paralelo, `vector_tile` |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

@@ -6586,3 +6586,135 @@ con el encargo de terminarlo; esto se hizo sin revisión suya. La biblioteca **n
   ejecutado nunca allí. El pseudoterminal de Linux no es un puerto USB: p. ej. no ejercita el desenchufado (`ResourceError`) ni los errores de velocidad.
 - Qt Serial Port **del PC del usuario**: si su kit no lo trae, el cliente compilará sin serie (por diseño), pero esa rama no se ha compilado aquí.
 - Formatos serie distintos de 8N1 y control de flujo; TCP servidor, TLS y autenticación.
+
+## 163. MBTiles vectoriales (pbf / Mapbox Vector Tile) como capa base
+
+El usuario pasó dos scripts (`descargar-mbtiles.sh` / `.bat`) que bajan el mapa de Cuba de **OpenMapTiles** en MBTiles **vectorial**:
+`cuba-osm-z16.mbtiles` (z0-16, 360 MB) y `cuba-osm.mbtiles` (913 MB), y pidió «preparar la librería para trabajar con mbtiles pbf
+vectoriales… no se puede dañar lo que ya existe, es un agrego más». Hasta ahora `MBTiles::describe` los **rechazaba** («solo se admiten
+MBTiles ráster») y `probe_db` avisaba de que no se mostrarían.
+
+### Qué se decidió y por qué
+
+- **Pintar la tesela vectorial a imagen en el hilo de carga, y nada más.** El motor entero (caché por capa, escalera de respaldo,
+  planificador, cobertura, `addBaseLayer`, cambio de capa) trabaja con `QImage` de 256 px. Si el `TileLoader` entrega una imagen, nada de
+  eso se entera de que la fuente es vectorial: el cambio queda acotado a **dónde se decodifica** (`TileLoader::load`), y una capa con
+  `vector = false` —todas las anteriores— sigue el camino de siempre línea a línea. Dibujar la geometría directamente en el `MapView`
+  (como `FeatureLayer`) habría dado zoom continuo sin escalones, pero obligaba a duplicar caché, respaldo y planificación: mucho riesgo
+  para un «agregado».
+- **Sin dependencias nuevas.** MVT es protobuf en gzip. libprotobuf y zlib complicarían el despliegue con MinGW (`desplegar.bat`,
+  `desplegar_qt5.bat`, qmake). El protobuf de MVT solo usa varints, enteros fijos y bloques con longitud: el lector propio
+  (`src/vector/MvtTile.cpp`) son unas 200 líneas. El gzip lo infla **miniz**, que ya estaba en el repo para `fill_hgt`; ahora también va
+  dentro de `libmapa_core` (CMake y `core.pro`).
+- **Estilo propio y sencillo, no Mapbox GL.** El formato de estilos de Mapbox GL exige expresiones, sprites y glifos remotos; para pintar
+  sin conexión con `QPainter` basta una lista de reglas en orden (capa, filtro por propiedad, zooms, relleno, trazo con grosor por zoom,
+  borde, discontinuo, rótulo). El **estilo por defecto** es para el esquema OpenMapTiles (colores tipo OSM Bright) y va embebido como JSON,
+  que es a la vez el ejemplo del formato (`docs/estilo_vectorial.json`, `vector_tile --print-style`). Uno propio se pone con
+  `"vectorStyle"` en el dataset (relativo al JSON, viaja con el paquete); si no se puede leer, se avisa y se usa el de por defecto: un
+  estilo roto no deja el mapa en blanco.
+- **Detección por contenido, no solo por metadata.** `describe` decodifica una tesela real: si es MVT marca `TileDataset::vector`; si
+  dice `pbf` pero trae otra cosa (p. ej. PNG) se sigue rechazando con su motivo. Así siguen pasando sin tocarlos los casos de
+  `tst_mbtiles::rejectsWhatItCannotUse`.
+- **Rótulos sin cortes.** Cada tesela se pinta sola, y un texto que cruza el borde saldría cortado por la vecina. Solo se rotulan los
+  puntos cuyo ancla cae **dentro** de la tesela (la vecina no lo repite aunque lo traiga en su margen) y el texto se desliza lo justo para
+  caber entero; los que chocan con otro se omiten. Se pierden algunos nombres junto a los bordes, a cambio de no ver nunca medio nombre.
+  Los rótulos a lo largo de líneas (calles) no se dibujan.
+- **En paralelo.** Medido con el fichero real: una tesela z14 del centro de La Habana (140 KB en gzip, ~8600 edificios) tarda 50-130 ms;
+  una pantalla de 20 teselas, 1,5 s en un hilo. `TileLoader::renderVector` las reparte entre su hilo y un `QThreadPool` propio
+  (núcleos − 2; no el global, que puede ser de la app) y abandona si la petición caduca: 35 teselas z15 en ~350 ms en el contenedor.
+- **`check_data`** decodificaba una tesela de muestra como imagen y habría dado un error falso («falta el plugin de imagen»); ahora una
+  capa vectorial se comprueba como MVT y sale «imagenes mvt (gzip)».
+
+### Un fallo encontrado con el dato real
+
+`tinfl_decompress_mem_to_heap` (la función de miniz que usa `fill_hgt`) devuelve NULL también cuando el resultado tiene **cero bytes**, y
+el MBTiles de Cuba está lleno de teselas vacías (gzip de nada: mar abierto). La primera prueba con el fichero real lo rechazó entero por
+«tesela comprimida corrupta». Se cambió a `tinfl_decompress_mem_to_callback` y esa tesela vacía, tal cual sale del fichero, es ahora un caso
+del test.
+
+### Herramienta nueva: `vector_tile`
+
+`--info` (capas, entidades, claves y clases de la tesela de un punto), `--out` (pinta una vista a PNG, con `--style` opcional, y dice lo
+que tarda cada tesela) y `--print-style`. Solo núcleo, se instala con las demás.
+
+### Comprobado
+
+- **Referencia independiente:** los fixtures oficiales de `mapbox/mvt-fixtures` (CC0, `tests/data/mvt/`): punto, línea, polígono,
+  multipunto, multilínea, multipolígono con hueco, capa vacía y los siete tipos de `Value`, con el resultado que da la especificación; gzip
+  y zlib comprimidos con Python. Además, ida y vuelta con teselas fabricadas en el test (estilo, píxeles, rótulos en el borde, MBTiles →
+  `TileLoader` con estilo por defecto, propio y roto, `datasets.json` y paquete + `PackageCheck`). `tst_vectortiles`: 16 casos.
+- **Fichero real** (`cuba-osm-z16.mbtiles`, MD5 `b9f78193…` como dice el script): se detecta vectorial z0-16; `vector_tile --info` lee
+  sus 14 capas; vistas de La Habana a z7, z11, z14 y z16 revisadas a ojo; `render_map` con el `MapWidget` real; `check_data` sobre un
+  paquete con él: 0 errores.
+- `render_map` deja en respaldo las celdas del borde de la imagen aunque las teselas ya hayan llegado; **pasa igual con un MBTiles ráster**
+  hecho de la misma zona, así que es algo previo de `render_map` sin ventana, no de lo vectorial.
+- Qt 6.4 y Qt 5.15 (Linux, GCC): compila sin avisos nuevos; `core.pro` con qmake6 compila; contrato de instalación
+  (`probar_instalacion.sh`) en verde.
+
+### Sin probar / pendiente
+
+- **El PC del usuario** (Qt 6.11 MinGW, Windows): ni compilado ni visto allí. El dibujo de texto desde varios hilos a la vez es soportado
+  por Qt sobre `QImage`, pero en Windows no se ha ejecutado.
+- `cuba-osm.mbtiles` (z17, 913 MB): no se descargó; debería comportarse igual.
+- **Este MBTiles no trae polígonos de océano** (y su `metadata.bounds` declara el este en 0°): el mar sale con el color de fondo. Es del
+  dato, no del dibujo; un estilo propio puede cambiar el fondo.
+- Más allá del zoom máximo del fichero se usa el respaldo de siempre (la tesela padre escalada, borrosa); sobre-zoom vectorial nítido
+  (pintar una parte de la tesela padre a más escala) queda como mejora.
+
+**Estado: 31 tests (28 sin QCustomPlot), Qt 6.4 y Qt 5.15.**
+
+### 163 (ajuste). «La tabla `tiles` no tiene la columna zoom_level» con los ficheros recién descargados
+
+Primera prueba del usuario en su PC: `vector_tile --info` sobre los dos MBTiles bajados con el `.bat` respondió «no es un MBTiles: la tabla
+`tiles` no tiene la columna zoom_level». Ese texto despista: es lo que sale cuando el fichero **no es un SQLite entero** (SQLite lo abre sin
+quejarse y solo «no ve» la tabla). Se reprodujo aquí con un `cuba-osm-z16.mbtiles` cortado a 5 MB y con una página HTML guardada como
+`.mbtiles`: los dos daban exactamente ese mensaje. Los MBTiles grandes se bajan en partes y se unen con `copy /b`: si falta una parte, se cortó
+una descarga o el servidor devolvió una página web, el resultado es justo eso.
+
+`MBTiles::describe` mira ahora, antes de abrir la base, la firma `SQLite format 3` y que el fichero mida lo que dice su cabecera (tamaño de
+página × número de páginas; para el de Cuba, 4096 × 87849 = 359 829 504 bytes). Si no, lo dice: «no es una base de datos SQLite… parece una
+página web» o «está INCOMPLETO: mide X bytes y debería medir Y (faltan Z MB)», con la sugerencia de volver a descargar y comprobar el MD5.
+Vale para cualquier MBTiles, ráster o vectorial. Tres casos más en `tst_mbtiles::rejectsWhatItCannotUse` (texto, HTML y un MBTiles válido
+cortado a la mitad; el entero sigue sin queja). **Sin confirmar** que esa sea la causa en el PC del usuario: depende de lo que digan el
+tamaño y el MD5 de sus ficheros.
+
+## 164. El mar en las capas vectoriales: máscara de tierra (`landMask`)
+
+El usuario, ya con `cuba-osm.mbtiles` (z17) en su `mapa.json`: «agrega color al mar». El MBTiles de Cuba **no trae océano en
+ningún zoom** (`vector_tile --info` en z4-z12, sobre tierra y en mar abierto: la capa `water` solo tiene `lake` y `river`; las teselas
+de mar abierto faltan o son gzip vacíos). No hay nada en el fichero que diga dónde acaba la tierra. Los «triángulos» de agua de las vistas
+generales son golfos etiquetados como lago. Cambiar el color de fondo tampoco sirve: pintaría de azul también la tierra.
+
+### Qué se decidió y por qué
+
+- **Usar la costa que el usuario ya tiene.** `herramientas/osm_costa_a_sqlitedb.py` (§94) genera `cuba_tierra.sqlitedb`: la costa de
+  OSM cosida en polígonos de tierra, la misma BD que `dem_to_hillshade --water-mask` y la capa «Costa exacta» de su paquete. Es la
+  única fuente sin conexión de «esto es tierra» que hay en el proyecto, y con el detalle de OSM, igual que el MBTiles. La alternativa
+  (los polígonos de agua de osmdata.openstreetmap.de) son cientos de MB más y un formato nuevo.
+- **`LandMask` (`src/vector/`)**: lee los polígonos con `VectorRepository` (como `dem_to_hillshade`), los guarda en Mercator normalizado
+  con su recuadro y, por tesela, rellena la tierra con la regla **par-impar** (las lagunas y bahías cerradas quedan como agua sin orientar
+  anillos). El renderizador, si tiene máscara, rellena el fondo con `"sea"` del estilo, pinta la tierra con `"background"` y después las
+  reglas de siempre: los lagos, parques y usos del suelo quedan encima.
+- **Que no cueste.** El anillo de la isla grande tiene ~100 000 vértices y toca casi todas las teselas. En vez de pasárselo entero a
+  `QPainter`, `paint` descarta los anillos que no tocan la tesela y los de menos de medio píxel, reduce cada **racha de puntos que queda al
+  mismo lado fuera de la tesela** a sus extremos (el tramo nuevo cae en el mismo semiplano, así que no cambia nada dentro de la tesela) y
+  quita los puntos a menos de 0,3 px. Medido con la costa real (5735 anillos, 429 676 vértices): **1-8 ms por tesela** (z7-z16), frente a
+  los 50-130 ms de pintar la tesela vectorial; cargarla, ~300 ms una vez por capa.
+- **Configuración**: `"landMask"` (y opcional `"landLayer"`) en la entrada del dataset, relativa al JSON, como `"vectorStyle"`; viaja
+  con el paquete (`DataPackage::files()`) y `check_data` avisa si falta (aviso, no error: el mapa se ve, sin mar). Sin `landMask`, todo
+  igual que antes. `"sea"` en el estilo (por defecto `#a5c9ea`, el del agua). `vector_tile --land-mask … [--land-layer …]`.
+- En el mapa, las teselas que el MBTiles **no tiene** (mar abierto a zoom alto) se cubren con la del nivel superior, que ya sale de mar:
+  comprobado con `render_map` a z12 frente a La Habana.
+
+### Comprobado
+
+- Costa real bajada de Overpass (la misma consulta de §94) y convertida con el script del repo: 5735 anillos, 429 676 vértices.
+  Vistas a z7, z11, z14 y z16 revisadas a ojo: mar azul, cayos, bahía de La Habana y ensenadas recortadas por la costa OSM.
+- `tst_vectortiles` (18 casos): mar, tierra y laguna en su sitio y el lago del MVT encima; sin tesela conocida, el fondo de antes; y el
+  recorte rápido pinta **lo mismo** que `QPainter` con el polígono entero (una isla dentada de 20 000 vértices que entra y sale de la
+  tesela, comparada píxel a píxel). `landMask`/`landLayer` en `datasets.json` (rutas relativas, ida y vuelta por JSON) y el aviso de
+  `check_data`.
+
+**Sin probar:** con el `cuba_tierra.sqlitedb` del usuario (el suyo tiene 5020 anillos, de otra fecha de OSM) y en su PC.
+
+**Estado: 31 tests (28 sin QCustomPlot), Qt 6.4.**

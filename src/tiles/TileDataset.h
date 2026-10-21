@@ -121,6 +121,35 @@ struct TileDataset
      */
     bool mbtiles = false;
 
+    /*!
+     * \brief true si las teselas son VECTORIALES (MVT/pbf), no imagenes.
+     *
+     * Lo detecta \c MBTiles::describe (metadata `format = pbf` y una tesela que
+     * se decodifica como MVT). El \c TileLoader las convierte entonces en imagen
+     * con \c VectorTileRenderer en vez de leerlas con QImageReader; todo lo
+     * demas (cache, respaldo, cobertura) no se entera de la diferencia.
+     */
+    bool vector = false;
+
+    /*!
+     * \brief Estilo JSON con el que se pintan las teselas vectoriales.
+     *
+     * Vacio = el estilo por defecto para el esquema OpenMapTiles. Ruta absoluta
+     * o, en datasets.json / mapa.json, relativa al propio JSON.
+     */
+    QString vectorStyleFile;
+
+    /*!
+     * \brief Mascara de tierra para pintar el MAR en una capa vectorial.
+     *
+     * BD de entidades con la tierra como poligono (la de osm_costa_a_sqlitedb.py,
+     * la misma de dem_to_hillshade --water-mask). Hace falta cuando el MBTiles no
+     * trae oceano (el de Cuba de OpenMapTiles): sin ella el mar sale del color de
+     * fondo. Vacia = sin mascara. "landMask" en el JSON, relativa a el.
+     */
+    QString vectorLandMask;
+    QString vectorLandLayer;   //!< Capa de la mascara ("landLayer"); vacia = todas.
+
     int storedZ(int logicalZ) const { return zFactor * logicalZ + zOffset; }
 
     int logicalZ(int storedZ) const

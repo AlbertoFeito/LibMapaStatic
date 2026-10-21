@@ -10,10 +10,13 @@
 #include <QHash>
 #include <QImage>
 #include <QObject>
+#include <QThreadPool>
 #include <QVector>
 #include <memory>
 
 namespace libmapa {
+
+class VectorTileRenderer;
 
 //! Una tesela ya leida y decodificada, lista para la interfaz.
 struct LoadedTile
@@ -50,7 +53,9 @@ struct TileRequest
  *
  * Dos decisiones importantes:
  *
- * 1. Se decodifica AQUI, en el hilo trabajador, y se entrega QImage. QPixmap
+ * 1. Se decodifica AQUI, en el hilo trabajador, y se entrega QImage. Las
+ *    teselas de un dataset vectorial (MVT) no se decodifican como imagen: se
+ *    pintan aqui mismo con VectorTileRenderer, y el resto no nota la diferencia. QPixmap
  *    solo puede construirse en el hilo de la GUI, asi que decodificar alli
  *    devolveria el problema al sitio del que se queria sacar. La conversion
  *    QImage -> QPixmap se hace al montar el item y es mucho mas barata que
@@ -106,12 +111,21 @@ signals:
 
 private:
     RMapsTileSource *sourceFor(const QString &datasetId);
+    VectorTileRenderer *rendererFor(const TileDataset &dataset);
+    bool renderVector(const QHash<TileKey, QByteArray> &raw, const TileDataset &ds,
+                      const VectorTileRenderer &renderer, quint64 requestId,
+                      QVector<LoadedTile> *loaded, int *failed);
     bool isStale(quint64 requestId) const;
 
     QHash<QString, TileDataset> m_datasets;
     // shared_ptr y no unique_ptr: QHash exige que el valor sea copiable
     // para poder desasociarse (implicit sharing).
     QHash<QString, std::shared_ptr<RMapsTileSource>> m_sources;
+    // Uno por dataset vectorial, con su estilo ya leido (solo se usan aqui, en
+    // el hilo trabajador).
+    QHash<QString, std::shared_ptr<VectorTileRenderer>> m_renderers;
+    // Hilos que ayudan a pintar teselas vectoriales; se crea al primer uso.
+    std::unique_ptr<QThreadPool> m_renderPool;
     QAtomicInteger<quint64> m_newestRequest{0};
 };
 

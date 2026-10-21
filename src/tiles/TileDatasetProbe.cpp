@@ -741,9 +741,12 @@ std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
         const QHash<QString, QString> meta = readMetadata(db);
         const QString formato = meta.value(QStringLiteral("format")).toLower();
         if (formato == QLatin1String("pbf") || formato == QLatin1String("mvt")) {
+            // Las teselas son MVT: el TileLoader las pinta con un estilo
+            // (VectorTileRenderer), a 256 px como cualquier otra capa base.
+            result.dataset.vector = true;
             result.warnings << QStringLiteral(
-                "MBTiles VECTORIAL (format=%1): la libreria dibuja teselas de "
-                "imagen (PNG/JPG/WebP), no vectoriales; esta BD no se mostrara.")
+                "MBTiles VECTORIAL (format=%1): se pinta con el estilo por defecto "
+                "de OpenMapTiles o con el de \"vectorStyle\" en datasets.json.")
                 .arg(formato);
         }
         // Si no se paso --ref-bbox, se toma la extension de 'metadata.bounds'
@@ -767,7 +770,8 @@ std::optional<ProbeResult> TileDatasetProbe::probe(const QString &filePath,
         return std::nullopt;
 
     detectScheme(db, result.dataset, result, effRef, mbtiles);
-    detectTileSize(db, result.dataset, result);
+    if (!result.dataset.vector)          // una tesela MVT no tiene lado en pixeles
+        detectTileSize(db, result.dataset, result);
 
     return result;
 }
