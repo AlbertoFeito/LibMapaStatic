@@ -216,6 +216,24 @@ public:
     bool setBaseLayerGroupVisible(const QString &group, bool visible,
                                   const QString &layerId = QString());
 
+    /*!
+     * \brief «Que hay aqui»: las entidades del MBTiles vectorial bajo un punto.
+     *
+     * Lee la tesela vectorial que contiene \a position (del overlay hibrido y de
+     * la capa base, si son vectoriales) y devuelve las entidades a menos de
+     * \a radiusMeters: calles, edificios, parques, lugares... con sus atributos
+     * (tipo de via, superficie, altura del edificio, nombre...). Primero los
+     * poligonos que contienen el punto y luego por cercania; si hay overlay, sus
+     * entidades van antes que las de la base.
+     *
+     * \param radiusMeters  radio de busqueda; negativo = unos 8 pixeles al zoom actual.
+     * \return vacio si ninguna capa visible es vectorial o no hay nada cerca.
+     *         Bloquea lo que tarde una lectura de SQLite y un decodificado: pensado
+     *         para un clic, no para llamarlo en bucle.
+     */
+    QVector<VectorFeatureInfo> vectorFeaturesAt(const QGeoCoordinate &position,
+                                                double radiusMeters = -1.0) const;
+
     // --- Mapa hibrido: overlay de teselas vectoriales --------------------
     /*!
      * \brief Pone un MBTiles vectorial (pbf) ENCIMA de la capa base, sea cual sea.

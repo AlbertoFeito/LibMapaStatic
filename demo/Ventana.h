@@ -144,6 +144,7 @@ private:
     void tooltipEnPuntero();
     bool elevacionEnUso() const;
     void mostrarTarjeta(const MapHit &hit, const QPoint &global);
+    void queHayAqui(const QGeoCoordinate &p);
     void mostrarAyudaRaton();
 
     void moverPinCoord(Pick cual, const QGeoCoordinate &g);

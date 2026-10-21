@@ -7,6 +7,7 @@
 #include <QMetaType>
 #include <QPixmap>
 #include <QString>
+#include <QVariantMap>
 #include <QVector>
 
 #include <limits>
@@ -61,6 +62,24 @@ struct BaseLayerInfo {
     int minZoom = 0;
     int maxZoom = 0;       //!< El recomendado, no el ultimo con teselas sueltas.
     bool available = false;
+};
+
+//! Una entidad del mapa vectorial bajo un punto (MapWidget::vectorFeaturesAt).
+struct VectorFeatureInfo {
+    QString layer;          //!< Capa del MBTiles: "transportation", "poi", "building"...
+    QString geometry;       //!< "point", "line" o "polygon".
+    double distanceM = 0.0; //!< Distancia al punto; 0 si cae dentro del poligono.
+    QVariantMap attributes; //!< Propiedades: "class", "name", "surface"...
+    bool fromOverlay = false; //!< true si viene del overlay (mapa hibrido), no de la base.
+
+    //! Nombre legible si lo tiene ("name", si no "name:latin" o "name_en"), o vacio.
+    QString name() const
+    {
+        for (const char *k : { "name", "name:latin", "name_en", "ref" })
+            if (!attributes.value(QLatin1String(k)).toString().isEmpty())
+                return attributes.value(QLatin1String(k)).toString();
+        return QString();
+    }
 };
 
 //! Un grupo de una capa base VECTORIAL que se puede encender o apagar (nombres de

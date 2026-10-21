@@ -15,6 +15,7 @@
 #include <QDialog>
 #include <QFrame>
 #include <QLabel>
+#include <QTextBrowser>
 #include <QPushButton>
 #include <QScreen>
 #include <QTimer>
@@ -234,6 +235,52 @@ void Ventana::mostrarTarjeta(const MapHit &hit, const QPoint &global)
     }
     tarjeta->move(pos);
     tarjeta->show();
+}
+
+// «¿Qué hay aquí?»: las calles, edificios, parques y lugares del MBTiles vectorial
+// bajo el punto, con sus atributos. Primero lo que contiene el punto y luego lo más
+// cercano; si ninguna capa visible es vectorial, o no hay nada cerca, lo dice.
+void Ventana::queHayAqui(const QGeoCoordinate &p)
+{
+    const QVector<VectorFeatureInfo> hits = m_mapa->vectorFeaturesAt(p);
+    QString html;
+    int mostrados = 0;
+    for (const VectorFeatureInfo &h : hits) {
+        if (++mostrados > 12)
+            break;
+        const QString clase = h.attributes.value(QStringLiteral("class")).toString();
+        QString titulo = h.name();
+        if (titulo.isEmpty())
+            titulo = clase.isEmpty() ? h.layer : clase;
+        const QString donde = h.distanceM < 0.5 ? tr("aquí")
+                                                : tr("a %1").arg(textoDistancia(h.distanceM));
+        html += QStringLiteral("<p><b>%1</b> <span style='color:gray'>%2 · %3 · %4%5</span><br><table>")
+                    .arg(titulo.toHtmlEscaped(), h.layer.toHtmlEscaped(), h.geometry, donde,
+                         h.fromOverlay ? tr(" · híbrido") : QString());
+        for (auto it = h.attributes.constBegin(); it != h.attributes.constEnd(); ++it) {
+            if (it.key().startsWith(QLatin1String("name:")))
+                continue;                       // traducciones del nombre: ruido
+            html += fila(it.key().toHtmlEscaped(), it.value().toString().toHtmlEscaped());
+        }
+        html += QStringLiteral("</table></p>");
+    }
+    if (html.isEmpty())
+        html = tr("<p>No hay nada vectorial cerca de este punto (hace falta un MBTiles vectorial "
+                  "como base o como capa híbrida).</p>");
+    else if (hits.size() > 12)
+        html += tr("<p>…y %1 más.</p>").arg(hits.size() - 12);
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("¿Qué hay aquí? · %1").arg(formatCoordinate(p, m_formatoCoord)));
+    auto *caja = new QVBoxLayout(&dlg);
+    auto *txt = new QTextBrowser(&dlg);
+    txt->setHtml(html);
+    txt->setMinimumSize(380, 300);
+    caja->addWidget(txt);
+    auto *cerrar = new QPushButton(tr("Cerrar"), &dlg);
+    connect(cerrar, &QPushButton::clicked, &dlg, &QDialog::accept);
+    caja->addWidget(cerrar, 0, Qt::AlignRight);
+    dlg.exec();
 }
 
 // Diálogo con todos los gestos del ratón y del teclado sobre el mapa.

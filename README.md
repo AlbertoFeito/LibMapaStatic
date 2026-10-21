@@ -457,6 +457,7 @@ fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motiv
   y `"vectorStyle": "estilo.json"` en la capa (o en `"vectorOverlay"`). El grupo
   sale como una casilla más. Los POI por tema, su búsqueda y la tarjeta al pinchar
   están aparcados en [`docs/PENDIENTES.md`](docs/PENDIENTES.md).
+- **«¿Qué hay aquí?»:** `MapWidget::vectorFeaturesAt(punto, radioMetros)` devuelve las entidades vectoriales bajo un punto (calle, edificio, lugar…) con sus atributos (`class`, `name`, `surface`, `render_height`…), del overlay híbrido y de la base. La demo lo ofrece en el menú del clic derecho; en consola, `vector_tile --mbtiles f.mbtiles --at lat,lon`.
 - **Comprobar sin abrir la demo:** `vector_tile --mbtiles f.mbtiles --info`
   (capas, claves y clases de la tesela de un punto) y `--out vista.png` (pinta
   una vista con el estilo por defecto o `--style-file`). `check_data` reconoce las
@@ -512,7 +513,7 @@ amplía su última tesela.
 | `check_data` | Comprueba un paquete de datos antes de distribuirlo: ficheros, que abran, que sus imágenes se decodifiquen, cobertura por zoom en la zona y tamaño total |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
-| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style-file`; con `--land-mask` pinta además el mar, `--hide` apaga grupos y `--hybrid` usa el estilo del mapa híbrido) y vuelca el estilo por defecto (`--print-style`) |
+| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`; qué entidades hay bajo un punto, `--at lat,lon`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style-file`; con `--land-mask` pinta además el mar, `--hide` apaga grupos y `--hybrid` usa el estilo del mapa híbrido) y vuelca el estilo por defecto (`--print-style`) |
 | `geo_to_tiles` | Rasteriza un fichero vectorial `.geo` a una base de teselas, para usarlo como capa base |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |

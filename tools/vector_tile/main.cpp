@@ -17,6 +17,11 @@
  *     apaga grupos del estilo (los lista --info). --hybrid usa el estilo del
  *     mapa hibrido (PNG con fondo transparente).
  *
+ *   vector_tile --mbtiles cuba-osm-z16.mbtiles --at 23.1383,-82.3589 [--zoom 16] [--radius 15]
+ *     «Que hay aqui»: las entidades (calles, edificios, lugares...) a menos de
+ *     --radius metros (def. 15) del punto, con sus atributos. Es lo que hace
+ *     MapWidget::vectorFeaturesAt al hacer clic.
+ *
  *   vector_tile --print-style [--hybrid] > estilo.json
  *     Vuelca el estilo por defecto (OpenMapTiles, o el hibrido), plantilla para uno propio.
  *
@@ -27,6 +32,7 @@
 #include "geo/WebMercator.h"
 #include "tiles/MBTiles.h"
 #include "tiles/RMapsTileSource.h"
+#include "vector/FeatureQuery.h"
 #include "vector/MvtTile.h"
 #include "vector/VectorStyle.h"
 #include "vector/VectorTileRenderer.h"
@@ -96,6 +102,33 @@ int printInfo(RMapsTileSource &src, double lat, double lon, int z, QTextStream &
     return 0;
 }
 
+// «Que hay aqui»: lee la tesela del punto y lista lo que hay a menos de \a radiusM.
+int printAt(RMapsTileSource &src, double lat, double lon, int z, double radiusM, QTextStream &out)
+{
+    const QPointF px = worldPixel(lat, lon, z);
+    const TileKey key{ z, int(px.x() / 256.0), int(px.y() / 256.0) };
+    mvt::Tile tile;
+    QString error;
+    if (!mvt::decode(src.fetch(key), &tile, &error)) {
+        out << "Sin tesela z" << z << " en ese punto: " << error << "\n";
+        return 1;
+    }
+    const auto hits = featurequery::query(tile, key, lat, lon, radiusM);
+    out << hits.size() << " entidades a menos de " << radiusM << " m de " << lat << "," << lon << "\n";
+    for (const featurequery::Hit &h : hits) {
+        out << "  " << h.layer << " ["
+            << (h.type == mvt::GeomType::Point ? "punto"
+                : h.type == mvt::GeomType::LineString ? "linea" : "poligono")
+            << ", " << (h.distanceM < 0.5 ? QStringLiteral("aqui")
+                                          : QStringLiteral("a %1 m").arg(h.distanceM, 0, 'f', 1)) << "]";
+        for (auto it = h.attributes.constBegin(); it != h.attributes.constEnd(); ++it)
+            if (!it.key().startsWith(QLatin1String("name:")))
+                out << " " << it.key() << "=" << it.value().toString();
+        out << "\n";
+    }
+    return 0;
+}
+
 } // namespace
 
 // Punto de entrada: lee las opciones, abre el MBTiles con el lector de siempre
@@ -140,15 +173,21 @@ int main(int argc, char *argv[])
                                    QStringLiteral("Capas y claves de la tesela del centro"));
     const QCommandLineOption oPrint(QStringLiteral("print-style"),
                                     QStringLiteral("Vuelca el estilo por defecto (JSON)"));
-    p.addOptions({ oFile, oOut, oCenter, oZoom, oSize, oStyle, oMask, oMaskLayer, oHide, oHybrid, oInfo, oPrint });
+    const QCommandLineOption oAt(QStringLiteral("at"),
+                                 QStringLiteral("Que hay en este punto (lat,lon): entidades y atributos"),
+                                 QStringLiteral("coord"));
+    const QCommandLineOption oRadius(QStringLiteral("radius"),
+                                     QStringLiteral("Radio de --at en metros"),
+                                     QStringLiteral("m"), QStringLiteral("15"));
+    p.addOptions({ oAt, oRadius, oFile, oOut, oCenter, oZoom, oSize, oStyle, oMask, oMaskLayer, oHide, oHybrid, oInfo, oPrint });
     p.process(app);
 
     if (p.isSet(oPrint)) {
         out << (p.isSet(oHybrid) ? VectorStyle::hybridJson() : VectorStyle::openMapTilesJson()) << "\n";
         return 0;
     }
-    if (!p.isSet(oFile) || (!p.isSet(oInfo) && !p.isSet(oOut))) {
-        err << "Falta --mbtiles y --info o --out. Ver --help.\n";
+    if (!p.isSet(oFile) || (!p.isSet(oInfo) && !p.isSet(oOut) && !p.isSet(oAt))) {
+        err << "Falta --mbtiles y --info, --out o --at. Ver --help.\n";
         return 2;
     }
 
@@ -173,6 +212,11 @@ int main(int argc, char *argv[])
     if (!src.open()) {
         err << "No se pudo abrir: " << src.lastError() << "\n";
         return 1;
+    }
+    if (p.isSet(oAt)) {
+        const QStringList a = p.value(oAt).split(QLatin1Char(','));
+        return printAt(src, a.value(0).toDouble(), a.value(1).toDouble(), z,
+                       p.value(oRadius).toDouble(), out);
     }
     VectorStyle style = VectorStyle::defaultFor(p.isSet(oHybrid));
     if (p.isSet(oStyle) && !VectorStyle::fromFile(p.value(oStyle), &style, &error)) {
