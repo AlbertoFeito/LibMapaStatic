@@ -13,10 +13,12 @@
  *               [--style estilo.json] [--land-mask cuba_tierra.sqlitedb [--land-layer tierra]]
  *     Pinta la vista (mosaico de teselas de 256 px) con el estilo por defecto
  *     o con el dado, y dice cuánto tarda cada tesela. Con --land-mask (la BD de
- *     costa de osm_costa_a_sqlitedb.py) pinta además el mar.
+ *     costa de osm_costa_a_sqlitedb.py) pinta además el mar. --hide poi,edificios
+ *     apaga grupos del estilo (los lista --info). --hybrid usa el estilo del
+ *     mapa hibrido (PNG con fondo transparente).
  *
- *   vector_tile --print-style > estilo.json
- *     Vuelca el estilo por defecto (OpenMapTiles), plantilla para uno propio.
+ *   vector_tile --print-style [--hybrid] > estilo.json
+ *     Vuelca el estilo por defecto (OpenMapTiles, o el hibrido), plantilla para uno propio.
  *
  * Los rótulos necesitan QGuiApplication: en un servidor sin pantalla se ejecuta
  * con QT_QPA_PLATFORM=offscreen.
@@ -33,6 +35,7 @@
 #include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QPainter>
+#include <QSet>
 #include <QTextStream>
 
 #include <cmath>
@@ -124,15 +127,22 @@ int main(int argc, char *argv[])
     const QCommandLineOption oMaskLayer(QStringLiteral("land-layer"),
                                         QStringLiteral("Capa de la mascara (def. todas)"),
                                         QStringLiteral("capa"));
+    const QCommandLineOption oHide(QStringLiteral("hide"),
+                                   QStringLiteral("Grupos del estilo que no se dibujan, separados por comas "
+                                                  "(nombres_calles, poi, edificios...)"),
+                                   QStringLiteral("grupos"));
+    const QCommandLineOption oHybrid(QStringLiteral("hybrid"),
+                                     QStringLiteral("Estilo hibrido (fondo transparente, para ir encima "
+                                                    "de otra base) en vez del de OpenMapTiles"));
     const QCommandLineOption oInfo(QStringLiteral("info"),
                                    QStringLiteral("Capas y claves de la tesela del centro"));
     const QCommandLineOption oPrint(QStringLiteral("print-style"),
                                     QStringLiteral("Vuelca el estilo por defecto (JSON)"));
-    p.addOptions({ oFile, oOut, oCenter, oZoom, oSize, oStyle, oMask, oMaskLayer, oInfo, oPrint });
+    p.addOptions({ oFile, oOut, oCenter, oZoom, oSize, oStyle, oMask, oMaskLayer, oHide, oHybrid, oInfo, oPrint });
     p.process(app);
 
     if (p.isSet(oPrint)) {
-        out << VectorStyle::openMapTilesJson() << "\n";
+        out << (p.isSet(oHybrid) ? VectorStyle::hybridJson() : VectorStyle::openMapTilesJson()) << "\n";
         return 0;
     }
     if (!p.isSet(oFile) || (!p.isSet(oInfo) && !p.isSet(oOut))) {
@@ -162,15 +172,23 @@ int main(int argc, char *argv[])
         err << "No se pudo abrir: " << src.lastError() << "\n";
         return 1;
     }
-    if (p.isSet(oInfo))
-        return printInfo(src, lat, lon, z, out);
-
-    VectorStyle style = VectorStyle::openMapTiles();
+    VectorStyle style = VectorStyle::defaultFor(p.isSet(oHybrid));
     if (p.isSet(oStyle) && !VectorStyle::fromFile(p.value(oStyle), &style, &error)) {
         err << error << "\n";
         return 1;
     }
+    if (p.isSet(oInfo)) {
+        out << "Grupos del estilo (para --hide y \"hiddenGroups\"):\n";
+        for (const auto &g : style.groups)
+            out << "  " << g.first << "  (" << g.second << ")\n";
+        return printInfo(src, lat, lon, z, out);
+    }
+
     VectorTileRenderer renderer(style);
+    if (p.isSet(oHide)) {
+        const QStringList hide = p.value(oHide).split(QLatin1Char(','), Qt::SkipEmptyParts);
+        renderer.setHiddenGroups(QSet<QString>(hide.begin(), hide.end()));
+    }
     if (p.isSet(oMask)) {
         QElapsedTimer tm;
         tm.start();

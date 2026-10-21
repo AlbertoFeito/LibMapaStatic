@@ -31,6 +31,7 @@ static QMouseEvent mouseEvent(QEvent::Type tipo, const QPoint &pos,
 
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -58,6 +59,7 @@ private slots:
     void cleanupTestCase();
 
     void buildsFromDatasetsJson();
+    void hybridOverlayOverAnyBase();
     void reportsErrorOnMissingJson();
 
     void listsAvailableLayers();
@@ -4659,6 +4661,198 @@ void TstMapWidget::layerIndexStaysConsistent()
     QVERIFY(ids(QStringLiteral("b")).isEmpty());
 }
 
+
+
+// --- Mapa híbrido --------------------------------------------------------
+
+namespace {
+
+// Varint de protobuf (para fabricar teselas MVT de prueba).
+void pbVarint(QByteArray &b, quint64 v)
+{
+    while (v >= 0x80) {
+        b.append(char((v & 0x7f) | 0x80));
+        v >>= 7;
+    }
+    b.append(char(v));
+}
+
+// Campo con longitud (sub-mensaje o texto).
+void pbBytes(QByteArray &b, int field, const QByteArray &data)
+{
+    pbVarint(b, quint64((field << 3) | 2));
+    pbVarint(b, quint64(data.size()));
+    b.append(data);
+}
+
+// Tesela MVT con una capa "boundary" y una línea horizontal por el centro de la
+// tesela, admin_level = 2 (frontera de país): la pinta el estilo híbrido en su
+// grupo "limites" a cualquier zoom.
+QByteArray boundaryTile()
+{
+    auto zz = [](int v) { return quint64((v << 1) ^ (v >> 31)); };
+    QByteArray geom;
+    pbVarint(geom, (1 & 7) | (1 << 3));                  // MoveTo 1
+    pbVarint(geom, zz(-100));
+    pbVarint(geom, zz(2048));
+    pbVarint(geom, (2 & 7) | (1 << 3));                  // LineTo 1
+    pbVarint(geom, zz(4296));
+    pbVarint(geom, zz(0));
+    QByteArray tags;
+    pbVarint(tags, 0);
+    pbVarint(tags, 0);
+    QByteArray feat;
+    pbBytes(feat, 2, tags);
+    pbVarint(feat, (3 << 3) | 0);
+    pbVarint(feat, 2);                                   // LineString
+    pbBytes(feat, 4, geom);
+    QByteArray value;
+    pbBytes(value, 1, QByteArray("2"));
+    QByteArray layer;
+    pbVarint(layer, (15 << 3) | 0);
+    pbVarint(layer, 2);
+    pbBytes(layer, 1, QByteArray("boundary"));
+    pbBytes(layer, 2, feat);
+    pbBytes(layer, 3, QByteArray("admin_level"));
+    pbBytes(layer, 4, value);
+    pbVarint(layer, (5 << 3) | 0);
+    pbVarint(layer, 4096);
+    QByteArray tile;
+    pbBytes(tile, 3, layer);
+    return tile;
+}
+
+// MBTiles de los zooms 3 y 4 del mundo entero: PNG gris liso o, con \a vector,
+// la tesela MVT de arriba en todas las posiciones.
+bool makeWorldMBTiles(const QString &path, bool vector)
+{
+    const QString conn = QStringLiteral("mk_%1").arg(path);
+    bool ok = true;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+        db.setDatabaseName(path);
+        if (!db.open())
+            return false;
+        QSqlQuery q(db);
+        ok = q.exec(QStringLiteral("CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, "
+                                   "tile_row INTEGER, tile_data BLOB)"))
+             && q.exec(QStringLiteral("CREATE TABLE metadata (name TEXT, value TEXT)"))
+             && q.exec(QStringLiteral("INSERT INTO metadata VALUES ('format','%1'), ('minzoom','3'), "
+                                      "('maxzoom','4')").arg(vector ? "pbf" : "png"));
+        QByteArray data = boundaryTile();
+        if (!vector) {
+            QImage img(256, 256, QImage::Format_RGB32);
+            img.fill(QColor(100, 100, 100));
+            QBuffer buf(&data);
+            data.clear();
+            buf.open(QIODevice::WriteOnly);
+            img.save(&buf, "PNG");
+        }
+        db.transaction();
+        for (int z = 3; ok && z <= 4; ++z)
+            for (int x = 0; x < (1 << z); ++x)
+                for (int y = 0; y < (1 << z); ++y) {
+                    q.prepare(QStringLiteral("INSERT INTO tiles VALUES (:z, :x, :y, :d)"));
+                    q.bindValue(QStringLiteral(":z"), z);
+                    q.bindValue(QStringLiteral(":x"), x);
+                    q.bindValue(QStringLiteral(":y"), y);
+                    q.bindValue(QStringLiteral(":d"), data);
+                    ok = ok && q.exec();
+                }
+        db.commit();
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(conn);
+    return ok;
+}
+
+// Píxeles de la imagen que no son el gris de la base.
+int notGray(const QImage &img)
+{
+    int n = 0;
+    for (int y = 0; y < img.height(); ++y)
+        for (int x = 0; x < img.width(); ++x) {
+            const QColor c(img.pixel(x, y));
+            n += qAbs(c.red() - 100) > 12 || qAbs(c.green() - 100) > 12 || qAbs(c.blue() - 100) > 12;
+        }
+    return n;
+}
+
+} // namespace
+
+// Mapa híbrido: un MBTiles vectorial ENCIMA de una base ráster cualquiera. Se ve
+// (las fronteras del estilo híbrido sobre el gris), se apaga entero o por grupos,
+// los grupos que el estilo marca apagados arrancan así, y un fichero ráster no
+// sirve de overlay.
+void TstMapWidget::hybridOverlayOverAnyBase()
+{
+    const QString base = m_dir.filePath(QStringLiteral("gris.mbtiles"));
+    const QString vec = m_dir.filePath(QStringLiteral("fronteras.mbtiles"));
+    QVERIFY(makeWorldMBTiles(base, false));
+    QVERIFY(makeWorldMBTiles(vec, true));
+    const QString json = m_dir.filePath(QStringLiteral("gris.json"));
+    {
+        QFile f(json);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QJsonDocument(QJsonObject{ { QStringLiteral("datasets"),
+            QJsonArray{ QJsonObject{ { QStringLiteral("id"), QStringLiteral("gris") },
+                                     { QStringLiteral("filePath"), base } } } } }).toJson());
+    }
+    MapConfig cfg = baseConfig(json);
+    cfg.initialZoom = 4;
+    cfg.initialCenter = QGeoCoordinate(40.0, -100.0);
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+    w.resize(600, 400);
+    QTRY_VERIFY_WITH_TIMEOUT(w.exactCoverage() > 0.99, 20000);
+    QVERIFY(!w.hasVectorOverlay());
+    // Lo que no es gris con la base sola (en Qt 5 queda alguna costura de 1 px
+    // entre teselas): la referencia para saber si el overlay se ve o no.
+    QTest::qWait(300);
+    const int sinOverlay = notGray(w.grab().toImage());
+    QVERIFY2(sinOverlay < 400, qPrintable(QString::number(sinOverlay)));
+
+    QString error;
+    QVERIFY(!w.setVectorOverlay(base, &error));                  // ráster: no
+    QVERIFY2(error.contains(QStringLiteral("vectorial")), qPrintable(error));
+
+    QSignalSpy cambios(&w, &MapWidget::vectorOverlayChanged);
+    QVERIFY2(w.setVectorOverlay(vec, &error), qPrintable(error));
+    QVERIFY(w.hasVectorOverlay());
+    QVERIFY(w.isVectorOverlayVisible());
+    QCOMPARE(QFileInfo(w.vectorOverlayFile()).fileName(), QStringLiteral("fronteras.mbtiles"));
+    QVERIFY(cambios.count() >= 1);
+    QCOMPARE(w.baseLayerId(), QStringLiteral("gris"));           // la base no cambia
+
+    bool limites = false, poi = true;
+    for (const BaseLayerGroup &g : w.vectorOverlayGroups()) {
+        if (g.id == QLatin1String("limites")) limites = g.visible;
+        if (g.id == QLatin1String("poi")) poi = g.visible;
+    }
+    QVERIFY(limites);
+    QVERIFY(!poi);                                               // "visible": false en el estilo
+    QVERIFY(w.baseLayerGroups().isEmpty());                     // la base es ráster
+
+    // Las fronteras se ven sobre el gris.
+    QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) > sinOverlay + 50, 20000);
+
+    // Apagar su grupo: desaparecen; encenderlo: vuelven.
+    QVERIFY(w.setVectorOverlayGroupVisible(QStringLiteral("limites"), false));
+    QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) <= sinOverlay, 20000);
+    QVERIFY(w.setVectorOverlayGroupVisible(QStringLiteral("limites"), true));
+    QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) > sinOverlay + 50, 20000);
+    QVERIFY(!w.setVectorOverlayGroupVisible(QStringLiteral("no_existe"), false));
+
+    // Apagar el overlay entero, y quitarlo.
+    w.setVectorOverlayVisible(false);
+    QVERIFY(!w.isVectorOverlayVisible());
+    QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) <= sinOverlay, 20000);
+    w.setVectorOverlayVisible(true);
+    QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) > sinOverlay + 50, 20000);
+    w.clearVectorOverlay();
+    QVERIFY(!w.hasVectorOverlay());
+    QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) <= sinOverlay, 20000);
+}
 
 QTEST_MAIN(TstMapWidget)
 #include "tst_mapwidget.moc"

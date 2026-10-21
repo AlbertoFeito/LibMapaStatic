@@ -58,6 +58,16 @@ public:
     RangeLayer *rangeLayer() const { return m_rangeLayer; }
     HillshadeLayer *hillshadeLayer() const { return m_hillshadeLayer; }
 
+    /*!
+     * \brief Capa de teselas OVERLAY (mapa hibrido): un segundo juego de teselas,
+     *        con fondo transparente, encima de la base y del relieve y debajo de
+     *        las entidades. Su servicio es independiente del de la base: cambiar
+     *        de base no lo toca. null = sin overlay.
+     */
+    void setOverlayService(TileService *service);
+    TileService *overlayService() const { return m_overlayService; }
+    TileLayer *overlayTileLayer() const { return m_overlayLayer; }
+
     QGeoCoordinate center() const;
     void setCenter(const QGeoCoordinate &center);
 
@@ -243,6 +253,9 @@ private:
 
     TileService *m_service = nullptr;
     TileLayer *m_tileLayer = nullptr;
+    TileService *m_overlayService = nullptr;
+    TileLayer *m_overlayLayer = nullptr;
+    QMetaObject::Connection m_overlayReady;
     OverlayModel *m_model = nullptr;
     FeatureLayer *m_featureLayer = nullptr;
     TargetModel *m_targetModel = nullptr;

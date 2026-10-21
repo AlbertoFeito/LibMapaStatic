@@ -450,6 +450,39 @@ void MapView::requestVisibleTiles()
         return;
     m_service->requestViewport(visibleNorthWest(), visibleSouthEast(),
                                m_zoom, /*marginTiles=*/1);
+    // El overlay (si se ve) pide lo mismo a SU servicio; su zoom se recorta al
+    // rango de su MBTiles y, mas alla, se amplia la ultima tesela.
+    if (m_overlayService && m_overlayLayer && m_overlayLayer->visible())
+        m_overlayService->requestViewport(visibleNorthWest(), visibleSouthEast(),
+                                          m_zoom, /*marginTiles=*/1);
+}
+
+// Pone (o quita, con null) el overlay de teselas. La capa se crea la primera vez
+// en su propio nivel de QCustomPlot, encima del relieve y debajo de las
+// entidades, y sin color de "sin datos": donde no hay overlay se ve la base.
+void MapView::setOverlayService(TileService *service)
+{
+    if (m_overlayReady)
+        disconnect(m_overlayReady);
+    m_overlayService = service;
+    if (!m_overlayLayer) {
+        addLayer(QStringLiteral("tileoverlay"), layer(QStringLiteral("hillshade")),
+                 QCustomPlot::limAbove);
+        m_overlayLayer = new TileLayer(this, nullptr);
+        m_overlayLayer->setLayer(QStringLiteral("tileoverlay"));
+        m_overlayLayer->setNoDataColor(Qt::transparent);
+    }
+    m_overlayLayer->setService(service);
+    m_overlayLayer->setPlan(TilePlanner::Plan());
+    m_overlayLayer->setVisible(service != nullptr);
+    if (service)
+        m_overlayReady = connect(service, &TileService::tilesReady, this,
+                                 [this](quint64, int, int nuevas) {
+                                     if (nuevas > 0)
+                                         refreshPlan();
+                                 });
+    requestVisibleTiles();
+    refreshPlan();
 }
 
 // Oculta la marca de seleccion: el recuadro de SelectArea (sin borrarlo, para
@@ -484,6 +517,9 @@ void MapView::refreshPlan()
         return;
     m_tileLayer->setPlan(m_service->planFor(visibleNorthWest(),
                                             visibleSouthEast(), m_zoom));
+    if (m_overlayService && m_overlayLayer && m_overlayLayer->visible())
+        m_overlayLayer->setPlan(m_overlayService->planFor(visibleNorthWest(),
+                                                          visibleSouthEast(), m_zoom));
     replot(QCustomPlot::rpQueuedReplot);
 }
 

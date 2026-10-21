@@ -85,6 +85,8 @@ private:
 
     // ===================================================== anadir capa base ==
     void alAnadirCapaBase();
+    void alPonerHibrido();
+    void alQuitarHibrido();
     void registrarCapaBase(const BaseLayerInfo &c);
     QMenu *m_menuBase = nullptr;               //!< Ver -> Capa base
     QActionGroup *m_grupoBase = nullptr;       //!< radio de las capas base del menú

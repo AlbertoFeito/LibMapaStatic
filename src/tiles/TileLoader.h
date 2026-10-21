@@ -97,6 +97,14 @@ public slots:
     //! cada una. Abandona en cuanto la peticion queda obsoleta.
     void load(const libmapa::TileRequest &request);
 
+    /*!
+     * \brief Cambia los grupos ocultos del estilo de una capa vectorial.
+     *
+     * Las teselas que se pinten despues ya salen sin esos grupos; las de la
+     * cache las vacia quien llama (TileService).
+     */
+    void setVectorHiddenGroups(const QString &datasetId, const QStringList &groups);
+
     //! Cierra las conexiones de este hilo. Llamar antes de parar el hilo.
     void releaseResources();
 

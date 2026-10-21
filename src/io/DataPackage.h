@@ -72,6 +72,21 @@ struct DataPackage
 
     QVector<Overlay> overlays;
 
+    /*!
+     * \brief Overlay de teselas vectoriales (mapa hibrido), opcional.
+     *
+     * "vectorOverlay" en mapa.json: un MBTiles vectorial que se pinta ENCIMA de
+     * la capa base que este elegida (satelite, OSM, relieve), con el estilo
+     * hibrido (o "vectorStyle"). Claves: "filePath", "vectorStyle",
+     * "hiddenGroups" y "visible".
+     */
+    struct VectorOverlay {
+        TileDataset dataset;
+        bool visible = true;
+        bool hiddenGroupsSet = false;    //!< El JSON trae "hiddenGroups" (manda sobre el estilo).
+    };
+    std::optional<VectorOverlay> vectorOverlay;
+
     QString featuresFile;        //!< Tal cual viene en el manifiesto (sin resolver).
     QString featuresSeed;        //!< Entidades de partida (absoluta), o vacio.
 

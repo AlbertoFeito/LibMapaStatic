@@ -150,6 +150,24 @@ struct TileDataset
     QString vectorLandMask;
     QString vectorLandLayer;   //!< Capa de la mascara ("landLayer"); vacia = todas.
 
+    /*!
+     * \brief Grupos del estilo vectorial que NO se dibujan ("hiddenGroups").
+     *
+     * El estilo reparte sus reglas en grupos que se pueden apagar: nombres de
+     * calles, puntos de interes, edificios... (VectorRule::group). Es el estado
+     * de partida; MapWidget::setBaseLayerGroupVisible lo cambia en caliente.
+     */
+    QStringList vectorHiddenGroups;
+
+    /*!
+     * \brief true si la capa vectorial se usa como OVERLAY (mapa hibrido) encima
+     *        de otra base, y no como base.
+     *
+     * Solo cambia el estilo por defecto: el hibrido (fondo transparente, rotulos
+     * blancos) en vez del de OpenMapTiles. Lo pone MapWidget::setVectorOverlay.
+     */
+    bool vectorOverlay = false;
+
     int storedZ(int logicalZ) const { return zFactor * logicalZ + zOffset; }
 
     int logicalZ(int storedZ) const

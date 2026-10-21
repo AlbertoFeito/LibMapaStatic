@@ -57,6 +57,12 @@ private slots:
     void packageWithVectorLayer();
     void landMaskPaintsSea();
     void landMaskClipMatchesFullPolygon();
+    void styleGroups();
+    void hiddenGroupsAreNotDrawn();
+    void hybridStyleIsTransparent();
+    void namesFollowTheLine();
+    void loaderChangesHiddenGroups();
+    void packageDeclaresHybridOverlay();
 
 private:
     QByteArray fixture(const char *name) const;
@@ -775,6 +781,186 @@ void TstVectorTiles::landMaskClipMatchesFullPolygon()
     // Una tesela lejos (fuera del recuadro del anillo) no pinta nada.
     QPainter p(&fast);
     QVERIFY(!mask->paint(p, z, x + 50, y, 256, Qt::white));
+}
+
+
+// Grupos del estilo: los declarados con su título y en su orden, los que solo
+// salen en una regla (título = id), y los que arrancan apagados ("visible": false).
+void TstVectorTiles::styleGroups()
+{
+    VectorStyle s;
+    QVERIFY(VectorStyle::fromJson(QJsonDocument::fromJson(R"({
+        "groups": [ { "id": "b", "title": "Be" }, { "id": "a", "title": "A", "visible": false } ],
+        "rules": [ { "layer": "x", "group": "a", "fill": "red" },
+                   { "layer": "y", "group": "c", "fill": "red" },
+                   { "layer": "z", "fill": "red" } ] })").object(), &s));
+    QCOMPARE(s.groupIds(), QStringList({ "b", "a", "c" }));
+    QCOMPARE(s.groups[0].second, QStringLiteral("Be"));
+    QCOMPARE(s.groups[2].second, QStringLiteral("c"));
+    QCOMPARE(s.defaultHidden, QStringList{ QStringLiteral("a") });
+    QCOMPARE(s.rules[2].group, QString());
+
+    // El estilo por defecto ofrece los grupos de siempre y no apaga ninguno.
+    const VectorStyle d = VectorStyle::openMapTiles();
+    for (const char *g : { "nombres_calles", "lugares", "poi", "edificios", "numeros", "cimas", "limites" })
+        QVERIFY2(d.groupIds().contains(QLatin1String(g)), g);
+    QVERIFY(d.defaultHidden.isEmpty());
+}
+
+// Un grupo oculto no se pinta; lo que no tiene grupo (el agua) siempre sí.
+void TstVectorTiles::hiddenGroupsAreNotDrawn()
+{
+    VectorStyle s;
+    QVERIFY(VectorStyle::fromJson(QJsonDocument::fromJson(R"({ "background": "#000000",
+        "rules": [ { "layer": "water", "fill": "#0000ff" },
+                   { "layer": "transportation", "group": "vias", "line": "#ff0000", "width": 8 } ] })").object(), &s));
+    VectorTileRenderer r(s);
+    QVERIFY(sameColor(r.render(waterAndMotorway(), 5, 256).pixel(60, 128), Qt::red));
+    r.setHiddenGroups({ QStringLiteral("vias") });
+    QCOMPARE(r.hiddenGroups(), QSet<QString>{ QStringLiteral("vias") });
+    const QImage sin = r.render(waterAndMotorway(), 5, 256);
+    QVERIFY(sameColor(sin.pixel(60, 128), Qt::blue));
+    QVERIFY(sameColor(sin.pixel(10, 10), Qt::blue));
+}
+
+// El estilo híbrido es para ir ENCIMA de otra base: fondo transparente (sin
+// agua ni tierra), las vías sí, y POI y números de portal apagados de partida.
+void TstVectorTiles::hybridStyleIsTransparent()
+{
+    QJsonParseError pe{};
+    QVERIFY(!QJsonDocument::fromJson(VectorStyle::hybridJson(), &pe).isNull());
+    const VectorStyle h = VectorStyle::hybrid();
+    QCOMPARE(h.background.alpha(), 0);
+    QVERIFY(h.groupIds().contains(QStringLiteral("vias")));
+    QVERIFY(h.defaultHidden.contains(QStringLiteral("poi")));
+    QVERIFY(h.defaultHidden.contains(QStringLiteral("numeros")));
+    QVERIFY(!h.defaultHidden.contains(QStringLiteral("nombres_calles")));
+    QCOMPARE(VectorStyle::defaultFor(true).name, h.name);
+    QCOMPARE(VectorStyle::defaultFor(false).name, VectorStyle::openMapTiles().name);
+
+    const QImage img = VectorTileRenderer(h).render(waterAndMotorway(), 12, 256);
+    QCOMPARE(qAlpha(img.pixel(10, 10)), 0);                    // el agua no se pinta
+    QVERIFY(qAlpha(img.pixel(60, 128)) > 100);                  // la autopista sí
+}
+
+// El nombre de una calle va A LO LARGO de ella: horizontal en una calle
+// horizontal, vertical en una vertical, y nada si la calle es más corta que el texto.
+void TstVectorTiles::namesFollowTheLine()
+{
+    if (QFontMetricsF(QFont()).horizontalAdvance(QStringLiteral("Obispo")) <= 0)
+        QSKIP("Sin fuentes en este sistema: no se pueden pintar rótulos");
+
+    VectorStyle s;
+    QVERIFY(VectorStyle::fromJson(QJsonDocument::fromJson(R"({ "background": "#000000",
+        "rules": [ { "layer": "transportation_name", "label": "name", "textColor": "#00ff00",
+                     "halo": "#00000000", "textSize": 14 } ] })").object(), &s));
+    const VectorTileRenderer r(s);
+    auto calle = [](QPoint a, QPoint b) {
+        return tile({ layer(QStringLiteral("transportation_name"),
+                            { { 2, path({ a, b }, false),
+                                { { QStringLiteral("name"), QStringLiteral("Calle Obispo") } } } }) });
+    };
+    auto caja = [](const QImage &img) {
+        QRect b;
+        for (int y = 0; y < img.height(); ++y)
+            for (int x = 0; x < img.width(); ++x)
+                if (qGreen(img.pixel(x, y)) > 100 && qRed(img.pixel(x, y)) < 100)
+                    b |= QRect(x, y, 1, 1);
+        return b;
+    };
+
+    const QRect h = caja(r.render(calle({ 200, 2048 }, { 3900, 2048 }), 15, 256));
+    QVERIFY(!h.isEmpty());
+    QVERIFY2(h.width() > 3 * h.height(), qPrintable(QStringLiteral("%1x%2").arg(h.width()).arg(h.height())));
+    QVERIFY(qAbs(h.center().y() - 128) < 6);                   // sobre la calle
+
+    const QRect v = caja(r.render(calle({ 2048, 200 }, { 2048, 3900 }), 15, 256));
+    QVERIFY(!v.isEmpty());
+    QVERIFY2(v.height() > 3 * v.width(), qPrintable(QStringLiteral("%1x%2").arg(v.width()).arg(v.height())));
+    QVERIFY(qAbs(v.center().x() - 128) < 6);
+
+    QVERIFY(caja(r.render(calle({ 2000, 2048 }, { 2300, 2048 }), 15, 256)).isEmpty());   // no cabe
+}
+
+// El TileLoader cambia los grupos ocultos en caliente: lo siguiente que pinta ya
+// sale sin ellos (y con ellos al volver a encenderlos).
+void TstVectorTiles::loaderChangesHiddenGroups()
+{
+    const QString f = p("grupos.mbtiles");
+    QVERIFY(makeVectorMBTiles(f, waterAndMotorway(), 1));
+    TileDataset ds = MBTiles::fromFile(f, QStringLiteral("g"));
+    {
+        QFile out(p("grupos.json"));
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        out.write(R"({ "background": "#000000", "rules": [ { "layer": "water", "group": "agua", "fill": "#0000ff" } ] })");
+    }
+    ds.vectorStyleFile = p("grupos.json");
+
+    TileLoader loader;
+    loader.configure({ ds });
+    auto pinta = [&loader](quint64 id) {
+        QSignalSpy spy(&loader, &TileLoader::tilesLoaded);
+        TileRequest req;
+        req.datasetId = QStringLiteral("g");
+        req.id = id;
+        TileMatrix::TileRange range;
+        range.z = 1;
+        range.xMax = 0;
+        range.yMax = 0;
+        req.ranges = { range };
+        loader.load(req);
+        const auto t = spy.first().at(3).value<QVector<LoadedTile>>();
+        return t.isEmpty() ? QImage() : t.first().image;
+    };
+    QVERIFY(sameColor(pinta(1).pixel(10, 10), Qt::blue));
+    loader.setVectorHiddenGroups(QStringLiteral("g"), { QStringLiteral("agua") });
+    QVERIFY(sameColor(pinta(2).pixel(10, 10), Qt::black));
+    loader.setVectorHiddenGroups(QStringLiteral("g"), {});
+    QVERIFY(sameColor(pinta(3).pixel(10, 10), Qt::blue));
+    loader.releaseResources();
+
+    // "hiddenGroups" en el JSON del dataset, ida y vuelta.
+    ds.vectorHiddenGroups = QStringList{ QStringLiteral("agua") };
+    QCOMPARE(TileDataset::fromJson(ds.toJson()).vectorHiddenGroups, ds.vectorHiddenGroups);
+}
+
+
+// "vectorOverlay" en mapa.json: el MBTiles vectorial que va encima de la base
+// (mapa híbrido), con rutas relativas, sus grupos y si arranca visible. Un
+// overlay ráster o que no existe se avisa y no se pone.
+void TstVectorTiles::packageDeclaresHybridOverlay()
+{
+    QDir().mkpath(p("hib"));
+    QVERIFY(makeVectorMBTiles(p("hib/calles.mbtiles"), waterAndMotorway(), 1));
+    QVERIFY(makeVectorMBTiles(p("hib/base.mbtiles"), waterAndMotorway(), 1));
+    auto escribe = [this](const QByteArray &overlay) {
+        QFile f(p("hib/mapa.json"));
+        if (!f.open(QIODevice::WriteOnly))
+            return false;
+        f.write(R"({ "format": "libmapa-package", "version": 2, "package": { "id": "h", "name": "H" },
+                     "datasets": [ { "id": "base", "filePath": "base.mbtiles" } ],
+                     "vectorOverlay": )" + overlay + " }");
+        return true;
+    };
+
+    QVERIFY(escribe(R"({ "filePath": "calles.mbtiles", "hiddenGroups": ["poi"], "visible": false })"));
+    QString error;
+    auto pkg = DataPackage::load(p("hib"), &error);
+    QVERIFY2(pkg.has_value(), qPrintable(error));
+    QVERIFY(pkg->vectorOverlay.has_value());
+    QVERIFY(pkg->vectorOverlay->dataset.vector);
+    QVERIFY(pkg->vectorOverlay->dataset.vectorOverlay);
+    QCOMPARE(pkg->vectorOverlay->dataset.id, QStringLiteral("hibrido"));
+    QVERIFY(!pkg->vectorOverlay->visible);
+    QVERIFY(pkg->vectorOverlay->hiddenGroupsSet);
+    QCOMPARE(pkg->vectorOverlay->dataset.vectorHiddenGroups, QStringList{ QStringLiteral("poi") });
+    QVERIFY(pkg->files().contains(QFileInfo(p("hib/calles.mbtiles")).absoluteFilePath()));
+
+    QVERIFY(escribe(R"({ "filePath": "no_esta.mbtiles" })"));
+    pkg = DataPackage::load(p("hib"), &error);
+    QVERIFY(pkg.has_value());
+    QVERIFY(!pkg->vectorOverlay.has_value());
+    QVERIFY(pkg->warnings.join(QLatin1Char(' ')).contains(QStringLiteral("vectorOverlay")));
 }
 
 QTEST_MAIN(TstVectorTiles)

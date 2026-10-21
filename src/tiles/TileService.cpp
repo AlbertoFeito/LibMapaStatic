@@ -2,6 +2,7 @@
 
 #include "core/Logging.h"
 #include "tiles/MBTiles.h"
+#include "vector/VectorStyle.h"
 
 #include <QDir>
 #include <QFile>
@@ -268,6 +269,40 @@ bool TileService::addDataset(const TileDataset &dataset, QString *error)
     return true;
 }
 
+// Grupos del estilo de la capa, leyendo su estilo como lo hara el TileLoader (el
+// suyo si se puede leer; si no, el de OpenMapTiles).
+QVector<QPair<QString, QString>> TileService::vectorGroups(const QString &id) const
+{
+    const TileDataset *ds = dataset(id);
+    if (!ds || !ds->vector)
+        return {};
+    VectorStyle style = VectorStyle::defaultFor(ds->vectorOverlay);
+    if (!ds->vectorStyleFile.isEmpty()) {
+        VectorStyle custom;
+        if (VectorStyle::fromFile(ds->vectorStyleFile, &custom))
+            style = custom;
+    }
+    return style.groups;
+}
+
+// Cambia los grupos ocultos: aqui (para vectorGroups y el JSON), en el hilo
+// lector (para las teselas nuevas) y en la cache (las viejas fuera). Las
+// peticiones en curso quedan obsoletas y lo que llegue de ellas se tira.
+bool TileService::setVectorHiddenGroups(const QString &id, const QStringList &groups)
+{
+    auto it = m_datasets.find(id);
+    if (it == m_datasets.end() || !it->vector || !m_loader)
+        return false;
+    it->vectorHiddenGroups = groups;
+    QMetaObject::invokeMethod(m_loader, "setVectorHiddenGroups", Qt::QueuedConnection,
+                              Q_ARG(QString, id), Q_ARG(QStringList, groups));
+    m_discardBefore.insert(id, m_nextRequestId);
+    m_loader->invalidateBefore(m_nextRequestId);
+    m_hasPending = false;
+    cacheFor(id).clear();
+    return true;
+}
+
 // Cuantos peldanos de "escalera de respaldo" precargar. Si esta en automatico
 // (-1), lo decide segun el relleno tipico de la capa (una BD llena casi no la
 // necesita; una con muchos huecos si).
@@ -411,6 +446,10 @@ void TileService::onTilesLoaded(quint64 requestId, const QString &datasetId,
     // Las teselas van a la cache de SU dataset, no a la de la capa activa: si
     // el usuario cambio de capa mientras se leian, guardarlas en la cache
     // equivocada las mostraria sobre el mapa que no toca.
+    // Pintadas con grupos que ya no tocan (ver setVectorHiddenGroups): fuera.
+    if (requestId < m_discardBefore.value(datasetId, 0))
+        return;
+
     TileCache &destino = cacheFor(datasetId);
 
     // Los niveles por debajo del pedido son la escalera de respaldo: van al

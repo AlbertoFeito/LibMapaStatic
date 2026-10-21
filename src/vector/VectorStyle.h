@@ -24,6 +24,10 @@ namespace libmapa {
 struct VectorRule
 {
     QString layer;                                   //!< capa del MVT: "water", "transportation"…
+    //! Grupo al que pertenece ("nombres_calles", "poi"…): la aplicación puede
+    //! ocultar un grupo entero (\c VectorTileRenderer::setHiddenGroups). Vacío =
+    //! siempre visible (el agua, las vías, el fondo).
+    QString group;
     //! Todas deben cumplirse: el valor de la clave está en la lista.
     QVector<QPair<QString, QStringList>> filter;
     //! Ninguna debe cumplirse (p. ej. excluir `brunnel = tunnel`).
@@ -42,7 +46,8 @@ struct VectorRule
     bool dashed = false;
 
     //! Propiedades de las que sale el texto, por orden de preferencia
-    //! ("name:es", "name", "name:latin"…). Vacía = sin rótulo.
+    //! ("name:es", "name", "name:latin"…). Vacía = sin rótulo. En un punto, el
+    //! texto va sobre él; en una línea (una calle, un río), A LO LARGO de ella.
     QStringList labelFields;
     QColor textColor = QColor(51, 51, 51);
     QColor haloColor = QColor(255, 255, 255, 220);
@@ -76,6 +81,17 @@ public:
     //! sabe qué es mar y todo el fondo es \c background.
     QColor sea = QColor(165, 201, 234);
     QVector<VectorRule> rules;
+    //! Grupos que se pueden encender y apagar, en el orden en que se ofrecen:
+    //! (id, título para la interfaz). Incluye los que solo aparecen en "group"
+    //! de alguna regla (con el id como título).
+    QVector<QPair<QString, QString>> groups;
+
+    //! Ids de \c groups, en orden.
+    QStringList groupIds() const;
+
+    //! Grupos que arrancan APAGADOS ("visible": false en "groups"), salvo que la
+    //! configuración diga otra cosa ("hiddenGroups").
+    QStringList defaultHidden;
 
     //! Estilo por defecto para el esquema OpenMapTiles (agua, usos del suelo,
     //! edificios, vías por categoría, límites y nombres de lugares).
@@ -83,6 +99,16 @@ public:
 
     //! El JSON de \c openMapTiles, tal cual: plantilla para un estilo propio.
     static QByteArray openMapTilesJson();
+
+    /*!
+     * \brief Estilo «híbrido», para pintar el MBTiles ENCIMA de otra base (satélite,
+     *        relieve…): fondo transparente, vías finas y rótulos blancos con halo.
+     */
+    static VectorStyle hybrid();
+    static QByteArray hybridJson();
+
+    //! \c hybrid si es un overlay, \c openMapTiles si es una capa base.
+    static VectorStyle defaultFor(bool overlay);
 
     /*!
      * \brief Lee un estilo de su JSON:
@@ -94,7 +120,9 @@ public:
      *              { "layer": "place", "filter": { "class": "city" },
      *                "label": "name:es|name|name:latin", "textSize": 13, "bold": true } ] }
      * \endcode
-     * "sea" es el color del mar (solo con máscara de tierra). Otras claves de regla: "exclude", "maxZoom", "geometry" ("point", "line",
+     * "sea" es el color del mar (solo con máscara de tierra). "groups" lista los grupos
+     * que se pueden apagar ([{"id": "poi", "title": "Puntos de interés"}, …]) y cada
+     * regla dice el suyo con "group". Otras claves de regla: "exclude", "maxZoom", "geometry" ("point", "line",
      * "polygon" o una lista), "widthOffset", "dash", "textColor", "halo",
      * "italic", "pointRadius", "pointColor".
      * \return false si el JSON no tiene reglas válidas; el motivo, en \a error.

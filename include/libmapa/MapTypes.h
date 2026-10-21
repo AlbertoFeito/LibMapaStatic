@@ -63,6 +63,14 @@ struct BaseLayerInfo {
     bool available = false;
 };
 
+//! Un grupo de una capa base VECTORIAL que se puede encender o apagar (nombres de
+//! calles, puntos de interes, edificios...). Ver MapWidget::baseLayerGroups.
+struct BaseLayerGroup {
+    QString id;            //!< "nombres_calles", "poi"...
+    QString title;         //!< Texto para la interfaz: "Nombres de calles".
+    bool visible = true;
+};
+
 //! Unidades de la escala grafica (MapWidget::setScaleBarUnits).
 enum class ScaleUnits {
     Metric,     //!< metros / kilometros

@@ -20,6 +20,15 @@ const char kOpenMapTilesStyle[] = R"JSON({
   "name": "OpenMapTiles (libmapa)",
   "background": "#f8f4f0",
   "sea": "#a5c9ea",
+  "groups": [
+    { "id": "nombres_calles", "title": "Nombres de calles" },
+    { "id": "lugares", "title": "Nombres de lugares" },
+    { "id": "poi", "title": "Puntos de interés" },
+    { "id": "edificios", "title": "Edificios" },
+    { "id": "numeros", "title": "Números de portal" },
+    { "id": "cimas", "title": "Cimas" },
+    { "id": "limites", "title": "Límites administrativos" }
+  ],
   "rules": [
     { "layer": "landcover", "filter": { "class": ["wood", "forest"] }, "fill": "#d6e6c3" },
     { "layer": "landcover", "filter": { "class": "grass" }, "fill": "#e2edd2" },
@@ -53,8 +62,8 @@ const char kOpenMapTilesStyle[] = R"JSON({
     { "layer": "aeroway", "geometry": "line", "filter": { "class": "taxiway" }, "minZoom": 13,
       "line": "#d8d4de", "width": [[13, 0.8], [16, 6]] },
 
-    { "layer": "building", "minZoom": 13, "fill": "#dfd9d2" },
-    { "layer": "building", "minZoom": 15, "line": "#cdc5bc", "width": 0.6 },
+    { "layer": "building", "group": "edificios", "minZoom": 13, "fill": "#dfd9d2" },
+    { "layer": "building", "group": "edificios", "minZoom": 15, "line": "#cdc5bc", "width": 0.6 },
 
     { "layer": "transportation", "filter": { "class": "ferry" }, "minZoom": 9, "line": "#7d9cc4",
       "dash": true, "width": 1 },
@@ -93,39 +102,120 @@ const char kOpenMapTilesStyle[] = R"JSON({
     { "layer": "transportation", "filter": { "class": ["rail", "transit"] }, "minZoom": 10,
       "line": "#9a9a9a", "dash": true, "width": [[10, 0.6], [16, 1.6]] },
 
-    { "layer": "boundary", "filter": { "admin_level": ["5", "6", "7", "8"] }, "minZoom": 11,
+    { "layer": "boundary", "group": "limites", "filter": { "admin_level": ["5", "6", "7", "8"] }, "minZoom": 11,
       "exclude": { "maritime": ["1", "true"] }, "line": "#c4bccf", "dash": true, "width": 0.8 },
-    { "layer": "boundary", "filter": { "admin_level": ["3", "4"] }, "minZoom": 5,
+    { "layer": "boundary", "group": "limites", "filter": { "admin_level": ["3", "4"] }, "minZoom": 5,
       "exclude": { "maritime": ["1", "true"] }, "line": "#a597b6", "dash": true,
       "width": [[5, 0.6], [10, 1.2], [16, 1.8]] },
-    { "layer": "boundary", "filter": { "admin_level": "2" },
+    { "layer": "boundary", "group": "limites", "filter": { "admin_level": "2" },
       "exclude": { "maritime": ["1", "true"] }, "line": "#8a7aa0", "dash": true,
       "width": [[3, 0.8], [10, 1.6], [16, 2.4]] },
 
-    { "layer": "water_name", "label": "name:es|name|name:latin", "textColor": "#4f73a3",
+    { "layer": "place", "group": "lugares", "filter": { "class": "country" }, "maxZoom": 6, "label": "name:es|name|name:latin",
+      "textSize": 13, "bold": true, "textColor": "#4a4a4a" },
+    { "layer": "place", "group": "lugares", "filter": { "class": "state" }, "minZoom": 5, "maxZoom": 9,
+      "label": "name:es|name|name:latin", "textSize": 11, "textColor": "#7a6f8a" },
+    { "layer": "place", "group": "lugares", "filter": { "class": "city" }, "minZoom": 5, "label": "name:es|name|name:latin",
+      "textSize": 13, "bold": true, "pointRadius": 2.5, "pointColor": "#555555" },
+    { "layer": "place", "group": "lugares", "filter": { "class": "town" }, "minZoom": 8, "label": "name:es|name|name:latin",
+      "textSize": 12 },
+    { "layer": "place", "group": "lugares", "filter": { "class": "village" }, "minZoom": 11, "label": "name:es|name|name:latin",
+      "textSize": 11 },
+    { "layer": "place", "group": "lugares", "filter": { "class": ["hamlet", "suburb", "neighbourhood", "quarter", "locality",
+                                              "isolated_dwelling"] },
+      "minZoom": 13, "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#666666" },
+    { "layer": "water_name", "group": "lugares", "label": "name:es|name|name:latin", "textColor": "#4f73a3",
       "italic": true, "textSize": 11 },
-    { "layer": "aerodrome_label", "minZoom": 10, "label": "name:es|name|name:latin|iata",
+    { "layer": "aerodrome_label", "group": "lugares", "minZoom": 10, "label": "name:es|name|name:latin|iata",
       "textColor": "#6b5f85", "textSize": 10, "pointRadius": 2.5, "pointColor": "#8e7fb0" },
-    { "layer": "poi", "minZoom": 15, "maxZoom": 15, "filter": { "rank": ["1", "2", "3", "4", "5"] },
+    { "layer": "transportation_name", "group": "nombres_calles",
+      "filter": { "class": ["motorway", "trunk", "primary", "secondary"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin|ref", "textSize": 10.5, "textColor": "#4a4036" },
+    { "layer": "transportation_name", "group": "nombres_calles",
+      "filter": { "class": ["tertiary", "minor", "service"] }, "minZoom": 15,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#5a5047" },
+    { "layer": "mountain_peak", "group": "cimas", "minZoom": 11, "label": "name:es|name|name:latin",
+      "textSize": 10, "textColor": "#6b4f2f", "pointRadius": 2.5, "pointColor": "#8b6b45" },
+    { "layer": "poi", "group": "poi", "minZoom": 15, "maxZoom": 15, "filter": { "rank": ["1", "2", "3", "4", "5"] },
       "label": "name:es|name|name:latin", "textColor": "#6b6b6b", "textSize": 9, "pointRadius": 2,
       "pointColor": "#a0a0a0" },
-    { "layer": "poi", "minZoom": 16, "label": "name:es|name|name:latin", "textColor": "#6b6b6b",
+    { "layer": "poi", "group": "poi", "minZoom": 16, "label": "name:es|name|name:latin", "textColor": "#6b6b6b",
       "textSize": 9, "pointRadius": 2, "pointColor": "#a0a0a0" },
-    { "layer": "place", "filter": { "class": "country" }, "maxZoom": 6, "label": "name:es|name|name:latin",
-      "textSize": 13, "bold": true, "textColor": "#4a4a4a" },
-    { "layer": "place", "filter": { "class": "state" }, "minZoom": 5, "maxZoom": 9,
-      "label": "name:es|name|name:latin", "textSize": 11, "textColor": "#7a6f8a" },
-    { "layer": "place", "filter": { "class": "city" }, "minZoom": 5, "label": "name:es|name|name:latin",
-      "textSize": 13, "bold": true, "pointRadius": 2.5, "pointColor": "#555555" },
-    { "layer": "place", "filter": { "class": "town" }, "minZoom": 8, "label": "name:es|name|name:latin",
-      "textSize": 12 },
-    { "layer": "place", "filter": { "class": "village" }, "minZoom": 11, "label": "name:es|name|name:latin",
-      "textSize": 11 },
-    { "layer": "place", "filter": { "class": ["hamlet", "suburb", "neighbourhood", "quarter", "locality",
-                                              "isolated_dwelling"] },
-      "minZoom": 13, "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#666666" }
+    { "layer": "housenumber", "group": "numeros", "minZoom": 17, "label": "housenumber",
+      "textSize": 8.5, "textColor": "#8a7f74" }
   ]
 })JSON";
+
+/*
+ * Estilo «híbrido»: para pintar el MBTiles vectorial ENCIMA de otra capa base
+ * (satélite, relieve, OSM ráster). Fondo transparente, sin rellenos: solo vías
+ * finas semitransparentes, límites y rótulos en blanco con halo oscuro, que se
+ * leen sobre una foto. Los grupos con "visible": false arrancan apagados.
+ */
+const char kHybridStyle[] = R"JSON({
+  "name": "Híbrido (libmapa)",
+  "background": "#00000000",
+  "groups": [
+    { "id": "vias", "title": "Carreteras y calles" },
+    { "id": "nombres_calles", "title": "Nombres de calles" },
+    { "id": "lugares", "title": "Nombres de lugares" },
+    { "id": "poi", "title": "Puntos de interés", "visible": false },
+    { "id": "numeros", "title": "Números de portal", "visible": false },
+    { "id": "cimas", "title": "Cimas" },
+    { "id": "limites", "title": "Límites administrativos" }
+  ],
+  "rules": [
+    { "layer": "boundary", "group": "limites", "filter": { "admin_level": ["3", "4"] }, "minZoom": 5,
+      "line": "#b0ffffff", "dash": true, "width": [[5, 0.8], [12, 1.4]] },
+    { "layer": "boundary", "group": "limites", "filter": { "admin_level": "2" },
+      "line": "#d0ffffff", "dash": true, "width": [[3, 1], [12, 2]] },
+
+    { "layer": "transportation", "group": "vias", "filter": { "class": ["minor", "service"] }, "minZoom": 14,
+      "line": "#70ffffff", "width": [[14, 0.6], [17, 2.2]] },
+    { "layer": "transportation", "group": "vias", "filter": { "class": "tertiary" }, "minZoom": 12,
+      "line": "#90ffffff", "width": [[12, 0.6], [17, 3]] },
+    { "layer": "transportation", "group": "vias", "filter": { "class": "secondary" }, "minZoom": 9,
+      "line": "#b0fff3a0", "width": [[9, 0.6], [17, 3.5]] },
+    { "layer": "transportation", "group": "vias", "filter": { "class": ["primary", "trunk"] }, "minZoom": 7,
+      "line": "#c0ffd27a", "width": [[7, 0.7], [17, 4]] },
+    { "layer": "transportation", "group": "vias", "filter": { "class": "motorway" }, "minZoom": 5,
+      "line": "#d0ffb04a", "width": [[5, 0.8], [17, 4.5]] },
+    { "layer": "transportation", "group": "vias", "filter": { "class": ["rail", "transit"] }, "minZoom": 11,
+      "line": "#a0e0e0e0", "dash": true, "width": 1 },
+
+    { "layer": "place", "group": "lugares", "filter": { "class": "country" }, "maxZoom": 6,
+      "label": "name:es|name|name:latin", "textSize": 13, "bold": true, "textColor": "#ffffff", "halo": "#d0000000" },
+    { "layer": "place", "group": "lugares", "filter": { "class": "state" }, "minZoom": 5, "maxZoom": 9,
+      "label": "name:es|name|name:latin", "textSize": 11, "textColor": "#f0f0f0", "halo": "#d0000000" },
+    { "layer": "place", "group": "lugares", "filter": { "class": "city" }, "minZoom": 5,
+      "label": "name:es|name|name:latin", "textSize": 13, "bold": true, "textColor": "#ffffff", "halo": "#d0000000",
+      "pointRadius": 2.5, "pointColor": "#ffffff" },
+    { "layer": "place", "group": "lugares", "filter": { "class": "town" }, "minZoom": 8,
+      "label": "name:es|name|name:latin", "textSize": 12, "textColor": "#ffffff", "halo": "#d0000000" },
+    { "layer": "place", "group": "lugares", "filter": { "class": "village" }, "minZoom": 11,
+      "label": "name:es|name|name:latin", "textSize": 11, "textColor": "#ffffff", "halo": "#d0000000" },
+    { "layer": "place", "group": "lugares",
+      "filter": { "class": ["hamlet", "suburb", "neighbourhood", "quarter", "locality", "isolated_dwelling"] },
+      "minZoom": 13, "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#f0f0f0", "halo": "#d0000000" },
+    { "layer": "water_name", "group": "lugares", "label": "name:es|name|name:latin", "italic": true,
+      "textSize": 11, "textColor": "#d6ecff", "halo": "#c0002040" },
+    { "layer": "aerodrome_label", "group": "lugares", "minZoom": 10, "label": "name:es|name|name:latin|iata",
+      "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000", "pointRadius": 2.5, "pointColor": "#ffffff" },
+    { "layer": "transportation_name", "group": "nombres_calles",
+      "filter": { "class": ["motorway", "trunk", "primary", "secondary"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin|ref", "textSize": 10.5, "textColor": "#ffffff", "halo": "#d0000000" },
+    { "layer": "transportation_name", "group": "nombres_calles",
+      "filter": { "class": ["tertiary", "minor", "service"] }, "minZoom": 15,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000" },
+    { "layer": "mountain_peak", "group": "cimas", "minZoom": 11, "label": "name:es|name|name:latin",
+      "textSize": 10, "textColor": "#fff0d0", "halo": "#d0000000", "pointRadius": 2.5, "pointColor": "#fff0d0" },
+    { "layer": "poi", "group": "poi", "minZoom": 15, "label": "name:es|name|name:latin",
+      "textSize": 9, "textColor": "#ffffff", "halo": "#d0000000", "pointRadius": 2, "pointColor": "#ffffff" },
+    { "layer": "housenumber", "group": "numeros", "minZoom": 17, "label": "housenumber",
+      "textSize": 8.5, "textColor": "#ffffff", "halo": "#c0000000" }
+  ]
+})JSON";
+
 
 // "#rrggbb", "#aarrggbb" o un nombre SVG. Inválido si no se reconoce.
 QColor parseColor(const QJsonValue &v)
@@ -243,6 +333,7 @@ bool VectorStyle::fromJson(const QJsonObject &json, VectorStyle *out, QString *e
         const QJsonObject o = v.toObject();
         VectorRule r;
         r.layer = o.value(QStringLiteral("layer")).toString();
+        r.group = o.value(QStringLiteral("group")).toString();
         r.filter = parseFilter(o.value(QStringLiteral("filter")));
         r.exclude = parseFilter(o.value(QStringLiteral("exclude")));
         r.minZoom = o.value(QStringLiteral("minZoom")).toInt(r.minZoom);
@@ -276,6 +367,21 @@ bool VectorStyle::fromJson(const QJsonObject &json, VectorStyle *out, QString *e
         s.rules.append(r);
     }
 
+    // Grupos: primero los declarados (con su título), luego los que solo salen en
+    // alguna regla.
+    for (const QJsonValue &g : json.value(QStringLiteral("groups")).toArray()) {
+        const QJsonObject go = g.toObject();
+        const QString id = go.value(QStringLiteral("id")).toString();
+        if (!id.isEmpty() && !s.groupIds().contains(id)) {
+            s.groups.append(qMakePair(id, go.value(QStringLiteral("title")).toString(id)));
+            if (!go.value(QStringLiteral("visible")).toBool(true))
+                s.defaultHidden << id;
+        }
+    }
+    for (const VectorRule &r : s.rules)
+        if (!r.group.isEmpty() && !s.groupIds().contains(r.group))
+            s.groups.append(qMakePair(r.group, r.group));
+
     if (s.rules.isEmpty()) {
         if (error) *error = QStringLiteral("el estilo no tiene reglas válidas");
         return false;
@@ -304,6 +410,35 @@ bool VectorStyle::fromFile(const QString &path, VectorStyle *out, QString *error
         return false;
     }
     return true;
+}
+
+// Ids de los grupos, en el orden en que se ofrecen.
+QStringList VectorStyle::groupIds() const
+{
+    QStringList ids;
+    for (const auto &g : groups)
+        ids << g.first;
+    return ids;
+}
+
+// El estilo híbrido, de su JSON embebido (como openMapTiles).
+VectorStyle VectorStyle::hybrid()
+{
+    VectorStyle s;
+    fromJson(QJsonDocument::fromJson(QByteArray(kHybridStyle)).object(), &s);
+    return s;
+}
+
+// Texto del estilo híbrido, para usarlo de plantilla.
+QByteArray VectorStyle::hybridJson()
+{
+    return QByteArray(kHybridStyle);
+}
+
+// Estilo por defecto según el uso: híbrido para un overlay, OpenMapTiles para una base.
+VectorStyle VectorStyle::defaultFor(bool overlay)
+{
+    return overlay ? hybrid() : openMapTiles();
 }
 
 // Texto del estilo por defecto, para volcarlo y usarlo de plantilla.

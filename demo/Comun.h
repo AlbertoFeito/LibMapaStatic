@@ -83,6 +83,8 @@ using namespace libmapa;
 constexpr int RolCapa = Qt::UserRole;        //!< id de capa (en ambos)
 constexpr int RolEntidad = Qt::UserRole + 1; //!< id de entidad (solo hojas)
 constexpr int RolBase = Qt::UserRole + 2;    //!< id de capa base (grupo «Base»)
+constexpr int RolGrupoBase = Qt::UserRole + 3; //!< grupo de una base vectorial (calles, POI...)
+constexpr int RolHibrido = Qt::UserRole + 4;   //!< el overlay híbrido ("*") o uno de sus grupos
 
 // --- Iconos de objetivos, dibujados en codigo -----------------------------
 // La libreria es agnostica del dominio: el JUEGO de iconos lo pone la app. Aqui

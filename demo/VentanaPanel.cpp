@@ -3,6 +3,8 @@
 
 #include "Ventana.h"
 
+#include <QFileInfo>
+
 using namespace libmapa;
 
 // Construye el panel lateral (dock): pestañas Capas, ficha de la entidad y Elevación.
@@ -294,6 +296,18 @@ void Ventana::reconstruirPanel()
         it->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable
                      | Qt::ItemIsUserCheckable);
         it->setCheckState(0, b.id == baseActual ? Qt::Checked : Qt::Unchecked);
+
+        // Una base vectorial (MBTiles pbf) trae sus propias capas: nombres de
+        // calles, puntos de interés, edificios... Cada una, una casilla debajo.
+        for (const BaseLayerGroup &g : m_mapa->baseLayerGroups(b.id)) {
+            auto *hg = new QTreeWidgetItem(it);
+            hg->setText(0, g.title);
+            hg->setData(0, RolGrupoBase, g.id);
+            hg->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+            hg->setCheckState(0, g.visible ? Qt::Checked : Qt::Unchecked);
+        }
+        if (it->childCount() > 0)
+            it->setExpanded(b.id == baseActual);
     }
 
     // --- Capas vectoriales: overlays (no editables) vs entidades ----------
@@ -303,6 +317,24 @@ void Ventana::reconstruirPanel()
     QTreeWidgetItem *gEnt  = nuevoGrupo(tr("Entidades (editables)"));
     auto capas = m_mapa->featureLayers();
     std::reverse(capas.begin(), capas.end());
+
+    // Mapa híbrido: el MBTiles vectorial encima de la base, arriba del todo de
+    // los overlays, con sus grupos (calles, lugares, POI...) como casillas.
+    if (m_mapa->hasVectorOverlay()) {
+        auto *hib = new QTreeWidgetItem(gOver);
+        hib->setText(0, tr("Híbrido: %1").arg(QFileInfo(m_mapa->vectorOverlayFile()).completeBaseName()));
+        hib->setData(0, RolHibrido, QStringLiteral("*"));
+        hib->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+        hib->setCheckState(0, m_mapa->isVectorOverlayVisible() ? Qt::Checked : Qt::Unchecked);
+        for (const BaseLayerGroup &g : m_mapa->vectorOverlayGroups()) {
+            auto *hg = new QTreeWidgetItem(hib);
+            hg->setText(0, g.title);
+            hg->setData(0, RolHibrido, g.id);
+            hg->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+            hg->setCheckState(0, g.visible ? Qt::Checked : Qt::Unchecked);
+        }
+        hib->setExpanded(true);
+    }
 
     for (const LayerInfo &c : capas) {
         QTreeWidgetItem *grupo = c.editable ? gEnt : gOver;
@@ -417,6 +449,26 @@ void Ventana::visibilidadCambiada(QTreeWidgetItem *item, int col)
 {
     if (col != 0)
         return;
+
+    // Mapa híbrido: la casilla del overlay entero ("*") o la de uno de sus grupos.
+    const QString hibrido = item->data(0, RolHibrido).toString();
+    if (!hibrido.isEmpty()) {
+        const bool on = item->checkState(0) == Qt::Checked;
+        if (hibrido == QLatin1String("*"))
+            m_mapa->setVectorOverlayVisible(on);
+        else
+            m_mapa->setVectorOverlayGroupVisible(hibrido, on);
+        return;
+    }
+
+    // Una capa propia de una base vectorial (nombres de calles, POI...): cuelga
+    // de su capa base, que dice de qué capa es.
+    const QString grupo = item->data(0, RolGrupoBase).toString();
+    if (!grupo.isEmpty()) {
+        const QString de = item->parent() ? item->parent()->data(0, RolBase).toString() : QString();
+        m_mapa->setBaseLayerGroupVisible(grupo, item->checkState(0) == Qt::Checked, de);
+        return;
+    }
 
     // Grupo «Base»: casillas con comportamiento de radio. Marcar una fija la
     // capa base; desmarcar la activa no hace nada (siempre hay un mapa), así

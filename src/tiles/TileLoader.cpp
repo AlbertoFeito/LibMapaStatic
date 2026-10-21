@@ -102,14 +102,15 @@ RMapsTileSource *TileLoader::sourceFor(const QString &datasetId)
 
 // Devuelve (creandolo la primera vez) el renderizador de un dataset vectorial,
 // con el estilo de su vectorStyleFile o, si no tiene o no se puede leer, el de
-// OpenMapTiles. Un estilo roto se avisa una vez y no deja la capa en blanco.
+// por defecto (OpenMapTiles para una base, el hibrido para un overlay). Un
+// estilo roto se avisa una vez y no deja la capa en blanco.
 VectorTileRenderer *TileLoader::rendererFor(const TileDataset &dataset)
 {
     auto it = m_renderers.find(dataset.id);
     if (it != m_renderers.end())
         return it->get();
 
-    VectorStyle style = VectorStyle::openMapTiles();
+    VectorStyle style = VectorStyle::defaultFor(dataset.vectorOverlay);
     if (!dataset.vectorStyleFile.isEmpty()) {
         QString error;
         VectorStyle custom;
@@ -117,12 +118,14 @@ VectorTileRenderer *TileLoader::rendererFor(const TileDataset &dataset)
             style = custom;
         else
             qCWarning(lcMapaTiles) << "Estilo vectorial no valido para" << dataset.id
-                                   << "- se usa el de OpenMapTiles:" << error;
+                                   << "- se usa el de por defecto:" << error;
     }
     auto renderer = std::make_shared<VectorTileRenderer>(style);
+    renderer->setHiddenGroups(QSet<QString>(dataset.vectorHiddenGroups.begin(),
+                                            dataset.vectorHiddenGroups.end()));
     // Mascara de tierra (para pintar el mar). Si no se puede leer, se avisa y la
     // capa se ve como sin ella: el mar del color de fondo.
-    if (!dataset.vectorLandMask.isEmpty()) {
+    if (!dataset.vectorLandMask.isEmpty() && !dataset.vectorOverlay) {
         QString error;
         auto mask = LandMask::fromFile(dataset.vectorLandMask, dataset.vectorLandLayer, &error);
         if (mask)
@@ -222,6 +225,24 @@ bool TileLoader::renderVector(const QHash<TileKey, QByteArray> &raw, const TileD
         loaded->append(LoadedTile{ in[i].first, out[i] });
     }
     return true;
+}
+
+// Cambia los grupos ocultos de una capa vectorial. No se toca el renderizador en
+// uso (otros hilos del pool podrian estar pintando con el): se pone uno NUEVO,
+// copia del anterior con el estilo y la mascara ya cargados, y el viejo muere
+// cuando nadie lo usa. Corre en el hilo trabajador, entre peticion y peticion.
+void TileLoader::setVectorHiddenGroups(const QString &datasetId, const QStringList &groups)
+{
+    auto ds = m_datasets.find(datasetId);
+    if (ds == m_datasets.end())
+        return;
+    ds->vectorHiddenGroups = groups;
+    auto it = m_renderers.find(datasetId);
+    if (it == m_renderers.end())
+        return;                           // se creara con los grupos nuevos
+    auto renderer = std::make_shared<VectorTileRenderer>(*it->get());
+    renderer->setHiddenGroups(QSet<QString>(groups.begin(), groups.end()));
+    it.value() = renderer;
 }
 
 // Atiende UNA peticion (varias rejillas, de gruesa a fina): lee cada rango de la

@@ -32,6 +32,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión. El historial de los objetivos sale a **GPX con la hora de cada punto** (`exportTargetHistory`, releíble con `parseGpxTracks`)
 - **Exportar la vista** a imagen o PDF (`exportView`, `renderImage`): el mapa tal cual se ve, con título, pie (extensión, fecha UTC, atribución) y, en PDF, vectorial y con la escala de impresión 1:N
 - **MBTiles vectoriales (pbf / Mapbox Vector Tile)**: un `.mbtiles` de OpenMapTiles (como el de Cuba, z0-16) entra como capa base igual que uno ráster —por `datasets.json`, `mapa.json` o `addBaseLayer`—, sin conexión y sin dependencias nuevas. La librería decodifica cada tesela (gzip con miniz, protobuf propio) y la **pinta con un estilo** en el hilo de carga, en paralelo; caché, respaldo, cobertura y cambio de capa no notan la diferencia. Trae un estilo para el esquema OpenMapTiles (agua, usos del suelo, edificios, vías por categoría, límites, nombres de lugares) y admite uno propio en JSON (`"vectorStyle"`). Ver «MBTiles vectoriales» más abajo
+- **Mapa híbrido**: el MBTiles vectorial también va **encima de cualquier capa base** (satélite, relieve, OSM ráster) como overlay transparente, con nombres de calles, carreteras, lugares y límites en blanco con halo (`setVectorOverlay`, o `"vectorOverlay"` en `mapa.json`). Sus capas (nombres de calles, lugares, POI, números de portal, cimas, límites) se encienden y apagan una a una, igual que las de una base vectorial. Los nombres de calles van a lo largo de cada calle
 - **Añadir una capa base en caliente**: `MapWidget::addBaseLayer(fichero)` mete un `.mbtiles` o una base de teselas `.sqlitedb` como capa nueva con el mapa ya abierto (sin editar `datasets.json` ni reiniciar), y devuelve su id para activarla con `setBaseLayerId`. Detecta sola el esquema y el zoom, como `probe_db`. La demo lo trae en **Datos → Añadir capa base (teselas)…**
 - **Búsqueda de lugares sin conexión**: `searchPlaces("guantanamo")` devuelve ciudades, pueblos, aeropuertos, bahías, cabos, picos… ordenados (los que empiezan por lo escrito, y la ciudad antes que la aldea), sin distinguir tildes ni mayúsculas; `goToPlace` centra el mapa con el zoom que corresponde al tipo. El índice es un `lugares.sqlitedb` (`"places"` en `mapa.json` o `MapConfig::placesDbFile`) que genera `osm_lugares_a_sqlitedb.py` desde un export de OpenStreetMap. La demo lo usa en un campo de la barra (Ctrl+K)
 - **Medir superficie en pantalla** (`MapTool::MeasureArea`): se marca un polígono clic a clic y la superficie y el perímetro salen en vivo junto al cursor; al cerrarlo, `areaMeasured` da la medida
@@ -430,7 +431,13 @@ fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motiv
 - **Rótulos:** cada tesela se pinta por separado, así que solo se rotulan los
   puntos que caen dentro de la tesela y el texto se desplaza para caber entero:
   ningún nombre sale cortado ni repetido, a cambio de omitir algunos en los bordes.
-  Los nombres de calles (rótulos a lo largo de líneas) no se dibujan.
+  Los nombres de calles y ríos van **a lo largo de la línea**, letra a letra, si
+  caben enteros en la tesela sin doblar más de 35° entre letras.
+- **Capas dentro de la capa:** el estilo reparte sus reglas en grupos que se
+  encienden y apagan (`MapWidget::baseLayerGroups` / `setBaseLayerGroupVisible`;
+  en la demo, casillas debajo de la capa base): Nombres de calles, Nombres de
+  lugares, Puntos de interés, Edificios, Números de portal, Cimas y Límites
+  administrativos. De partida, `"hiddenGroups": ["poi"]` en la entrada del dataset.
 - **Comprobar sin abrir la demo:** `vector_tile --mbtiles f.mbtiles --info`
   (capas, claves y clases de la tesela de un punto) y `--out vista.png` (pinta
   una vista con el estilo por defecto o `--style`). `check_data` reconoce las
@@ -456,6 +463,28 @@ El MBTiles de Cuba (`descargar-mbtiles.sh` / `.bat`: `cuba-osm-z16.mbtiles`,
 de tierra arriba. Pintar una tesela z14 de La Habana
 (~8600 edificios) cuesta unos 50-130 ms; por eso se reparten entre varios hilos.
 
+### Mapa híbrido (el vectorial encima de cualquier base)
+
+El mismo MBTiles vectorial se puede poner **encima** de la capa base que esté
+elegida (satélite, relieve, OSM ráster), como overlay transparente: es el mapa
+«híbrido». Va en una capa de teselas propia, entre el relieve y las entidades,
+con su hilo y su caché: cambiar de base no lo toca.
+
+```json
+"vectorOverlay": { "filePath": "cuba-osm.mbtiles", "hiddenGroups": ["poi"], "visible": true }
+```
+
+o en código `mapa->setVectorOverlay("cuba-osm.mbtiles")`. Se pinta con el estilo
+**híbrido** (fondo transparente, carreteras finas semitransparentes y rótulos
+blancos con halo oscuro, que se leen sobre una foto), o con `"vectorStyle"`.
+Sus grupos: Carreteras y calles, Nombres de calles, Nombres de lugares, Puntos de
+interés y Números de portal (estos dos, apagados de partida), Cimas y Límites
+(`vectorOverlayGroups` / `setVectorOverlayGroupVisible`; `setVectorOverlayVisible`
+lo apaga entero). En la demo: **Datos → Mapa híbrido…**, y en el panel de capas,
+«Híbrido» con sus grupos debajo. Plantilla del estilo: `docs/estilo_hibrido.json`
+(`vector_tile --print-style --hybrid`). Más allá del zoom máximo del MBTiles se
+amplía su última tesela.
+
 ## Herramientas
 
 | | |
@@ -465,7 +494,7 @@ de tierra arriba. Pintar una tesela z14 de La Habana
 | `check_data` | Comprueba un paquete de datos antes de distribuirlo: ficheros, que abran, que sus imágenes se decodifiquen, cobertura por zoom en la zona y tamaño total |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
-| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style`; con `--land-mask` pinta además el mar) y vuelca el estilo por defecto (`--print-style`) |
+| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style`; con `--land-mask` pinta además el mar, `--hide` apaga grupos y `--hybrid` usa el estilo del mapa híbrido) y vuelca el estilo por defecto (`--print-style`) |
 | `geo_to_tiles` | Rasteriza un fichero vectorial `.geo` a una base de teselas, para usarlo como capa base |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |
@@ -806,6 +835,7 @@ docs/arquitectura.html + .pdf   documento técnico (arquitectura, módulos, fluj
 | 29 | Importar un fichero = una sola operación de deshacer; textos de Qt en español en la demo; filtro de objetivos (`setTargetFilter`) |
 | 30 | Agrupar objetivos al alejar el zoom (`setTargetClustering`, `targetClusterClicked`) |
 | 31 | MBTiles **vectoriales** (pbf/MVT, OpenMapTiles) como capa base: decodificador propio, estilo por defecto o JSON propio, pintado en paralelo, `vector_tile` |
+| 32 | **Mapa híbrido**: el MBTiles vectorial encima de cualquier base; nombres de calles a lo largo de la calle y capas (grupos) que se encienden y apagan |
 
 El producto final trabaja **solo con datos locales**, y la librería ya se puede
 usar desde otra aplicación y llevar a un PC sin Qt. Detalles y decisiones en

@@ -8,6 +8,7 @@
 
 #include <QByteArray>
 #include <QImage>
+#include <QSet>
 #include <QString>
 
 #include <memory>
@@ -21,6 +22,9 @@ namespace libmapa {
  * del motor: el \c TileLoader, en su hilo trabajador, pasa por aquí las teselas
  * de un dataset vectorial y entrega una QImage como si hubiera leído un PNG.
  * Caché, escalera de respaldo, cobertura y capa activa siguen igual.
+ *
+ * Los nombres de las líneas (calles, ríos) van a lo largo de ellas, letra a letra,
+ * y solo si caben enteros en la tesela sin doblar demasiado.
  *
  * Rótulos: cada tesela se pinta por separado, así que un texto que cruzara el
  * borde quedaría cortado por la vecina. Para evitarlo, solo se rotulan los
@@ -50,6 +54,13 @@ public:
     void setLandMask(std::shared_ptr<const LandMask> mask) { m_landMask = std::move(mask); }
     const LandMask *landMask() const { return m_landMask.get(); }
 
+    /*!
+     * \brief Grupos del estilo que NO se dibujan ("nombres_calles", "poi"…; ver
+     *        \c VectorRule::group). Vacío = todo visible.
+     */
+    void setHiddenGroups(const QSet<QString> &groups) { m_hiddenGroups = groups; }
+    QSet<QString> hiddenGroups() const { return m_hiddenGroups; }
+
     //! Dibuja \a tile, que es la tesela XYZ \a key, con mar y tierra si hay máscara.
     QImage render(const mvt::Tile &tile, const TileKey &key, int sizePx) const;
 
@@ -71,6 +82,7 @@ private:
 
     VectorStyle m_style;
     std::shared_ptr<const LandMask> m_landMask;
+    QSet<QString> m_hiddenGroups;
 };
 
 } // namespace libmapa
