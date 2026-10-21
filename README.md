@@ -32,7 +32,7 @@ en un hilo aparte y rellena los huecos con teselas de nivel superior escaladas.
 - **Intercambio GeoJSON / KML / GPX**: `importVectorFile` trae entidades de QGIS, Google Earth o un GPS como capa (con nombre, atributos y estilo) y `exportVectorFile` las saca en el formato que diga la extensión. El historial de los objetivos sale a **GPX con la hora de cada punto** (`exportTargetHistory`, releíble con `parseGpxTracks`)
 - **Exportar la vista** a imagen o PDF (`exportView`, `renderImage`): el mapa tal cual se ve, con título, pie (extensión, fecha UTC, atribución) y, en PDF, vectorial y con la escala de impresión 1:N
 - **MBTiles vectoriales (pbf / Mapbox Vector Tile)**: un `.mbtiles` de OpenMapTiles (como el de Cuba, z0-16) entra como capa base igual que uno ráster —por `datasets.json`, `mapa.json` o `addBaseLayer`—, sin conexión y sin dependencias nuevas. La librería decodifica cada tesela (gzip con miniz, protobuf propio) y la **pinta con un estilo** en el hilo de carga, en paralelo; caché, respaldo, cobertura y cambio de capa no notan la diferencia. Trae un estilo para el esquema OpenMapTiles (agua, usos del suelo, edificios, vías por categoría, límites, nombres de lugares) y admite uno propio en JSON (`"vectorStyle"`). Ver «MBTiles vectoriales» más abajo
-- **Mapa híbrido**: el MBTiles vectorial también va **encima de cualquier capa base** (satélite, relieve, OSM ráster) como overlay transparente, con nombres de calles, carreteras, lugares y límites en blanco con halo (`setVectorOverlay`, o `"vectorOverlay"` en `mapa.json`). Sus capas (nombres de calles, lugares, POI, números de portal, cimas, límites) se encienden y apagan una a una, igual que las de una base vectorial. Los nombres de calles van a lo largo de cada calle
+- **Mapa híbrido**: el MBTiles vectorial también va **encima de cualquier capa base** (satélite, relieve, OSM ráster) como overlay transparente, con nombres de calles, carreteras, lugares y límites en blanco con halo (`setVectorOverlay`, o `"vectorOverlay"` en `mapa.json`). Sus capas (carreteras, nombres de calles, lugares, cimas, límites) se encienden y apagan una a una, igual que las de una base vectorial. Los nombres de calles van a lo largo de cada calle
 - **Añadir una capa base en caliente**: `MapWidget::addBaseLayer(fichero)` mete un `.mbtiles` o una base de teselas `.sqlitedb` como capa nueva con el mapa ya abierto (sin editar `datasets.json` ni reiniciar), y devuelve su id para activarla con `setBaseLayerId`. Detecta sola el esquema y el zoom, como `probe_db`. La demo lo trae en **Datos → Añadir capa base (teselas)…**
 - **Búsqueda de lugares sin conexión**: `searchPlaces("guantanamo")` devuelve ciudades, pueblos, aeropuertos, bahías, cabos, picos… ordenados (los que empiezan por lo escrito, y la ciudad antes que la aldea), sin distinguir tildes ni mayúsculas; `goToPlace` centra el mapa con el zoom que corresponde al tipo. El índice es un `lugares.sqlitedb` (`"places"` en `mapa.json` o `MapConfig::placesDbFile`) que genera `osm_lugares_a_sqlitedb.py` desde un export de OpenStreetMap. La demo lo usa en un campo de la barra (Ctrl+K)
 - **Medir superficie en pantalla** (`MapTool::MeasureArea`): se marca un polígono clic a clic y la superficie y el perímetro salen en vivo junto al cursor; al cerrarlo, `areaMeasured` da la medida
@@ -422,7 +422,8 @@ fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motiv
 - **Estilo por defecto:** el del esquema OpenMapTiles (colores tipo OSM Bright):
   agua, bosques y usos del suelo, parques, edificios (z13+), vías por categoría
   con borde, ferrocarril, límites por `admin_level`, aeropuertos y rótulos de
-  lugares, aguas y POI (`name:es`, `name` o `name:latin`, el primero que haya).
+  lugares y aguas (`name:es`, `name` o `name:latin`, el primero que haya). Sin
+  puntos de interés ni números de portal: ver «Añadir puntos de interés» abajo.
 - **Estilo propio:** `"vectorStyle": "estilo.json"` en la entrada del dataset
   (relativo al JSON; viaja con el paquete). Formato sencillo: fondo y una lista de
   reglas por capa con filtro, zooms, relleno, trazo, grosor por zoom y rótulo.
@@ -436,11 +437,28 @@ fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motiv
 - **Capas dentro de la capa:** el estilo reparte sus reglas en grupos que se
   encienden y apagan (`MapWidget::baseLayerGroups` / `setBaseLayerGroupVisible`;
   en la demo, casillas debajo de la capa base): Nombres de calles, Nombres de
-  lugares, Puntos de interés, Edificios, Números de portal, Cimas y Límites
-  administrativos. De partida, `"hiddenGroups": ["poi"]` en la entrada del dataset.
+  lugares, Edificios, Cimas y Límites administrativos. De partida,
+  `"hiddenGroups": ["edificios"]` en la entrada del dataset (o, en un estilo propio,
+  `"visible": false` en el grupo).
+- **Añadir puntos de interés:** los estilos por defecto no los traen, pero el
+  MBTiles sí (capa `poi`, con `class`: hospital, fuel, police, pharmacy, school,
+  bank, lodging…; `vector_tile --info` lista las de una zona). Para ver solo los
+  que interesen, un estilo propio (copia de `docs/estilo_vectorial.json` o de
+  `docs/estilo_hibrido.json`) con un grupo y una regla:
+
+  ```json
+  "groups": [ …, { "id": "servicios", "title": "Hospitales y policía" } ],
+  "rules":  [ …, { "layer": "poi", "group": "servicios", "minZoom": 13,
+                   "filter": { "class": ["hospital", "police"] },
+                   "label": "name:es|name|name:latin", "textSize": 10,
+                   "textColor": "#b00020", "pointRadius": 3, "pointColor": "#b00020" } ]
+  ```
+
+  y `"vectorStyle": "estilo.json"` en la capa (o en `"vectorOverlay"`). El grupo
+  sale como una casilla más.
 - **Comprobar sin abrir la demo:** `vector_tile --mbtiles f.mbtiles --info`
   (capas, claves y clases de la tesela de un punto) y `--out vista.png` (pinta
-  una vista con el estilo por defecto o `--style`). `check_data` reconoce las
+  una vista con el estilo por defecto o `--style-file`). `check_data` reconoce las
   capas vectoriales (`imagenes mvt (gzip)`).
 
 - **El mar:** algunos MBTiles **no traen polígonos de océano** (el de Cuba de
@@ -471,14 +489,13 @@ elegida (satélite, relieve, OSM ráster), como overlay transparente: es el mapa
 con su hilo y su caché: cambiar de base no lo toca.
 
 ```json
-"vectorOverlay": { "filePath": "cuba-osm.mbtiles", "hiddenGroups": ["poi"], "visible": true }
+"vectorOverlay": { "filePath": "cuba-osm.mbtiles", "hiddenGroups": ["cimas"], "visible": true }
 ```
 
 o en código `mapa->setVectorOverlay("cuba-osm.mbtiles")`. Se pinta con el estilo
 **híbrido** (fondo transparente, carreteras finas semitransparentes y rótulos
 blancos con halo oscuro, que se leen sobre una foto), o con `"vectorStyle"`.
-Sus grupos: Carreteras y calles, Nombres de calles, Nombres de lugares, Puntos de
-interés y Números de portal (estos dos, apagados de partida), Cimas y Límites
+Sus grupos: Carreteras y calles, Nombres de calles, Nombres de lugares, Cimas y Límites
 (`vectorOverlayGroups` / `setVectorOverlayGroupVisible`; `setVectorOverlayVisible`
 lo apaga entero). En la demo: **Datos → Mapa híbrido…**, y en el panel de capas,
 «Híbrido» con sus grupos debajo. Plantilla del estilo: `docs/estilo_hibrido.json`
@@ -494,7 +511,7 @@ amplía su última tesela.
 | `check_data` | Comprueba un paquete de datos antes de distribuirlo: ficheros, que abran, que sus imágenes se decodifiquen, cobertura por zoom en la zona y tamaño total |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
-| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style`; con `--land-mask` pinta además el mar, `--hide` apaga grupos y `--hybrid` usa el estilo del mapa híbrido) y vuelca el estilo por defecto (`--print-style`) |
+| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style-file`; con `--land-mask` pinta además el mar, `--hide` apaga grupos y `--hybrid` usa el estilo del mapa híbrido) y vuelca el estilo por defecto (`--print-style`) |
 | `geo_to_tiles` | Rasteriza un fichero vectorial `.geo` a una base de teselas, para usarlo como capa base |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |

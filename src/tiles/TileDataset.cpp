@@ -60,7 +60,7 @@ QJsonObject TileDataset::toJson() const
         o[QStringLiteral("landMask")] = vectorLandMask;
     if (!vectorLandLayer.isEmpty())
         o[QStringLiteral("landLayer")] = vectorLandLayer;
-    if (!vectorHiddenGroups.isEmpty())
+    if (vectorHiddenGroupsSet || !vectorHiddenGroups.isEmpty())
         o[QStringLiteral("hiddenGroups")] = QJsonArray::fromStringList(vectorHiddenGroups);
     return o;
 }
@@ -105,6 +105,7 @@ TileDataset TileDataset::fromJson(const QJsonObject &o)
     d.vectorStyleFile = o.value(QStringLiteral("vectorStyle")).toString();
     d.vectorLandMask  = o.value(QStringLiteral("landMask")).toString();
     d.vectorLandLayer = o.value(QStringLiteral("landLayer")).toString();
+    d.vectorHiddenGroupsSet = o.contains(QStringLiteral("hiddenGroups"));
     for (const QJsonValue &g : o.value(QStringLiteral("hiddenGroups")).toArray())
         if (!g.toString().isEmpty())
             d.vectorHiddenGroups << g.toString();

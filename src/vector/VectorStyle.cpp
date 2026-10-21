@@ -23,9 +23,7 @@ const char kOpenMapTilesStyle[] = R"JSON({
   "groups": [
     { "id": "nombres_calles", "title": "Nombres de calles" },
     { "id": "lugares", "title": "Nombres de lugares" },
-    { "id": "poi", "title": "Puntos de interés" },
     { "id": "edificios", "title": "Edificios" },
-    { "id": "numeros", "title": "Números de portal" },
     { "id": "cimas", "title": "Cimas" },
     { "id": "limites", "title": "Límites administrativos" }
   ],
@@ -135,14 +133,7 @@ const char kOpenMapTilesStyle[] = R"JSON({
       "filter": { "class": ["tertiary", "minor", "service"] }, "minZoom": 15,
       "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#5a5047" },
     { "layer": "mountain_peak", "group": "cimas", "minZoom": 11, "label": "name:es|name|name:latin",
-      "textSize": 10, "textColor": "#6b4f2f", "pointRadius": 2.5, "pointColor": "#8b6b45" },
-    { "layer": "poi", "group": "poi", "minZoom": 15, "maxZoom": 15, "filter": { "rank": ["1", "2", "3", "4", "5"] },
-      "label": "name:es|name|name:latin", "textColor": "#6b6b6b", "textSize": 9, "pointRadius": 2,
-      "pointColor": "#a0a0a0" },
-    { "layer": "poi", "group": "poi", "minZoom": 16, "label": "name:es|name|name:latin", "textColor": "#6b6b6b",
-      "textSize": 9, "pointRadius": 2, "pointColor": "#a0a0a0" },
-    { "layer": "housenumber", "group": "numeros", "minZoom": 17, "label": "housenumber",
-      "textSize": 8.5, "textColor": "#8a7f74" }
+      "textSize": 10, "textColor": "#6b4f2f", "pointRadius": 2.5, "pointColor": "#8b6b45" }
   ]
 })JSON";
 
@@ -159,8 +150,6 @@ const char kHybridStyle[] = R"JSON({
     { "id": "vias", "title": "Carreteras y calles" },
     { "id": "nombres_calles", "title": "Nombres de calles" },
     { "id": "lugares", "title": "Nombres de lugares" },
-    { "id": "poi", "title": "Puntos de interés", "visible": false },
-    { "id": "numeros", "title": "Números de portal", "visible": false },
     { "id": "cimas", "title": "Cimas" },
     { "id": "limites", "title": "Límites administrativos" }
   ],
@@ -208,11 +197,7 @@ const char kHybridStyle[] = R"JSON({
       "filter": { "class": ["tertiary", "minor", "service"] }, "minZoom": 15,
       "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000" },
     { "layer": "mountain_peak", "group": "cimas", "minZoom": 11, "label": "name:es|name|name:latin",
-      "textSize": 10, "textColor": "#fff0d0", "halo": "#d0000000", "pointRadius": 2.5, "pointColor": "#fff0d0" },
-    { "layer": "poi", "group": "poi", "minZoom": 15, "label": "name:es|name|name:latin",
-      "textSize": 9, "textColor": "#ffffff", "halo": "#d0000000", "pointRadius": 2, "pointColor": "#ffffff" },
-    { "layer": "housenumber", "group": "numeros", "minZoom": 17, "label": "housenumber",
-      "textSize": 8.5, "textColor": "#ffffff", "halo": "#c0000000" }
+      "textSize": 10, "textColor": "#fff0d0", "halo": "#d0000000", "pointRadius": 2.5, "pointColor": "#fff0d0" }
   ]
 })JSON";
 

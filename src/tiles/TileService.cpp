@@ -54,6 +54,25 @@ TileService::~TileService()
 
 // Arranca el servicio: valida los datasets, crea un TileCache por capa (repartiendo
 // el presupuesto), levanta el hilo lector (TileLoader) y activa la primera capa.
+namespace {
+
+// Capa vectorial sin "hiddenGroups" propio: apaga los grupos que su estilo marca
+// "visible": false (un estilo propio puede apagar asi lo que no quiera de
+// partida). Se hace aqui, al registrar la capa, para que el hilo lector y la interfaz
+// (vectorGroups / baseLayerGroups) partan del mismo estado.
+void applyDefaultHiddenGroups(TileDataset &d)
+{
+    if (!d.vector || d.vectorHiddenGroupsSet)
+        return;
+    VectorStyle style = VectorStyle::defaultFor(d.vectorOverlay);
+    if (!d.vectorStyleFile.isEmpty())
+        VectorStyle::fromFile(d.vectorStyleFile, &style);
+    d.vectorHiddenGroups = style.defaultHidden;
+    d.vectorHiddenGroupsSet = true;
+}
+
+} // namespace
+
 bool TileService::start(const QVector<TileDataset> &datasets, int cacheMiB)
 {
     if (m_started) {
@@ -62,7 +81,8 @@ bool TileService::start(const QVector<TileDataset> &datasets, int cacheMiB)
     }
 
     QVector<TileDataset> valid;
-    for (const TileDataset &d : datasets) {
+    for (TileDataset d : datasets) {
+        applyDefaultHiddenGroups(d);
         if (!d.isValid()) {
             qCWarning(lcMapaTiles) << "Dataset invalido, se ignora:" << d.id;
             continue;
@@ -262,9 +282,11 @@ bool TileService::addDataset(const TileDataset &dataset, QString *error)
     if (m_datasets.contains(dataset.id))
         return fallo(tr("Ya hay una capa con el id %1.").arg(dataset.id));
 
-    m_datasets.insert(dataset.id, dataset);
+    TileDataset d = dataset;
+    applyDefaultHiddenGroups(d);
+    m_datasets.insert(d.id, d);
     QMetaObject::invokeMethod(m_loader, "addDataset", Qt::QueuedConnection,
-                              Q_ARG(libmapa::TileDataset, dataset));
+                              Q_ARG(libmapa::TileDataset, d));
     qCInfo(lcMapaTiles) << "Capa base anadida:" << dataset.id;
     return true;
 }
@@ -294,6 +316,7 @@ bool TileService::setVectorHiddenGroups(const QString &id, const QStringList &gr
     if (it == m_datasets.end() || !it->vector || !m_loader)
         return false;
     it->vectorHiddenGroups = groups;
+    it->vectorHiddenGroupsSet = true;
     QMetaObject::invokeMethod(m_loader, "setVectorHiddenGroups", Qt::QueuedConnection,
                               Q_ARG(QString, id), Q_ARG(QStringList, groups));
     m_discardBefore.insert(id, m_nextRequestId);

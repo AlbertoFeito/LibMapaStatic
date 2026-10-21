@@ -158,6 +158,9 @@ struct TileDataset
      * de partida; MapWidget::setBaseLayerGroupVisible lo cambia en caliente.
      */
     QStringList vectorHiddenGroups;
+    //! true si vectorHiddenGroups lo fijo alguien ("hiddenGroups" en el JSON, o la
+    //! app en caliente). Si no, TileService pone los que el estilo apaga de partida.
+    bool vectorHiddenGroupsSet = false;
 
     /*!
      * \brief true si la capa vectorial se usa como OVERLAY (mapa hibrido) encima

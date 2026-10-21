@@ -918,12 +918,8 @@ bool MapWidget::Impl::installVectorOverlay(TileDataset ds, bool visible, bool hi
     ds.vectorOverlay = true;
     ds.vectorLandMask.clear();
     ds.baseZoom = ds.maxZoom;
-    if (!hiddenGroupsSet) {
-        VectorStyle style = VectorStyle::hybrid();
-        if (!ds.vectorStyleFile.isEmpty())
-            VectorStyle::fromFile(ds.vectorStyleFile, &style);
-        ds.vectorHiddenGroups = style.defaultHidden;
-    }
+    // Sin "hiddenGroups" propio, TileService apaga los que el estilo marca.
+    ds.vectorHiddenGroupsSet = hiddenGroupsSet;
 
     if (d->view)
         d->view->setOverlayService(nullptr);

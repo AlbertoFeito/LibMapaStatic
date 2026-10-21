@@ -10,7 +10,7 @@
  *
  *   vector_tile --mbtiles cuba-osm-z16.mbtiles --out habana.png
  *               [--center 23.1136,-82.3666] [--zoom 14] [--size 1024x768]
- *               [--style estilo.json] [--land-mask cuba_tierra.sqlitedb [--land-layer tierra]]
+ *               [--style-file estilo.json] [--land-mask cuba_tierra.sqlitedb [--land-layer tierra]]
  *     Pinta la vista (mosaico de teselas de 256 px) con el estilo por defecto
  *     o con el dado, y dice cuánto tarda cada tesela. Con --land-mask (la BD de
  *     costa de osm_costa_a_sqlitedb.py) pinta además el mar. --hide poi,edificios
@@ -119,7 +119,9 @@ int main(int argc, char *argv[])
                                    QStringLiteral("z"), QStringLiteral("14"));
     const QCommandLineOption oSize(QStringLiteral("size"), QStringLiteral("AnchoxAlto"),
                                    QStringLiteral("px"), QStringLiteral("1024x768"));
-    const QCommandLineOption oStyle(QStringLiteral("style"), QStringLiteral("Estilo JSON propio"),
+    // "style-file" y no "style": Qt se queda con -style/--style (el estilo visual
+    // de la aplicacion) antes de que llegue aqui.
+    const QCommandLineOption oStyle(QStringLiteral("style-file"), QStringLiteral("Estilo JSON propio"),
                                     QStringLiteral("fichero"));
     const QCommandLineOption oMask(QStringLiteral("land-mask"),
                                    QStringLiteral("Mascara de tierra (BD de entidades) para pintar el mar"),

@@ -199,8 +199,7 @@ public:
      *
      * Una capa de un MBTiles vectorial (pbf) se pinta con un estilo cuyas reglas
      * van por grupos: con el estilo por defecto, «Nombres de calles», «Nombres de
-     * lugares», «Puntos de interes», «Edificios», «Numeros de portal», «Cimas» y
-     * «Limites administrativos». Cada uno se comporta como una capa mas.
+     * lugares», «Edificios», «Cimas» y «Limites administrativos». Cada uno se comporta como una capa mas.
      *
      * \param layerId capa base; vacio = la activa.
      * \return vacio si la capa no es vectorial (o no existe).

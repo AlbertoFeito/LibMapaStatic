@@ -800,11 +800,14 @@ void TstVectorTiles::styleGroups()
     QCOMPARE(s.defaultHidden, QStringList{ QStringLiteral("a") });
     QCOMPARE(s.rules[2].group, QString());
 
-    // El estilo por defecto ofrece los grupos de siempre y no apaga ninguno.
+    // El estilo por defecto ofrece estos grupos y no apaga ninguno. Ni POI ni
+    // números de portal: en el MBTiles de Cuba no se veían y se quitaron.
     const VectorStyle d = VectorStyle::openMapTiles();
-    for (const char *g : { "nombres_calles", "lugares", "poi", "edificios", "numeros", "cimas", "limites" })
-        QVERIFY2(d.groupIds().contains(QLatin1String(g)), g);
+    QCOMPARE(d.groupIds(), QStringList({ "nombres_calles", "lugares", "edificios", "cimas", "limites" }));
     QVERIFY(d.defaultHidden.isEmpty());
+    for (const VectorRule &r : d.rules)
+        QVERIFY2(r.layer != QLatin1String("poi") && r.layer != QLatin1String("housenumber"),
+                 qPrintable(r.layer));
 }
 
 // Un grupo oculto no se pinta; lo que no tiene grupo (el agua) siempre sí.
@@ -824,17 +827,15 @@ void TstVectorTiles::hiddenGroupsAreNotDrawn()
 }
 
 // El estilo híbrido es para ir ENCIMA de otra base: fondo transparente (sin
-// agua ni tierra), las vías sí, y POI y números de portal apagados de partida.
+// agua ni tierra), las vías sí, y sus grupos (sin POI ni números de portal).
 void TstVectorTiles::hybridStyleIsTransparent()
 {
     QJsonParseError pe{};
     QVERIFY(!QJsonDocument::fromJson(VectorStyle::hybridJson(), &pe).isNull());
     const VectorStyle h = VectorStyle::hybrid();
     QCOMPARE(h.background.alpha(), 0);
-    QVERIFY(h.groupIds().contains(QStringLiteral("vias")));
-    QVERIFY(h.defaultHidden.contains(QStringLiteral("poi")));
-    QVERIFY(h.defaultHidden.contains(QStringLiteral("numeros")));
-    QVERIFY(!h.defaultHidden.contains(QStringLiteral("nombres_calles")));
+    QCOMPARE(h.groupIds(), QStringList({ "vias", "nombres_calles", "lugares", "cimas", "limites" }));
+    QVERIFY(h.defaultHidden.isEmpty());
     QCOMPARE(VectorStyle::defaultFor(true).name, h.name);
     QCOMPARE(VectorStyle::defaultFor(false).name, VectorStyle::openMapTiles().name);
 
@@ -922,6 +923,24 @@ void TstVectorTiles::loaderChangesHiddenGroups()
     // "hiddenGroups" en el JSON del dataset, ida y vuelta.
     ds.vectorHiddenGroups = QStringList{ QStringLiteral("agua") };
     QCOMPARE(TileDataset::fromJson(ds.toJson()).vectorHiddenGroups, ds.vectorHiddenGroups);
+
+    // Un grupo con "visible": false en el estilo arranca apagado también en una
+    // capa BASE, salvo que el dataset diga sus "hiddenGroups" (aunque sea []).
+    {
+        QFile out(p("grupos.json"));
+        QVERIFY(out.open(QIODevice::WriteOnly));
+        out.write(R"({ "groups": [ { "id": "agua", "title": "Agua", "visible": false } ],
+                       "rules": [ { "layer": "water", "group": "agua", "fill": "#0000ff" } ] })");
+    }
+    TileDataset sinLista = MBTiles::fromFile(f, QStringLiteral("a"));
+    sinLista.vectorStyleFile = p("grupos.json");
+    TileDataset conLista = MBTiles::fromFile(f, QStringLiteral("b"));
+    conLista.vectorStyleFile = p("grupos.json");
+    conLista.vectorHiddenGroupsSet = true;                      // "hiddenGroups": []
+    TileService service;
+    QVERIFY(service.start({ sinLista, conLista }, 16));
+    QCOMPARE(service.dataset(QStringLiteral("a"))->vectorHiddenGroups, QStringList{ QStringLiteral("agua") });
+    QVERIFY(service.dataset(QStringLiteral("b"))->vectorHiddenGroups.isEmpty());
 }
 
 

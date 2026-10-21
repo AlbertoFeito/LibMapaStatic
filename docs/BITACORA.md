@@ -6786,3 +6786,24 @@ en el panel, «Híbrido: …» en Overlays con sus grupos. `vector_tile --hybrid
 **Sin probar:** sobre un satélite de verdad (aquí solo hay una base ráster oscura sintética) y en el PC del usuario.
 
 **Estado: 31 tests (28 sin QCustomPlot), Qt 6.4 y Qt 5.15.**
+
+### 165 (ajuste). Fuera los puntos de interés y los números de portal
+
+El usuario, probándolo en su PC: «quita los puntos de interés o dime cómo agrego alguno, quita también los números de portal… quitar
+significa quitar de la lista, no muestran nada ahora mismo, no tienen datos». En el híbrido arrancaban apagados y, encendidos, a los zooms
+en que él mira no salía nada: los POI empezaban en z15 y los números de portal en z17. Una casilla que no hace nada estorba, así que se
+quitan **de los dos estilos por defecto**, grupo y reglas. Quedan cinco grupos en la base (Nombres de calles, Nombres de lugares,
+Edificios, Cimas y Límites) y cinco en el híbrido (Carreteras y calles, Nombres de calles, Nombres de lugares, Cimas y Límites). Para quien
+quiera algunos POI concretos (hospitales, policía, gasolineras…), el README explica la regla de estilo propio, con su grupo y su filtro por
+`class`: el MBTiles los trae.
+
+De paso, `"visible": false` en un grupo del estilo ya vale también para una capa **base** vectorial, no solo para el overlay. Antes lo
+aplicaba solo `MapWidget::setVectorOverlay`, y una base lo ignoraba. Ahora lo hace `TileService` al registrar cualquier capa vectorial sin
+`"hiddenGroups"` propio (`TileDataset::vectorHiddenGroupsSet` distingue «no lo dijo» de «lo dijo vacío»). Un caso más en
+`tst_vectortiles`. 31 tests en verde.
+
+Al comprobar el ejemplo del README para añadir POI (hospitales y policía con un estilo propio) apareció un fallo de `vector_tile` que venía
+de §163: **`--style` no funcionaba nunca**. Qt se queda con `-style`/`--style` (es su opción para el estilo visual de la aplicación) antes de
+que la vea `QCommandLineParser`, así que la herramienta pintaba siempre con el estilo por defecto sin decir nada. La opción pasa a ser
+`--style-file`. Con ella, el ejemplo pinta 717 píxeles rojos de hospitales y comisarías en el Vedado y Centro Habana. A la librería no le
+afectaba: `"vectorStyle"` va en el JSON, no por la línea de comandos.

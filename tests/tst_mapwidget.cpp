@@ -4824,13 +4824,14 @@ void TstMapWidget::hybridOverlayOverAnyBase()
     QVERIFY(cambios.count() >= 1);
     QCOMPARE(w.baseLayerId(), QStringLiteral("gris"));           // la base no cambia
 
-    bool limites = false, poi = true;
+    QStringList grupos;
+    bool limites = false;
     for (const BaseLayerGroup &g : w.vectorOverlayGroups()) {
+        grupos << g.id;
         if (g.id == QLatin1String("limites")) limites = g.visible;
-        if (g.id == QLatin1String("poi")) poi = g.visible;
     }
+    QCOMPARE(grupos, QStringList({ "vias", "nombres_calles", "lugares", "cimas", "limites" }));
     QVERIFY(limites);
-    QVERIFY(!poi);                                               // "visible": false en el estilo
     QVERIFY(w.baseLayerGroups().isEmpty());                     // la base es ráster
 
     // Las fronteras se ven sobre el gris.

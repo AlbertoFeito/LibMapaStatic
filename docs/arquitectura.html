@@ -860,15 +860,15 @@ distribuir, 1 = errores, 2 = argumentos mal; pensado para scripts.</p>
 </table>
 
 <h3>vector_tile — inspeccionar y pintar un MBTiles vectorial</h3>
-<p class="mono" style="font-size:12px">vector_tile --mbtiles &lt;f.mbtiles&gt; (--info | --out &lt;vista.png&gt;) [--center lat,lon] [--zoom N] [--size AnchoxAlto] [--style estilo.json] · vector_tile --print-style</p>
+<p class="mono" style="font-size:12px">vector_tile --mbtiles &lt;f.mbtiles&gt; (--info | --out &lt;vista.png&gt;) [--center lat,lon] [--zoom N] [--size AnchoxAlto] [--style-file estilo.json] · vector_tile --print-style</p>
 <table class="kv">
 <tr><td>--mbtiles</td><td>MBTiles vectorial (<code>format = pbf</code>).</td></tr>
 <tr><td>--info</td><td>Capas, nº de entidades por tipo, claves y valores de <code>class</code> de la tesela del centro.</td></tr>
 <tr><td>--out</td><td>Pinta la vista (mosaico de teselas de 256&nbsp;px) a PNG y dice cuánto tardó cada tesela.</td></tr>
 <tr><td>--center / --zoom / --size</td><td>Centro <code>lat,lon</code> (def. La Habana), zoom (def. 14) y tamaño (def. <code>1024x768</code>).</td></tr>
-<tr><td>--style</td><td>Estilo JSON propio en vez del de OpenMapTiles.</td></tr>
+<tr><td>--style-file</td><td>Estilo JSON propio en vez del de OpenMapTiles (no <code>--style</code>: Qt se queda con esa opción).</td></tr>
 <tr><td>--land-mask / --land-layer</td><td>Máscara de tierra (BD de costa) y su capa: pinta el mar.</td></tr>
-<tr><td>--hide</td><td>Grupos del estilo que no se pintan (<code>nombres_calles,poi,…</code>; <code>--info</code> los lista).</td></tr>
+<tr><td>--hide</td><td>Grupos del estilo que no se pintan (<code>nombres_calles,limites,…</code>; <code>--info</code> los lista).</td></tr>
 <tr><td>--hybrid</td><td>Estilo del mapa híbrido (PNG con fondo transparente); con <code>--print-style</code>, lo vuelca.</td></tr>
 <tr><td>--print-style</td><td>Vuelca el estilo por defecto, plantilla para uno propio.</td></tr>
 </table>
