@@ -140,6 +140,8 @@ QVector<TileDataset> TileService::loadDatasets(const QString &jsonPath,
             d.filePath = baseDir.absoluteFilePath(d.filePath);
         if (!d.vectorStyleFile.isEmpty() && QFileInfo(d.vectorStyleFile).isRelative())
             d.vectorStyleFile = baseDir.absoluteFilePath(d.vectorStyleFile);
+        if (!d.vectorLandMask.isEmpty() && QFileInfo(d.vectorLandMask).isRelative())
+            d.vectorLandMask = baseDir.absoluteFilePath(d.vectorLandMask);
         // MBTiles: lo que el JSON no diga (zooms, lado de tesela, nombre) se lee
         // del propio fichero. Si no se puede, se avisa y se sigue: la capa se
         // queda con los valores por defecto y PackageCheck dara el detalle.

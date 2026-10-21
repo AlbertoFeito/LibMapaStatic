@@ -120,6 +120,18 @@ VectorTileRenderer *TileLoader::rendererFor(const TileDataset &dataset)
                                    << "- se usa el de OpenMapTiles:" << error;
     }
     auto renderer = std::make_shared<VectorTileRenderer>(style);
+    // Mascara de tierra (para pintar el mar). Si no se puede leer, se avisa y la
+    // capa se ve como sin ella: el mar del color de fondo.
+    if (!dataset.vectorLandMask.isEmpty()) {
+        QString error;
+        auto mask = LandMask::fromFile(dataset.vectorLandMask, dataset.vectorLandLayer, &error);
+        if (mask)
+            qCInfo(lcMapaTiles) << "Mascara de tierra para" << dataset.id << ":"
+                                << mask->ringCount() << "anillos," << mask->vertexCount() << "vertices";
+        else
+            qCWarning(lcMapaTiles) << "Mascara de tierra no valida para" << dataset.id << "-" << error;
+        renderer->setLandMask(mask);
+    }
     m_renderers.insert(dataset.id, renderer);
     return renderer.get();
 }
@@ -154,7 +166,7 @@ public:
             if (i >= int(m_in.size()) || m_stale())
                 return;
             const auto &item = m_in[size_t(i)];
-            m_out[size_t(i)] = m_renderer.render(item.second, item.first.z, m_size);
+            m_out[size_t(i)] = m_renderer.render(item.second, item.first, m_size);
         }
     }
 

@@ -6677,3 +6677,44 @@ página web» o «está INCOMPLETO: mide X bytes y debería medir Y (faltan Z MB
 Vale para cualquier MBTiles, ráster o vectorial. Tres casos más en `tst_mbtiles::rejectsWhatItCannotUse` (texto, HTML y un MBTiles válido
 cortado a la mitad; el entero sigue sin queja). **Sin confirmar** que esa sea la causa en el PC del usuario: depende de lo que digan el
 tamaño y el MD5 de sus ficheros.
+
+## 164. El mar en las capas vectoriales: máscara de tierra (`landMask`)
+
+El usuario, ya con `cuba-osm.mbtiles` (z17) en su `mapa.json`: «agrega color al mar». El MBTiles de Cuba **no trae océano en
+ningún zoom** (`vector_tile --info` en z4-z12, sobre tierra y en mar abierto: la capa `water` solo tiene `lake` y `river`; las teselas
+de mar abierto faltan o son gzip vacíos). No hay nada en el fichero que diga dónde acaba la tierra. Los «triángulos» de agua de las vistas
+generales son golfos etiquetados como lago. Cambiar el color de fondo tampoco sirve: pintaría de azul también la tierra.
+
+### Qué se decidió y por qué
+
+- **Usar la costa que el usuario ya tiene.** `herramientas/osm_costa_a_sqlitedb.py` (§94) genera `cuba_tierra.sqlitedb`: la costa de
+  OSM cosida en polígonos de tierra, la misma BD que `dem_to_hillshade --water-mask` y la capa «Costa exacta» de su paquete. Es la
+  única fuente sin conexión de «esto es tierra» que hay en el proyecto, y con el detalle de OSM, igual que el MBTiles. La alternativa
+  (los polígonos de agua de osmdata.openstreetmap.de) son cientos de MB más y un formato nuevo.
+- **`LandMask` (`src/vector/`)**: lee los polígonos con `VectorRepository` (como `dem_to_hillshade`), los guarda en Mercator normalizado
+  con su recuadro y, por tesela, rellena la tierra con la regla **par-impar** (las lagunas y bahías cerradas quedan como agua sin orientar
+  anillos). El renderizador, si tiene máscara, rellena el fondo con `"sea"` del estilo, pinta la tierra con `"background"` y después las
+  reglas de siempre: los lagos, parques y usos del suelo quedan encima.
+- **Que no cueste.** El anillo de la isla grande tiene ~100 000 vértices y toca casi todas las teselas. En vez de pasárselo entero a
+  `QPainter`, `paint` descarta los anillos que no tocan la tesela y los de menos de medio píxel, reduce cada **racha de puntos que queda al
+  mismo lado fuera de la tesela** a sus extremos (el tramo nuevo cae en el mismo semiplano, así que no cambia nada dentro de la tesela) y
+  quita los puntos a menos de 0,3 px. Medido con la costa real (5735 anillos, 429 676 vértices): **1-8 ms por tesela** (z7-z16), frente a
+  los 50-130 ms de pintar la tesela vectorial; cargarla, ~300 ms una vez por capa.
+- **Configuración**: `"landMask"` (y opcional `"landLayer"`) en la entrada del dataset, relativa al JSON, como `"vectorStyle"`; viaja
+  con el paquete (`DataPackage::files()`) y `check_data` avisa si falta (aviso, no error: el mapa se ve, sin mar). Sin `landMask`, todo
+  igual que antes. `"sea"` en el estilo (por defecto `#a5c9ea`, el del agua). `vector_tile --land-mask … [--land-layer …]`.
+- En el mapa, las teselas que el MBTiles **no tiene** (mar abierto a zoom alto) se cubren con la del nivel superior, que ya sale de mar:
+  comprobado con `render_map` a z12 frente a La Habana.
+
+### Comprobado
+
+- Costa real bajada de Overpass (la misma consulta de §94) y convertida con el script del repo: 5735 anillos, 429 676 vértices.
+  Vistas a z7, z11, z14 y z16 revisadas a ojo: mar azul, cayos, bahía de La Habana y ensenadas recortadas por la costa OSM.
+- `tst_vectortiles` (18 casos): mar, tierra y laguna en su sitio y el lago del MVT encima; sin tesela conocida, el fondo de antes; y el
+  recorte rápido pinta **lo mismo** que `QPainter` con el polígono entero (una isla dentada de 20 000 vértices que entra y sale de la
+  tesela, comparada píxel a píxel). `landMask`/`landLayer` en `datasets.json` (rutas relativas, ida y vuelta por JSON) y el aviso de
+  `check_data`.
+
+**Sin probar:** con el `cuba_tierra.sqlitedb` del usuario (el suyo tiene 5020 anillos, de otra fecha de OSM) y en su PC.
+
+**Estado: 31 tests (28 sin QCustomPlot), Qt 6.4.**

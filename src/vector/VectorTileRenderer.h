@@ -1,12 +1,16 @@
 #ifndef LIBMAPA_VECTOR_VECTORTILERENDERER_H_
 #define LIBMAPA_VECTOR_VECTORTILERENDERER_H_
 
+#include "tiles/TileKey.h"
+#include "vector/LandMask.h"
 #include "vector/MvtTile.h"
 #include "vector/VectorStyle.h"
 
 #include <QByteArray>
 #include <QImage>
 #include <QString>
+
+#include <memory>
 
 namespace libmapa {
 
@@ -35,6 +39,24 @@ public:
 
     const VectorStyle &style() const { return m_style; }
 
+    /*!
+     * \brief Máscara de tierra para pintar el mar (null = sin máscara, como antes).
+     *
+     * Con máscara, el fondo de cada tesela es \c VectorStyle::sea y la tierra de la
+     * máscara se pinta encima con \c VectorStyle::background; después, las reglas.
+     * Solo la usan las variantes de \c render que reciben la tesela entera (\c TileKey),
+     * porque hace falta saber DÓNDE está la tesela.
+     */
+    void setLandMask(std::shared_ptr<const LandMask> mask) { m_landMask = std::move(mask); }
+    const LandMask *landMask() const { return m_landMask.get(); }
+
+    //! Dibuja \a tile, que es la tesela XYZ \a key, con mar y tierra si hay máscara.
+    QImage render(const mvt::Tile &tile, const TileKey &key, int sizePx) const;
+
+    //! Decodifica \a bytes y los dibuja como la tesela XYZ \a key (null si no es MVT).
+    QImage render(const QByteArray &bytes, const TileKey &key, int sizePx,
+                  QString *error = nullptr) const;
+
     //! Dibuja \a tile, que es del zoom lógico \a zoom, en una imagen de \a sizePx de lado.
     QImage render(const mvt::Tile &tile, int zoom, int sizePx) const;
 
@@ -45,7 +67,10 @@ public:
     QImage render(const QByteArray &bytes, int zoom, int sizePx, QString *error = nullptr) const;
 
 private:
+    QImage renderImpl(const mvt::Tile &tile, int zoom, const TileKey *key, int sizePx) const;
+
     VectorStyle m_style;
+    std::shared_ptr<const LandMask> m_landMask;
 };
 
 } // namespace libmapa

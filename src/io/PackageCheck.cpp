@@ -228,6 +228,10 @@ PackageCheck PackageCheck::run(const DataPackage &p, const Options &options)
             if (!mvt::decode(muestra, &tile, &motivo))
                 r.add(Severity::Error, d.id,
                       QStringLiteral("Sus teselas vectoriales no se pueden leer: %1").arg(motivo));
+            if (!d.vectorLandMask.isEmpty() && !QFileInfo::exists(d.vectorLandMask))
+                r.add(Severity::Warning, d.id,
+                      QStringLiteral("Falta su mascara de tierra (landMask) %1: el mar se vera "
+                                     "del color de fondo").arg(d.vectorLandMask));
         } else {
             QBuffer buffer(&muestra);
             buffer.open(QIODevice::ReadOnly);

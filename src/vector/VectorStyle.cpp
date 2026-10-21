@@ -19,6 +19,7 @@ namespace {
 const char kOpenMapTilesStyle[] = R"JSON({
   "name": "OpenMapTiles (libmapa)",
   "background": "#f8f4f0",
+  "sea": "#a5c9ea",
   "rules": [
     { "layer": "landcover", "filter": { "class": ["wood", "forest"] }, "fill": "#d6e6c3" },
     { "layer": "landcover", "filter": { "class": "grass" }, "fill": "#e2edd2" },
@@ -234,6 +235,9 @@ bool VectorStyle::fromJson(const QJsonObject &json, VectorStyle *out, QString *e
     const QColor bg = parseColor(json.value(QStringLiteral("background")));
     if (bg.isValid())
         s.background = bg;
+    const QColor sea = parseColor(json.value(QStringLiteral("sea")));
+    if (sea.isValid())
+        s.sea = sea;
 
     for (const QJsonValue &v : json.value(QStringLiteral("rules")).toArray()) {
         const QJsonObject o = v.toObject();

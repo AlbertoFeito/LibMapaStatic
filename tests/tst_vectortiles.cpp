@@ -5,11 +5,14 @@
 #include "tiles/TileLoader.h"
 #include "tiles/TileService.h"
 #include "vector/Gzip.h"
+#include "vector/LandMask.h"
 #include "vector/MvtTile.h"
 #include "vector/VectorStyle.h"
 #include "vector/VectorTileRenderer.h"
 
 #include <QFile>
+#include <QPainter>
+#include <QPainterPath>
 #include <QFontMetricsF>
 #include <QImage>
 #include <QJsonDocument>
@@ -20,6 +23,8 @@
 #include <QTemporaryDir>
 #include <QVariant>
 #include <QtTest>
+
+#include <cmath>
 
 using namespace libmapa;
 
@@ -50,6 +55,8 @@ private slots:
     void loaderPaintsVectorTiles();
     void datasetsJsonResolvesStyle();
     void packageWithVectorLayer();
+    void landMaskPaintsSea();
+    void landMaskClipMatchesFullPolygon();
 
 private:
     QByteArray fixture(const char *name) const;
@@ -178,6 +185,17 @@ QByteArray waterAndMotorway()
                             { { QStringLiteral("class"), QStringLiteral("motorway") } } },
                           { 2, path({ { 2048, -100 }, { 2048, 4196 } }, false),
                             { { QStringLiteral("class"), QStringLiteral("path") } } } }) });
+}
+
+// Esquina noroeste (lat, lon) de la tesela XYZ (z, x, y) más una fracción (fx, fy)
+// de su lado: para colocar polígonos de máscara en sitios conocidos de la tesela.
+QGeoCoordinate tilePoint(int z, int x, int y, double fx, double fy)
+{
+    const double pi = 3.14159265358979323846;
+    const double n = std::ldexp(1.0, z);
+    const double lon = (x + fx) / n * 360.0 - 180.0;
+    const double lat = std::atan(std::sinh(pi * (1.0 - 2.0 * (y + fy) / n))) * 180.0 / pi;
+    return QGeoCoordinate(lat, lon);
 }
 
 // zlib a partir de qCompress, quitando los 4 bytes de longitud que antepone Qt.
@@ -605,7 +623,8 @@ void TstVectorTiles::datasetsJsonResolvesStyle()
     QFile json(p("datasets.json"));
     QVERIFY(json.open(QIODevice::WriteOnly));
     json.write(R"({ "datasets": [ { "id": "vectorial", "filePath": "cuba.mbtiles",
-                                    "vectorStyle": "estilo.json" } ] })");
+                                    "vectorStyle": "estilo.json",
+                                    "landMask": "costa/tierra.sqlitedb", "landLayer": "tierra" } ] })");
     json.close();
 
     QString error;
@@ -613,6 +632,11 @@ void TstVectorTiles::datasetsJsonResolvesStyle()
     QCOMPARE(ds.size(), 1);
     QVERIFY(ds[0].vector);
     QCOMPARE(ds[0].vectorStyleFile, p("estilo.json"));
+    QCOMPARE(ds[0].vectorLandMask, p("costa/tierra.sqlitedb"));
+    QCOMPARE(ds[0].vectorLandLayer, QStringLiteral("tierra"));
+    const TileDataset vuelta = TileDataset::fromJson(ds[0].toJson());
+    QCOMPARE(vuelta.vectorLandMask, ds[0].vectorLandMask);
+    QCOMPARE(vuelta.vectorLandLayer, QStringLiteral("tierra"));
     QCOMPARE(ds[0].maxZoom, 1);
 }
 
@@ -633,7 +657,7 @@ void TstVectorTiles::packageWithVectorLayer()
                                   "bounds": { "north": 23.3, "west": -85.0, "south": 19.7, "east": -74.0 } },
                      "start": { "layer": "cuba" },
                      "datasets": [ { "id": "cuba", "filePath": "cuba.mbtiles",
-                                     "vectorStyle": "estilo.json" } ] })");
+                                     "vectorStyle": "estilo.json", "landMask": "no_esta.sqlitedb" } ] })");
     }
 
     QString error;
@@ -650,6 +674,107 @@ void TstVectorTiles::packageWithVectorLayer()
     QVERIFY2(!r.hasErrors(), qPrintable(r.problems().join(QLatin1Char('\n'))));
     QCOMPARE(r.datasets.size(), 1);
     QCOMPARE(r.datasets.first().imageFormat, QStringLiteral("mvt"));
+    // La máscara que falta es un aviso (el mapa se ve, sin mar), no un error.
+    QVERIFY2(r.problems().join(QLatin1Char(' ')).contains(QStringLiteral("mascara de tierra")),
+             qPrintable(r.problems().join(QLatin1Char(' '))));
+}
+
+// Con máscara: fuera de la isla, mar; dentro, tierra; en la laguna (anillo
+// interior), mar otra vez; y las reglas (el lago del MVT) encima de la tierra.
+// Sin la tesela (variante solo con zoom) o sin máscara, todo como antes.
+void TstVectorTiles::landMaskPaintsSea()
+{
+    const int z = 12, x = 1111, y = 1776;
+    // Isla: del 20 % al 80 % de la tesela; laguna: del 40 % al 60 %.
+    auto square = [&](double a, double b) {
+        return QVector<QGeoCoordinate>{ tilePoint(z, x, y, a, a), tilePoint(z, x, y, b, a),
+                                        tilePoint(z, x, y, b, b), tilePoint(z, x, y, a, b) };
+    };
+    const auto mask = LandMask::fromRings({ square(0.2, 0.8), square(0.4, 0.6) });
+    QVERIFY(mask);
+    QCOMPARE(mask->ringCount(), 2);
+    QCOMPARE(mask->vertexCount(), qint64(8));
+    QVERIFY(!LandMask::fromRings({ { tilePoint(z, x, y, 0, 0), tilePoint(z, x, y, 1, 1) } }));
+
+    // Un lago del MVT en la esquina superior izquierda de la isla (25-35 %).
+    const QVector<QPoint> lake{ { 1024, 1024 }, { 1434, 1024 }, { 1434, 1434 }, { 1024, 1434 } };
+    const QByteArray bytes = tile({ layer(QStringLiteral("water"), { { 3, path(lake, true), {} } }) });
+
+    VectorStyle style;
+    QVERIFY(VectorStyle::fromJson(QJsonDocument::fromJson(R"({ "background": "#00ff00", "sea": "#0000ff",
+        "rules": [ { "layer": "water", "fill": "#ff0000" } ] })").object(), &style));
+    QCOMPARE(style.sea, QColor(Qt::blue));
+    VectorTileRenderer r(style);
+    r.setLandMask(mask);
+    QCOMPARE(r.landMask(), mask.get());
+
+    const QImage img = r.render(bytes, TileKey{ z, x, y }, 256);
+    QVERIFY(!img.isNull());
+    QVERIFY(sameColor(img.pixel(10, 10), Qt::blue));         // mar
+    QVERIFY(sameColor(img.pixel(245, 128), Qt::blue));
+    QVERIFY(sameColor(img.pixel(70, 180), Qt::green));       // tierra
+    QVERIFY(sameColor(img.pixel(128, 128), Qt::blue));       // laguna
+    QVERIFY(sameColor(img.pixel(76, 76), Qt::red));          // lago del MVT, encima
+
+    // La tesela vecina (toda mar) y una tesela vacía (gzip de nada) también.
+    const QImage vecina = r.render(QByteArray(), TileKey{ z, x + 1, y }, 256);
+    QVERIFY(sameColor(vecina.pixel(128, 128), Qt::blue));
+
+    // Sin saber qué tesela es: el fondo de siempre.
+    const QImage sinClave = r.render(bytes, z, 256);
+    QVERIFY(sameColor(sinClave.pixel(10, 10), Qt::green));
+}
+
+// El recorte rápido de LandMask::paint (rachas fuera de la tesela reducidas a sus
+// extremos, puntos de menos de 0,3 px fuera) tiene que pintar lo MISMO que el
+// polígono entero: una «isla» dentada de 20 000 vértices que cruza la tesela por
+// varios sitios, comparada píxel a píxel con QPainter sobre todos sus puntos.
+void TstVectorTiles::landMaskClipMatchesFullPolygon()
+{
+    const int z = 14, x = 4443, y = 7110;
+    const double pi = 3.14159265358979323846;
+    QVector<QGeoCoordinate> ring;
+    QPolygonF full;
+    const int n = 20000;
+    for (int i = 0; i < n; ++i) {
+        const double a = 2.0 * pi * i / n;
+        // Radio de 0,25 a 0,85 teselas alrededor del centro: entra y sale de la tesela.
+        const double rad = 0.55 + 0.28 * std::sin(7.0 * a) + 0.02 * std::sin(400.0 * a);
+        const double fx = 0.5 + rad * std::cos(a), fy = 0.5 + rad * std::sin(a);
+        ring.append(tilePoint(z, x, y, fx, fy));
+        full.append(QPointF(fx * 256.0, fy * 256.0));
+    }
+    const auto mask = LandMask::fromRings({ ring });
+    QVERIFY(mask);
+
+    QImage fast(256, 256, QImage::Format_ARGB32_Premultiplied);
+    fast.fill(Qt::black);
+    {
+        QPainter p(&fast);
+        QVERIFY(mask->paint(p, z, x, y, 256, Qt::white));
+    }
+    QImage ref(256, 256, QImage::Format_ARGB32_Premultiplied);
+    ref.fill(Qt::black);
+    {
+        QPainter p(&ref);
+        QPainterPath pp;
+        pp.setFillRule(Qt::OddEvenFill);
+        pp.addPolygon(full);
+        p.fillPath(pp, Qt::white);
+    }
+    int distintos = 0, blancos = 0;
+    for (int j = 0; j < 256; ++j)
+        for (int i = 0; i < 256; ++i) {
+            const int a = qGray(fast.pixel(i, j)), b = qGray(ref.pixel(i, j));
+            distintos += qAbs(a - b) > 64;
+            blancos += a > 128;
+        }
+    QVERIFY2(blancos > 1000 && blancos < 256 * 256 - 1000, qPrintable(QString::number(blancos)));
+    QVERIFY2(distintos < 60, qPrintable(QStringLiteral("%1 píxeles distintos").arg(distintos)));
+
+    // Una tesela lejos (fuera del recuadro del anillo) no pinta nada.
+    QPainter p(&fast);
+    QVERIFY(!mask->paint(p, z, x + 50, y, 256, Qt::white));
 }
 
 QTEST_MAIN(TstVectorTiles)

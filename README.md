@@ -436,9 +436,24 @@ fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motiv
   una vista con el estilo por defecto o `--style`). `check_data` reconoce las
   capas vectoriales (`imagenes mvt (gzip)`).
 
+- **El mar:** algunos MBTiles **no traen polígonos de océano** (el de Cuba de
+  OpenMapTiles solo trae lagos y ríos), y entonces el mar sale del color de fondo,
+  igual que la tierra. Para pintarlo, se le da una **máscara de tierra**: la BD de
+  costa que hace `herramientas/osm_costa_a_sqlitedb.py` (la misma de
+  `dem_to_hillshade --water-mask` y de la capa «costa exacta»). Con ella, el fondo
+  de cada tesela es el mar (`"sea"` del estilo) y la tierra va encima (`"background"`):
+
+  ```json
+  { "id": "cuba", "filePath": "cuba-osm.mbtiles",
+    "landMask": "cuba_tierra.sqlitedb", "landLayer": "tierra" }
+  ```
+
+  `"landLayer"` es opcional (por defecto, todos los polígonos de la BD). Rutas
+  relativas al JSON; viaja con el paquete y `check_data` avisa si falta.
+
 El MBTiles de Cuba (`descargar-mbtiles.sh` / `.bat`: `cuba-osm-z16.mbtiles`,
-360 MB, z0-16, y `cuba-osm.mbtiles`, 913 MB) **no trae polígonos de océano**: el
-mar sale con el color de fondo del estilo. Pintar una tesela z14 de La Habana
+360 MB, z0-16, y `cuba-osm.mbtiles`, 913 MB, z0-17) no trae océano: ver la máscara
+de tierra arriba. Pintar una tesela z14 de La Habana
 (~8600 edificios) cuesta unos 50-130 ms; por eso se reparten entre varios hilos.
 
 ## Herramientas
@@ -450,7 +465,7 @@ mar sale con el color de fondo del estilo. Pintar una tesela z14 de La Habana
 | `check_data` | Comprueba un paquete de datos antes de distribuirlo: ficheros, que abran, que sus imágenes se decodifiquen, cobertura por zoom en la zona y tamaño total |
 | `bench_tiles` | Mide cobertura y tiempos de carga sobre las BD reales |
 | `render_map` | Dibuja el mapa a PNG, sin abrir ninguna ventana (también un paquete entero con `--data`) |
-| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style`) y vuelca el estilo por defecto (`--print-style`) |
+| `vector_tile` | Inspecciona un MBTiles **vectorial** (capas y claves de una tesela, `--info`), pinta una vista a PNG con el estilo por defecto o uno propio (`--out`, `--style`; con `--land-mask` pinta además el mar) y vuelca el estilo por defecto (`--print-style`) |
 | `geo_to_tiles` | Rasteriza un fichero vectorial `.geo` a una base de teselas, para usarlo como capa base |
 | `fill_tiles` | Descarga las teselas que faltan (o crea una base nueva) de una fuente XYZ sin clave |
 | `fill_hgt` | Descarga ficheros de elevación SRTM `.hgt` (30 m) de AWS Skadi (sin clave) para una zona (autónomo: descomprime con **miniz**, sin zlib) |

@@ -39,6 +39,7 @@ SOURCES += \
     $$ROOT/src/tiles/TileLoader.cpp \
     $$ROOT/src/tiles/TileService.cpp \
     $$ROOT/src/vector/Gzip.cpp \
+    $$ROOT/src/vector/LandMask.cpp \
     $$ROOT/src/vector/MvtTile.cpp \
     $$ROOT/src/vector/VectorStyle.cpp \
     $$ROOT/src/vector/VectorTileRenderer.cpp \

@@ -1,6 +1,7 @@
 {
   "name": "OpenMapTiles (libmapa)",
   "background": "#f8f4f0",
+  "sea": "#a5c9ea",
   "rules": [
     { "layer": "landcover", "filter": { "class": ["wood", "forest"] }, "fill": "#d6e6c3" },
     { "layer": "landcover", "filter": { "class": "grass" }, "fill": "#e2edd2" },

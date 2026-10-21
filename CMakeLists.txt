@@ -132,6 +132,8 @@ add_library(libmapa_core STATIC
     # Teselas vectoriales (MBTiles pbf/MVT): gzip, decodificador y renderizador.
     src/vector/Gzip.cpp
     src/vector/Gzip.h
+    src/vector/LandMask.cpp
+    src/vector/LandMask.h
     src/vector/MvtTile.cpp
     src/vector/MvtTile.h
     src/vector/VectorStyle.cpp

@@ -125,6 +125,8 @@ std::optional<DataPackage> DataPackage::load(const QString &path, QString *error
         d.filePath = resolve(base, d.filePath);
         if (!d.vectorStyleFile.isEmpty())
             d.vectorStyleFile = resolve(base, d.vectorStyleFile);
+        if (!d.vectorLandMask.isEmpty())
+            d.vectorLandMask = resolve(base, d.vectorLandMask);
         if (d.mbtiles && QFileInfo::exists(d.filePath)) {      // zooms y lado desde el propio fichero
             QString aviso;
             if (!MBTiles::describe(d, v.toObject(), &aviso))
@@ -208,6 +210,7 @@ QStringList DataPackage::files() const
     for (const TileDataset &d : datasets) {
         anadir(d.filePath);
         anadir(d.vectorStyleFile);      // el estilo de una capa vectorial viaja con ella
+        anadir(d.vectorLandMask);       // y su mascara de tierra
     }
     anadir(elevationFile);
     if (!elevationDir.isEmpty())

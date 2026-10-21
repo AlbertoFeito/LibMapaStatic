@@ -392,12 +392,16 @@ funcionan sin cambios. Sin dependencias nuevas: ni libprotobuf ni zlib.</p>
 <tr><td class="mono">Gzip <span class="muted">vector/Gzip.h</span></td><td><code>inflateIfCompressed</code>: gzip (RFC 1952) o zlib (RFC 1950) con <b>miniz</b> (dominio público, el mismo de <code>fill_hgt</code>); lo que no está comprimido pasa intacto. Una tesela vacía (gzip de 0 bytes, el mar en OpenMapTiles) es válida.</td></tr>
 <tr><td class="mono">mvt::decode <span class="muted">vector/MvtTile.h</span></td><td>Lector de protobuf propio (varints, fijos, bloques) → <code>Tile</code> / <code>Layer</code> (nombre, extent, tablas de claves y valores) / <code>Feature</code> (tipo, tags, piezas en coordenadas de tesela). <code>decodeGeometry</code> interpreta MoveTo/LineTo/ClosePath en zigzag. Nunca lee fuera del buffer: un dato corrupto da error, no un cuelgue.</td></tr>
 <tr><td class="mono">VectorStyle <span class="muted">vector/VectorStyle.h</span></td><td>Fondo + reglas en orden (capa, filtro/exclusión por propiedad, zooms, tipo de geometría, relleno, trazo con grosor interpolado por zoom, borde, discontinuo, rótulo). <code>openMapTiles()</code> trae el estilo por defecto para ese esquema (JSON embebido, = <code>docs/estilo_vectorial.json</code>); <code>fromJson/fromFile</code> lee uno propio.</td></tr>
+<tr><td class="mono">LandMask <span class="muted">vector/LandMask.h</span></td><td>Máscara de tierra para pintar el <b>mar</b> cuando el MBTiles no trae océano: los polígonos de una BD de entidades (la costa de <code>osm_costa_a_sqlitedb.py</code>), en Mercator normalizado con su recuadro. <code>paint(z, x, y)</code> rellena la tierra de la tesela (par-impar: las lagunas quedan como agua) y no le pasa a <code>QPainter</code> la isla entera: descarta anillos que no tocan, reduce cada racha de puntos que queda al mismo lado fuera de la tesela a sus extremos (no cambia lo que hay dentro) y quita los puntos a menos de 0,3&nbsp;px.</td></tr>
 <tr><td class="mono">VectorTileRenderer <span class="muted">vector/VectorTileRenderer.h</span></td><td>Pinta regla a regla con <code>QPainter</code> sobre <code>QImage</code> (una ruta por regla, relleno <code>WindingFill</code> para respetar huecos). Los rótulos van al final, sin solaparse, solo para puntos <b>dentro</b> de la tesela y desplazados para caber enteros: nada sale cortado ni repetido entre teselas. Reentrante; sin <code>QGuiApplication</code> omite los rótulos.</td></tr>
 </table>
 <p><b>Cómo se engancha.</b> <code>MBTiles::describe</code> decodifica una tesela real: si es MVT pone
 <code>TileDataset::vector</code> (un fichero que dice <code>pbf</code> pero no lo es se rechaza con su motivo).
 <code>TileDataset::vectorStyleFile</code> (<code>"vectorStyle"</code> en <code>datasets.json</code>/<code>mapa.json</code>,
 relativo al JSON y parte de <code>DataPackage::files()</code>) elige el estilo; si falta o no se lee, el de OpenMapTiles.
+<code>TileDataset::vectorLandMask</code> / <code>vectorLandLayer</code> (<code>"landMask"</code> / <code>"landLayer"</code>) dan la
+máscara de tierra: con ella el fondo de la tesela es <code>VectorStyle::sea</code> y la tierra se pinta encima con
+<code>background</code>, antes de las reglas.
 <code>TileLoader::rendererFor</code> crea un renderizador por capa y <code>renderVector</code> reparte las teselas de una
 rejilla entre su hilo y un <code>QThreadPool</code> propio (núcleos − 2), abandonando si la petición caduca: una tesela
 z14 urbana (~8600 edificios) cuesta 50-130&nbsp;ms, mucho más que un PNG. Con <code>vector = false</code> (todo lo
@@ -850,6 +854,7 @@ distribuir, 1 = errores, 2 = argumentos mal; pensado para scripts.</p>
 <tr><td>--out</td><td>Pinta la vista (mosaico de teselas de 256&nbsp;px) a PNG y dice cuánto tardó cada tesela.</td></tr>
 <tr><td>--center / --zoom / --size</td><td>Centro <code>lat,lon</code> (def. La Habana), zoom (def. 14) y tamaño (def. <code>1024x768</code>).</td></tr>
 <tr><td>--style</td><td>Estilo JSON propio en vez del de OpenMapTiles.</td></tr>
+<tr><td>--land-mask / --land-layer</td><td>Máscara de tierra (BD de costa) y su capa: pinta el mar.</td></tr>
 <tr><td>--print-style</td><td>Vuelca el estilo por defecto, plantilla para uno propio.</td></tr>
 </table>
 <p>Necesita <code>QGuiApplication</code> para los rótulos: sin pantalla, <code>QT_QPA_PLATFORM=offscreen</code>.</p>

@@ -10,9 +10,10 @@
  *
  *   vector_tile --mbtiles cuba-osm-z16.mbtiles --out habana.png
  *               [--center 23.1136,-82.3666] [--zoom 14] [--size 1024x768]
- *               [--style estilo.json]
+ *               [--style estilo.json] [--land-mask cuba_tierra.sqlitedb [--land-layer tierra]]
  *     Pinta la vista (mosaico de teselas de 256 px) con el estilo por defecto
- *     o con el dado, y dice cuánto tarda cada tesela.
+ *     o con el dado, y dice cuánto tarda cada tesela. Con --land-mask (la BD de
+ *     costa de osm_costa_a_sqlitedb.py) pinta además el mar.
  *
  *   vector_tile --print-style > estilo.json
  *     Vuelca el estilo por defecto (OpenMapTiles), plantilla para uno propio.
@@ -117,11 +118,17 @@ int main(int argc, char *argv[])
                                    QStringLiteral("px"), QStringLiteral("1024x768"));
     const QCommandLineOption oStyle(QStringLiteral("style"), QStringLiteral("Estilo JSON propio"),
                                     QStringLiteral("fichero"));
+    const QCommandLineOption oMask(QStringLiteral("land-mask"),
+                                   QStringLiteral("Mascara de tierra (BD de entidades) para pintar el mar"),
+                                   QStringLiteral("fichero"));
+    const QCommandLineOption oMaskLayer(QStringLiteral("land-layer"),
+                                        QStringLiteral("Capa de la mascara (def. todas)"),
+                                        QStringLiteral("capa"));
     const QCommandLineOption oInfo(QStringLiteral("info"),
                                    QStringLiteral("Capas y claves de la tesela del centro"));
     const QCommandLineOption oPrint(QStringLiteral("print-style"),
                                     QStringLiteral("Vuelca el estilo por defecto (JSON)"));
-    p.addOptions({ oFile, oOut, oCenter, oZoom, oSize, oStyle, oInfo, oPrint });
+    p.addOptions({ oFile, oOut, oCenter, oZoom, oSize, oStyle, oMask, oMaskLayer, oInfo, oPrint });
     p.process(app);
 
     if (p.isSet(oPrint)) {
@@ -163,12 +170,25 @@ int main(int argc, char *argv[])
         err << error << "\n";
         return 1;
     }
-    const VectorTileRenderer renderer(style);
+    VectorTileRenderer renderer(style);
+    if (p.isSet(oMask)) {
+        QElapsedTimer tm;
+        tm.start();
+        auto mask = LandMask::fromFile(p.value(oMask), p.value(oMaskLayer), &error);
+        if (!mask) {
+            err << error << "\n";
+            return 1;
+        }
+        out << "Mascara de tierra: " << mask->ringCount() << " anillos, " << mask->vertexCount()
+            << " vertices (" << tm.elapsed() << " ms)\n";
+        renderer.setLandMask(mask);
+    }
 
     const QStringList wh = p.value(oSize).split(QLatin1Char('x'));
     const int w = qMax(64, wh.value(0).toInt()), h = qMax(64, wh.value(1).toInt());
     QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
-    img.fill(style.background);
+    // Donde el MBTiles no tiene tesela (mar abierto) va el fondo; con máscara, el mar.
+    img.fill(renderer.landMask() ? style.sea : style.background);
     QPainter painter(&img);
 
     // Esquina superior izquierda de la vista en píxeles del mundo y rejilla de
@@ -184,7 +204,7 @@ int main(int argc, char *argv[])
     int n = 0;
     for (auto it = tiles.constBegin(); it != tiles.constEnd(); ++it) {
         t.restart();
-        const QImage tileImg = renderer.render(it.value(), z, 256, &error);
+        const QImage tileImg = renderer.render(it.value(), it.key(), 256, &error);
         const qint64 ms = t.elapsed();
         worst = qMax(worst, ms);
         total += ms;

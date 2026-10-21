@@ -142,14 +142,31 @@ VectorTileRenderer::VectorTileRenderer(VectorStyle style)
 {
 }
 
-// Pinta regla a regla (una sola ruta por regla: un trazo continuo y mucho más
-// rápido que una llamada por entidad) y deja los rótulos para el final.
+// Sin saber qué tesela es no se puede usar la máscara: solo fondo y reglas.
 QImage VectorTileRenderer::render(const mvt::Tile &tile, int zoom, int sizePx) const
 {
+    return renderImpl(tile, zoom, nullptr, sizePx);
+}
+
+// Con la tesela entera: mar y tierra de la máscara (si la hay) y luego las reglas.
+QImage VectorTileRenderer::render(const mvt::Tile &tile, const TileKey &key, int sizePx) const
+{
+    return renderImpl(tile, key.z, &key, sizePx);
+}
+
+// Pinta regla a regla (una sola ruta por regla: un trazo continuo y mucho más
+// rápido que una llamada por entidad) y deja los rótulos para el final. Con
+// máscara de tierra y tesela conocida, el fondo es el mar y la tierra va encima.
+QImage VectorTileRenderer::renderImpl(const mvt::Tile &tile, int zoom, const TileKey *key,
+                                      int sizePx) const
+{
     QImage img(sizePx, sizePx, QImage::Format_ARGB32_Premultiplied);
-    img.fill(m_style.background);
+    const bool withMask = m_landMask && key;
+    img.fill(withMask ? m_style.sea : m_style.background);
     QPainter p(&img);
     p.setRenderHint(QPainter::Antialiasing, true);
+    if (withMask)
+        m_landMask->paint(p, key->z, key->x, key->y, sizePx, m_style.background);
 
     const bool canLabel = qobject_cast<QGuiApplication *>(QCoreApplication::instance()) != nullptr;
     QVector<LabelCandidate> labels;
@@ -247,6 +264,16 @@ QImage VectorTileRenderer::render(const QByteArray &bytes, int zoom, int sizePx,
     if (!mvt::decode(bytes, &tile, error))
         return QImage();
     return render(tile, zoom, sizePx);
+}
+
+// Atajo con la tesela entera (para la máscara de tierra).
+QImage VectorTileRenderer::render(const QByteArray &bytes, const TileKey &key, int sizePx,
+                                  QString *error) const
+{
+    mvt::Tile tile;
+    if (!mvt::decode(bytes, &tile, error))
+        return QImage();
+    return render(tile, key, sizePx);
 }
 
 } // namespace libmapa

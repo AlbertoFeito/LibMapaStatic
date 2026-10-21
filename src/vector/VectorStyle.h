@@ -71,7 +71,10 @@ class VectorStyle
 {
 public:
     QString name;
-    QColor background = QColor(248, 244, 240);
+    QColor background = QColor(248, 244, 240);     //!< fondo = tierra
+    //! Color del mar. Solo se usa con máscara de tierra (\c LandMask): sin ella no se
+    //! sabe qué es mar y todo el fondo es \c background.
+    QColor sea = QColor(165, 201, 234);
     QVector<VectorRule> rules;
 
     //! Estilo por defecto para el esquema OpenMapTiles (agua, usos del suelo,
@@ -91,7 +94,7 @@ public:
      *              { "layer": "place", "filter": { "class": "city" },
      *                "label": "name:es|name|name:latin", "textSize": 13, "bold": true } ] }
      * \endcode
-     * Otras claves de regla: "exclude", "maxZoom", "geometry" ("point", "line",
+     * "sea" es el color del mar (solo con máscara de tierra). Otras claves de regla: "exclude", "maxZoom", "geometry" ("point", "line",
      * "polygon" o una lista), "widthOffset", "dash", "textColor", "halo",
      * "italic", "pointRadius", "pointColor".
      * \return false si el JSON no tiene reglas válidas; el motivo, en \a error.
