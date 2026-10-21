@@ -7,20 +7,93 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
+#include <QSet>
+#include <QTransform>
 
+#include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace libmapa {
 
 namespace {
 
-// Un rótulo pendiente: se colocan todos al final, encima de la geometría.
+// Un rótulo pendiente: se colocan todos al final, encima de la geometría. Si
+// \c line tiene puntos, el texto va A LO LARGO de esa línea (una calle); si no,
+// sobre \c anchor (un punto).
 struct LabelCandidate
 {
     QPointF anchor;          // en píxeles de la tesela
     QString text;
     const VectorRule *rule;
+    QVector<QPointF> line;   // en píxeles de la tesela
 };
+
+// Una letra de un rótulo a lo largo de una línea: su centro y su ángulo.
+struct Glyph
+{
+    QString text;
+    QPointF center;
+    double angleDeg;
+    double advance;
+};
+
+// Punto y ángulo (en grados) a la distancia \a d desde el inicio de la línea.
+// \a cum son las longitudes acumuladas de \a pts (cum[0] = 0).
+bool pointAt(const QVector<QPointF> &pts, const QVector<double> &cum, double d,
+             QPointF *at, double *angleDeg)
+{
+    for (int i = 1; i < pts.size(); ++i) {
+        if (d <= cum[i] || i == pts.size() - 1) {
+            const double seg = cum[i] - cum[i - 1];
+            if (seg <= 0)
+                continue;
+            const double t = qBound(0.0, (d - cum[i - 1]) / seg, 1.0);
+            const QPointF a = pts[i - 1], b = pts[i];
+            *at = a + (b - a) * t;
+            *angleDeg = std::atan2(b.y() - a.y(), b.x() - a.x()) * 180.0 / 3.14159265358979323846;
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * Coloca un rótulo a lo largo de una línea, letra a letra, empezando en \a start
+ * (px desde el inicio). Falla si la línea dobla demasiado bajo el texto (más de
+ * 35° entre letras seguidas: se leería mal) o si alguna letra se sale de la
+ * tesela (la vecina no lo terminaría: mejor no ponerlo que cortarlo).
+ */
+bool layoutAlong(const QVector<QPointF> &pts, const QVector<double> &cum, double start,
+                 const QString &text, const QFontMetricsF &fm, int sizePx, QVector<Glyph> *out)
+{
+    out->clear();
+    const double h = fm.height();
+    double d = start;
+    double prevAngle = 0.0;
+    for (int i = 0; i < text.size(); ++i) {
+        const QString ch = text.mid(i, 1);
+        const double adv = fm.horizontalAdvance(ch);
+        QPointF c;
+        double ang = 0.0;
+        if (!pointAt(pts, cum, d + adv / 2.0, &c, &ang))
+            return false;
+        if (i > 0) {
+            double diff = std::fabs(ang - prevAngle);
+            if (diff > 180.0)
+                diff = 360.0 - diff;
+            if (diff > 35.0)
+                return false;
+        }
+        const double m = h / 2.0 + 2.0;
+        if (c.x() < m || c.y() < m || c.x() > sizePx - m || c.y() > sizePx - m)
+            return false;
+        out->append(Glyph{ ch, c, ang, adv });
+        prevAngle = ang;
+        d += adv;
+    }
+    return true;
+}
 
 // Índices (en la tabla de claves de la capa) de las claves de un filtro. Una
 // clave que la capa no trae queda en -1: su valor será siempre inválido.
@@ -84,10 +157,87 @@ QPen strokePen(const VectorRule &rule, double width)
     return pen;
 }
 
-// Coloca y pinta los rótulos: con halo, dentro de la tesela y sin solaparse.
+// ¿Choca \a box con algún rótulo ya puesto?
+bool clashes(const QVector<QRectF> &placed, const QRectF &box)
+{
+    for (const QRectF &o : placed)
+        if (o.intersects(box))
+            return true;
+    return false;
+}
+
+/*
+ * Rótulo a lo largo de una línea (el nombre de una calle). Se prueba en el
+ * centro de la línea y, si no cabe o choca, a un tercio y a dos tercios. El texto
+ * se lee siempre de izquierda a derecha: si la línea va «hacia atrás», se le da la
+ * vuelta. Cada calle se rotula una vez por tesela (\a done).
+ */
+bool placeAlongLine(QPainter &p, const LabelCandidate &c, const QFont &font,
+                    const QFontMetricsF &fm, int sizePx, QVector<QRectF> *placed,
+                    QSet<QString> *done)
+{
+    if (done->contains(c.text))
+        return false;
+    QVector<QPointF> pts = c.line;
+    if (pts.size() < 2)
+        return false;
+    if (pts.last().x() < pts.first().x())
+        std::reverse(pts.begin(), pts.end());
+    QVector<double> cum(pts.size(), 0.0);
+    for (int i = 1; i < pts.size(); ++i) {
+        const QPointF d = pts[i] - pts[i - 1];
+        cum[i] = cum[i - 1] + std::sqrt(d.x() * d.x() + d.y() * d.y());
+    }
+    const double length = cum.last();
+    const double w = fm.horizontalAdvance(c.text);
+    if (w + 10.0 > length)
+        return false;
+
+    const double h = fm.height();
+    QVector<Glyph> glyphs;
+    for (double t : { 0.5, 0.3, 0.7 }) {
+        const double start = qBound(0.0, t * length - w / 2.0, length - w);
+        if (!layoutAlong(pts, cum, start, c.text, fm, sizePx, &glyphs))
+            continue;
+        QVector<QRectF> boxes;
+        for (const Glyph &g : glyphs)
+            boxes.append(QRectF(g.center.x() - h / 2.0, g.center.y() - h / 2.0, h, h));
+        bool clash = false;
+        for (const QRectF &b : boxes)
+            if (clashes(*placed, b)) {
+                clash = true;
+                break;
+            }
+        if (clash)
+            continue;
+
+        // Cada letra en su sitio y girada; el halo y el texto, de una vez.
+        QPainterPath path;
+        const double baseline = (fm.ascent() - fm.descent()) / 2.0;
+        for (const Glyph &g : glyphs) {
+            QPainterPath one;
+            one.addText(QPointF(-g.advance / 2.0, baseline), font, g.text);
+            QTransform tr;
+            tr.translate(g.center.x(), g.center.y());
+            tr.rotate(g.angleDeg);
+            path.addPath(tr.map(one));
+        }
+        const VectorRule &r = *c.rule;
+        p.strokePath(path, QPen(r.haloColor, 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.fillPath(path, r.textColor);
+        *placed += boxes;
+        done->insert(c.text);
+        return true;
+    }
+    return false;
+}
+
+// Coloca y pinta los rótulos, en el orden de las reglas: con halo, dentro de la
+// tesela y sin solaparse (el primero que llega se queda el sitio).
 void drawLabels(QPainter &p, const QVector<LabelCandidate> &labels, int sizePx)
 {
     QVector<QRectF> placed;
+    QSet<QString> streetsDone;
     const QRectF tileRect(0, 0, sizePx, sizePx);
     for (const LabelCandidate &c : labels) {
         const VectorRule &r = *c.rule;
@@ -96,6 +246,10 @@ void drawLabels(QPainter &p, const QVector<LabelCandidate> &labels, int sizePx)
         font.setBold(r.bold);
         font.setItalic(r.italic);
         const QFontMetricsF fm(font);
+        if (!c.line.isEmpty()) {
+            placeAlongLine(p, c, font, fm, sizePx, &placed, &streetsDone);
+            continue;
+        }
         const double w = fm.horizontalAdvance(c.text);
         const double h = fm.height();
         if (w + 4 > sizePx)
@@ -112,13 +266,7 @@ void drawLabels(QPainter &p, const QVector<LabelCandidate> &labels, int sizePx)
             continue;
 
         const QRectF guard = box.adjusted(-2, -1, 2, 1);
-        bool clash = false;
-        for (const QRectF &o : placed)
-            if (o.intersects(guard)) {
-                clash = true;
-                break;
-            }
-        if (clash)
+        if (clashes(placed, guard))
             continue;
         placed.append(guard);
 
@@ -174,6 +322,8 @@ QImage VectorTileRenderer::renderImpl(const mvt::Tile &tile, int zoom, const Til
     for (const VectorRule &rule : m_style.rules) {
         if (zoom < rule.minZoom || zoom > rule.maxZoom)
             continue;
+        if (!rule.group.isEmpty() && m_hiddenGroups.contains(rule.group))
+            continue;
         const mvt::Layer *layer = tile.layer(rule.layer);
         if (!layer || layer->features.isEmpty())
             continue;
@@ -205,6 +355,20 @@ QImage VectorTileRenderer::renderImpl(const mvt::Tile &tile, int zoom, const Til
                 }
                 break;
             case mvt::GeomType::LineString:
+                // Con rótulo, el nombre va a lo largo de cada tramo (una calle).
+                if (!rule.labelFields.isEmpty() && canLabel) {
+                    const QString text = labelText(*layer, f, rule.labelFields);
+                    if (!text.isEmpty())
+                        for (const QVector<QPoint> &part : f.parts) {
+                            QVector<QPointF> px;
+                            px.reserve(part.size());
+                            for (const QPoint &q : part)
+                                px.append(QPointF(q.x() * k, q.y() * k));
+                            labels.append(LabelCandidate{ QPointF(), text, &rule, px });
+                        }
+                }
+                if (!rule.line.isValid())
+                    break;
                 for (const QVector<QPoint> &part : f.parts) {
                     lines.moveTo(part[0].x() * k, part[0].y() * k);
                     for (int i = 1; i < part.size(); ++i)
@@ -223,7 +387,7 @@ QImage VectorTileRenderer::renderImpl(const mvt::Tile &tile, int zoom, const Til
                             continue;
                         const QString text = labelText(*layer, f, rule.labelFields);
                         if (!text.isEmpty())
-                            labels.append(LabelCandidate{ at, text, &rule });
+                            labels.append(LabelCandidate{ at, text, &rule, {} });
                     } else if (rule.pointRadius > 0) {
                         dots.append(at);
                     }

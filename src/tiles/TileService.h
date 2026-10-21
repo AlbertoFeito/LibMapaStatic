@@ -58,6 +58,23 @@ public:
      */
     bool addDataset(const TileDataset &dataset, QString *error = nullptr);
 
+    /*!
+     * \brief Grupos del estilo de una capa vectorial: (id, titulo), en orden.
+     *
+     * Lee el estilo de la capa (su vectorStyle o el de OpenMapTiles). Vacio si la
+     * capa no existe o no es vectorial.
+     */
+    QVector<QPair<QString, QString>> vectorGroups(const QString &id) const;
+
+    /*!
+     * \brief Oculta (o vuelve a mostrar) grupos del estilo de una capa vectorial.
+     *
+     * Vacia la cache de esa capa y descarta lo que estuviera en camino, para que
+     * no se mezclen teselas pintadas con los grupos de antes. Quien llama vuelve a
+     * pedir el viewport. false si la capa no existe o no es vectorial.
+     */
+    bool setVectorHiddenGroups(const QString &id, const QStringList &groups);
+
     //! Carga los datasets desde un datasets.json. \a baseDir resuelve rutas relativas.
     static QVector<TileDataset> loadDatasets(const QString &jsonPath,
                                              QString *error = nullptr);
@@ -179,6 +196,9 @@ private:
     TilePlanner m_planner;
     TileMatrix m_matrix;
 
+    // Por capa: las teselas de peticiones anteriores a este id se tiran al
+    // llegar (se pintaron con otros grupos visibles).
+    QHash<QString, quint64> m_discardBefore;
     QHash<QString, TileDataset> m_datasets;
     QString m_activeId;
 

@@ -48,6 +48,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/docs-quitar-mundo` | #28 | Quita de `docs/MIS_RUTAS.md` la nota pendiente de la capa `mundo` |
 | `claude/cliente-tcp-serie` | #29 | `cliente_telemetria` por TCP (cliente, con reconexión) y por puerto serie (opcional); `emisor_nmea --tcp` |
 | `claude/sweet-cray-74nz88` | #30 | MBTiles vectoriales (pbf/MVT): `src/vector/` (gzip, decodificador, estilo, renderizador), `vector_tile` |
+| `claude/sweet-cray-74nz88` (otra vez, desde `main`) | #31 | Mapa híbrido: el MBTiles vectorial encima de cualquier base, nombres de calles y capas conmutables |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
@@ -131,6 +132,9 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
   --print-to-pdf=docs/LibMapaStatic_Documentacion.pdf docs/arquitectura.html`
   (Chromium está en `/opt/pw-browsers/`).
 - Mantén el **README** al día (nº de tests, herramientas, estado).
+- **Ideas aparcadas** (habladas con el usuario y dejadas para otro momento):
+  `docs/PENDIENTES.md`. Míralo antes de proponer trabajo nuevo; al hacer una, bórrala
+  de ahí y cuéntala en la bitácora.
 
 ## Entorno
 Se trabaja en dos sitios; comprueba en cuál estás antes de seguir las

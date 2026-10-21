@@ -187,6 +187,34 @@ std::optional<DataPackage> DataPackage::load(const QString &path, QString *error
         p.overlays.append(ov);
     }
 
+    // --- vectorOverlay (mapa hibrido) -----------------------------------
+    const QJsonObject vo = root.value(QStringLiteral("vectorOverlay")).toObject();
+    if (!vo.isEmpty()) {
+        VectorOverlay ov;
+        ov.dataset = TileDataset::fromJson(vo);
+        if (ov.dataset.id.isEmpty())
+            ov.dataset.id = QStringLiteral("hibrido");
+        ov.dataset.filePath = resolve(base, ov.dataset.filePath);
+        if (!ov.dataset.vectorStyleFile.isEmpty())
+            ov.dataset.vectorStyleFile = resolve(base, ov.dataset.vectorStyleFile);
+        ov.dataset.vectorOverlay = true;
+        ov.visible = vo.value(QStringLiteral("visible")).toBool(true);
+        ov.hiddenGroupsSet = vo.contains(QStringLiteral("hiddenGroups"));
+        if (ov.dataset.filePath.isEmpty() || !QFileInfo::exists(ov.dataset.filePath)) {
+            p.warnings << QStringLiteral("Falta el overlay vectorial (vectorOverlay): %1")
+                              .arg(ov.dataset.filePath);
+        } else {
+            QString aviso;
+            if (!MBTiles::describe(ov.dataset, vo, &aviso))
+                p.warnings << aviso;
+            else if (!ov.dataset.vector)
+                p.warnings << QStringLiteral("El overlay %1 no es un MBTiles vectorial (pbf)")
+                                  .arg(ov.dataset.filePath);
+            else
+                p.vectorOverlay = ov;
+        }
+    }
+
     // --- features -------------------------------------------------------
     const QJsonObject feats = root.value(QStringLiteral("features")).toObject();
     p.featuresFile = feats.value(QStringLiteral("file")).toString();
@@ -220,6 +248,10 @@ QStringList DataPackage::files() const
                   QStringLiteral("*.tiff"), QStringLiteral("*.TIFF")}, QDir::Files))
             anadir(f.absoluteFilePath());
     anadir(placesFile);
+    if (vectorOverlay) {
+        anadir(vectorOverlay->dataset.filePath);
+        anadir(vectorOverlay->dataset.vectorStyleFile);
+    }
     for (const Overlay &ov : overlays)
         anadir(ov.file);
     anadir(featuresSeed);

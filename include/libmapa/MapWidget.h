@@ -194,6 +194,57 @@ public:
      */
     void reloadBaseLayer();
 
+    /*!
+     * \brief Grupos que se pueden encender y apagar de una capa base vectorial.
+     *
+     * Una capa de un MBTiles vectorial (pbf) se pinta con un estilo cuyas reglas
+     * van por grupos: con el estilo por defecto, «Nombres de calles», «Nombres de
+     * lugares», «Edificios», «Cimas» y «Limites administrativos». Cada uno se comporta como una capa mas.
+     *
+     * \param layerId capa base; vacio = la activa.
+     * \return vacio si la capa no es vectorial (o no existe).
+     */
+    QVector<BaseLayerGroup> baseLayerGroups(const QString &layerId = QString()) const;
+
+    /*!
+     * \brief Muestra u oculta un grupo de una capa base vectorial.
+     *
+     * Las teselas de esa capa se vuelven a pintar sin (o con) ese grupo. El
+     * estado de partida sale de "hiddenGroups" en mapa.json / datasets.json.
+     * \return false si la capa no es vectorial o no tiene ese grupo.
+     */
+    bool setBaseLayerGroupVisible(const QString &group, bool visible,
+                                  const QString &layerId = QString());
+
+    // --- Mapa hibrido: overlay de teselas vectoriales --------------------
+    /*!
+     * \brief Pone un MBTiles vectorial (pbf) ENCIMA de la capa base, sea cual sea.
+     *
+     * Es el «mapa hibrido»: el satelite (o el relieve, u OSM) con los nombres de
+     * calles y lugares, las carreteras, los limites... del MBTiles vectorial
+     * encima. Se pinta con fondo transparente y el estilo hibrido (rotulos
+     * blancos con halo oscuro), o con \a styleFile. Cambiar de capa base no lo
+     * toca. Sus grupos (calles, POI...) se encienden y apagan con
+     * \c setVectorOverlayGroupVisible. Sustituye al overlay que hubiera.
+     *
+     * En el paquete de datos: "vectorOverlay": { "filePath": "cuba-osm.mbtiles" }.
+     * \return false (motivo en \a error) si el fichero no es un MBTiles vectorial.
+     */
+    bool setVectorOverlay(const QString &file, QString *error = nullptr,
+                          const QString &styleFile = QString());
+    //! Quita el overlay vectorial.
+    void clearVectorOverlay();
+    bool hasVectorOverlay() const;
+    //! Fichero del overlay vectorial (vacio si no hay).
+    QString vectorOverlayFile() const;
+    //! Muestra u oculta el overlay entero (sin olvidar sus grupos).
+    void setVectorOverlayVisible(bool visible);
+    bool isVectorOverlayVisible() const;
+    //! Grupos del overlay que se pueden encender y apagar.
+    QVector<BaseLayerGroup> vectorOverlayGroups() const;
+    //! Muestra u oculta un grupo del overlay; false si no existe.
+    bool setVectorOverlayGroupVisible(const QString &group, bool visible);
+
     //! Quita la marca que dejan SelectArea (el recuadro) o SelectPolygon (el
     //! contorno) tras emitir areaSelected / polygonSelected. Tambien se quitan
     //! solas al cambiar de herramienta.
@@ -932,6 +983,8 @@ public:
 
 signals:
     void baseLayerChanged(const QString &id);
+    //! Se puso, quito, mostro u oculto el overlay vectorial, o cambio uno de sus grupos.
+    void vectorOverlayChanged();
     void featureAdded(qint64 id);
     void featureUpdated(qint64 id);
     void featureRemoved(qint64 id);

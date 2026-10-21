@@ -6718,3 +6718,92 @@ generales son golfos etiquetados como lago. Cambiar el color de fondo tampoco si
 **Sin probar:** con el `cuba_tierra.sqlitedb` del usuario (el suyo tiene 5020 anillos, de otra fecha de OSM) y en su PC.
 
 **Estado: 31 tests (28 sin QCustomPlot), Qt 6.4.**
+
+## 165. Mapa híbrido: el MBTiles vectorial encima de cualquier base, nombres de calles y capas conmutables
+
+El usuario, con la capa vectorial ya funcionando: «agrega los nombres de las calles o ponlo como una capa, que otras trae el mbtiles», y
+después, al ver las opciones: «¿se pueden crear overlays para mostrar en cualquier capa seleccionada, no solo en la vectorial?… me gusta la
+idea, mapas híbridos». Tres piezas, en este orden porque cada una se apoya en la anterior.
+
+### 1. Nombres de calles a lo largo de la calle
+
+El MBTiles trae `transportation_name` (nombre y `ref` de cada vía) y `water_name` como **líneas**. Un rótulo de punto no sirve: hay que
+escribir siguiendo la calle. `VectorTileRenderer` coloca el texto **letra a letra** sobre la línea (posición y ángulo de cada letra por la
+longitud recorrida), lo prueba en el centro de la línea y, si no cabe o choca, a un tercio y a dos tercios. Lo da la vuelta si la línea va
+«hacia atrás» para que se lea de izquierda a derecha, y lo descarta si la línea dobla más de 35° entre dos letras (se leería mal) o si
+alguna letra se sale de la tesela. Es la misma regla de los rótulos de punto: mejor no ponerlo que cortarlo. Una calle se rotula una vez por
+tesela, con lo que en una calle larga el nombre se repite cada ~256 px, como en cualquier mapa. Los rótulos se ordenan por importancia
+(lugares, aguas y aeropuertos; luego calles; luego cimas, POI y números de portal): el primero que llega se queda el sitio.
+
+### 2. Las capas que trae el MBTiles, como capas
+
+En vez de un interruptor solo para las calles, cada regla del estilo puede pertenecer a un **grupo** (`"group"`), con su título en
+`"groups"`. El estilo por defecto trae siete: Nombres de calles, Nombres de lugares, Puntos de interés, Edificios, Números de portal (nuevo,
+`housenumber` a z17), Cimas (nuevo, `mountain_peak`) y Límites administrativos. El agua, las vías y los usos del suelo no tienen grupo:
+son el mapa. `"hiddenGroups"` en el dataset da el estado de partida; `MapWidget::baseLayerGroups` / `setBaseLayerGroupVisible` lo
+cambian en caliente, y en la demo salen como casillas debajo de la capa base vectorial.
+
+Cambiar un grupo obliga a repintar las teselas de esa capa sin mezclar las viejas con las nuevas. `TileService::setVectorHiddenGroups`:
+- **No toca el renderizador en uso**: varios hilos del pool pueden estar pintando con él. El `TileLoader` pone uno NUEVO, copia del anterior
+  con el estilo y la máscara ya cargados, y el viejo muere cuando nadie lo usa.
+- **Vacía la caché** de la capa.
+- **Descarta lo que esté en camino**: lo que llegue de peticiones anteriores se tira al llegar (`m_discardBefore`), aunque ya estuviera en
+  la cola de señales.
+
+### 3. Mapa híbrido: el vectorial encima de cualquier base
+
+El motor tenía UNA capa de teselas. Para poner el vectorial encima del satélite (o del relieve, u OSM) hacía falta una segunda, y se hizo
+**reutilizando todo lo que ya había** en vez de inventar un camino nuevo:
+- **Un segundo `TileService`** con el MBTiles como única capa: hilo, caché, planificador y escalera de respaldo propios. Cambiar de base no
+  toca el overlay, y un overlay lento no frena la base.
+- **Un segundo `TileLayer`** en su propia capa de QCustomPlot (`tileoverlay`: encima del relieve, debajo de las entidades), con color de
+  «sin datos» transparente: donde no hay overlay se ve la base. `MapView::requestVisibleTiles` y `refreshPlan` piden y planifican los dos.
+- **Estilo híbrido** (`VectorStyle::hybrid`; `TileDataset::vectorOverlay` lo elige por defecto). Lleva fondo transparente, sin rellenos ni
+  máscara, carreteras finas semitransparentes y rótulos blancos con halo oscuro, que se leen sobre una foto. POI y números de portal
+  arrancan apagados (`"visible": false` en `"groups"`) porque sobre el satélite tapan demasiado.
+- **El nivel de fondo del overlay es su último zoom.** Con el de una base (z0) aparecían, mientras cargaba, rótulos de una tesela mucho más
+  gruesa ampliados; con texto eso se ve fatal. Así solo se usa la del nivel de encima. Más allá del zoom máximo del MBTiles (si la base
+  llega a z19) se amplía su última tesela, como con cualquier capa.
+
+API: `MapWidget::setVectorOverlay(fichero[, error, estilo])`, `clearVectorOverlay`, `setVectorOverlayVisible`, `vectorOverlayGroups`,
+`setVectorOverlayGroupVisible` y la señal `vectorOverlayChanged`; en `mapa.json`, `"vectorOverlay": { "filePath", "vectorStyle",
+"hiddenGroups", "visible" }` (lo lee `DataPackage`, viaja con el paquete). Demo: **Datos → Mapa híbrido…** / **Quitar el mapa híbrido**, y
+en el panel, «Híbrido: …» en Overlays con sus grupos. `vector_tile --hybrid`, `--hide` y `--print-style --hybrid`
+(`docs/estilo_hibrido.json`).
+
+### Comprobado
+
+- Vistas de La Habana a z15 y z16 con nombres de calles (horizontales, verticales y en diagonal, sin cortes) y el overlay híbrido sobre
+  una base ráster oscura (que imita un satélite) con `render_map --data` y `"vectorOverlay"` en el paquete.
+- `tst_vectortiles` (24 casos): grupos del estilo (orden, títulos, apagados de partida), un grupo oculto no se pinta, el estilo híbrido es
+  transparente, el nombre sigue la línea (caja ancha en una calle horizontal, alta en una vertical, nada si no cabe), el `TileLoader`
+  cambia los grupos en caliente, y `"vectorOverlay"` en el paquete (y el aviso si falta).
+- `tst_mapwidget::hybridOverlayOverAnyBase`: sobre una base ráster gris, el overlay se ve, se apaga por grupo y entero, vuelve, se quita, y
+  un MBTiles ráster no sirve de overlay. En Qt 5 la base sola deja una costura de 1 px entre teselas (no es del overlay): el test compara
+  con la base sola en vez de con cero.
+- Qt 6.4 y Qt 5.15: 31 tests en verde, sin avisos nuevos.
+
+**Sin probar:** sobre un satélite de verdad (aquí solo hay una base ráster oscura sintética) y en el PC del usuario.
+
+**Estado: 31 tests (28 sin QCustomPlot), Qt 6.4 y Qt 5.15.**
+
+### 165 (ajuste). Fuera los puntos de interés y los números de portal
+
+El usuario, probándolo en su PC: «quita los puntos de interés o dime cómo agrego alguno, quita también los números de portal… quitar
+significa quitar de la lista, no muestran nada ahora mismo, no tienen datos». En el híbrido arrancaban apagados y, encendidos, a los zooms
+en que él mira no salía nada: los POI empezaban en z15 y los números de portal en z17. Una casilla que no hace nada estorba, así que se
+quitan **de los dos estilos por defecto**, grupo y reglas. Quedan cinco grupos en la base (Nombres de calles, Nombres de lugares,
+Edificios, Cimas y Límites) y cinco en el híbrido (Carreteras y calles, Nombres de calles, Nombres de lugares, Cimas y Límites). Para quien
+quiera algunos POI concretos (hospitales, policía, gasolineras…), el README explica la regla de estilo propio, con su grupo y su filtro por
+`class`: el MBTiles los trae.
+
+De paso, `"visible": false` en un grupo del estilo ya vale también para una capa **base** vectorial, no solo para el overlay. Antes lo
+aplicaba solo `MapWidget::setVectorOverlay`, y una base lo ignoraba. Ahora lo hace `TileService` al registrar cualquier capa vectorial sin
+`"hiddenGroups"` propio (`TileDataset::vectorHiddenGroupsSet` distingue «no lo dijo» de «lo dijo vacío»). Un caso más en
+`tst_vectortiles`. 31 tests en verde.
+
+Al comprobar el ejemplo del README para añadir POI (hospitales y policía con un estilo propio) apareció un fallo de `vector_tile` que venía
+de §163: **`--style` no funcionaba nunca**. Qt se queda con `-style`/`--style` (es su opción para el estilo visual de la aplicación) antes de
+que la vea `QCommandLineParser`, así que la herramienta pintaba siempre con el estilo por defecto sin decir nada. La opción pasa a ser
+`--style-file`. Con ella, el ejemplo pinta 717 píxeles rojos de hospitales y comisarías en el Vedado y Centro Habana. A la librería no le
+afectaba: `"vectorStyle"` va en el JSON, no por la línea de comandos.

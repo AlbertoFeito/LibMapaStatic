@@ -15,6 +15,7 @@
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileDatasetProbe.h"
 #include "tiles/TileService.h"
+#include "vector/VectorStyle.h"
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
 #include "io/PackageCheck.h"
@@ -140,6 +141,15 @@ public:
     DataPackageInfo package;
     QVector<DataPackage::Overlay> overlays;
     QSet<QString> fixedLayers;
+
+    // Mapa hibrido: overlay de teselas vectoriales con su propio servicio (hilo
+    // y cache aparte de la base). Nulo = sin overlay.
+    std::unique_ptr<TileService> vectorOverlay;
+    bool vectorOverlayVisible = true;
+    std::optional<DataPackage::VectorOverlay> pendingOverlay;   // del paquete, al crear la vista
+
+    //! Instala \a ds como overlay vectorial (ver MapWidget::setVectorOverlay).
+    bool installVectorOverlay(TileDataset ds, bool visible, bool hiddenGroupsSet, QString *motivo);
     QStringList dataWarnings;      // comprobacion rapida del paquete al abrir
 
     // Alertas de zona: que objetivos estan dentro de que entidades vigiladas.
@@ -567,6 +577,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
 
         d->package = paquete->info;
         d->overlays = paquete->overlays;
+        d->pendingOverlay = paquete->vectorOverlay;
         for (const DataPackage::Overlay &ov : paquete->overlays)
             d->fixedLayers.insert(ov.id);
 
@@ -643,6 +654,15 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     d->layout->addWidget(d->view);
 
     d->view->tileLayer()->setNoDataColor(cfg.noDataColor);
+
+    // Overlay vectorial del paquete (mapa hibrido), si lo declara.
+    if (d->pendingOverlay) {
+        QString motivo;
+        if (!d->installVectorOverlay(d->pendingOverlay->dataset, d->pendingOverlay->visible,
+                                  d->pendingOverlay->hiddenGroupsSet, &motivo))
+            qCWarning(lcMapaRender) << "Overlay vectorial:" << motivo;
+        d->pendingOverlay.reset();
+    }
 
     connect(d->view, &MapView::zoomChanged, this, &MapWidget::zoomChanged);
     connect(d->view, &MapView::centerChanged, this, &MapWidget::centerChanged);
@@ -818,6 +838,198 @@ void MapWidget::reloadBaseLayer()
     d->service.cache().clear();      // olvida teselas y marcas de "no existe"
     d->view->requestVisibleTiles();  // vuelve a pedirlas a la BD
     d->view->refreshPlan();
+}
+
+// Grupos del estilo de la capa con su visibilidad actual (los de hiddenGroups,
+// apagados).
+QVector<BaseLayerGroup> MapWidget::baseLayerGroups(const QString &layerId) const
+{
+    const QString id = layerId.isEmpty() ? d->service.activeDatasetId() : layerId;
+    const TileDataset *ds = d->service.dataset(id);
+    QVector<BaseLayerGroup> out;
+    if (!ds)
+        return out;
+    for (const auto &g : d->service.vectorGroups(id))
+        out.append(BaseLayerGroup{ g.first, g.second, !ds->vectorHiddenGroups.contains(g.first) });
+    return out;
+}
+
+// Cambia un grupo y, si la capa es la que se ve, vuelve a pedir el viewport (la
+// cache de esa capa ya la vacio el servicio).
+bool MapWidget::setBaseLayerGroupVisible(const QString &group, bool visible,
+                                         const QString &layerId)
+{
+    const QString id = layerId.isEmpty() ? d->service.activeDatasetId() : layerId;
+    const TileDataset *ds = d->service.dataset(id);
+    if (!ds)
+        return false;
+    bool known = false;
+    for (const auto &g : d->service.vectorGroups(id))
+        known = known || g.first == group;
+    if (!known)
+        return false;
+    QStringList hidden = ds->vectorHiddenGroups;
+    if (visible == !hidden.contains(group))
+        return true;                                  // ya estaba asi
+    if (visible)
+        hidden.removeAll(group);
+    else
+        hidden.append(group);
+    if (!d->service.setVectorHiddenGroups(id, hidden))
+        return false;
+    if (id == d->service.activeDatasetId() && d->view) {
+        d->syncGeometry();
+        d->view->requestVisibleTiles();
+        d->view->refreshPlan();
+    }
+    return true;
+}
+
+// ------------------------------------------------- mapa hibrido (overlay) --
+
+// Lee el MBTiles, comprueba que sea vectorial y lo instala como overlay.
+bool MapWidget::setVectorOverlay(const QString &file, QString *error, const QString &styleFile)
+{
+    QString motivo;
+    TileDataset ds = MBTiles::fromFile(file, QStringLiteral("hibrido"), &motivo);
+    if (motivo.isEmpty() && ds.isValid() && !ds.vector)
+        motivo = tr("%1 no es un MBTiles vectorial (pbf)").arg(file);
+    if (!motivo.isEmpty() || !ds.isValid()) {
+        if (error)
+            *error = motivo.isEmpty() ? tr("No se puede usar %1").arg(file) : motivo;
+        return false;
+    }
+    ds.vectorStyleFile = styleFile;
+    return d->installVectorOverlay(ds, true, false, error);
+}
+
+/*
+ * Arranca el servicio del overlay y se lo da a la vista. Un overlay no lleva
+ * mascara de tierra (no hay mar que pintar: debajo esta la base) y su nivel de
+ * fondo es el ultimo: mientras llega una tesela no se rellena con una de mucho
+ * menos zoom ampliada, que con texto se ve fatal; solo con la del nivel de
+ * encima. Los grupos apagados salen del estilo ("visible": false) salvo que el
+ * paquete diga los suyos.
+ */
+bool MapWidget::Impl::installVectorOverlay(TileDataset ds, bool visible, bool hiddenGroupsSet,
+                                           QString *motivo)
+{
+    Impl *d = this;   // mismo cuerpo que el resto de MapWidget
+    ds.vectorOverlay = true;
+    ds.vectorLandMask.clear();
+    ds.baseZoom = ds.maxZoom;
+    // Sin "hiddenGroups" propio, TileService apaga los que el estilo marca.
+    ds.vectorHiddenGroupsSet = hiddenGroupsSet;
+
+    if (d->view)
+        d->view->setOverlayService(nullptr);
+    d->vectorOverlay.reset();
+
+    auto servicio = std::make_unique<TileService>();
+    if (!servicio->start({ ds }, qMax(32, d->config.cacheMiB / 2))) {
+        if (motivo)
+            *motivo = MapWidget::tr("No se pudo abrir el overlay %1").arg(ds.filePath);
+        return false;
+    }
+    servicio->setDebounceMs(d->config.debounceMs);
+    d->vectorOverlay = std::move(servicio);
+    d->vectorOverlayVisible = visible;
+    if (d->view) {
+        d->syncGeometry();
+        d->view->setOverlayService(d->vectorOverlay.get());
+        d->view->overlayTileLayer()->setVisible(visible);
+        d->view->requestVisibleTiles();
+        d->view->refreshPlan();
+    }
+    emit q->vectorOverlayChanged();
+    return true;
+}
+
+// Quita el overlay: la vista suelta el servicio antes de destruirlo.
+void MapWidget::clearVectorOverlay()
+{
+    if (!d->vectorOverlay)
+        return;
+    if (d->view)
+        d->view->setOverlayService(nullptr);
+    d->vectorOverlay.reset();
+    if (d->view)
+        d->view->refreshPlan();
+    emit vectorOverlayChanged();
+}
+
+// ¿Hay overlay vectorial puesto?
+bool MapWidget::hasVectorOverlay() const
+{
+    return d->vectorOverlay != nullptr;
+}
+
+// Fichero del overlay, o vacio.
+QString MapWidget::vectorOverlayFile() const
+{
+    const TileDataset *ds = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    return ds ? ds->filePath : QString();
+}
+
+// Enciende o apaga la capa del overlay; al encenderla pide las teselas que falten.
+void MapWidget::setVectorOverlayVisible(bool visible)
+{
+    if (!d->vectorOverlay || d->vectorOverlayVisible == visible)
+        return;
+    d->vectorOverlayVisible = visible;
+    if (d->view && d->view->overlayTileLayer()) {
+        d->view->overlayTileLayer()->setVisible(visible);
+        d->view->requestVisibleTiles();
+        d->view->refreshPlan();
+    }
+    emit vectorOverlayChanged();
+}
+
+// ¿Se ve el overlay?
+bool MapWidget::isVectorOverlayVisible() const
+{
+    return d->vectorOverlay && d->vectorOverlayVisible;
+}
+
+// Grupos del overlay con su visibilidad actual.
+QVector<BaseLayerGroup> MapWidget::vectorOverlayGroups() const
+{
+    QVector<BaseLayerGroup> out;
+    const TileDataset *ds = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    if (!ds)
+        return out;
+    for (const auto &g : d->vectorOverlay->vectorGroups(ds->id))
+        out.append(BaseLayerGroup{ g.first, g.second, !ds->vectorHiddenGroups.contains(g.first) });
+    return out;
+}
+
+// Cambia un grupo del overlay: el servicio vacia su cache y aqui se vuelve a pedir.
+bool MapWidget::setVectorOverlayGroupVisible(const QString &group, bool visible)
+{
+    const TileDataset *ds = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    if (!ds)
+        return false;
+    bool known = false;
+    for (const auto &g : d->vectorOverlay->vectorGroups(ds->id))
+        known = known || g.first == group;
+    if (!known)
+        return false;
+    QStringList hidden = ds->vectorHiddenGroups;
+    if (visible == !hidden.contains(group))
+        return true;
+    if (visible)
+        hidden.removeAll(group);
+    else
+        hidden.append(group);
+    if (!d->vectorOverlay->setVectorHiddenGroups(ds->id, hidden))
+        return false;
+    if (d->view) {
+        d->syncGeometry();
+        d->view->requestVisibleTiles();
+        d->view->refreshPlan();
+    }
+    emit vectorOverlayChanged();
+    return true;
 }
 
 // Quita la marca de "seleccionar area" o "seleccionar poligono" que queda

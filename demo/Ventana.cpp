@@ -192,6 +192,7 @@ void Ventana::conectarSenales()
     connect(m_mapa, &MapWidget::featureRemoved, this, &Ventana::pedirReconstruir);
     connect(m_mapa, &MapWidget::featureUpdated, this, &Ventana::pedirReconstruir);
     connect(m_mapa, &MapWidget::featureLayersChanged, this, &Ventana::pedirReconstruir);
+    connect(m_mapa, &MapWidget::vectorOverlayChanged, this, &Ventana::pedirReconstruir);
     // Toda «Área objetivo» queda vigilada sola (creada, cargada o restaurada).
     connect(m_mapa, &MapWidget::featureLayersChanged, this, &Ventana::vigilarAreasObjetivo);
     connect(m_mapa, &MapWidget::featureRemoved, this, [this](qint64) {

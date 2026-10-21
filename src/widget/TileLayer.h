@@ -43,6 +43,9 @@ public:
     TileLayer(QCustomPlot *parent, TileService *service);
     ~TileLayer() override;
 
+    //! Servicio del que salen las teselas (la base, o el del overlay hibrido).
+    void setService(TileService *service) { m_service = service; }
+
     //! Plan de dibujo vigente. Lo recalcula MapView cuando cambia la vista.
     void setPlan(const TilePlanner::Plan &plan);
     const TilePlanner::Plan &plan() const { return m_plan; }

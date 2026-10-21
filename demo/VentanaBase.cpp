@@ -22,6 +22,29 @@ void Ventana::registrarCapaBase(const BaseLayerInfo &c)
     });
 }
 
+// Pide un MBTiles vectorial y lo pone encima de la base (mapa híbrido). El panel
+// lo muestra en «Overlays» con sus grupos (calles, lugares, POI...).
+void Ventana::alPonerHibrido()
+{
+    const QString file = QFileDialog::getOpenFileName(
+        this, tr("MBTiles vectorial (pbf)"), QString(), tr("MBTiles (*.mbtiles);;Todos (*)"));
+    if (file.isEmpty())
+        return;
+    QString error;
+    if (!m_mapa->setVectorOverlay(file, &error)) {
+        QMessageBox::warning(this, tr("Mapa híbrido"),
+                             tr("No se pudo poner el overlay:\n%1").arg(error));
+        return;
+    }
+    statusBar()->showMessage(tr("Mapa híbrido: %1 encima de la capa base").arg(file), 6000);
+}
+
+// Quita el overlay del mapa híbrido.
+void Ventana::alQuitarHibrido()
+{
+    m_mapa->clearVectorOverlay();
+}
+
 // Pide un fichero de teselas, lo añade como capa base y la activa. Si no es una
 // base de teselas válida, dice por qué.
 void Ventana::alAnadirCapaBase()

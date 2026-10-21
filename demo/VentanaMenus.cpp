@@ -437,6 +437,12 @@ void Ventana::construirMenuYBarra()
     m_accAnadirBase->setStatusTip(tr("Añade al mapa un fichero de teselas (.mbtiles o .sqlitedb) "
                                      "como capa base, sin reiniciar."));
     connect(m_accAnadirBase, &QAction::triggered, this, &Ventana::alAnadirCapaBase);
+    QAction *accHibrido = mDatos->addAction(tr("Mapa híbrido (MBTiles vectorial encima)..."));
+    accHibrido->setStatusTip(tr("Pone un MBTiles vectorial (calles, nombres, límites...) encima "
+                                "de la capa base que esté elegida: satélite, relieve, OSM."));
+    connect(accHibrido, &QAction::triggered, this, &Ventana::alPonerHibrido);
+    QAction *accQuitarHibrido = mDatos->addAction(tr("Quitar el mapa híbrido"));
+    connect(accQuitarHibrido, &QAction::triggered, this, &Ventana::alQuitarHibrido);
     QMenu *mDem = mDatos->addMenu(tr("Cargar elevación (DEM)"));
     mDem->addAction(m_accDemCarpeta);
     mDem->addAction(m_accDemFichero);
