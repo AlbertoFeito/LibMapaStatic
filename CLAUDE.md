@@ -132,6 +132,9 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
   --print-to-pdf=docs/LibMapaStatic_Documentacion.pdf docs/arquitectura.html`
   (Chromium está en `/opt/pw-browsers/`).
 - Mantén el **README** al día (nº de tests, herramientas, estado).
+- **Ideas aparcadas** (habladas con el usuario y dejadas para otro momento):
+  `docs/PENDIENTES.md`. Míralo antes de proponer trabajo nuevo; al hacer una, bórrala
+  de ahí y cuéntala en la bitácora.
 
 ## Entorno
 Se trabaja en dos sitios; comprueba en cuál estás antes de seguir las

@@ -455,7 +455,8 @@ fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motiv
   ```
 
   y `"vectorStyle": "estilo.json"` en la capa (o en `"vectorOverlay"`). El grupo
-  sale como una casilla más.
+  sale como una casilla más. Los POI por tema, su búsqueda y la tarjeta al pinchar
+  están aparcados en [`docs/PENDIENTES.md`](docs/PENDIENTES.md).
 - **Comprobar sin abrir la demo:** `vector_tile --mbtiles f.mbtiles --info`
   (capas, claves y clases de la tesela de un punto) y `--out vista.png` (pinta
   una vista con el estilo por defecto o `--style-file`). `check_data` reconoce las
