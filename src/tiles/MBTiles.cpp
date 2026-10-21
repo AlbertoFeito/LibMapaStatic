@@ -3,6 +3,7 @@
 #include "vector/Gzip.h"
 #include "vector/MvtTile.h"
 
+#include <QFile>
 #include <QFileInfo>
 #include <QImage>
 // Qt5 solo DECLARA QVariant en qsqlquery.h (Qt6 si lo incluye), asi que hay que
@@ -111,6 +112,55 @@ bool looksLikeRaster(const QByteArray &b)
            || b.startsWith("GIF8");
 }
 
+// Entero big-endian de 16 o 32 bits de la cabecera SQLite.
+quint32 beUInt(const QByteArray &b, int at, int bytes)
+{
+    quint32 v = 0;
+    for (int i = 0; i < bytes; ++i)
+        v = (v << 8) | quint8(b[at + i]);
+    return v;
+}
+
+// Comprueba, sin abrir la base, que el fichero sea un SQLite ENTERO: la firma de
+// los 16 primeros bytes y que mida lo que dice su cabecera (tamaño de página ×
+// número de páginas). Un MBTiles grande suele bajarse en partes y unirse a mano;
+// si falta una parte, se cortó la descarga o el servidor devolvió una página web,
+// SQLite lo abre igual y solo «no encuentra la tabla», un mensaje que despista.
+// Vacío si está bien (o si la cabecera no permite saberlo).
+QString sqliteFileProblem(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return QString();                     // lo dirá la apertura con su motivo
+    const qint64 size = f.size();
+    const QByteArray head = f.read(100);
+    if (head.size() < 100 || !head.startsWith(QByteArray("SQLite format 3\0", 16))) {
+        const QString start = QString::fromLatin1(head.left(15)).simplified();
+        return QStringLiteral("%1 no es una base de datos SQLite (%2 bytes; empieza por «%3»)%4. "
+                              "¿Descarga fallida? Vuelve a descargarlo y comprueba su MD5.")
+            .arg(path).arg(size).arg(start,
+                                     head.trimmed().startsWith('<')
+                                         ? QStringLiteral(": parece una página web, no el fichero")
+                                         : QString());
+    }
+    quint64 pageSize = beUInt(head, 16, 2);
+    if (pageSize == 1)
+        pageSize = 65536;
+    const quint32 pages = beUInt(head, 28, 4);
+    // El número de páginas solo es fiable si «version-valid-for» coincide con el
+    // contador de cambios (ficheros escritos por SQLite 3.7.0 o posterior).
+    if (pages == 0 || beUInt(head, 92, 4) != beUInt(head, 24, 4))
+        return QString();
+    const quint64 expected = pageSize * pages;
+    if (quint64(size) < expected)
+        return QStringLiteral("%1 está INCOMPLETO: mide %2 bytes y debería medir %3 (faltan %4 MB). "
+                              "¿Falta alguna parte al unirlo o se cortó la descarga? Vuelve a "
+                              "descargarlo y comprueba su MD5.")
+            .arg(path).arg(size).arg(expected)
+            .arg(double(expected - quint64(size)) / (1024.0 * 1024.0), 0, 'f', 1);
+    return QString();
+}
+
 } // namespace
 
 // Ver la cabecera: la extension .mbtiles, sin distinguir mayusculas.
@@ -141,6 +191,9 @@ bool describe(TileDataset &ds, const QJsonObject &given, QString *error)
 {
     if (!QFileInfo::exists(ds.filePath))
         return fail(error, QStringLiteral("No existe %1").arg(ds.filePath));
+    const QString broken = sqliteFileProblem(ds.filePath);
+    if (!broken.isEmpty())
+        return fail(error, broken);
 
     TempConnection conn(ds.filePath);
     if (!conn.isOpen())

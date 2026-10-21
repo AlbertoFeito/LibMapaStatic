@@ -309,7 +309,36 @@ void TstMBTiles::rejectsWhatItCannotUse()
     f.close();
     error.clear();
     MBTiles::fromFile(txt, QString(), &error);
-    QVERIFY(!error.isEmpty());
+    QVERIFY2(error.contains(QStringLiteral("no es una base de datos SQLite")), qPrintable(error));
+
+    // Lo que devuelve un servidor en vez del fichero: una página web.
+    const QString html = p("pagina.mbtiles");
+    QFile h(html);
+    QVERIFY(h.open(QIODevice::WriteOnly));
+    h.write("<!DOCTYPE html><html><body>Enlace caducado</body></html>");
+    h.close();
+    error.clear();
+    MBTiles::fromFile(html, QString(), &error);
+    QVERIFY2(error.contains(QStringLiteral("página web")), qPrintable(error));
+
+    // Un MBTiles válido cortado a la mitad (falta una parte al unirlo con copy /b).
+    const QString entero = p("entero.mbtiles");
+    QVERIFY(makeMBTiles(entero, 0, 3, { { "format", "png" } }));
+    QFile src(entero);
+    QVERIFY(src.open(QIODevice::ReadOnly));
+    const QByteArray bytes = src.readAll();
+    src.close();
+    const QString cortado = p("cortado.mbtiles");
+    QFile dst(cortado);
+    QVERIFY(dst.open(QIODevice::WriteOnly));
+    dst.write(bytes.left(bytes.size() / 2));
+    dst.close();
+    error.clear();
+    MBTiles::fromFile(cortado, QString(), &error);
+    QVERIFY2(error.contains(QStringLiteral("INCOMPLETO")), qPrintable(error));
+    error.clear();
+    MBTiles::fromFile(entero, QString(), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));               // el entero, sin queja
     error.clear();
     MBTiles::fromFile(p("no_existe.mbtiles"), QString(), &error);
     QVERIFY2(error.contains(QStringLiteral("No existe")), qPrintable(error));

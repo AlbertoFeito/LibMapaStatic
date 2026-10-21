@@ -6662,3 +6662,18 @@ que tarda cada tesela) y `--print-style`. Solo núcleo, se instala con las demá
   (pintar una parte de la tesela padre a más escala) queda como mejora.
 
 **Estado: 31 tests (28 sin QCustomPlot), Qt 6.4 y Qt 5.15.**
+
+### 163 (ajuste). «La tabla `tiles` no tiene la columna zoom_level» con los ficheros recién descargados
+
+Primera prueba del usuario en su PC: `vector_tile --info` sobre los dos MBTiles bajados con el `.bat` respondió «no es un MBTiles: la tabla
+`tiles` no tiene la columna zoom_level». Ese texto despista: es lo que sale cuando el fichero **no es un SQLite entero** (SQLite lo abre sin
+quejarse y solo «no ve» la tabla). Se reprodujo aquí con un `cuba-osm-z16.mbtiles` cortado a 5 MB y con una página HTML guardada como
+`.mbtiles`: los dos daban exactamente ese mensaje. Los MBTiles grandes se bajan en partes y se unen con `copy /b`: si falta una parte, se cortó
+una descarga o el servidor devolvió una página web, el resultado es justo eso.
+
+`MBTiles::describe` mira ahora, antes de abrir la base, la firma `SQLite format 3` y que el fichero mida lo que dice su cabecera (tamaño de
+página × número de páginas; para el de Cuba, 4096 × 87849 = 359 829 504 bytes). Si no, lo dice: «no es una base de datos SQLite… parece una
+página web» o «está INCOMPLETO: mide X bytes y debería medir Y (faltan Z MB)», con la sugerencia de volver a descargar y comprobar el MD5.
+Vale para cualquier MBTiles, ráster o vectorial. Tres casos más en `tst_mbtiles::rejectsWhatItCannotUse` (texto, HTML y un MBTiles válido
+cortado a la mitad; el entero sigue sin queja). **Sin confirmar** que esa sea la causa en el PC del usuario: depende de lo que digan el
+tamaño y el MD5 de sus ficheros.
