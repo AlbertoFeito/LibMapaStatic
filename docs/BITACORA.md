@@ -7042,3 +7042,14 @@ ciudad: para eso haría falta un índice de calles, igual que con los POI.
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+### 170 (ajuste). El buscador dice cuándo no mira donde está el usuario
+
+El usuario escribió «Obi» a zoom 10 con el centro del mapa en el mar, al sur de Artemisa: salieron cinco lugares del índice y ninguna calle ni sitio, y
+pareció que «Obispo» no existía. Sí existe, pero a unos 30 km del centro, y sitios y calles solo se buscan alrededor del centro (6 km). Nada en pantalla lo
+decía, y es lo que dije que pasaría en «Sin probar»: en uso real se tropieza a la primera. Dos cambios en la demo, sin tocar la API:
+- El radio sigue al zoom: lo que se ve de ancho (metros por píxel × ancho / 2), entre 6 y 15 km. A zoom lejano mira más, a zoom cercano se queda en 6.
+- Si no sale ni un sitio ni una calle, el desplegable lo dice («sin sitios ni calles a 15 km del centro: acerca el mapa a la zona»), en una fila que es solo
+  un aviso (elegirla no hace nada).
+Con el MBTiles de Cuba y 15 km sigue sin llegar de Artemisa a La Habana desde el centro del mar. La solución de verdad, buscar en todo el mapa, es un índice de
+calles y sitios del MBTiles entero, generado una vez y consultado como el de lugares; no está hecho.
+

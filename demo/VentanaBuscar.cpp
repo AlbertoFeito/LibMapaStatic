@@ -78,8 +78,11 @@ void Ventana::buscarLugares(const QString &texto)
 {
     const bool sitios = m_mapa->canSearchPointsOfInterest();
     m_lugaresVistos = m_mapa->searchPlaces(texto, sitios ? 5 : 12);
-    m_poisVistos = sitios ? m_mapa->searchPointsOfInterest(texto, 5) : QVector<PointOfInterest>();
-    m_callesVistas = m_mapa->canSearchStreets() ? m_mapa->searchStreets(texto, 5) : QVector<Street>();
+    // Los sitios y las calles se buscan alrededor del centro: tanto como se ve de ancho (con
+    // zoom lejano, más), pero entre 6 y 15 km para que la primera lectura de teselas no tarde.
+    const double radio = qBound(6000.0, m_mapa->metersPerPixel() * m_mapa->width() / 2.0, 15000.0);
+    m_poisVistos = sitios ? m_mapa->searchPointsOfInterest(texto, 5, radio) : QVector<PointOfInterest>();
+    m_callesVistas = m_mapa->canSearchStreets() ? m_mapa->searchStreets(texto, 5, radio) : QVector<Street>();
     QStringList filas;
     for (const Place &p : m_lugaresVistos)
         filas << QStringLiteral("%1 — %2").arg(p.name, p.typeLabel());
@@ -87,6 +90,12 @@ void Ventana::buscarLugares(const QString &texto)
         filas << tr("%1 — %2 · a %3").arg(p.displayName(), p.typeLabel(), textoDistancia(p.distanceM));
     for (const Street &c : m_callesVistas)
         filas << tr("%1 — %2 · a %3").arg(c.name, c.typeLabel(), textoDistancia(c.distanceM));
+    // Sin sitios ni calles: lo dice, para que no parezca que no existen. Solo se buscan cerca del
+    // centro del mapa; los lugares (ciudades, bahías...) sí se buscan en todo el índice. Esta fila
+    // es solo un aviso: elegirla no hace nada.
+    if (sitios && texto.trimmed().size() >= 2 && m_poisVistos.isEmpty() && m_callesVistas.isEmpty())
+        filas << tr("(sin sitios ni calles a %1 del centro: acerca el mapa a la zona)")
+                     .arg(textoDistancia(radio));
     m_sugerencias->setStringList(filas);
     if (!filas.isEmpty() && m_buscador->completer())
         m_buscador->completer()->complete();
