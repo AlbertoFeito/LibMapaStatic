@@ -66,6 +66,7 @@ namespace {
 // Capas del mapa: la ruta debajo y los marcadores A y B encima.
 const QString kCapaRuta = QStringLiteral("ruta");
 const QString kCapaPuntos = QStringLiteral("puntos");
+const QString kCapaAlcance = QStringLiteral("alcance");
 
 // Nombre en español de un tipo de vía de OpenMapTiles (el tipo tal cual si no lo conoce).
 QString nombreVia(const QString &tipo)
@@ -322,6 +323,7 @@ public:
         cfg.dataDir = datos;
         m_mapa = new MapWidget(cfg, this);
         m_mapa->setScaleBarVisible(true);
+        m_mapa->addFeatureLayer(kCapaAlcance, tr("Alcance de B"), 900);
         m_mapa->addFeatureLayer(kCapaRuta, tr("Ruta"), 1000);
         m_mapa->addFeatureLayer(kCapaPuntos, tr("Puntos"), 1100);
         m_mapa->setFeatureLayerTransient(kCapaPuntos);
@@ -353,6 +355,9 @@ public:
         m_tabla->setEditTriggers(QAbstractItemView::NoEditTriggers);
         m_tabla->setSelectionMode(QAbstractItemView::NoSelection);
         m_tabla->verticalHeader()->hide();
+        m_alcance = new QLabel(this);
+        m_alcance->setWordWrap(true);
+        m_alcance->setTextFormat(Qt::RichText);
         m_aviso = new QLabel(this);
         m_aviso->setWordWrap(true);
         m_aviso->setTextFormat(Qt::RichText);
@@ -371,6 +376,7 @@ public:
         botones->addWidget(limpiar);
         col->addLayout(botones);
         col->addWidget(m_ejemplos);
+        col->addWidget(m_alcance);
         col->addWidget(m_resumen);
         col->addWidget(m_tabla, 1);
         col->addWidget(m_aviso);
@@ -589,6 +595,43 @@ private:
         f.style.lineColor = esA ? QColor(0x2e, 0x7d, 0x32) : QColor(0xc6, 0x28, 0x28);
         f.style.fillColor = f.style.lineColor;
         id = m_mapa->addFeature(f);
+        if (esA)
+            pintarAlcance(c);
+    }
+
+    // Dibuja alrededor de \a a el contorno de hasta dónde puede estar B: más allá, findRoute dice «ruta
+    // demasiado larga» porque habría que leer más de kMaxRouteTiles teselas. No es un círculo: la zona
+    // que se lee es un rectángulo de teselas, y en línea recta llega más lejos que en diagonal.
+    void pintarAlcance(const QGeoCoordinate &a)
+    {
+        m_mapa->clearFeatureLayer(kCapaAlcance);
+        m_alcance->clear();
+        const QVector<QGeoCoordinate> borde = m_mapa->routeReach(a, 72);
+        if (borde.isEmpty())
+            return;
+        MapFeature f;
+        f.kind = GeometryKind::Polygon;
+        f.layerId = kCapaAlcance;
+        f.name = tr("Alcance de B");
+        f.geometry = borde;
+        f.selectable = false;
+        f.style.labelVisible = false;
+        f.style.lineWidth = 2.0;
+        f.style.lineStyle = Qt::DashLine;
+        f.style.lineColor = QColor(0x2e, 0x7d, 0x32);
+        f.style.fillColor = QColor(0x2e, 0x7d, 0x32, 28);
+        m_mapa->addFeature(f);
+
+        double minM = 1e18, maxM = 0.0;
+        for (const QGeoCoordinate &c : borde) {
+            const double d = a.distanceTo(c);
+            minM = qMin(minM, d);
+            maxM = qMax(maxM, d);
+        }
+        m_alcance->setText(tr("<span style='color:#2e7d32'><b>B debe caer dentro del contorno verde</b>: a unos "
+                              "%1 de A en diagonal y hasta %2 en línea recta (más lejos, la ruta pide leer "
+                              "demasiadas teselas).</span>")
+                               .arg(textoDistancia(minM), textoDistancia(maxM)));
     }
 
     // Quita un marcador si existe.
@@ -630,6 +673,8 @@ private:
     void limpiarTodo()
     {
         m_mapa->clearFeatureLayer(kCapaRuta);
+        m_mapa->clearFeatureLayer(kCapaAlcance);
+        m_alcance->clear();
         quitarMarcador(m_idA);
         quitarMarcador(m_idB);
         m_aPuesto = m_bPuesto = false;
@@ -652,6 +697,8 @@ private:
         const bool esA = id == m_idA;
         (esA ? m_puntoA : m_puntoB) = f->position();
         (esA ? m_a : m_b)->setText(formatCoordinate(f->position(), CoordinateFormat::Decimal));
+        if (esA)
+            pintarAlcance(f->position());
         if (m_aPuesto && m_bPuesto)
             calcular(m_puntoA, m_puntoB, true);
     }
@@ -691,6 +738,7 @@ private:
     QLineEdit *m_a = nullptr, *m_b = nullptr;
     QComboBox *m_ejemplos = nullptr;
     QLabel *m_resumen = nullptr;
+    QLabel *m_alcance = nullptr;
     QLabel *m_aviso = nullptr;
     QTableWidget *m_tabla = nullptr;
     QPushButton *m_exportar = nullptr;
@@ -783,6 +831,22 @@ static int comprobar(Ventana &ventana)
               guardada ? QStringLiteral("%1 bytes").arg(f.size()) : error);
     verificar(QStringLiteral("la ruta está pintada por tramos"), ventana.tramosPintados() >= 1,
               QString::number(ventana.tramosPintados()));
+
+    // El contorno de alcance de B: 72 rumbos; un destino al 90 % del borde no da «demasiado larga» y
+    // uno al 120 % sí. En ambos casos el destino es el mismo rumbo visto desde A.
+    const QVector<QGeoCoordinate> borde = ventana.mapa()->routeReach(oeste, 72);
+    bool alcanceBien = borde.size() == 72;
+    QString detalleAlcance = QString::number(borde.size());
+    for (int i = 0; alcanceBien && i < borde.size(); i += 9) {
+        const double d = oeste.distanceTo(borde[i]), rumbo = oeste.azimuthTo(borde[i]);
+        const RouteResult dentro = ventana.mapa()->findRoute(oeste, oeste.atDistanceAndAzimuth(d * 0.9, rumbo));
+        const RouteResult fuera = ventana.mapa()->findRoute(oeste, oeste.atDistanceAndAzimuth(d * 1.2, rumbo));
+        alcanceBien = d > 10000.0 && !dentro.error.contains(QLatin1String("demasiado larga"))
+                      && fuera.error.contains(QLatin1String("demasiado larga"));
+        detalleAlcance = QStringLiteral("rumbo %1: %2 m, dentro «%3», fuera «%4»")
+                             .arg(rumbo, 0, 'f', 0).arg(d, 0, 'f', 0).arg(dentro.error, fuera.error);
+    }
+    verificar(QStringLiteral("contorno de alcance de B"), alcanceBien, detalleAlcance);
 
     out << (todoBien ? "TODO BIEN\n" : "HAY FALLOS\n");
     return todoBien ? 0 : 1;

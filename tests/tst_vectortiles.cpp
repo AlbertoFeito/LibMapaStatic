@@ -10,6 +10,7 @@
 #include "vector/MvtTile.h"
 #include "vector/PoiSearch.h"
 #include "vector/RoadGraph.h"
+#include "vector/RoutePlanner.h"
 #include "vector/StreetSearch.h"
 #include "vector/VectorStyle.h"
 #include "vector/VectorTileRenderer.h"
@@ -72,6 +73,7 @@ private slots:
     void decodeOnlyChosenLayers();
     void searchesPointsOfInterest();
     void roadGraphRoutes();
+    void routeReachContour();
     void roadGraphWeldsTileSeams();
     void searchesStreets();
     void filtersPointsOfInterest();
@@ -1578,6 +1580,33 @@ void TstVectorTiles::roadGraphWeldsTileSeams()
     // La vía cerrada no cuenta aunque esté en el mapa: el único camino es la carretera.
     QCOMPARE(r.byClass.size(), 1);
     QCOMPARE(r.byClass.first().first, QStringLiteral("primary"));
+}
+
+// El contorno de alcance: un punto por rumbo, ninguno a menos de 10 km, en línea recta llega más lejos
+// que en diagonal (el rectángulo de teselas crece con el lado mayor) y un destino algo más allá del
+// borde ya da «ruta demasiado larga», uno algo más acá no.
+void TstVectorTiles::routeReachContour()
+{
+    TileDataset ds;
+    ds.vector = true;
+    ds.minZoom = 0;
+    ds.maxZoom = 14;
+    const QGeoCoordinate a(22.0, -80.0);
+    const QVector<QGeoCoordinate> borde = routeplanner::routeReach(ds, a, 72);
+    QCOMPARE(borde.size(), 72);
+    double minM = 1e18, maxM = 0.0;
+    for (const QGeoCoordinate &c : borde) {
+        minM = qMin(minM, a.distanceTo(c));
+        maxM = qMax(maxM, a.distanceTo(c));
+    }
+    QVERIFY2(minM > 10000.0, qPrintable(QString::number(minM)));
+    QVERIFY2(maxM > minM * 1.1, qPrintable(QStringLiteral("%1 vs %2").arg(minM).arg(maxM)));
+    for (int i = 0; i < 72; i += 8) {
+        const double d = a.distanceTo(borde[i]), az = a.azimuthTo(borde[i]);
+        QVERIFY(!routeplanner::findRoute(ds, a, a.atDistanceAndAzimuth(d * 0.9, az)).error.contains(QLatin1String("demasiado larga")));
+        QVERIFY(routeplanner::findRoute(ds, a, a.atDistanceAndAzimuth(d * 1.2, az)).error.contains(QLatin1String("demasiado larga")));
+    }
+    QVERIFY(routeplanner::routeReach(TileDataset(), a, 72).isEmpty());   // sin mapa vectorial no hay alcance
 }
 
 QTEST_MAIN(TstVectorTiles)

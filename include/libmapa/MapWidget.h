@@ -892,6 +892,14 @@ public:
     RouteResult findRoute(const QGeoCoordinate &from, const QGeoCoordinate &to,
                           const std::function<bool(int, int)> &progress = nullptr) const;
 
+    /*!
+     * \brief Contorno de los destinos a los que \c findRoute se atreve a ir desde \a from
+     *        (hasta \c kMaxRouteTiles teselas): \a bearings puntos, uno por rumbo desde el norte
+     *        en sentido horario. Vacio sin mapa vectorial. Es el rectangulo de lectura, no un
+     *        circulo, y no promete que haya camino: solo que no saldra «ruta demasiado larga».
+     */
+    QVector<QGeoCoordinate> routeReach(const QGeoCoordinate &from, int bearings = 72) const;
+
     //! Perfil de elevacion del terreno a lo largo de una ruta (polilinea): la
     //! cota en cada lugar, muestreada cada \c params.stepMeters (30 m por
     //! defecto), con distancia total y desniveles. Perfil vacio si no hay origen

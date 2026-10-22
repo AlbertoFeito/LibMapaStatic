@@ -6854,6 +6854,10 @@ decodificado: es para un clic, no para un bucle.
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+### Alcance de B desde A en `rutas_tierra`
+
+Se pidió ver, desde el punto A, hasta dónde puede estar B. El límite real es `kMaxRouteTiles` (3000 teselas z14): `findRoute` lee el rectángulo origen-destino con margen y, si pasa del tope, da «ruta demasiado larga». Para no duplicar esa cuenta en la app, el cálculo del rectángulo se sacó a un ayudante único (`rectFor`) que usan `findRoute` y la función nueva `routeplanner::routeReach` / `MapWidget::routeReach(from, bearings = 72)`: por cada rumbo busca por bisección la distancia máxima que cabe (las teselas crecen siempre con la distancia). Devuelve el contorno, que **no es un círculo**: en línea recta llega a ~140 km y en diagonal a ~110 km a la latitud de Cuba. El ejemplo lo dibuja en verde discontinuo (capa «Alcance de B», bajo la ruta) en cuanto se pone A, lo redibuja al arrastrar A y lo explica en el panel. Solo promete que no saldrá «demasiado larga», no que haya camino. Prueba: `routeReachContour` en `tst_vectortiles` y una comprobación más en `rutas_tierra --comprobar` (al 90 % del borde no da «demasiado larga», al 120 % sí).
+
 ### 166 (ajuste). La ventana «¿Qué hay aquí?» en lenguaje llano
 
 El usuario, probándola en su PC con el MBTiles de Cuba: no le gustó cómo se veía. Con razón: era un volcado de atributos crudos (`class`,

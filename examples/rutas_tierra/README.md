@@ -16,6 +16,7 @@ de un planificador de rutas offline.
 | Barra de progreso que se puede cancelar mientras se leen las teselas | el parámetro `progress` de `findRoute` |
 | Marcadores A y B que se arrastran y recalculan al soltarlos | `MapFeature::draggable`, señal `featureDragFinished` |
 | Escribir A y B en cualquier formato de coordenada | `parseCoordinate` (decimal, grados y minutos, UTM, MGRS) |
+| Contorno de hasta dónde puede estar B desde A | `MapWidget::routeReach` |
 | Guardar la ruta a GPX, KML o GeoJSON | `exportVectorFile` |
 
 Todo en un solo fichero, [`main.cpp`](main.cpp), pensado para leerse de arriba abajo.
@@ -45,6 +46,10 @@ En la ventana:
 - **Arrastra** un marcador A o B: al soltarlo, la ruta se recalcula.
 - **Invertir** cambia A por B; **Limpiar** quita todo; **Guardar la ruta…** la saca a GPX, KML
   o GeoJSON.
+- En cuanto pones A se dibuja en **verde discontinuo el alcance de B**: dentro de ese contorno la ruta se
+  puede calcular; fuera, la aplicación avisa de que es demasiado larga (habría que leer más de 3000 teselas).
+  No es un círculo, sino un rectángulo de lectura: en línea recta llega más lejos que en diagonal. Que B
+  caiga dentro no garantiza que haya camino.
 - La tabla da los kilómetros y el % por tipo de vía; la fila de tierra va resaltada, y debajo
   sale el aviso de cuánto de la ruta es de tierra.
 
