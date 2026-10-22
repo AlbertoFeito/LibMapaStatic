@@ -7105,3 +7105,34 @@ grafo no las une y la ruta falla con «las vías no llegan a unirse». Es lo pri
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+## 172. Ejemplo `rutas_tierra`: probar las rutas por tierra
+
+Petición del usuario: «crea una app de ejemplo en examples para probar rutas de tierra», para probar con datos suyos lo de §171. Se entendió «rutas por tierra» como rutas por la
+red vial y, dentro de ellas, **los caminos de tierra** (la clase `track` de OpenMapTiles), que son los que más dudas dan: cuánto de una ruta es de tierra y si el cálculo los usa
+como se espera.
+
+**El ejemplo** (`examples/rutas_tierra`, un solo `main.cpp` de ~700 líneas, con su `README.md`, `CMakeLists.txt` y `.pro`, como los demás): dos clics en el mapa ponen A y B, o se escriben
+en cualquier formato de coordenada, o se **arrastran los marcadores** y la ruta se recalcula al soltar. La ruta se pinta **por tramos de un mismo tipo de vía**: asfalto en azul y caminos de
+tierra en marrón y discontinuos; un panel da la distancia, el tiempo estimado, lo que se anda hasta la vía, la tabla de kilómetros y % por tipo (la fila de tierra resaltada) y un aviso con
+cuánta tierra lleva. Barra de progreso cancelable, invertir, limpiar y guardar a GPX/KML/GeoJSON.
+
+**Red de demostración propia.** Probar rutas necesita un MBTiles vectorial con vías, y no todo el mundo lo tiene a mano. El ejemplo **escribe el suyo** en una carpeta temporal (una tesela z14
+con la capa `transportation`, codificada a mano en MVT, más el `mapa.json`): un pueblo a cada lado unidos por un camino de tierra casi recto (~1,9 km), una calle de asfalto que da la
+vuelta por el sur (~4,6 km), una carretera principal que sube hasta el camino y un ramal de tierra sin salida a una finca. Con `--demo`, o sin paquete de datos, se usa; con un paquete real, se usa ese.
+Hay tres rutas de ejemplo en un desplegable. Es el mismo patrón que el terreno de demostración de `analisis_terreno`.
+
+**Cambio en la biblioteca: `RouteResult::legs`.** Para pintar la tierra de otro color, la ruta tenía que decir qué tramo es de qué tipo de vía; hasta entonces solo daba el trazado entero y
+los totales por tipo. Ahora `legs` parte el trazado en tramos seguidos de un mismo tipo (`RouteLeg`: tipo, trazado, longitud), cada uno empezando donde acabó el anterior. Al probarlo salió
+un fallo: si el origen cae justo en un cruce, el tramo parcial del enganche mide 0 m y abría un tramo «de calle» de 0 m delante de la carretera por la que se iba (la ruta cruce → finca salía
+en tres tramos en vez de dos). Las aristas de longitud cero ya no abren tramo, con su caso en `roadGraphRoutes`.
+
+**Prueba sin ventana** (`rutas_tierra --comprobar`): tres rutas de longitud conocida sobre la demo (pueblo oeste → pueblo este: ~1,9 km, todo de tierra, un solo tramo; cruce → finca: carretera
+principal y luego tierra, dos tramos seguidos; pueblo oeste → finca: solo tierra), que la vuelta mida lo mismo y la exportación a GPX. Entra en `herramientas/probar_instalacion.sh`, que se ha
+corrido entero contra una instalación local (los diez ejemplos). 32 casos de `tst_vectortiles` en verde, 31 tests.
+
+**Límites, sin rodeos:** lo de §171 (tiempo estimado, sin giros prohibidos). Y una cosa más: el ejemplo **no puede evitar** los caminos de tierra, solo mostrar cuánto hay; evitarlos pide
+una opción en `findRoute` (anotada en `PENDIENTES.md`). Con datos reales, lo primero que hay que mirar sigue siendo si las intersecciones llegan unidas, y cuántos `track` trae el MBTiles de la zona.
+La ventana no se ha visto en pantalla (compila y su prueba sin ventana pasa); el dibujo discontinuo de la tierra es lo primero que hay que mirar.
+
+**Estado: 31 tests (28 sin QCustomPlot).**
+

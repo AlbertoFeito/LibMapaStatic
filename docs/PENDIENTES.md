@@ -38,5 +38,7 @@ zona alrededor, pero nadie lo ha pedido.
     sacarlos de OSM aparte; sin ellos el tiempo es una estimación.
   - *Instrucciones giro a giro* («gira a la derecha en Obispo»): las teselas traen los nombres en otra capa
     (`transportation_name`) y habría que cruzarlos con el trazado.
-  - *Varios destinos / ruta más corta en vez de más rápida / evitar autopistas*.
+  - *Varios destinos / ruta más corta en vez de más rápida / evitar autopistas / **evitar caminos de tierra***: hoy
+    `examples/rutas_tierra` solo MUESTRA cuánta tierra lleva la ruta. Haría falta un `RouteOptions` en `findRoute`
+    (p. ej. `avoidTracks`, que pondría el coste de `track` muy alto o lo quitaría del grafo).
 - Recordar la licencia del dato: **ODbL**, «© OpenStreetMap contributors, © OpenMapTiles».
