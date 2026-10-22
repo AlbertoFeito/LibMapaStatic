@@ -6,8 +6,8 @@ en `BITACORA.md`.
 
 ## Puntos de interés (POI) del MBTiles vectorial
 
-*Aparcado el 2026-10-21 (§165), retomado en §166 (qué hay aquí, con tarjeta al pinchar) y §167
-(grupos por tema).* Quedan la búsqueda y la selección como entidades.
+*Aparcado el 2026-10-21 (§165), retomado en §166 (qué hay aquí, con tarjeta al pinchar), §167
+(grupos por tema) y §168 (búsqueda).* Queda la selección como entidades.
 
 **Lo que ya se sabe del dato** (`cuba-osm.mbtiles`, OpenMapTiles):
 - Capa `poi`, z12–17, con `name:latin`, `class`, `subclass`, `rank` e `indoor`.
@@ -24,9 +24,7 @@ z13, con color y símbolo propios. Falta verlos con el `cuba-osm.mbtiles` real: 
 clases y el zoom desde el que salen salieron de la documentación de OpenMapTiles.
 
 **Lo que quedaría por hacer, cuando toque:**
-1. **Buscar POI** por nombre o tipo («farmacia») cerca de la vista, sumándolo al
-   índice de lugares (`lugares.sqlitedb`).
-2. **Sacar una selección como entidades** («todos los hospitales de la provincia»):
+1. **Sacar una selección como entidades** («todos los hospitales de la provincia»):
    para filtrarlas, vigilarlas con alertas de zona y exportarlas a GeoJSON/KML/GPX.
 
 ## Otras ideas del mismo MBTiles (plan del 2026-10-21)

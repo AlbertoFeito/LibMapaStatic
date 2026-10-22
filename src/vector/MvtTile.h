@@ -93,6 +93,16 @@ struct Tile
 bool decode(const QByteArray &bytes, Tile *out, QString *error = nullptr);
 
 /*!
+ * \brief Como \c decode, pero solo lee las capas cuyo nombre está en \a onlyLayers
+ *        (las demás se saltan sin decodificar sus entidades).
+ *
+ * Una tesela de ciudad trae miles de edificios y vías; para buscar puntos de interés
+ * solo hace falta la capa `poi`, y saltarse el resto es la diferencia entre decenas de
+ * milisegundos y uno. \a onlyLayers vacío = todas.
+ */
+bool decode(const QByteArray &bytes, Tile *out, QString *error, const QStringList &onlyLayers);
+
+/*!
  * \brief Decodifica solo la geometría de una entidad (comandos MoveTo/LineTo/
  *        ClosePath con parámetros en zigzag, §4.3 de la especificación).
  *

@@ -33,6 +33,27 @@ struct LIBMAPA_EXPORT Place
     int suggestedZoom() const;
 };
 
+/*!
+ * \brief Un punto de interés del MBTiles vectorial (farmacia, hospital, gasolinera…).
+ *
+ * Sale de `MapWidget::searchPointsOfInterest`. A diferencia de `Place`, no sale de
+ * un índice aparte: se lee directamente de la capa `poi` de las teselas vectoriales
+ * que hay alrededor del mapa, así que sirve cualquier MBTiles de OpenMapTiles.
+ */
+struct LIBMAPA_EXPORT PointOfInterest
+{
+    QString name;                  //!< Nombre; vacío si el MBTiles no lo trae.
+    QString type;                  //!< `class` de OpenMapTiles: "pharmacy", "fuel"…
+    QString subtype;               //!< `subclass`: "hotel", "bakery"… (puede estar vacío).
+    QGeoCoordinate coordinate;
+    double distanceM = 0.0;        //!< Distancia al centro del mapa en la búsqueda.
+
+    //! Tipo en español para mostrarlo ("farmacia", "hotel"…); el tipo tal cual si no lo conoce.
+    QString typeLabel() const;
+    //! El nombre, o el tipo si no tiene ("Farmacia"): siempre algo que mostrar.
+    QString displayName() const;
+};
+
 } // namespace libmapa
 
 #endif // LIBMAPA_PLACES_H_

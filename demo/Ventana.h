@@ -97,10 +97,13 @@ private:
     void actualizarBuscador();
     void buscarLugares(const QString &texto);
     void irALugar(const Place &lugar);
+    void irAPoi(const PointOfInterest &poi);
+    void irAResultado(int indice);
     void enfocarBuscador();
     QLineEdit *m_buscador = nullptr;          //!< campo «Buscar lugar…» de la barra
     QStringListModel *m_sugerencias = nullptr; //!< filas del desplegable («nombre — tipo»)
-    QVector<Place> m_lugaresVistos;            //!< resultados de la última búsqueda, en el mismo orden
+    QVector<Place> m_lugaresVistos;            //!< lugares de la última búsqueda (primero en el desplegable)
+    QVector<PointOfInterest> m_poisVistos;     //!< puntos de interés de la última búsqueda (tras los lugares)
     QAction *m_accDemCarpeta = nullptr;     //!< Cargar elevación: carpeta de GeoTIFF o .hgt
     QAction *m_accDemFichero = nullptr;     //!< Cargar elevación: un GeoTIFF o una BD .sqlitedb
 

@@ -60,6 +60,7 @@ private slots:
 
     void buildsFromDatasetsJson();
     void hybridOverlayOverAnyBase();
+    void searchesPointsOfInterest();
     void reportsErrorOnMissingJson();
 
     void listsAvailableLayers();
@@ -4722,9 +4723,54 @@ QByteArray boundaryTile()
     return tile;
 }
 
+// Tesela MVT con tres POI junto al centro (a z4 cada unidad de tesela son ~600 m, así que
+// quedan a menos de 3 km): una farmacia con nombre, otra sin nombre y un hospital. Las
+// claves y los valores van en las tablas de la capa.
+QByteArray poiTile()
+{
+    auto zz = [](int v) { return quint64((v << 1) ^ (v >> 31)); };
+    const QStringList keys{ QStringLiteral("class"), QStringLiteral("name") };
+    const QStringList values{ QStringLiteral("pharmacy"), QStringLiteral("Farmacia Central"),
+                              QStringLiteral("hospital"), QStringLiteral("Hospital Calixto García") };
+    auto point = [&](int px, int py, int kv1, int vv1, int kv2, int vv2) {
+        QByteArray geom;
+        pbVarint(geom, (1 & 7) | (1 << 3));
+        pbVarint(geom, zz(px));
+        pbVarint(geom, zz(py));
+        QByteArray tags;
+        pbVarint(tags, quint64(kv1)); pbVarint(tags, quint64(vv1));
+        if (kv2 >= 0) { pbVarint(tags, quint64(kv2)); pbVarint(tags, quint64(vv2)); }
+        QByteArray feat;
+        pbBytes(feat, 2, tags);
+        pbVarint(feat, (3 << 3) | 0);
+        pbVarint(feat, 1);                               // Point
+        pbBytes(feat, 4, geom);
+        return feat;
+    };
+    QByteArray layer;
+    pbVarint(layer, (15 << 3) | 0);
+    pbVarint(layer, 2);
+    pbBytes(layer, 1, QByteArray("poi"));
+    pbBytes(layer, 2, point(2048, 2048, 0, 0, 1, 1));    // farmacia con nombre, en el centro
+    pbBytes(layer, 2, point(2048, 2052, 0, 0, -1, -1));  // farmacia sin nombre, a ~2 km
+    pbBytes(layer, 2, point(2052, 2048, 0, 2, 1, 3));    // hospital, a ~2 km
+    for (const QString &k : keys)
+        pbBytes(layer, 3, k.toUtf8());
+    for (const QString &v : values) {
+        QByteArray val;
+        pbBytes(val, 1, v.toUtf8());
+        pbBytes(layer, 4, val);
+    }
+    pbVarint(layer, (5 << 3) | 0);
+    pbVarint(layer, 4096);
+    QByteArray tile;
+    pbBytes(tile, 3, layer);
+    return tile;
+}
+
 // MBTiles de los zooms 3 y 4 del mundo entero: PNG gris liso o, con \a vector,
 // la tesela MVT de arriba en todas las posiciones.
-bool makeWorldMBTiles(const QString &path, bool vector)
+bool makeWorldMBTiles(const QString &path, bool vector, const QByteArray &vectorData = QByteArray())
 {
     const QString conn = QStringLiteral("mk_%1").arg(path);
     bool ok = true;
@@ -4739,7 +4785,7 @@ bool makeWorldMBTiles(const QString &path, bool vector)
              && q.exec(QStringLiteral("CREATE TABLE metadata (name TEXT, value TEXT)"))
              && q.exec(QStringLiteral("INSERT INTO metadata VALUES ('format','%1'), ('minzoom','3'), "
                                       "('maxzoom','4')").arg(vector ? "pbf" : "png"));
-        QByteArray data = boundaryTile();
+        QByteArray data = vectorData.isEmpty() ? boundaryTile() : vectorData;
         if (!vector) {
             QImage img(256, 256, QImage::Format_RGB32);
             img.fill(QColor(100, 100, 100));
@@ -4878,6 +4924,75 @@ void TstMapWidget::hybridOverlayOverAnyBase()
     w.clearVectorOverlay();
     QVERIFY(!w.hasVectorOverlay());
     QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) <= sinOverlay, 20000);
+}
+
+// Buscar puntos de interés en el MBTiles vectorial (overlay híbrido) alrededor del
+// centro del mapa: por nombre, por tipo en español y en inglés; el orden por relevancia;
+// que no salga nada sin capa vectorial, con una letra o fuera del radio; y que ir a
+// un POI centre el mapa en él.
+void TstMapWidget::searchesPointsOfInterest()
+{
+    const QString base = m_dir.filePath(QStringLiteral("gris_poi.mbtiles"));
+    const QString vec = m_dir.filePath(QStringLiteral("poi.mbtiles"));
+    QVERIFY(makeWorldMBTiles(base, false));
+    QVERIFY(makeWorldMBTiles(vec, true, poiTile()));
+    const QString json = m_dir.filePath(QStringLiteral("gris_poi.json"));
+    {
+        QFile f(json);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QJsonDocument(QJsonObject{ { QStringLiteral("datasets"),
+            QJsonArray{ QJsonObject{ { QStringLiteral("id"), QStringLiteral("gris") },
+                                     { QStringLiteral("filePath"), base } } } } }).toJson());
+    }
+    // Centro de la tesela z4 (7, 6): ahí está el POI de (2048, 2048).
+    const double pi = 3.14159265358979323846;
+    const QGeoCoordinate centro(std::atan(std::sinh(pi * (1.0 - 2.0 * 6.5 / 16.0))) * 180.0 / pi,
+                                (7.5 / 16.0) * 360.0 - 180.0);
+    MapConfig cfg = baseConfig(json);
+    cfg.initialZoom = 4;
+    cfg.initialCenter = centro;
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+    w.resize(600, 400);
+
+    // Sin capa vectorial (la base es ráster) no hay donde buscar.
+    QVERIFY(!w.canSearchPointsOfInterest());
+    QVERIFY(w.searchPointsOfInterest(QStringLiteral("farmacia")).isEmpty());
+
+    QString error;
+    QVERIFY2(w.setVectorOverlay(vec, &error), qPrintable(error));
+    QVERIFY(w.canSearchPointsOfInterest());
+
+    auto r = w.searchPointsOfInterest(QStringLiteral("calixto"));
+    QCOMPARE(r.size(), 1);
+    QCOMPARE(r[0].name, QStringLiteral("Hospital Calixto García"));
+    QCOMPARE(r[0].typeLabel(), QStringLiteral("hospital"));
+    QVERIFY(r[0].distanceM < 6000.0);
+
+    // «farmacia» da las dos (la sin nombre también); la que tiene nombre, primero.
+    r = w.searchPointsOfInterest(QStringLiteral("farmacia"));
+    QCOMPARE(r.size(), 2);
+    QCOMPARE(r[0].name, QStringLiteral("Farmacia Central"));
+    QVERIFY(r[1].name.isEmpty());
+    QCOMPARE(w.searchPointsOfInterest(QStringLiteral("pharmacy")).size(), 2);   // en inglés vale
+    QCOMPARE(w.searchPointsOfInterest(QStringLiteral("farmacia"), 1).size(), 1);  // límite
+    // Repetir la búsqueda (ahora con las teselas en la caché) da lo mismo.
+    QCOMPARE(w.searchPointsOfInterest(QStringLiteral("farmacia")).size(), 2);
+
+    QVERIFY(w.searchPointsOfInterest(QStringLiteral("f")).isEmpty());           // una letra: nada
+    QVERIFY(w.searchPointsOfInterest(QStringLiteral("zzzz")).isEmpty());
+
+    // Fuera del radio no sale: con el centro lejos del POI no hay resultados.
+    w.setCenter(QGeoCoordinate(centro.latitude() + 8.0, centro.longitude()));
+    QVERIFY(w.searchPointsOfInterest(QStringLiteral("farmacia")).isEmpty());
+
+    // Ir a un POI centra el mapa en él.
+    w.goToPointOfInterest(r[0]);
+    QVERIFY(w.center().distanceTo(r[0].coordinate) < 50.0);
+
+    // Sin overlay vuelve a no haber donde buscar.
+    w.clearVectorOverlay();
+    QVERIFY(!w.canSearchPointsOfInterest());
 }
 
 QTEST_MAIN(TstMapWidget)

@@ -17,6 +17,7 @@
 #include "tiles/TileService.h"
 #include "vector/FeatureQuery.h"
 #include "vector/MvtTile.h"
+#include "vector/PoiSearch.h"
 #include "vector/VectorStyle.h"
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
@@ -115,6 +116,9 @@ public:
     QString elevationDesc;                  //!< resumen para el usuario (ver elevationDescription)
     QStringList elevationWarn;              //!< problemas de la ultima carga
     PlaceIndex places;                      //!< busqueda de lugares (vacio = sin indice)
+    //! POI ya leidos de las teselas, por "fichero|z/x/y" (vacio = tesela sin POI):
+    //! buscar mientras se teclea no vuelve a abrir la base de datos.
+    mutable QHash<QString, QVector<PointOfInterest>> poiCache;
 
     // Persistencia automatica de entidades (opcional). Vacio = apagada. El timer
     // agrupa las rafagas de cambios; suppressAutosave evita guardar durante la
@@ -2609,6 +2613,113 @@ void MapWidget::goToPlace(const Place &place)
         return;
     setZoom(qMin(place.suggestedZoom(), maxZoom()));
     setCenter(place.coordinate);
+}
+
+// ------------------------------------------------- puntos de interes --
+
+namespace {
+
+// POI de las teselas que rodean \a centro en un dataset vectorial, a menos de
+// \a radiusM. Lee de la cache lo que ya vio y pide a la base de datos, de una vez, el
+// rectangulo que cubre lo que falta; las teselas que no existen (o sin POI) se
+// guardan vacias para no volver a pedirlas.
+QVector<PointOfInterest> poisAround(const TileDataset &dataset, const QGeoCoordinate &centro,
+                                    double radiusM, QHash<QString, QVector<PointOfInterest>> *cache)
+{
+    QVector<PointOfInterest> out;
+    if (!dataset.vector)
+        return out;
+    const int z = qBound(dataset.minZoom, 14, dataset.maxZoom);
+    const double n = double(1 << z);
+    const double latR = qDegreesToRadians(WebMercator::clampLatitude(centro.latitude()));
+    const double lado = 40075016.685578488 * std::cos(latR) / n;       // metros por lado de tesela
+    const int cx = int(std::floor((centro.longitude() + 180.0) / 360.0 * n));
+    const int cy = int(std::floor((1.0 - std::asinh(std::tan(latR)) / M_PI) / 2.0 * n));
+    const int r = qBound(0, int(std::ceil(radiusM / lado)), 4);
+    const int x0 = qMax(0, cx - r), x1 = qMin(int(n) - 1, cx + r);
+    const int y0 = qMax(0, cy - r), y1 = qMin(int(n) - 1, cy + r);
+
+    const auto clave = [&](int x, int y) {
+        return QStringLiteral("%1|%2/%3/%4").arg(dataset.filePath).arg(z).arg(x).arg(y);
+    };
+    // Rectangulo que cubre las teselas que faltan en la cache.
+    int mx0 = x1 + 1, mx1 = -1, my0 = y1 + 1, my1 = -1;
+    for (int x = x0; x <= x1; ++x)
+        for (int y = y0; y <= y1; ++y)
+            if (!cache->contains(clave(x, y))) {
+                mx0 = qMin(mx0, x); mx1 = qMax(mx1, x);
+                my0 = qMin(my0, y); my1 = qMax(my1, y);
+            }
+    if (mx1 >= 0) {
+        TileDataset ds = dataset;
+        ds.id = QStringLiteral("poi:") + dataset.filePath;      // conexion propia de este hilo
+        RMapsTileSource src(ds);
+        if (!src.open())
+            return out;
+        if (cache->size() > 800)
+            cache->clear();                                      // cota simple: no crece sin limite
+        const QHash<TileKey, QByteArray> crudas = src.fetchRange(z, mx0, mx1, my0, my1);
+        for (int x = mx0; x <= mx1; ++x)
+            for (int y = my0; y <= my1; ++y) {
+                if (cache->contains(clave(x, y)))
+                    continue;
+                QVector<PointOfInterest> pois;
+                const TileKey key{ z, x, y };
+                const QByteArray bytes = crudas.value(key);
+                mvt::Tile tile;
+                // Solo la capa poi: saltarse edificios y vias es lo que lo hace rapido.
+                if (!bytes.isEmpty()
+                    && mvt::decode(bytes, &tile, nullptr, QStringList{ QLatin1String(poisearch::kLayer) }))
+                    pois = poisearch::inTile(tile, key);
+                cache->insert(clave(x, y), pois);
+            }
+    }
+    for (int x = x0; x <= x1; ++x)
+        for (int y = y0; y <= y1; ++y)
+            for (const PointOfInterest &p : cache->value(clave(x, y)))
+                if (centro.distanceTo(p.coordinate) <= radiusM)
+                    out.append(p);
+    return out;
+}
+
+} // namespace
+
+// ¿Hay donde buscar POI? Una capa vectorial: el overlay o la base activa.
+bool MapWidget::canSearchPointsOfInterest() const
+{
+    const TileDataset *base = d->service.activeDataset();
+    const TileDataset *over = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    return (base && base->vector) || (over && over->vector);
+}
+
+// Busca en el overlay (si esta) y en la base, y ordena todo junto por relevancia.
+QVector<PointOfInterest> MapWidget::searchPointsOfInterest(const QString &text, int limit,
+                                                           double radiusMeters) const
+{
+    if (text.trimmed().size() < 2 || limit <= 0)
+        return {};
+    const QGeoCoordinate centro = center();
+    if (!centro.isValid())
+        return {};
+    const double radio = qBound(1000.0, radiusMeters, 15000.0);
+    QVector<PointOfInterest> todos;
+    const TileDataset *over = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    const TileDataset *base = d->service.activeDataset();
+    if (over)
+        todos += poisAround(*over, centro, radio, &d->poiCache);
+    // Overlay y base pueden ser el mismo MBTiles: no se cuenta dos veces.
+    if (base && (!over || base->filePath != over->filePath))
+        todos += poisAround(*base, centro, radio, &d->poiCache);
+    return poisearch::search(todos, text, centro, limit);
+}
+
+// Centra en el POI con el zoom mas cercano que tenga teselas.
+void MapWidget::goToPointOfInterest(const PointOfInterest &poi)
+{
+    if (!poi.coordinate.isValid())
+        return;
+    setZoom(qMin(17, maxZoom()));
+    setCenter(poi.coordinate);
 }
 
 // Herramienta activa (arrastrar, medir, dibujar, editar...).

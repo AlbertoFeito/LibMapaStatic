@@ -8,6 +8,7 @@
 #include "vector/Gzip.h"
 #include "vector/LandMask.h"
 #include "vector/MvtTile.h"
+#include "vector/PoiSearch.h"
 #include "vector/VectorStyle.h"
 #include "vector/VectorTileRenderer.h"
 
@@ -66,6 +67,8 @@ private slots:
     void packageDeclaresHybridOverlay();
     void queryFindsWhatIsHere();
     void poiGroupsAndShapes();
+    void decodeOnlyChosenLayers();
+    void searchesPointsOfInterest();
 
 private:
     QByteArray fixture(const char *name) const;
@@ -1126,6 +1129,87 @@ void TstVectorTiles::poiGroupsAndShapes()
     for (int i = 0; i < imagenes.size(); ++i)
         for (int j = i + 1; j < imagenes.size(); ++j)
             QVERIFY2(imagenes[i] != imagenes[j], qPrintable(QStringLiteral("%1 = %2").arg(i).arg(j)));
+}
+
+// Una tesela de ciudad trae miles de entidades de capas que no interesan: decode con
+// lista de capas se salta las demás (y sigue dando error con un MVT roto).
+void TstVectorTiles::decodeOnlyChosenLayers()
+{
+    const QByteArray bytes = waterAndMotorway();
+    mvt::Tile todas, solo;
+    QVERIFY(mvt::decode(bytes, &todas));
+    QCOMPARE(todas.layers.size(), 2);
+    QVERIFY(mvt::decode(bytes, &solo, nullptr, QStringList{ QStringLiteral("transportation") }));
+    QCOMPARE(solo.layers.size(), 1);
+    QCOMPARE(solo.layers[0].name, QStringLiteral("transportation"));
+    QCOMPARE(solo.layers[0].features.size(), todas.layer(QStringLiteral("transportation"))->features.size());
+    QVERIFY(mvt::decode(bytes, &solo, nullptr, QStringList{ QStringLiteral("no_existe") }));
+    QVERIFY(solo.layers.isEmpty());
+    QVERIFY(!mvt::decode(QByteArray("\xff\xff\xff"), &solo, nullptr, QStringList{ QStringLiteral("water") }));
+}
+
+// Buscar puntos de interés: cuatro POI puestos a mano en una tesela z14 (dos farmacias,
+// una con nombre y otra sin él; un hospital; una gasolinera). Se busca por nombre sin
+// tildes, por tipo en español y en inglés, por palabras de uso común ("cupet"), y se
+// comprueba el orden (los que empiezan por lo escrito, luego los más cercanos) y que
+// un texto de una letra no devuelva nada.
+void TstVectorTiles::searchesPointsOfInterest()
+{
+    const int z = 14, x = 4000, y = 7000;
+    const TileKey key{ z, x, y };
+    auto punto = [](int px, int py) { return QVector<quint32>{ cmd(1, 1), zz(px), zz(py) }; };
+    const QByteArray bytes = tile({ layer(QStringLiteral("poi"), {
+        { 1, punto(1000, 1000), { { QStringLiteral("class"), QStringLiteral("pharmacy") },
+                                  { QStringLiteral("name"), QStringLiteral("Farmacia Central") } } },
+        { 1, punto(3000, 3000), { { QStringLiteral("class"), QStringLiteral("pharmacy") } } },
+        { 1, punto(2000, 500), { { QStringLiteral("class"), QStringLiteral("hospital") },
+                                 { QStringLiteral("name"), QStringLiteral("Hospital Calixto García") } } },
+        { 1, punto(500, 2500), { { QStringLiteral("class"), QStringLiteral("fuel") },
+                                 { QStringLiteral("name:es"), QStringLiteral("Servicentro Oro Negro") } } },
+        { 1, punto(-50, 100), { { QStringLiteral("class"), QStringLiteral("bank") } } },   // del margen: no cuenta
+        { 2, path({ { 0, 0 }, { 100, 100 } }, false), { { QStringLiteral("class"), QStringLiteral("pharmacy") } } },
+    }) });
+    mvt::Tile t;
+    QVERIFY(mvt::decode(bytes, &t, nullptr, QStringList{ QStringLiteral("poi") }));
+    const QVector<PointOfInterest> todos = poisearch::inTile(t, key);
+    QCOMPARE(todos.size(), 4);                                   // sin la línea ni el punto del margen
+    const QGeoCoordinate centro = tilePoint(z, x, y, 0.5, 0.5);
+    for (const PointOfInterest &p : todos)
+        QVERIFY2(qAbs(p.coordinate.latitude() - centro.latitude()) < 0.1, "posición fuera de la tesela");
+
+    // Por nombre, sin tildes ni mayúsculas, y con varias palabras.
+    auto r = poisearch::search(todos, QStringLiteral("calixto garcia"), centro, 10);
+    QCOMPARE(r.size(), 1);
+    QCOMPARE(r[0].name, QStringLiteral("Hospital Calixto García"));
+    QCOMPARE(r[0].typeLabel(), QStringLiteral("hospital"));
+    QVERIFY(r[0].distanceM > 0.0);
+    QCOMPARE(poisearch::search(todos, QStringLiteral("oro negro"), centro, 10).size(), 1);   // name:es
+
+    // Por tipo: en español, en inglés y con una palabra de uso común; salen también las sin nombre.
+    r = poisearch::search(todos, QStringLiteral("farmacia"), centro, 10);
+    QCOMPARE(r.size(), 2);
+    QCOMPARE(r[0].name, QStringLiteral("Farmacia Central"));     // casa por nombre, va antes
+    QVERIFY(r[1].name.isEmpty());
+    QCOMPARE(r[1].displayName(), QStringLiteral("Farmacia"));
+    QCOMPARE(poisearch::search(todos, QStringLiteral("pharmacy"), centro, 10).size(), 2);
+    QCOMPARE(poisearch::search(todos, QStringLiteral("cupet"), centro, 10).size(), 1);
+    QCOMPARE(poisearch::search(todos, QStringLiteral("gasolinera"), centro, 10).first().name,
+             QStringLiteral("Servicentro Oro Negro"));
+
+    // Nombre + tipo: las dos palabras tienen que casar.
+    QCOMPARE(poisearch::search(todos, QStringLiteral("hospital calixto"), centro, 10).size(), 1);
+    QCOMPARE(poisearch::search(todos, QStringLiteral("farmacia calixto"), centro, 10).size(), 0);
+
+    // Orden por cercanía dentro de un mismo grupo, y el límite.
+    const QGeoCoordinate cerca = poisearch::search(todos, QStringLiteral("farmacia"), centro, 10).first().coordinate;
+    r = poisearch::search(todos, QStringLiteral("farmacia"), cerca, 10);
+    QCOMPARE(r.first().distanceM, 0.0);
+    QCOMPARE(poisearch::search(todos, QStringLiteral("farmacia"), centro, 1).size(), 1);
+
+    // Muy poco texto, o nada: no se devuelve todo.
+    QVERIFY(poisearch::search(todos, QStringLiteral("a"), centro, 10).isEmpty());
+    QVERIFY(poisearch::search(todos, QString(), centro, 10).isEmpty());
+    QVERIFY(poisearch::search(todos, QStringLiteral("zzzz"), centro, 10).isEmpty());
 }
 
 QTEST_MAIN(TstVectorTiles)

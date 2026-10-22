@@ -783,6 +783,33 @@ public:
     //! \c Place::suggestedZoom, limitado al maximo de la capa activa).
     void goToPlace(const Place &place);
 
+    // --- Busqueda de puntos de interes (MBTiles vectorial) -----------------
+    //! ¿Hay alguna capa vectorial (el overlay hibrido o la base) donde buscar
+    //! puntos de interes? A diferencia de \c hasPlaces, no hace falta ningun indice.
+    bool canSearchPointsOfInterest() const;
+    /*!
+     * \brief Puntos de interes (farmacias, hospitales, gasolineras...) cuyo nombre o
+     *        tipo casa con \a text, cerca del centro del mapa.
+     *
+     * Lee la capa `poi` de las teselas vectoriales (z14 o la mas alta que tenga el
+     * MBTiles) a menos de \a radiusMeters del centro, del overlay hibrido y de la
+     * base. Cada palabra de \a text tiene que estar en el nombre o en el tipo, en
+     * espanol o ingles y sin tildes: «farmacia» da las farmacias aunque no tengan
+     * nombre, y «hospital calixto» el hospital de ese nombre. Los que empiezan por
+     * lo escrito van primero; luego, los mas cercanos al centro.
+     *
+     * Las teselas leidas se guardan, asi que solo la primera busqueda en una zona
+     * tarda (decenas de ms por tesela); las siguientes, al teclear, son inmediatas.
+     * Bloquea mientras lee: pensada para llamarla al teclear, no en un bucle grande.
+     *
+     * \param radiusMeters  radio de busqueda, acotado a 1-15 km.
+     * \return vacio con menos de dos letras, sin capa vectorial o sin coincidencias.
+     */
+    QVector<PointOfInterest> searchPointsOfInterest(const QString &text, int limit = 12,
+                                                    double radiusMeters = 6000.0) const;
+    //! Centra el mapa en \a poi con zoom 17 (o el maximo de la capa activa).
+    void goToPointOfInterest(const PointOfInterest &poi);
+
     //! Perfil de elevacion del terreno a lo largo de una ruta (polilinea): la
     //! cota en cada lugar, muestreada cada \c params.stepMeters (30 m por
     //! defecto), con distancia total y desniveles. Perfil vacio si no hay origen
