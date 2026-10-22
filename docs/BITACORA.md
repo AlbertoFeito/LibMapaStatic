@@ -6866,3 +6866,16 @@ El usuario, probándola en su PC con el MBTiles de Cuba: no le gustó cómo se v
 - Los atributos crudos del MBTiles quedan tras la casilla «Mostrar todos los atributos del mapa».
 Es solo la demo (`Ventana::queHayAqui`); la API (`vectorFeaturesAt`) no cambia. Compila; no lo he visto en pantalla con datos reales.
 
+### 166 (ajuste 2). «¿Qué hay aquí?» también en el clic izquierdo, como tarjeta
+
+Tras ver la ventana rehecha, el usuario aceptó la propuesta de una **tarjeta pequeña junto al cursor**, como la de los objetivos, enganchada al
+clic izquierdo. Ahora un clic izquierdo en un lugar **vacío** (navegando, sin captura de punto en curso y sin nada elegible debajo) abre una
+tarjeta con hasta 4 líneas de lo más relevante del punto y un botón «Todo… (N más)» que abre la ventana completa de antes (la del clic
+derecho). Decisiones:
+- Si no hay nada vectorial cerca, o la base no es vectorial, **no sale nada**: un clic en el vacío no abre cosas sin motivo.
+- Se espera lo que tarda un doble clic (`QApplication::doubleClickInterval`) y se cancela si el zoom cambió, porque el doble clic en vacío acerca
+  el mapa y la tarjeta saldría encima del zoom.
+- Sobre un elemento (objetivo, entidad, marca) sigue saliendo su tarjeta de siempre; esta solo cubre el vacío.
+- La composición del texto (agrupar tramos, «Aquí»/«Cerca», traducciones) es una sola, compartida por la tarjeta y la ventana.
+Solo la demo; la API no cambia. Compila y los 31 tests siguen en verde; sin ver en pantalla con datos reales.
+

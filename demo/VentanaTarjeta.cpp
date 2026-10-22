@@ -12,6 +12,8 @@
 #include "libmapa/Coordinates.h"
 
 #include <QApplication>
+#include <functional>
+
 #include <QCheckBox>
 #include <QDialog>
 #include <QHash>
@@ -369,31 +371,31 @@ DescripcionVectorial describirVectorial(const VectorFeatureInfo &h)
 
 } // namespace
 
-// «¿Qué hay aquí?»: lo que el MBTiles vectorial dice del punto, en lenguaje llano.
-// Sale en dos bloques, «Aquí» (lo que contiene el punto: el edificio, la zona) y
-// «Cerca» (calles, lugares a unos metros), una línea por cosa con su tipo y
-// detalles. Los tramos repetidos de una misma calle se agrupan en una línea. Los
-// atributos crudos del MBTiles (claves en inglés) quedan tras una casilla, para
-// quien los quiera.
-void Ventana::queHayAqui(const QGeoCoordinate &p)
-{
-    const QVector<VectorFeatureInfo> hits = m_mapa->vectorFeaturesAt(p);
+namespace {
 
-    // Una línea por (capa, tipo, nombre): los tramos de una calle se cuentan, no se repiten.
-    struct Linea
-    {
-        VectorFeatureInfo h;      // el más cercano del grupo
-        int tramos = 1;
-    };
-    QVector<Linea> lineas;
+// Una línea de «¿Qué hay aquí?»: la entidad más cercana de un grupo de tramos
+// iguales (misma capa, tipo, nombre y geometría) y cuántos tramos eran.
+struct LineaVectorial
+{
+    VectorFeatureInfo h;
+    int tramos = 1;
+};
+
+// Clave de agrupación: dos tramos de la misma calle son «la misma cosa».
+QString claveVectorial(const VectorFeatureInfo &h)
+{
+    return h.layer + QLatin1Char('|') + h.attributes.value(QStringLiteral("class")).toString()
+           + QLatin1Char('|') + h.name() + QLatin1Char('|') + h.geometry;
+}
+
+// Agrupa los tramos repetidos conservando el orden (y por tanto el más cercano primero).
+QVector<LineaVectorial> agruparVectorial(const QVector<VectorFeatureInfo> &hits)
+{
+    QVector<LineaVectorial> lineas;
     for (const VectorFeatureInfo &h : hits) {
-        const QString clave = h.layer + QLatin1Char('|') + h.attributes.value(QStringLiteral("class")).toString()
-                              + QLatin1Char('|') + h.name() + QLatin1Char('|') + h.geometry;
         bool repetida = false;
-        for (Linea &l : lineas) {
-            const QString k = l.h.layer + QLatin1Char('|') + l.h.attributes.value(QStringLiteral("class")).toString()
-                              + QLatin1Char('|') + l.h.name() + QLatin1Char('|') + l.h.geometry;
-            if (k == clave) {
+        for (LineaVectorial &l : lineas) {
+            if (claveVectorial(l.h) == claveVectorial(h)) {
                 ++l.tramos;
                 repetida = true;
                 break;
@@ -402,6 +404,64 @@ void Ventana::queHayAqui(const QGeoCoordinate &p)
         if (!repetida)
             lineas.append({ h, 1 });
     }
+    return lineas;
+}
+
+// HTML de las líneas, en los bloques «Aquí» (lo que contiene el punto) y «Cerca».
+// Con \a maximo > 0 solo las primeras \a maximo líneas; \a resto (si no es null) recibe
+// cuántas quedaron fuera. \a crudos añade los atributos del MBTiles tal cual.
+QString htmlVectorial(const QVector<LineaVectorial> &lineas, bool crudos, int maximo, int *resto,
+                      const std::function<QString(double)> &distancia)
+{
+    QString html;
+    int puestas = 0;
+    const auto bloque = [&](const QString &cabecera, bool dentro) {
+        QString cuerpo;
+        for (const LineaVectorial &l : lineas) {
+            if ((l.h.distanceM < 0.5) != dentro)
+                continue;
+            if (maximo > 0 && puestas >= maximo)
+                continue;
+            ++puestas;
+            const DescripcionVectorial d = describirVectorial(l.h);
+            QStringList sub{ d.categoria.toLower() };
+            sub << d.detalles;
+            if (l.tramos > 1)
+                sub << QObject::tr("%1 tramos").arg(l.tramos);
+            if (!dentro)
+                sub << QObject::tr("a %1").arg(distancia(l.h.distanceM));
+            cuerpo += QStringLiteral("<p style='margin:0 0 7px 0'><b>%1</b><br>"
+                                     "<span style='color:gray'>%2</span>")
+                          .arg(d.titulo.toHtmlEscaped(), sub.join(QStringLiteral(" · ")).toHtmlEscaped());
+            if (crudos) {
+                QStringList kv;
+                for (auto it = l.h.attributes.constBegin(); it != l.h.attributes.constEnd(); ++it)
+                    if (!it.key().startsWith(QLatin1String("name:")))
+                        kv << QStringLiteral("%1=%2").arg(it.key(), it.value().toString());
+                cuerpo += QStringLiteral("<br><span style='color:gray;font-size:small'>%1</span>")
+                              .arg(kv.join(QStringLiteral("  ")).toHtmlEscaped());
+            }
+            cuerpo += QStringLiteral("</p>");
+        }
+        if (!cuerpo.isEmpty())
+            html += QStringLiteral("<h4 style='margin:8px 0 4px 0'>%1</h4>").arg(cabecera.toHtmlEscaped()) + cuerpo;
+    };
+    bloque(QObject::tr("Aquí"), true);
+    bloque(QObject::tr("Cerca"), false);
+    if (resto)
+        *resto = int(lineas.size()) - puestas;
+    return html;
+}
+
+} // namespace
+
+// «¿Qué hay aquí?» completo: lo que el MBTiles vectorial dice del punto, en lenguaje
+// llano, en una ventana con todas las líneas. Los atributos crudos del MBTiles
+// (claves en inglés) quedan tras una casilla, para quien los quiera.
+void Ventana::queHayAqui(const QGeoCoordinate &p)
+{
+    const QVector<LineaVectorial> lineas = agruparVectorial(m_mapa->vectorFeaturesAt(p));
+    const std::function<QString(double)> distancia = [this](double m) { return textoDistancia(m); };
 
     auto *dlg = new QDialog(this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
@@ -421,46 +481,56 @@ void Ventana::queHayAqui(const QGeoCoordinate &p)
     caja->addWidget(cerrar, 0, Qt::AlignRight);
 
     // Se vuelve a componer al marcar o desmarcar la casilla.
-    const auto componer = [this, txt, lineas, crudos] {
-        QString html;
-        const auto bloque = [&](const QString &cabecera, bool dentro) {
-            QString cuerpo;
-            for (const Linea &l : lineas) {
-                if ((l.h.distanceM < 0.5) != dentro)
-                    continue;
-                const DescripcionVectorial d = describirVectorial(l.h);
-                QStringList sub{ d.categoria.toLower() };
-                sub << d.detalles;
-                if (l.tramos > 1)
-                    sub << tr("%1 tramos").arg(l.tramos);
-                if (!dentro)
-                    sub << tr("a %1").arg(textoDistancia(l.h.distanceM));
-                cuerpo += QStringLiteral("<p style='margin:0 0 7px 0'><b>%1</b><br>"
-                                         "<span style='color:gray'>%2</span>")
-                              .arg(d.titulo.toHtmlEscaped(), sub.join(QStringLiteral(" · ")).toHtmlEscaped());
-                if (crudos->isChecked()) {
-                    QStringList kv;
-                    for (auto it = l.h.attributes.constBegin(); it != l.h.attributes.constEnd(); ++it)
-                        if (!it.key().startsWith(QLatin1String("name:")))
-                            kv << QStringLiteral("%1=%2").arg(it.key(), it.value().toString());
-                    cuerpo += QStringLiteral("<br><span style='color:gray;font-size:small'>%1</span>")
-                                  .arg(kv.join(QStringLiteral("  ")).toHtmlEscaped());
-                }
-                cuerpo += QStringLiteral("</p>");
-            }
-            if (!cuerpo.isEmpty())
-                html += QStringLiteral("<h4 style='margin:8px 0 4px 0'>%1</h4>").arg(cabecera.toHtmlEscaped()) + cuerpo;
-        };
-        bloque(tr("Aquí"), true);
-        bloque(tr("Cerca"), false);
+    const auto componer = [txt, lineas, crudos, distancia] {
+        QString html = htmlVectorial(lineas, crudos->isChecked(), 0, nullptr, distancia);
         if (html.isEmpty())
-            html = tr("<p>No hay nada vectorial cerca de este punto. Hace falta un MBTiles "
-                      "vectorial como base o como capa híbrida.</p>");
+            html = QObject::tr("<p>No hay nada vectorial cerca de este punto. Hace falta un MBTiles "
+                               "vectorial como base o como capa híbrida.</p>");
         txt->setHtml(html);
     };
     connect(crudos, &QCheckBox::toggled, dlg, componer);
     componer();
     dlg->show();
+}
+
+// Clic izquierdo en un lugar vacío del mapa: una tarjeta pequeña junto al cursor con
+// lo más relevante del punto (hasta 4 líneas) y un botón «Todo…» para la ventana
+// completa. Si no hay nada vectorial cerca (o la base no es vectorial) no sale nada:
+// un clic en el vacío no debe abrir cosas sin motivo.
+void Ventana::tarjetaQueHayAqui(const QGeoCoordinate &p, const QPoint &global)
+{
+    const QVector<LineaVectorial> lineas = agruparVectorial(m_mapa->vectorFeaturesAt(p));
+    if (lineas.isEmpty())
+        return;
+    int resto = 0;
+    const QString html = htmlVectorial(lineas, false, 4, &resto,
+                                       [this](double m) { return textoDistancia(m); });
+
+    auto *tarjeta = new QFrame(this, Qt::Popup);
+    tarjeta->setAttribute(Qt::WA_DeleteOnClose);
+    tarjeta->setFrameShape(QFrame::StyledPanel);
+    auto *caja = new QVBoxLayout(tarjeta);
+    auto *cuerpo = new QLabel(html, tarjeta);
+    cuerpo->setTextFormat(Qt::RichText);
+    caja->addWidget(cuerpo);
+    auto *todo = new QPushButton(resto > 0 ? tr("Todo… (%1 más)").arg(resto) : tr("Todo…"), tarjeta);
+    todo->setAutoDefault(false);
+    connect(todo, &QPushButton::clicked, this, [this, tarjeta, p] {
+        tarjeta->close();
+        QTimer::singleShot(0, this, [this, p] { queHayAqui(p); });
+    });
+    caja->addWidget(todo, 0, Qt::AlignRight);
+
+    // Junto al cursor, sin salirse de la pantalla (igual que la tarjeta de los elementos).
+    tarjeta->adjustSize();
+    QPoint pos = global + QPoint(12, 12);
+    if (const QScreen *pantalla = QGuiApplication::screenAt(global)) {
+        const QRect area = pantalla->availableGeometry();
+        pos.setX(std::max(area.left(), std::min(pos.x(), area.right() - tarjeta->width())));
+        pos.setY(std::max(area.top(), std::min(pos.y(), area.bottom() - tarjeta->height())));
+    }
+    tarjeta->move(pos);
+    tarjeta->show();
 }
 
 // Diálogo con todos los gestos del ratón y del teclado sobre el mapa.
@@ -477,7 +547,7 @@ void Ventana::mostrarAyudaRaton()
         "<tr><td><b>Botón central</b></td><td>desplazar con cualquier herramienta</td></tr>"
         "<tr><td><b>Rueda</b></td><td>zoom hacia el cursor (los toques finos se acumulan)</td></tr>"
         "<tr><td><b>Doble clic</b></td><td>acercar un nivel en un lugar vacío</td></tr>"
-        "<tr><td><b>Clic</b></td><td>tarjeta del elemento (datos y acciones rápidas); en vacío deselecciona</td></tr>"
+        "<tr><td><b>Clic</b></td><td>tarjeta del elemento (datos y acciones rápidas); en vacío deselecciona y, con mapa vectorial, tarjeta «¿Qué hay aquí?»</td></tr>"
         "<tr><td><b>Clic derecho</b></td><td>menú completo del elemento o del lugar</td></tr>"
         "<tr><td><b>Flechas · + / −</b></td><td>desplazar · zoom</td></tr>"
         "</table>"
