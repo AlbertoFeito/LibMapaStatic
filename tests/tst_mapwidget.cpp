@@ -61,6 +61,7 @@ private slots:
     void buildsFromDatasetsJson();
     void hybridOverlayOverAnyBase();
     void searchesPointsOfInterest();
+    void findsARoute();
     void searchesStreets();
     void importsPointsOfInterestAsFeatures();
     void reportsErrorOnMissingJson();
@@ -4810,6 +4811,47 @@ QByteArray streetTile()
     return tile;
 }
 
+// Tesela MVT con dos vías que se cruzan en el centro (vértice compartido en 2048,2048): una
+// carretera principal horizontal y una calle vertical, de borde a borde (capa transportation).
+QByteArray roadTile()
+{
+    auto zz = [](int v) { return quint64((v << 1) ^ (v >> 31)); };
+    // Línea de tres vértices (x0,y0) (x1,y1) (x2,y2): MoveTo y LineTo con dos desplazamientos.
+    auto linea = [&](int x0, int y0, int x1, int y1, int x2, int y2, int clase) {
+        QByteArray geom;
+        pbVarint(geom, (1 & 7) | (1 << 3));
+        pbVarint(geom, zz(x0)); pbVarint(geom, zz(y0));
+        pbVarint(geom, (2 & 7) | (2 << 3));
+        pbVarint(geom, zz(x1 - x0)); pbVarint(geom, zz(y1 - y0));
+        pbVarint(geom, zz(x2 - x1)); pbVarint(geom, zz(y2 - y1));
+        QByteArray tags;
+        pbVarint(tags, 0); pbVarint(tags, quint64(clase));
+        QByteArray feat;
+        pbBytes(feat, 2, tags);
+        pbVarint(feat, (3 << 3) | 0);
+        pbVarint(feat, 2);                               // LineString
+        pbBytes(feat, 4, geom);
+        return feat;
+    };
+    QByteArray layer;
+    pbVarint(layer, (15 << 3) | 0);
+    pbVarint(layer, 2);
+    pbBytes(layer, 1, QByteArray("transportation"));
+    pbBytes(layer, 2, linea(0, 2048, 2048, 2048, 4096, 2048, 0));    // principal horizontal
+    pbBytes(layer, 2, linea(2048, 0, 2048, 2048, 2048, 4096, 1));    // calle vertical
+    pbBytes(layer, 3, QByteArray("class"));
+    for (const char *v : { "primary", "minor" }) {
+        QByteArray val;
+        pbBytes(val, 1, QByteArray(v));
+        pbBytes(layer, 4, val);
+    }
+    pbVarint(layer, (5 << 3) | 0);
+    pbVarint(layer, 4096);
+    QByteArray tile;
+    pbBytes(tile, 3, layer);
+    return tile;
+}
+
 // MBTiles de los zooms 3 y 4 del mundo entero: PNG gris liso o, con \a vector,
 // la tesela MVT de arriba en todas las posiciones.
 bool makeWorldMBTiles(const QString &path, bool vector, const QByteArray &vectorData = QByteArray())
@@ -5266,6 +5308,92 @@ void TstMapWidget::searchesStreets()
 
     w.clearVectorOverlay();
     QVERIFY(!w.canSearchStreets());
+}
+
+// Rutas sin conexión por la red vial del MBTiles vectorial: una tesela z14 con una carretera
+// horizontal y una calle vertical que se cruzan en el centro. De la punta oeste de la carretera
+// al extremo sur de la calle hay que girar en el cruce: recorre las dos y suma lo esperado.
+// También los errores (sin mapa vectorial, punto lejos de toda vía, demasiado largo) y el progreso.
+void TstMapWidget::findsARoute()
+{
+    const QString base = m_dir.filePath(QStringLiteral("gris_ruta.mbtiles"));
+    const QString vec = m_dir.filePath(QStringLiteral("vias14.mbtiles"));
+    QVERIFY(makeWorldMBTiles(base, false));
+    const double pi = 3.14159265358979323846;
+    const double n = 16384.0;
+    const int tx = int(std::floor((-80.0 + 180.0) / 360.0 * n));
+    const int ty = int(std::floor((1.0 - std::asinh(std::tan(22.0 * pi / 180.0)) / pi) / 2.0 * n));
+    QVERIFY(makeSingleTileMBTiles(vec, roadTile(), 14, tx, ty));
+    // Posición geográfica de un punto de la tesela, en unidades de 0..4096.
+    auto punto = [&](double ux, double uy) {
+        return QGeoCoordinate(std::atan(std::sinh(pi * (1.0 - 2.0 * (ty + uy / 4096.0) / n))) * 180.0 / pi,
+                              (tx + ux / 4096.0) / n * 360.0 - 180.0);
+    };
+    const QString json = m_dir.filePath(QStringLiteral("gris_ruta.json"));
+    {
+        QFile f(json);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QJsonDocument(QJsonObject{ { QStringLiteral("datasets"),
+            QJsonArray{ QJsonObject{ { QStringLiteral("id"), QStringLiteral("gris") },
+                                     { QStringLiteral("filePath"), base } } } } }).toJson());
+    }
+    MapConfig cfg = baseConfig(json);
+    cfg.initialZoom = 4;
+    cfg.initialCenter = punto(2048, 2048);
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+    w.resize(600, 400);
+
+    const QGeoCoordinate oeste = punto(100, 2048), sur = punto(2048, 3900);
+
+    // Sin capa vectorial no hay red vial.
+    auto r = w.findRoute(oeste, sur);
+    QVERIFY(!r.ok());
+    QVERIFY2(r.error.contains(QStringLiteral("vectorial")), qPrintable(r.error));
+
+    QString error;
+    QVERIFY2(w.setVectorOverlay(vec, &error), qPrintable(error));
+    QVERIFY(!w.findRoute(QGeoCoordinate(), sur).ok());                         // sin origen válido
+
+    // Oeste -> sur: 1948 unidades por la carretera y 1852 por la calle (~0,55 m cada una) = ~2,1 km.
+    int llamadas = 0;
+    r = w.findRoute(oeste, sur, [&](int, int) { ++llamadas; return true; });
+    QVERIFY2(r.ok(), qPrintable(r.error));
+    const double esperado = oeste.distanceTo(punto(2048, 2048)) + punto(2048, 2048).distanceTo(sur);
+    QVERIFY2(qAbs(r.distanceM - esperado) < 30.0, qPrintable(QStringLiteral("%1 vs %2").arg(r.distanceM).arg(esperado)));
+    QVERIFY(r.distanceM > 1800.0 && r.distanceM < 2400.0);
+    QCOMPARE(r.byClass.size(), 2);                                             // las dos vías
+    QCOMPARE(r.byClass.first().first, QStringLiteral("primary"));
+    QVERIFY(r.durationS > 100.0 && r.durationS < 200.0);                       // ~2 km a 30-60 km/h
+    QVERIFY(r.path.size() >= 3);                                               // salida, cruce y llegada
+    QVERIFY(r.path.first().distanceTo(oeste) < 2.0);
+    QVERIFY(r.path.last().distanceTo(sur) < 2.0);
+    QVERIFY(r.tiles >= 1);
+    QVERIFY(llamadas >= 2);                                                    // una por fila y al final
+
+    // La ruta de vuelta mide lo mismo.
+    const auto vuelta = w.findRoute(sur, oeste);
+    QVERIFY(vuelta.ok());
+    QVERIFY(qAbs(vuelta.distanceM - r.distanceM) < 5.0);
+
+    // Un punto a más de 500 m de toda vía: error que nombra el origen. Y un punto al lado de la vía sirve.
+    r = w.findRoute(punto(100, 500), sur);
+    QVERIFY(!r.ok());
+    QVERIFY2(r.error.contains(QStringLiteral("origen")), qPrintable(r.error));
+    r = w.findRoute(punto(100, 2300), sur);                                     // a ~140 m de la carretera
+    QVERIFY2(r.ok(), qPrintable(r.error));
+    QVERIFY(r.snapFromM > 100.0 && r.snapFromM < 200.0);
+
+    // Cortar con el progreso: error de cancelado.
+    r = w.findRoute(oeste, sur, [](int, int) { return false; });
+    QVERIFY(!r.ok());
+    QVERIFY2(r.error.contains(QStringLiteral("cancel")), qPrintable(r.error));
+
+    // Demasiado largo: dos puntos a ~200 km no caben en el tope de teselas (y no se lee nada).
+    r = w.findRoute(oeste, QGeoCoordinate(oeste.latitude(), oeste.longitude() + 2.0));
+    QVERIFY(!r.ok());
+    QVERIFY2(r.error.contains(QStringLiteral("demasiado larga")), qPrintable(r.error));
+    QVERIFY(r.tiles > MapWidget::kMaxRouteTiles);
 }
 
 QTEST_MAIN(TstMapWidget)

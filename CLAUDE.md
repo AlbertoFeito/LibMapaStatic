@@ -53,7 +53,8 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/stoic-clarke-rn7r7f` (otra vez, desde `main`) | #33 | Puntos de interés por tema en los estilos por defecto (cinco grupos apagados, con `pointShape`) |
 | `claude/stoic-clarke-rn7r7f` (y otra vez, desde `main`) | #34 | Buscar sitios (POI) por nombre o tipo: `MapWidget::searchPointsOfInterest` y el buscador de la demo |
 | `claude/stoic-clarke-rn7r7f` (y otra más, desde `main`) | #35 | Sacar los POI de una zona como entidades: `MapWidget::importPointsOfInterest` y «Sitios de la zona…» en la demo |
-| `claude/buscar-calles` | (borrador) | Búsqueda de calles sin conexión: `MapWidget::searchStreets`, resaltado en la demo |
+| `claude/buscar-calles` | #36 | Búsqueda de calles sin conexión: `MapWidget::searchStreets`, resaltado en la demo |
+| `claude/rutas-sin-conexion` | (borrador) | Rutas en coche sin conexión por la red vial de las teselas: `MapWidget::findRoute`, «Ruta (coche)» en la demo y `vector_tile --route` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).

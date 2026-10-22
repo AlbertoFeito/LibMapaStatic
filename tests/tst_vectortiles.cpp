@@ -9,6 +9,7 @@
 #include "vector/LandMask.h"
 #include "vector/MvtTile.h"
 #include "vector/PoiSearch.h"
+#include "vector/RoadGraph.h"
 #include "vector/StreetSearch.h"
 #include "vector/VectorStyle.h"
 #include "vector/VectorTileRenderer.h"
@@ -70,6 +71,8 @@ private slots:
     void poiGroupsAndShapes();
     void decodeOnlyChosenLayers();
     void searchesPointsOfInterest();
+    void roadGraphRoutes();
+    void roadGraphWeldsTileSeams();
     void searchesStreets();
     void filtersPointsOfInterest();
 
@@ -1349,6 +1352,198 @@ void TstVectorTiles::searchesStreets()
     QVERIFY(streetsearch::search(todos, QString(), centro, 10).isEmpty());
     QVERIFY(streetsearch::search(todos, QStringLiteral("zzzz"), centro, 10).isEmpty());
     QVERIFY(streetsearch::search(todos, QStringLiteral("un punto"), centro, 10).isEmpty());      // los puntos no son calles
+}
+
+namespace {
+
+// Punto a (este, norte) metros de (23.0, -82.0): para dibujar redes de prueba con medidas conocidas.
+QGeoCoordinate enMetros(double este, double norte)
+{
+    const double pi = 3.14159265358979323846;
+    return QGeoCoordinate(23.0 + norte / 111320.0, -82.0 + este / (111320.0 * std::cos(23.0 * pi / 180.0)));
+}
+
+// Un tramo de vía con sus vértices en metros.
+roadgraph::Segment via(const QString &clase, const QVector<QPointF> &pts, int sentido = 0, bool cerrada = false, int nivel = 0)
+{
+    roadgraph::Segment s;
+    s.cls = clase;
+    s.oneway = sentido;
+    s.blocked = cerrada;
+    s.level = nivel;
+    for (const QPointF &p : pts)
+        s.line.append(enMetros(p.x(), p.y()));
+    return s;
+}
+
+} // namespace
+
+// Rutas por la red vial: se arma una red de prueba con medidas conocidas y se comprueba que elige
+// lo MÁS RÁPIDO (no lo más corto), respeta el sentido único, las vías cerradas y las que el coche no
+// usa, no cruza un puente con lo que pasa por debajo, engancha los puntos a la vía y falla con
+// motivo cuando no hay camino. Las velocidades son las de carSpeedKmh.
+void TstVectorTiles::roadGraphRoutes()
+{
+    QCOMPARE(roadgraph::carSpeedKmh(QStringLiteral("motorway")), 90.0);
+    QCOMPARE(roadgraph::carSpeedKmh(QStringLiteral("primary")), 60.0);
+    QCOMPARE(roadgraph::carSpeedKmh(QStringLiteral("minor")), 30.0);
+    QCOMPARE(roadgraph::carSpeedKmh(QStringLiteral("path")), 0.0);          // un sendero no es para coches
+    QCOMPARE(roadgraph::carSpeedKmh(QStringLiteral("rail")), 0.0);
+
+    // S(0,0) -> T(1000,0). Directo por una calle de 1000 m a 30 km/h: 120 s. Rodeando por una carretera
+    // principal de 1400 m (sube 200 m en calle, 1000 m de principal, baja 200 m en calle): ~108 s, más rápido y más largo.
+    roadgraph::Graph g(23.0);
+    g.add({ via(QStringLiteral("minor"), { { 0, 0 }, { 500, 0 }, { 1000, 0 } }),
+            via(QStringLiteral("minor"), { { 0, 0 }, { 0, 200 } }),
+            via(QStringLiteral("primary"), { { 0, 200 }, { 500, 200 }, { 1000, 200 } }),
+            via(QStringLiteral("minor"), { { 1000, 200 }, { 1000, 0 } }) });
+    auto r = g.route(enMetros(0, 0), enMetros(1000, 0));
+    QVERIFY2(r.ok(), qPrintable(r.error));
+    QVERIFY2(qAbs(r.distanceM - 1400.0) < 20.0, qPrintable(QString::number(r.distanceM)));    // el rodeo
+    // 200 m + 200 m de calle (30 km/h: 8,3 m/s) y 1000 m de principal (60 km/h): 48 s + 60 s; la calle directa, 120 s.
+    QVERIFY2(qAbs(r.durationS - 108.0) < 3.0, qPrintable(QString::number(r.durationS)));
+    QCOMPARE(r.byClass.first().first, QStringLiteral("primary"));           // lo que más recorre, primero
+    QVERIFY(qAbs(r.byClass.first().second - 1000.0) < 15.0);
+    QVERIFY(r.path.size() >= 4);
+    QVERIFY(r.path.first().distanceTo(enMetros(0, 0)) < 1.0);
+    QVERIFY(r.path.last().distanceTo(enMetros(1000, 0)) < 1.0);
+    // La vuelta es igual (todo es de doble sentido).
+    r = g.route(enMetros(1000, 0), enMetros(0, 0));
+    QVERIFY(r.ok());
+    QVERIFY(qAbs(r.distanceM - 1400.0) < 20.0);
+
+    // Sentido único: la carretera solo se puede ir de oeste a este. De este a oeste, hay que usar la calle.
+    roadgraph::Graph u(23.0);
+    u.add({ via(QStringLiteral("minor"), { { 0, 0 }, { 500, 0 }, { 1000, 0 } }),
+            via(QStringLiteral("minor"), { { 0, 0 }, { 0, 200 } }),
+            via(QStringLiteral("primary"), { { 0, 200 }, { 500, 200 }, { 1000, 200 } }, 1),
+            via(QStringLiteral("minor"), { { 1000, 200 }, { 1000, 0 } }) });
+    QVERIFY(qAbs(u.route(enMetros(0, 0), enMetros(1000, 0)).distanceM - 1400.0) < 20.0);    // a favor: el rodeo
+    r = u.route(enMetros(1000, 0), enMetros(0, 0));
+    QVERIFY(r.ok());
+    QVERIFY2(qAbs(r.distanceM - 1000.0) < 20.0, qPrintable(QString::number(r.distanceM)));  // en contra: la calle
+    // Con -1 el sentido único va al revés que el trazado.
+    roadgraph::Graph inv(23.0);
+    inv.add({ via(QStringLiteral("primary"), { { 0, 0 }, { 1000, 0 } }, -1) });
+    QVERIFY(!inv.route(enMetros(0, 0), enMetros(1000, 0)).ok());
+    QVERIFY(inv.route(enMetros(1000, 0), enMetros(0, 0)).ok());
+
+    // Una vía cerrada (access = private) y un sendero no sirven: sin otra vía, no hay ruta, y lo dice.
+    roadgraph::Graph c(23.0);
+    c.add({ via(QStringLiteral("minor"), { { 0, 0 }, { 400, 0 } }),
+            via(QStringLiteral("minor"), { { 400, 0 }, { 600, 0 } }, 0, true),       // cerrada
+            via(QStringLiteral("path"), { { 400, 0 }, { 600, 0 } }),                 // solo a pie
+            via(QStringLiteral("minor"), { { 600, 0 }, { 1000, 0 } }) });
+    r = c.route(enMetros(0, 0), enMetros(1000, 0));
+    QVERIFY(!r.ok());
+    QVERIFY2(r.error.contains(QStringLiteral("No hay ruta")), qPrintable(r.error));
+
+    // Un puente no se suelda con la calle que pasa por debajo aunque coincidan en un punto.
+    roadgraph::Graph p(23.0);
+    p.add({ via(QStringLiteral("minor"), { { 0, 0 }, { 500, 0 }, { 1000, 0 } }),
+            via(QStringLiteral("primary"), { { 500, -300 }, { 500, 0 }, { 500, 300 } }, 0, false, 1) });
+    QVERIFY(!p.route(enMetros(0, 0), enMetros(500, 300)).ok());                 // no hay cruce: el puente va por encima
+    // Pero sus extremos sí se unen con el suelo: si la calle llega al extremo del puente, se pasa.
+    p.add({ via(QStringLiteral("minor"), { { 500, 300 }, { 700, 300 } }) });
+    QVERIFY(p.route(enMetros(700, 300), enMetros(500, -300)).ok());
+
+    // Enganche: un punto a 100 m de la vía se engancha y esos metros cuentan; a más de 500 m, error.
+    roadgraph::Graph e(23.0);
+    e.add({ via(QStringLiteral("minor"), { { 0, 0 }, { 100, 0 }, { 200, 0 } }) });
+    r = e.route(enMetros(0, 100), enMetros(200, 0));
+    QVERIFY(r.ok());
+    QVERIFY2(qAbs(r.snapFromM - 100.0) < 2.0, qPrintable(QString::number(r.snapFromM)));
+    QVERIFY(qAbs(r.distanceM - 300.0) < 5.0);                                  // 100 de enganche + 200 de vía
+    QVERIFY(r.path.first().distanceTo(enMetros(0, 100)) < 1.0);                // el trazado empieza en el punto pedido
+    r = e.route(enMetros(0, 800), enMetros(200, 0));
+    QVERIFY(!r.ok());
+    QVERIFY2(r.error.contains(QStringLiteral("origen")), qPrintable(r.error));
+    r = e.route(enMetros(0, 0), enMetros(200, 800));
+    QVERIFY2(r.error.contains(QStringLiteral("destino")), qPrintable(r.error));
+    QVERIFY(!roadgraph::Graph(23.0).route(enMetros(0, 0), enMetros(1, 1)).ok());   // sin vías
+
+    // Una carretera recta de 5 km con un vértice solo en cada extremo (como las rurales): el enganche es
+    // al PUNTO de la vía, no al vértice, o el origen quedaría a 1 km de donde está.
+    roadgraph::Graph larga(23.0);
+    larga.add({ via(QStringLiteral("primary"), { { 0, 0 }, { 5000, 0 } }) });
+    r = larga.route(enMetros(1000, 50), enMetros(4000, -50));
+    QVERIFY2(r.ok(), qPrintable(r.error));
+    QVERIFY2(qAbs(r.distanceM - 3100.0) < 15.0, qPrintable(QString::number(r.distanceM)));      // 50 + 3000 + 50
+    QVERIFY2(qAbs(r.snapFromM - 50.0) < 1.0, qPrintable(QString::number(r.snapFromM)));
+    QVERIFY(qAbs(r.durationS - (3000.0 / (60.0 / 3.6) + 100.0 / (15.0 / 3.6))) < 3.0);          // 180 s en carretera + el enganche
+    QVERIFY(r.path.size() >= 4);                                                              // punto, enganche, enganche, punto
+    // Los dos puntos en el mismo tramo de sentido único: hacia delante sí, hacia atrás no.
+    roadgraph::Graph una(23.0);
+    una.add({ via(QStringLiteral("primary"), { { 0, 0 }, { 5000, 0 } }, 1) });
+    QVERIFY(una.route(enMetros(1000, 0), enMetros(4000, 0)).ok());
+    r = una.route(enMetros(4000, 0), enMetros(1000, 0));
+    QVERIFY(!r.ok());
+    QVERIFY2(r.error.contains(QStringLiteral("No hay ruta")), qPrintable(r.error));
+    // Y en doble sentido, hacia atrás también, sin dar vueltas.
+    r = larga.route(enMetros(4000, 0), enMetros(1000, 0));
+    QVERIFY(r.ok());
+    QVERIFY(qAbs(r.distanceM - 3000.0) < 10.0);
+}
+
+// Las teselas se cortan: dos teselas z14 vecinas con una vía que cruza su borde, cada una con
+// las coordenadas redondeadas a su propia rejilla (aquí con 1 unidad de diferencia, ~0,5 m, como
+// pasa de verdad). Los extremos se sueldan y la vía vuelve a ser una; y los atributos (`oneway`,
+// `access`, `brunnel`) se leen de la capa.
+void TstVectorTiles::roadGraphWeldsTileSeams()
+{
+    const int z = 14, x = 4000, y = 7000;
+    auto linea = [](const QVector<QPoint> &pts) { return path(pts, false); };
+    auto props = [](const char *clase, const char *extra = nullptr, const char *valor = nullptr) {
+        QVector<QPair<QString, QString>> p{ { QStringLiteral("class"), QString::fromLatin1(clase) } };
+        if (extra)
+            p.append({ QString::fromLatin1(extra), QString::fromLatin1(valor) });
+        return p;
+    };
+    // A: carretera de borde a borde por y=2048, y una cerrada al coche. B: continúa, con el vértice
+    // del borde un poco desplazado (y=2049), y una de sentido único -1 y un puente.
+    const QByteArray tileA = tile({ layer(QStringLiteral("transportation"), {
+        { 2, linea({ { 0, 2048 }, { 2000, 2048 }, { 4096, 2048 } }), props("primary") },
+        { 2, linea({ { 0, 500 }, { 4096, 500 } }), props("minor", "access", "private") },
+        { 1, QVector<quint32>{ cmd(1, 1), zz(10), zz(10) }, props("minor") },
+    }) });
+    const QByteArray tileB = tile({ layer(QStringLiteral("transportation"), {
+        { 2, linea({ { 0, 2049 }, { 2000, 2049 } }), props("primary") },
+        { 2, linea({ { 0, 3000 }, { 100, 3000 } }), props("minor", "oneway", "-1") },
+        { 2, linea({ { 0, 3500 }, { 100, 3500 } }), props("minor", "brunnel", "bridge") },
+    }) });
+    QVector<roadgraph::Segment> segs;
+    mvt::Tile ta, tb;
+    QVERIFY(mvt::decode(tileA, &ta, nullptr, QStringList{ QStringLiteral("transportation") }));
+    QVERIFY(mvt::decode(tileB, &tb, nullptr, QStringList{ QStringLiteral("transportation") }));
+    const auto sa = roadgraph::inTile(ta, TileKey{ z, x, y });
+    const auto sb = roadgraph::inTile(tb, TileKey{ z, x + 1, y });
+    QCOMPARE(sa.size(), 2);                                   // sin el punto
+    QCOMPARE(sb.size(), 3);
+    QCOMPARE(sa[1].blocked, true);                            // access = private
+    QCOMPARE(sa[0].blocked, false);
+    QCOMPARE(sb[1].oneway, -1);
+    QCOMPARE(sb[2].level, 1);                                 // puente
+    QCOMPARE(sb[0].oneway, 0);
+    QCOMPARE(sa[0].cls, QStringLiteral("primary"));
+
+    // La carretera A (4096 de ancho: ~2,2 km) más la de B (2000: ~1,1 km): de un extremo al otro, por una sola vía.
+    segs = sa + sb;
+    const QGeoCoordinate oeste = sa[0].line.first();
+    const QGeoCoordinate este = sb[0].line.last();
+    roadgraph::Graph g(oeste.latitude());          // a esta latitud (~24,4º) y no a 23º: la escala de metros depende de ella
+    g.add(segs);
+    const auto r = g.route(oeste, este);
+    QVERIFY2(r.ok(), qPrintable(r.error));
+    const double esperado = oeste.distanceTo(sa[0].line.last()) + sb[0].line.first().distanceTo(este);
+    QVERIFY2(qAbs(r.distanceM - esperado) < 15.0, qPrintable(QStringLiteral("%1 vs %2").arg(r.distanceM).arg(esperado)));
+    QVERIFY(r.distanceM > 3000.0);                            // ~3,3 km: atravesó el borde de las teselas
+    // Sin soldar (si cada tesela fuera por su lado) no habría ruta: con solo A, el extremo de B no se alcanza.
+    roadgraph::Graph soloA(oeste.latitude());
+    soloA.add(sa);
+    QVERIFY(!soloA.route(oeste, este).ok());
+    // La vía cerrada no cuenta aunque esté en el mapa: el único camino es la carretera.
+    QCOMPARE(r.byClass.size(), 1);
+    QCOMPARE(r.byClass.first().first, QStringLiteral("primary"));
 }
 
 QTEST_MAIN(TstVectorTiles)

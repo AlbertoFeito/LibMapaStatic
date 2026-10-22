@@ -22,6 +22,10 @@
  *     --radius metros (def. 15) del punto, con sus atributos. Es lo que hace
  *     MapWidget::vectorFeaturesAt al hacer clic.
  *
+ *   vector_tile --mbtiles cuba-osm-z16.mbtiles --route 23.1383,-82.3589:23.0386,-82.2276 [--geojson ruta.geojson]
+ *     Ruta en coche por la red vial del MBTiles (capa transportation), sin conexion: distancia,
+ *     tiempo estimado, kilometros por tipo de via y teselas leidas; con --geojson guarda el trazado.
+ *
  *   vector_tile --print-style [--hybrid] > estilo.json
  *     Vuelca el estilo por defecto (OpenMapTiles, o el hibrido), plantilla para uno propio.
  *
@@ -34,12 +38,17 @@
 #include "tiles/RMapsTileSource.h"
 #include "vector/FeatureQuery.h"
 #include "vector/MvtTile.h"
+#include "vector/RoutePlanner.h"
 #include "vector/VectorStyle.h"
 #include "vector/VectorTileRenderer.h"
 
 #include <QCommandLineParser>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QGuiApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QPainter>
 #include <QSet>
 #include <QTextStream>
@@ -179,15 +188,21 @@ int main(int argc, char *argv[])
     const QCommandLineOption oRadius(QStringLiteral("radius"),
                                      QStringLiteral("Radio de --at en metros"),
                                      QStringLiteral("m"), QStringLiteral("15"));
-    p.addOptions({ oAt, oRadius, oFile, oOut, oCenter, oZoom, oSize, oStyle, oMask, oMaskLayer, oHide, oHybrid, oInfo, oPrint });
+    const QCommandLineOption oRoute(QStringLiteral("route"),
+                                    QStringLiteral("Ruta en coche entre dos puntos: lat,lon:lat,lon"),
+                                    QStringLiteral("a:b"));
+    const QCommandLineOption oGeojson(QStringLiteral("geojson"),
+                                      QStringLiteral("Guarda el trazado de --route como GeoJSON"),
+                                      QStringLiteral("fichero"));
+    p.addOptions({ oRoute, oGeojson, oAt, oRadius, oFile, oOut, oCenter, oZoom, oSize, oStyle, oMask, oMaskLayer, oHide, oHybrid, oInfo, oPrint });
     p.process(app);
 
     if (p.isSet(oPrint)) {
         out << (p.isSet(oHybrid) ? VectorStyle::hybridJson() : VectorStyle::openMapTilesJson()) << "\n";
         return 0;
     }
-    if (!p.isSet(oFile) || (!p.isSet(oInfo) && !p.isSet(oOut) && !p.isSet(oAt))) {
-        err << "Falta --mbtiles y --info, --out o --at. Ver --help.\n";
+    if (!p.isSet(oFile) || (!p.isSet(oInfo) && !p.isSet(oOut) && !p.isSet(oAt) && !p.isSet(oRoute))) {
+        err << "Falta --mbtiles y --info, --out, --at o --route. Ver --help.\n";
         return 2;
     }
 
@@ -212,6 +227,45 @@ int main(int argc, char *argv[])
     if (!src.open()) {
         err << "No se pudo abrir: " << src.lastError() << "\n";
         return 1;
+    }
+    if (p.isSet(oRoute)) {
+        const QStringList ab = p.value(oRoute).split(QLatin1Char(':'));
+        const QStringList pa = ab.value(0).split(QLatin1Char(',')), pb = ab.value(1).split(QLatin1Char(','));
+        if (ab.size() != 2 || pa.size() != 2 || pb.size() != 2) {
+            err << "--route necesita lat,lon:lat,lon\n";
+            return 2;
+        }
+        const QGeoCoordinate from(pa[0].toDouble(), pa[1].toDouble()), to(pb[0].toDouble(), pb[1].toDouble());
+        QElapsedTimer tm;
+        tm.start();
+        const RouteResult r = routeplanner::findRoute(ds, from, to);
+        out << "Ruta calculada en " << tm.elapsed() << " ms (" << r.tiles << " teselas, " << r.nodes << " nodos)\n";
+        if (!r.ok()) {
+            err << r.error << "\n";
+            return 1;
+        }
+        const int min = int(r.durationS / 60.0 + 0.5);
+        out << "Distancia " << QString::number(r.distanceM / 1000.0, 'f', 2) << " km, tiempo estimado "
+            << min / 60 << " h " << min % 60 << " min (enganche: " << qRound(r.snapFromM) << " m al origen, "
+            << qRound(r.snapToM) << " m al destino)\n";
+        for (const auto &clase : r.byClass)
+            out << "  " << clase.first << ": " << QString::number(clase.second / 1000.0, 'f', 2) << " km\n";
+        if (p.isSet(oGeojson)) {
+            QFile f(p.value(oGeojson));
+            if (!f.open(QIODevice::WriteOnly)) {
+                err << "No se pudo escribir " << p.value(oGeojson) << "\n";
+                return 1;
+            }
+            QJsonArray coords;
+            for (const QGeoCoordinate &pt : r.path)
+                coords.append(QJsonArray{ pt.longitude(), pt.latitude() });
+            f.write(QJsonDocument(QJsonObject{
+                { "type", "Feature" },
+                { "properties", QJsonObject{ { "distancia_m", r.distanceM }, { "duracion_s", r.durationS } } },
+                { "geometry", QJsonObject{ { "type", "LineString" }, { "coordinates", coords } } } }).toJson());
+            out << "Trazado (" << r.path.size() << " puntos) en " << p.value(oGeojson) << "\n";
+        }
+        return 0;
     }
     if (p.isSet(oAt)) {
         const QStringList a = p.value(oAt).split(QLatin1Char(','));

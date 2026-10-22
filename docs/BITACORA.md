@@ -7053,3 +7053,55 @@ decía, y es lo que dije que pasaría en «Sin probar»: en uso real se tropieza
 Con el MBTiles de Cuba y 15 km sigue sin llegar de Artemisa a La Habana desde el centro del mar. La solución de verdad, buscar en todo el mapa, es un índice de
 calles y sitios del MBTiles entero, generado una vez y consultado como el de lugares; no está hecho.
 
+## 171. Rutas sin conexión por la red vial (coche)
+
+Última de «Otras ideas del mismo MBTiles» y, como se anotó, la más costosa. Dos decisiones del usuario acotaron la primera versión: la red vial se
+**lee de las teselas al vuelo** (sin preparar ningún fichero) y el alcance es **dos puntos → ruta con distancia y tiempo, solo en coche**. Esta rama sale de
+`main` sin esperar a #36 (búsqueda de calles) porque no depende de ella; `BITACORA.md` (§170 de #36 y esta) y `CLAUDE.md` chocarán en texto y se
+resuelven manteniendo las dos entradas.
+
+**Cómo funciona:**
+- `routeplanner::findRoute` (`src/vector/RoutePlanner`) calcula las teselas z14 del rectángulo que une origen y destino con un margen (3 teselas o un cuarto de
+  lo que mida), las lee **fila a fila** (una consulta SQLite por fila, decodificando solo la capa `transportation`) y arma el grafo. Tope de 3000 teselas
+  (unos 14.000 km² a latitud de Cuba): si se pasa, lo dice antes de leer. Si no hay camino, repite una vez con el margen triplicado (un camino que rodea
+  una bahía queda fuera del primer rectángulo), siempre que quepa.
+- `roadgraph::Graph` (`src/vector/RoadGraph`): un nodo por vértice y una arista por cada par consecutivo, con la clase de la vía y su tiempo
+  (longitud / velocidad media: autopista 90, troncal 80, principal 60, secundaria 50, terciaria 40, calle 30, servicio y camino 15 km/h; sendero, ferri y
+  tren no valen para coche). A* con la distancia en línea recta a 90 km/h como heurística, que nunca sobrestima: la ruta es la de menor tiempo del grafo.
+
+**Lo difícil, y lo que salió mal al probar:**
+- **Coser las teselas.** Cada tesela redondea sus coordenadas a su propia rejilla (a z14 unos 0,6 m) y trae un margen que repite lo de la vecina, así que
+  una misma vía llega con vértices que no coinciden. El grafo **suelda** los vértices a menos de 1,5 m, y a menos de 4 m si son extremos de una vía
+  (donde se juntan las calles). Hay una prueba con dos teselas cuyas coordenadas del borde difieren una unidad.
+- **Un puente no se cruza con lo de abajo.** Cada nodo recuerda los niveles que pasan por él (suelo, puente, túnel) y no se suelda un puente con una calle
+  que pasa por debajo, salvo en los extremos del puente (donde se une con el suelo).
+- **Sentido único** (`oneway` 1 / -1) y vías cerradas (`access` = no/private). Una calle de sentido único a la que solo se llega (-1 en un extremo) también es un destino
+  válido; al principio el enganche la ignoraba por no tener aristas de salida.
+- **Enganchar al punto, no al vértice.** La primera versión enganchaba origen y destino al vértice más cercano. La prueba de extremo a extremo midió 2432 m donde
+  debían ser 2102: una carretera recta de 2 km con tres vértices dejaba el origen a 55 m del vértice y el destino a 108 m. Las carreteras rurales tienen
+  vértices cada kilómetro, así que era un fallo real, no de la prueba. Ahora se engancha al **punto más cercano de cualquier tramo** y se parte ese tramo en dos con
+  nodos virtuales (de salida y de llegada). Si origen y destino caen en el mismo tramo se va directo si el sentido lo permite.
+- La escala en metros depende de la latitud: el grafo usa el coseno de la latitud media de origen y destino. Una prueba que armaba la red a 23º con teselas a 24,4º
+  se equivocaba un 1 %; el grafo de verdad usa la latitud de la ruta.
+
+**API y demo:** `MapWidget::findRoute(origen, destino, progreso)` devuelve un `RouteResult` (trazado, distancia, tiempo estimado, metros por tipo de vía,
+enganche de origen y destino, teselas y nodos), con `error` si no hay ruta (sin mapa vectorial, punto a más de 500 m de toda vía, demasiado largo, vías sin
+unir, cancelada). En la demo: clic derecho → *Ruta (coche)* → «Ruta desde aquí» (marca el origen) y «Ruta hasta aquí» (barra de progreso cancelable; dibuja la línea
+en la capa «Rutas», con la distancia y el tiempo en el nombre y los km por vía en sus atributos, la encuadra y la deja como capa activa para exportarla con
+Datos → Exportar capa activa). `vector_tile --route lat,lon:lat,lon [--geojson f]` hace lo mismo en consola; se probó con un MBTiles sintético de dos vías
+(2,10 km, 3 min).
+
+**Límites, dichos sin rodeos:** el tiempo es una **estimación** por la velocidad media de cada tipo; las teselas de OpenMapTiles no traen giros prohibidos ni límites
+de velocidad reales ni semáforos. No hay instrucciones giro a giro (los nombres están en otra capa). Y solo coche.
+
+**Pruebas:** `tst_vectortiles::roadGraphRoutes` (elige lo más rápido y no lo más corto, sentido único en los dos sentidos, vías cerradas y senderos, puente sin soldar con
+lo de abajo, enganche a vía recta larga con y sin sentido único, errores con motivo), `roadGraphWeldsTileSeams` (dos teselas con el borde desajustado se sueldan; sin soldar no
+habría ruta; `oneway`, `access` y `brunnel` se leen de la capa) y `tst_mapwidget::findsARoute` (de extremo a extremo con un MBTiles z14: la distancia es la esperada, las dos vías
+por tipo, el progreso, la vuelta mide lo mismo, punto lejos de la vía, cancelada, sin capa vectorial y demasiado larga). 31 tests en verde en Qt 6.4.
+
+**Sin probar:** con el `cuba-osm.mbtiles` real: cuánto tarda una ruta de decenas de km (el grafo de una provincia tiene cientos de miles de nodos; el enganche recorre
+todas las aristas, unos milisegundos), y sobre todo si las **intersecciones llegan cosidas**: si el MBTiles simplifica a z14 y pierde el vértice donde una calle toca otra, el
+grafo no las une y la ruta falla con «las vías no llegan a unirse». Es lo primero que hay que mirar con datos reales. La demo solo se ha compilado.
+
+**Estado: 31 tests (28 sin QCustomPlot).**
+
