@@ -75,6 +75,27 @@ struct LIBMAPA_EXPORT PoiImportResult
     bool ok() const { return error.isEmpty() && !tooLarge && !cancelled; }
 };
 
+/*!
+ * \brief Una ruta por la red vial (resultado de \c MapWidget::findRoute).
+ *
+ * Si \c ok() es false, \c error dice por que (y el resto no vale).
+ */
+struct LIBMAPA_EXPORT RouteResult
+{
+    QString error;                          //!< Vacio si se encontro ruta.
+    QVector<QGeoCoordinate> path;           //!< El trazado, del origen al destino.
+    double distanceM = 0.0;                 //!< Longitud (m), con los tramos de enlace a la via.
+    double durationS = 0.0;                 //!< Tiempo estimado en coche (s), por la velocidad de cada tipo de via.
+    //! Metros por tipo de via ("primary", "minor"...), de mas a menos.
+    QVector<QPair<QString, double>> byClass;
+    double snapFromM = 0.0;                 //!< Lo que hubo que andar del origen a la via mas cercana.
+    double snapToM = 0.0;                   //!< Lo mismo del destino.
+    int tiles = 0;                          //!< Teselas leidas para armar la red.
+    int nodes = 0;                          //!< Cruces y vertices de la red armada.
+
+    bool ok() const { return error.isEmpty() && path.size() >= 2; }
+};
+
 } // namespace libmapa
 
 #endif // LIBMAPA_PLACES_H_

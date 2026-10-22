@@ -19,8 +19,11 @@
 
 #include "libmapa/Coordinates.h"
 
+#include <QApplication>
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QMessageBox>
+#include <QProgressDialog>
 
 using namespace libmapa;
 
@@ -587,6 +590,18 @@ void Ventana::menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enElemento)
             [this, p] { m_mapa->setCenter(p); });
     connect(menu->addAction(tr("¿Qué hay aquí?")), &QAction::triggered, this,
             [this, p] { queHayAqui(p); });
+    // Rutas por la red vial del mapa vectorial: se fija el origen y luego el destino.
+    if (m_mapa->canSearchPointsOfInterest()) {          // = hay un mapa vectorial
+        QMenu *ruta = menu->addMenu(tr("Ruta (coche)"));
+        connect(ruta->addAction(tr("Ruta desde aquí")), &QAction::triggered, this, [this, p] { rutaDesde(p); });
+        QAction *hasta = ruta->addAction(m_rutaOrigen.isValid() ? tr("Ruta hasta aquí")
+                                                                : tr("Ruta hasta aquí (fija antes el origen)"));
+        hasta->setEnabled(m_rutaOrigen.isValid());
+        connect(hasta, &QAction::triggered, this, [this, p] { rutaHasta(p); });
+        QAction *quitar = ruta->addAction(tr("Quitar la ruta"));
+        quitar->setEnabled(m_rutaOrigen.isValid() || !m_mapa->featuresInLayer(QStringLiteral("ruta")).isEmpty());
+        connect(quitar, &QAction::triggered, this, [this] { quitarRuta(); });
+    }
 
     if (!enElemento) {
         menu->addSeparator();
@@ -668,4 +683,104 @@ void Ventana::nuevoPunto(const QGeoCoordinate &p)
         m_mapa->updateRangeRings(anillos, suyos);
         statusBar()->showMessage(tr("El punto «%1» se queda con los anillos").arg(nombrePunto(id)), 4000);
     }
+}
+
+// Capa donde se dibuja la ruta. NO es temporal: la ruta se guarda y se exporta como cualquier
+// otra línea (Datos → Exportar capa activa a GeoJSON/KML/GPX).
+static const char *kCapaRuta = "ruta";
+
+// Fija el origen de una ruta en \a p y pone un marcador; el destino se elige después con
+// «Ruta hasta aquí». Un origen nuevo sustituye al anterior y a la ruta que hubiera.
+void Ventana::rutaDesde(const QGeoCoordinate &p)
+{
+    const QString capa = QLatin1String(kCapaRuta);
+    m_mapa->addFeatureLayer(capa, tr("Rutas"), 40);   // si ya existe, no hace nada
+    m_mapa->clearFeatureLayer(capa);
+    m_rutaOrigen = p;
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.layerId = capa;
+    f.type = QStringLiteral("origen");
+    f.name = tr("Origen");
+    f.geometry = { p };
+    f.style.lineColor = QColor(0x2e, 0x7d, 0x32);
+    f.style.pointRadiusPx = 7.0;
+    m_mapa->addFeature(f);
+    statusBar()->showMessage(tr("Origen fijado. Clic derecho en el destino → Ruta (coche) → Ruta hasta aquí."), 8000);
+}
+
+// Calcula la ruta del origen fijado a \a p por la red vial de las teselas y la dibuja: una línea con
+// la distancia y el tiempo en el nombre y los kilómetros por tipo de vía en sus atributos, y un
+// marcador de destino. La capa pasa a ser la activa (para exportarla). La lectura de teselas muestra
+// una barra de progreso que se puede cancelar; si no hay ruta, lo dice con el motivo.
+void Ventana::rutaHasta(const QGeoCoordinate &p)
+{
+    if (!m_rutaOrigen.isValid())
+        return;
+    QProgressDialog progreso(tr("Leyendo la red vial…"), tr("Cancelar"), 0, 100, this);
+    progreso.setWindowModality(Qt::WindowModal);
+    progreso.setMinimumDuration(400);                  // las rutas cortas no parpadean
+    const RouteResult r = m_mapa->findRoute(m_rutaOrigen, p, [&progreso](int hechas, int total) {
+        progreso.setMaximum(qMax(1, total));
+        progreso.setValue(hechas);
+        QApplication::processEvents();
+        return !progreso.wasCanceled();
+    });
+    progreso.close();
+    if (!r.ok()) {
+        QMessageBox::warning(this, tr("Ruta"), r.error);
+        return;
+    }
+
+    const QString capa = QLatin1String(kCapaRuta);
+    m_mapa->addFeatureLayer(capa, tr("Rutas"), 40);
+    const int minutos = int(r.durationS / 60.0 + 0.5);
+    const QString tiempo = minutos >= 60 ? tr("%1 h %2 min").arg(minutos / 60).arg(minutos % 60) : tr("%1 min").arg(minutos);
+    QStringList porVia;
+    for (const auto &c : r.byClass)
+        porVia << tr("%1: %2").arg(c.first, textoDistancia(c.second));
+
+    MapFeature linea;
+    linea.kind = GeometryKind::Polyline;
+    linea.layerId = capa;
+    linea.type = QStringLiteral("ruta");
+    linea.name = tr("Ruta: %1 · %2").arg(textoDistancia(r.distanceM), tiempo);
+    linea.geometry = r.path;
+    linea.style.lineColor = QColor(0x15, 0x65, 0xc0, 220);
+    linea.style.lineWidth = 5.0;
+    linea.attributes.insert(QStringLiteral("distancia_m"), qRound(r.distanceM));
+    linea.attributes.insert(QStringLiteral("duracion_s"), qRound(r.durationS));
+    linea.attributes.insert(QStringLiteral("por_via"), porVia.join(QStringLiteral(", ")));
+    linea.attributes.insert(QStringLiteral("modo"), QStringLiteral("coche"));
+    m_mapa->addFeature(linea);
+
+    MapFeature destino;
+    destino.kind = GeometryKind::Point;
+    destino.layerId = capa;
+    destino.type = QStringLiteral("destino");
+    destino.name = tr("Destino");
+    destino.geometry = { p };
+    destino.style.lineColor = QColor(0xc6, 0x28, 0x28);
+    destino.style.pointRadiusPx = 7.0;
+    m_mapa->addFeature(destino);
+
+    // Encuadra la ruta entera.
+    double s = 90, n = -90, w = 180, e = -180;
+    for (const QGeoCoordinate &c : r.path) {
+        s = qMin(s, c.latitude());  n = qMax(n, c.latitude());
+        w = qMin(w, c.longitude()); e = qMax(e, c.longitude());
+    }
+    m_mapa->fitBounds(QGeoCoordinate(n, w), QGeoCoordinate(s, e));
+    m_mapa->setActiveFeatureLayer(capa);
+    m_rutaOrigen = QGeoCoordinate();
+    statusBar()->showMessage(tr("%1 en coche (estimado; sin giros prohibidos ni límites reales). %2. "
+                                "Datos → Exportar capa activa la saca a GeoJSON/KML/GPX.")
+                                 .arg(linea.name, porVia.join(QStringLiteral(" · "))), 15000);
+}
+
+// Quita el origen fijado y la ruta dibujada.
+void Ventana::quitarRuta()
+{
+    m_rutaOrigen = QGeoCoordinate();
+    m_mapa->clearFeatureLayer(QLatin1String(kCapaRuta));
 }

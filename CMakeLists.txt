@@ -139,6 +139,10 @@ add_library(libmapa_core STATIC
     src/vector/MvtTile.cpp
     src/vector/PoiSearch.cpp
     src/vector/PoiSearch.h
+    src/vector/RoadGraph.cpp
+    src/vector/RoadGraph.h
+    src/vector/RoutePlanner.cpp
+    src/vector/RoutePlanner.h
     src/vector/MvtTile.h
     src/vector/VectorStyle.cpp
     src/vector/VectorStyle.h

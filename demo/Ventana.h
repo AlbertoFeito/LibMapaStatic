@@ -308,6 +308,11 @@ private:
     void menuMarca(QMenu *menu, qint64 id);
     void menuEntidad(QMenu *menu, qint64 id, int vertice = -1);
     void menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enElemento);
+    // Rutas sin conexión por la red vial del mapa vectorial (VentanaContexto.cpp).
+    void rutaDesde(const QGeoCoordinate &p);
+    void rutaHasta(const QGeoCoordinate &p);
+    void quitarRuta();
+    QGeoCoordinate m_rutaOrigen;            //!< origen fijado con «Ruta desde aquí» (inválido = ninguno)
     void submenuMarcacion(QMenu *menu, qint64 targetId, qint64 featureId);
     void submenuAnillos(QMenu *menu, qint64 targetId, qint64 featureId);
     void opcionesAnillos(QMenu *menu, qint64 id);

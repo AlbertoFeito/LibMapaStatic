@@ -19,6 +19,7 @@
 #include "vector/FeatureQuery.h"
 #include "vector/MvtTile.h"
 #include "vector/PoiSearch.h"
+#include "vector/RoutePlanner.h"
 #include "vector/VectorStyle.h"
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
@@ -2894,6 +2895,29 @@ PoiImportResult MapWidget::importPointsOfInterest(const QVector<QGeoCoordinate> 
         }
     }
     return r;
+}
+
+// -------------------------------------------------------- rutas ---------
+
+// El tope de teselas de la API publica y el del planificador son el mismo numero.
+static_assert(MapWidget::kMaxRouteTiles == routeplanner::kMaxTiles,
+              "kMaxRouteTiles debe coincidir con routeplanner::kMaxTiles");
+
+// Ruta en coche por la red vial de las teselas vectoriales (la logica vive en RoutePlanner, que
+// tambien usa vector_tile --route): aqui solo se elige el dataset.
+RouteResult MapWidget::findRoute(const QGeoCoordinate &from, const QGeoCoordinate &to,
+                                 const std::function<bool(int, int)> &progress) const
+{
+    // La red sale de la base vectorial o, si no, del overlay.
+    const TileDataset *base = d->service.activeDataset();
+    const TileDataset *over = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    const TileDataset *ds = (base && base->vector) ? base : ((over && over->vector) ? over : nullptr);
+    if (!ds) {
+        RouteResult r;
+        r.error = tr("No hay un mapa vectorial (MBTiles pbf) con la red vial");
+        return r;
+    }
+    return routeplanner::findRoute(*ds, from, to, progress);
 }
 
 // Herramienta activa (arrastrar, medir, dibujar, editar...).

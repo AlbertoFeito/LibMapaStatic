@@ -30,6 +30,14 @@ zona alrededor, pero nadie lo ha pedido.
 ## Otras ideas del mismo MBTiles (plan del 2026-10-21)
 
 - **Búsqueda de calles** («Obispo») sin conexión, desde `transportation_name`.
-- **Rutas sin conexión** por la red vial (tipo de vía, sentido único, acceso). Es
-  lo más costoso: hay que coser los tramos que las teselas cortan.
+- **Rutas: lo que quedó fuera de la primera versión** (§171, coche, leída de las teselas al vuelo):
+  - *Más modos*: a pie (senderos, calles peatonales; no autopistas) y en bici, cada uno con sus
+    vías y su velocidad. El grafo ya guarda la clase de cada tramo; falta el filtro y la tabla de velocidades por modo.
+  - *Rutas largas* (de punta a punta del país): hoy el tope es de ~14.000 km². Haría falta un grafo
+    precalculado en un fichero, generado una vez por una herramienta, con la red cosida de todo el MBTiles.
+  - *Giros prohibidos y límites de velocidad*: las teselas de OpenMapTiles no los traen. Habría que
+    sacarlos de OSM aparte; sin ellos el tiempo es una estimación.
+  - *Instrucciones giro a giro* («gira a la derecha en Obispo»): las teselas traen los nombres en otra capa
+    (`transportation_name`) y habría que cruzarlos con el trazado.
+  - *Varios destinos / ruta más corta en vez de más rápida / evitar autopistas*.
 - Recordar la licencia del dato: **ODbL**, «© OpenStreetMap contributors, © OpenMapTiles».

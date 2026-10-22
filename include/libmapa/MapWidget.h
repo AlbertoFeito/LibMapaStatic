@@ -840,6 +840,32 @@ public:
                                            const std::function<bool(int, int)> &progress = nullptr,
                                            int maxFeatures = 5000);
 
+    // --- Rutas sin conexion (MBTiles vectorial) -----------------------------
+    //! Tope de teselas que lee \c findRoute para armar la red vial (unos 14.000 km2 a
+    //! latitud de Cuba): una ruta de un centenar de km entra, de punta a punta del pais no.
+    static constexpr int kMaxRouteTiles = 3000;     // = routeplanner::kMaxTiles
+    /*!
+     * \brief La ruta mas rapida en coche de \a from a \a to por la red vial del
+     *        MBTiles vectorial (capa `transportation`), sin conexion.
+     *
+     * Lee las teselas z14 (o la mas alta del MBTiles) del rectangulo que une los dos
+     * puntos con un margen, las cose en una red (una via que las teselas parten vuelve
+     * a ser una) y busca el camino de menor tiempo con A*: tiempo por la velocidad media
+     * de cada tipo de via (autopista 90, principal 60, calle 30 km/h...). Respeta el
+     * sentido unico y las vias cerradas al coche (`access` = no/private). Si no hay camino,
+     * repite una vez con mas margen (un camino que rodea una bahia queda fuera del primero).
+     *
+     * Limites: las teselas de OpenMapTiles no traen giros prohibidos ni limites de velocidad
+     * reales, asi que el tiempo es una estimacion. Los puntos se enganchan a la via mas
+     * cercana (hasta 500 m). Bloquea mientras lee: \a progress (opcional) recibe (filas
+     * leidas, filas totales) y, si devuelve false, corta con un error.
+     *
+     * \return la ruta; \c RouteResult::error dice por que si no la hay (sin capa vectorial,
+     *         puntos lejos de toda via, demasiado largo, sin camino...).
+     */
+    RouteResult findRoute(const QGeoCoordinate &from, const QGeoCoordinate &to,
+                          const std::function<bool(int, int)> &progress = nullptr) const;
+
     //! Perfil de elevacion del terreno a lo largo de una ruta (polilinea): la
     //! cota en cada lugar, muestreada cada \c params.stepMeters (30 m por
     //! defecto), con distancia total y desniveles. Perfil vacio si no hay origen
