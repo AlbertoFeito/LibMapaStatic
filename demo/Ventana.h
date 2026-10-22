@@ -268,6 +268,7 @@ private:
     void prepararSeguimiento();
 
     void zonaSeleccionada(const QVector<QGeoCoordinate> &zona, bool rectangulo);
+    void sitiosDeLaZona(const QVector<QGeoCoordinate> &zona);
 
     void exportarVista(const QString &tituloSugerido = QString());
 

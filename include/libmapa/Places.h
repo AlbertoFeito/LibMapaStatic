@@ -79,6 +79,27 @@ struct LIBMAPA_EXPORT Street
     QString typeLabel() const;
 };
 
+/*!
+ * \brief Resultado de \c MapWidget::importPointsOfInterest.
+ *
+ * Si \c tooLarge, no se leyó nada: la zona abarca \c tiles teselas y el tope es
+ * \c MapWidget::kMaxPoiImportTiles.
+ */
+struct LIBMAPA_EXPORT PoiImportResult
+{
+    int found = 0;          //!< POI de la zona que casan con el texto.
+    int added = 0;          //!< Entidades nuevas creadas.
+    int skipped = 0;        //!< Ya estaban en la capa (mismo tipo, nombre y sitio).
+    int tiles = 0;          //!< Teselas que abarca la zona.
+    bool tooLarge = false;  //!< La zona abarca demasiadas teselas; no se leyó nada.
+    bool cancelled = false; //!< El usuario cortó la importación a medias.
+    bool truncated = false; //!< Se llegó al tope de entidades y se dejaron POI sin añadir.
+    QString error;          //!< Motivo si no se pudo (sin capa vectorial, zona vacía...).
+
+    //! ¿Terminó sin error ni corte?
+    bool ok() const { return error.isEmpty() && !tooLarge && !cancelled; }
+};
+
 } // namespace libmapa
 
 #endif // LIBMAPA_PLACES_H_

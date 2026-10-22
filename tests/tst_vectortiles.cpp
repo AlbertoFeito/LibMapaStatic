@@ -71,6 +71,7 @@ private slots:
     void decodeOnlyChosenLayers();
     void searchesPointsOfInterest();
     void searchesStreets();
+    void filtersPointsOfInterest();
 
 private:
     QByteArray fixture(const char *name) const;
@@ -1212,6 +1213,44 @@ void TstVectorTiles::searchesPointsOfInterest()
     QVERIFY(poisearch::search(todos, QStringLiteral("a"), centro, 10).isEmpty());
     QVERIFY(poisearch::search(todos, QString(), centro, 10).isEmpty());
     QVERIFY(poisearch::search(todos, QStringLiteral("zzzz"), centro, 10).isEmpty());
+}
+
+// El filtro de la importación: como la búsqueda pero sin tope ni mínimo de letras, y con
+// texto vacío da todos. Y el color por tema coincide con el de los grupos poi_* de los estilos.
+void TstVectorTiles::filtersPointsOfInterest()
+{
+    auto poi = [](const char *nombre, const char *clase) {
+        PointOfInterest p;
+        p.name = QString::fromUtf8(nombre);
+        p.type = QString::fromLatin1(clase);
+        p.coordinate = QGeoCoordinate(23.0, -82.0);
+        return p;
+    };
+    const QVector<PointOfInterest> todos = {
+        poi("Farmacia Central", "pharmacy"), poi("", "pharmacy"), poi("Hospital Calixto García", "hospital"),
+        poi("Servicentro", "fuel") };
+    QCOMPARE(poisearch::filter(todos, QString()).size(), 4);                 // vacío = todos
+    QCOMPARE(poisearch::filter(todos, QStringLiteral("  ")).size(), 4);
+    QCOMPARE(poisearch::filter(todos, QStringLiteral("farmacia")).size(), 2);  // también la sin nombre
+    QCOMPARE(poisearch::filter(todos, QStringLiteral("a")).size(), 4);         // sin mínimo de letras
+    QCOMPARE(poisearch::filter(todos, QStringLiteral("hospital calixto")).size(), 1);
+    QCOMPARE(poisearch::filter(todos, QStringLiteral("zzz")).size(), 0);
+    // Mantiene el orden de entrada (no ordena por relevancia).
+    QCOMPARE(poisearch::filter(todos, QStringLiteral("farmacia")).first().name, QStringLiteral("Farmacia Central"));
+
+    // El color por tema es el de los estilos por defecto (mismo color en el mapa y en la entidad).
+    for (const VectorRule &r : VectorStyle::openMapTiles().rules) {
+        if (!r.group.startsWith(QLatin1String("poi_")))
+            continue;
+        QStringList clases;
+        for (const auto &f : r.filter)
+            if (f.first == QLatin1String("class"))
+                clases = f.second;
+        QVERIFY(!clases.isEmpty());
+        for (const QString &c : clases)
+            QCOMPARE(poisearch::themeColor(c).name(), r.pointColor.name());
+    }
+    QCOMPARE(poisearch::themeColor(QStringLiteral("bank")).name(), QStringLiteral("#546e7a"));
 }
 
 // Buscar calles: tres tesela z14 puestas a mano. «Obispo» corre por la tesela A y sigue en

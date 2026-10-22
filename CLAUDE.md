@@ -51,7 +51,9 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/sweet-cray-74nz88` (otra vez, desde `main`) | #31 | Mapa híbrido: el MBTiles vectorial encima de cualquier base, nombres de calles y capas conmutables |
 | `claude/stoic-clarke-rn7r7f` | #32 | «¿Qué hay aquí?»: `MapWidget::vectorFeaturesAt`, ventana y tarjeta de la demo y `vector_tile --at` |
 | `claude/stoic-clarke-rn7r7f` (otra vez, desde `main`) | #33 | Puntos de interés por tema en los estilos por defecto (cinco grupos apagados, con `pointShape`) |
-| `claude/stoic-clarke-rn7r7f` (y otra vez, desde `main`) | (borrador) | Buscar sitios (POI) por nombre o tipo: `MapWidget::searchPointsOfInterest` y el buscador de la demo |
+| `claude/stoic-clarke-rn7r7f` (y otra vez, desde `main`) | #34 | Buscar sitios (POI) por nombre o tipo: `MapWidget::searchPointsOfInterest` y el buscador de la demo |
+| `claude/stoic-clarke-rn7r7f` (y otra más, desde `main`) | #35 | Sacar los POI de una zona como entidades: `MapWidget::importPointsOfInterest` y «Sitios de la zona…» en la demo |
+| `claude/buscar-calles` | (borrador) | Búsqueda de calles sin conexión: `MapWidget::searchStreets`, resaltado en la demo |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
