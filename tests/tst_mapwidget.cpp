@@ -61,6 +61,7 @@ private slots:
     void buildsFromDatasetsJson();
     void hybridOverlayOverAnyBase();
     void searchesPointsOfInterest();
+    void importsPointsOfInterestAsFeatures();
     void reportsErrorOnMissingJson();
 
     void listsAvailableLayers();
@@ -4812,6 +4813,36 @@ bool makeWorldMBTiles(const QString &path, bool vector, const QByteArray &vector
     return ok;
 }
 
+// MBTiles vectorial con UNA sola tesela, a zoom \a z, en la posición XYZ (x, y) (la fila
+// se guarda en TMS, como hace un MBTiles de verdad). Sirve para probar a zoom 14, donde el
+// de makeWorldMBTiles (z3-z4) no llega.
+bool makeSingleTileMBTiles(const QString &path, const QByteArray &data, int z, int x, int y)
+{
+    const QString conn = QStringLiteral("mk1_%1").arg(path);
+    bool ok = true;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+        db.setDatabaseName(path);
+        if (!db.open())
+            return false;
+        QSqlQuery q(db);
+        ok = q.exec(QStringLiteral("CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, "
+                                   "tile_row INTEGER, tile_data BLOB)"))
+             && q.exec(QStringLiteral("CREATE TABLE metadata (name TEXT, value TEXT)"))
+             && q.exec(QStringLiteral("INSERT INTO metadata VALUES ('format','pbf'), ('minzoom','%1'), "
+                                      "('maxzoom','%1')").arg(z));
+        q.prepare(QStringLiteral("INSERT INTO tiles VALUES (:z, :x, :y, :d)"));
+        q.bindValue(QStringLiteral(":z"), z);
+        q.bindValue(QStringLiteral(":x"), x);
+        q.bindValue(QStringLiteral(":y"), (1 << z) - 1 - y);
+        q.bindValue(QStringLiteral(":d"), data);
+        ok = ok && q.exec();
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(conn);
+    return ok;
+}
+
 // Píxeles de la imagen que no son el gris de la base.
 int notGray(const QImage &img)
 {
@@ -4993,6 +5024,130 @@ void TstMapWidget::searchesPointsOfInterest()
     // Sin overlay vuelve a no haber donde buscar.
     w.clearVectorOverlay();
     QVERIFY(!w.canSearchPointsOfInterest());
+}
+
+// Sacar la selección como entidades: los POI de una zona pasan a ser puntos de una capa,
+// con su tipo, color y atributos. Se prueba a z14 (una tesela con tres POI: dos farmacias,
+// una sin nombre, y un hospital): filtrar por texto, repetir sin duplicar, ampliar, el
+// tope de entidades, cortar a medias, zona fuera de los datos, zona demasiado grande y
+// los errores (sin mapa vectorial, zona sin área).
+void TstMapWidget::importsPointsOfInterestAsFeatures()
+{
+    const QString base = m_dir.filePath(QStringLiteral("gris_imp.mbtiles"));
+    const QString vec = m_dir.filePath(QStringLiteral("poi14.mbtiles"));
+    QVERIFY(makeWorldMBTiles(base, false));
+    // Tesela z14 que contiene (22.0, -80.0); su centro es donde cae el POI de (2048, 2048).
+    const double pi = 3.14159265358979323846;
+    const double n = 16384.0;
+    const int tx = int(std::floor((-80.0 + 180.0) / 360.0 * n));
+    const int ty = int(std::floor((1.0 - std::asinh(std::tan(22.0 * pi / 180.0)) / pi) / 2.0 * n));
+    QVERIFY(makeSingleTileMBTiles(vec, poiTile(), 14, tx, ty));
+    const QGeoCoordinate centro(std::atan(std::sinh(pi * (1.0 - 2.0 * (ty + 0.5) / n))) * 180.0 / pi,
+                                (tx + 0.5) / n * 360.0 - 180.0);
+    const QString json = m_dir.filePath(QStringLiteral("gris_imp.json"));
+    {
+        QFile f(json);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QJsonDocument(QJsonObject{ { QStringLiteral("datasets"),
+            QJsonArray{ QJsonObject{ { QStringLiteral("id"), QStringLiteral("gris") },
+                                     { QStringLiteral("filePath"), base } } } } }).toJson());
+    }
+    MapConfig cfg = baseConfig(json);
+    cfg.initialZoom = 4;
+    cfg.initialCenter = centro;
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+    w.resize(600, 400);
+
+    auto cuadro = [&](const QGeoCoordinate &c, double d) {
+        return QVector<QGeoCoordinate>{ QGeoCoordinate(c.latitude() + d, c.longitude() - d),
+                                        QGeoCoordinate(c.latitude() + d, c.longitude() + d),
+                                        QGeoCoordinate(c.latitude() - d, c.longitude() + d),
+                                        QGeoCoordinate(c.latitude() - d, c.longitude() - d) };
+    };
+    const auto zona = cuadro(centro, 0.01);
+
+    // Errores: sin mapa vectorial; una zona sin área; sin capa de destino.
+    auto r = w.importPointsOfInterest(zona, QStringLiteral("farmacia"), QStringLiteral("sitios"));
+    QVERIFY(!r.ok());
+    QVERIFY2(r.error.contains(QStringLiteral("vectorial")), qPrintable(r.error));
+    QString error;
+    QVERIFY2(w.setVectorOverlay(vec, &error), qPrintable(error));
+    QVERIFY(!w.importPointsOfInterest({ centro, centro }, QStringLiteral("farmacia"), QStringLiteral("sitios")).ok());
+    QVERIFY(!w.importPointsOfInterest(zona, QStringLiteral("farmacia"), QString()).ok());
+    QVERIFY(w.featuresInLayer(QStringLiteral("sitios")).isEmpty());          // nada se creó
+
+    // Las dos farmacias (una sin nombre) pasan a ser puntos de la capa, que se crea.
+    r = w.importPointsOfInterest(zona, QStringLiteral("farmacia"), QStringLiteral("sitios"));
+    QVERIFY2(r.ok(), qPrintable(r.error));
+    QCOMPARE(r.found, 2);
+    QCOMPARE(r.added, 2);
+    QCOMPARE(r.skipped, 0);
+    const auto feats = w.featuresInLayer(QStringLiteral("sitios"));
+    QCOMPARE(feats.size(), 2);
+    for (const MapFeature &f : feats) {
+        QCOMPARE(f.kind, GeometryKind::Point);
+        QCOMPARE(f.type, QStringLiteral("pharmacy"));
+        QCOMPARE(f.attributes.value(QStringLiteral("tipo")).toString(), QStringLiteral("farmacia"));
+        QCOMPARE(f.attributes.value(QStringLiteral("clase")).toString(), QStringLiteral("pharmacy"));
+        QCOMPARE(f.style.lineColor.name(), QStringLiteral("#d32f2f"));       // el color del tema salud
+        QVERIFY(f.position().distanceTo(centro) < 200.0);
+    }
+    QStringList nombres;
+    for (const MapFeature &f : feats)
+        nombres << f.name;
+    nombres.sort();
+    QCOMPARE(nombres, QStringList({ "Farmacia", "Farmacia Central" }));      // la sin nombre usa su tipo
+
+    // Repetir no duplica; ampliar (texto vacío = todos) añade solo el que faltaba.
+    r = w.importPointsOfInterest(zona, QStringLiteral("farmacia"), QStringLiteral("sitios"));
+    QCOMPARE(r.found, 2);
+    QCOMPARE(r.added, 0);
+    QCOMPARE(r.skipped, 2);
+    r = w.importPointsOfInterest(zona, QString(), QStringLiteral("sitios"));
+    QCOMPARE(r.found, 3);
+    QCOMPARE(r.added, 1);
+    QCOMPARE(r.skipped, 2);
+    QCOMPARE(w.featuresInLayer(QStringLiteral("sitios")).size(), 3);
+
+    // Tope de entidades: el resto se cuenta y se marca.
+    r = w.importPointsOfInterest(zona, QString(), QStringLiteral("tope"), nullptr, 1);
+    QCOMPARE(r.found, 3);
+    QCOMPARE(r.added, 1);
+    QVERIFY(r.truncated);
+
+    // Cortar a medias: no se añade nada. El progreso informa de filas hechas y totales.
+    int llamadas = 0, ultimoTotal = 0;
+    r = w.importPointsOfInterest(zona, QString(), QStringLiteral("cortada"),
+                                 [&](int, int total) { ++llamadas; ultimoTotal = total; return false; });
+    QVERIFY(r.cancelled);
+    QVERIFY(!r.ok());
+    QCOMPARE(llamadas, 1);
+    QVERIFY(ultimoTotal >= 1);
+    QVERIFY(w.featuresInLayer(QStringLiteral("cortada")).isEmpty());
+    llamadas = 0;
+    r = w.importPointsOfInterest(zona, QString(), QStringLiteral("completa"),
+                                 [&](int, int) { ++llamadas; return true; });
+    QVERIFY(r.ok());
+    QVERIFY(llamadas >= 2);                                                    // por fila y al final
+
+    // Una zona sin teselas, o sin POI dentro del polígono: 0 encontrados, sin error.
+    r = w.importPointsOfInterest(cuadro(QGeoCoordinate(centro.latitude() + 1.0, centro.longitude()), 0.005),
+                                 QString(), QStringLiteral("vacia"));
+    QVERIFY(r.ok());
+    QCOMPARE(r.found, 0);
+    QCOMPARE(r.added, 0);
+    // El polígono recorta: un cuadrito junto al centro que deja fuera los POI.
+    r = w.importPointsOfInterest(cuadro(QGeoCoordinate(centro.latitude() + 0.005, centro.longitude() + 0.005), 0.0005),
+                                 QString(), QStringLiteral("vacia"));
+    QCOMPARE(r.found, 0);
+
+    // Demasiado grande: no se lee nada y se dice cuántas teselas abarca.
+    r = w.importPointsOfInterest(cuadro(centro, 3.0), QString(), QStringLiteral("grande"));
+    QVERIFY(r.tooLarge);
+    QVERIFY(!r.ok());
+    QVERIFY(r.tiles > MapWidget::kMaxPoiImportTiles);
+    QVERIFY(w.featuresInLayer(QStringLiteral("grande")).isEmpty());
 }
 
 QTEST_MAIN(TstMapWidget)

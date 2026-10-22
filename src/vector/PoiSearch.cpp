@@ -2,6 +2,7 @@
 
 #include "io/PlaceIndex.h"
 
+#include <QColor>
 #include <QCoreApplication>
 #include <QHash>
 #include <QSet>
@@ -148,6 +149,28 @@ QVector<PointOfInterest> inTile(const mvt::Tile &tile, const TileKey &key)
     return out;
 }
 
+// ¿Casa el POI con todas las palabras? \a grupo: 0 si el nombre empieza por la primera,
+// 1 si lo contiene, 2 si casa solo por el tipo.
+static bool casa(const PointOfInterest &p, const QStringList &palabras, int *grupo)
+{
+    const QString nombre = PlaceIndex::normalize(p.name);
+    QString tipo;                           // se calcula solo si hace falta
+    bool todasEnNombre = !nombre.isEmpty();
+    for (const QString &w : palabras) {
+        const bool enNombre = !nombre.isEmpty() && nombre.contains(w);
+        todasEnNombre = todasEnNombre && enNombre;
+        if (enNombre)
+            continue;
+        if (tipo.isEmpty())
+            tipo = textoDeTipo(p);
+        if (!tipo.contains(w))
+            return false;
+    }
+    *grupo = (todasEnNombre && !palabras.isEmpty())
+                 ? (nombre.startsWith(palabras.first()) ? 0 : 1) : 2;
+    return true;
+}
+
 // Filtra por palabras (nombre o tipo), ordena por relevancia y luego por cercanía.
 QVector<PointOfInterest> search(const QVector<PointOfInterest> &pois, const QString &text,
                                 const QGeoCoordinate &from, int limit)
@@ -164,25 +187,9 @@ QVector<PointOfInterest> search(const QVector<PointOfInterest> &pois, const QStr
     };
     QVector<Candidato> cands;
     for (const PointOfInterest &p : pois) {
-        const QString nombre = PlaceIndex::normalize(p.name);
-        QString tipo;                       // se calcula solo si hace falta
-        bool todasEnNombre = !nombre.isEmpty();
-        bool todas = true;
-        for (const QString &w : palabras) {
-            const bool enNombre = !nombre.isEmpty() && nombre.contains(w);
-            todasEnNombre = todasEnNombre && enNombre;
-            if (enNombre)
-                continue;
-            if (tipo.isEmpty())
-                tipo = textoDeTipo(p);
-            if (!tipo.contains(w)) {
-                todas = false;
-                break;
-            }
-        }
-        if (!todas)
+        int grupo = 2;
+        if (!casa(p, palabras, &grupo))
             continue;
-        const int grupo = todasEnNombre ? (nombre.startsWith(palabras.first()) ? 0 : 1) : 2;
         PointOfInterest r = p;
         r.distanceM = from.isValid() ? from.distanceTo(p.coordinate) : 0.0;
         cands.append({ r, grupo });
@@ -197,6 +204,36 @@ QVector<PointOfInterest> search(const QVector<PointOfInterest> &pois, const QStr
     for (int i = 0; i < cands.size() && i < limit; ++i)
         out.append(cands[i].poi);
     return out;
+}
+
+// Los que casan con el texto, en el orden de entrada y sin tope; texto vacío = todos.
+QVector<PointOfInterest> filter(const QVector<PointOfInterest> &pois, const QString &text)
+{
+    const QStringList palabras = PlaceIndex::normalize(text).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (palabras.isEmpty())
+        return pois;
+    QVector<PointOfInterest> out;
+    for (const PointOfInterest &p : pois) {
+        int grupo = 2;
+        if (casa(p, palabras, &grupo))
+            out.append(p);
+    }
+    return out;
+}
+
+// Color por tema: el mismo de los grupos poi_* de los estilos por defecto.
+QColor themeColor(const QString &type)
+{
+    static const QHash<QString, QColor> temas = {
+        { "hospital", QColor("#d32f2f") }, { "doctors", QColor("#d32f2f") }, { "clinic", QColor("#d32f2f") },
+        { "pharmacy", QColor("#d32f2f") }, { "dentist", QColor("#d32f2f") }, { "veterinary", QColor("#d32f2f") },
+        { "police", QColor("#1565c0") }, { "fire_station", QColor("#1565c0") },
+        { "fuel", QColor("#ef6c00") }, { "charging_station", QColor("#ef6c00") },
+        { "lodging", QColor("#7b1fa2") }, { "campsite", QColor("#7b1fa2") },
+        { "bus", QColor("#00897b") }, { "railway", QColor("#00897b") },
+        { "ferry_terminal", QColor("#00897b") }, { "harbor", QColor("#00897b") },
+    };
+    return temas.value(type, QColor("#546e7a"));
 }
 
 } // namespace poisearch
