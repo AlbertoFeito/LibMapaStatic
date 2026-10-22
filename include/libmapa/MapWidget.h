@@ -20,6 +20,8 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+
+#include <functional>
 #include <QVariant>
 #include <QWidget>
 #include <limits>
@@ -809,6 +811,34 @@ public:
                                                     double radiusMeters = 6000.0) const;
     //! Centra el mapa en \a poi con zoom 17 (o el maximo de la capa activa).
     void goToPointOfInterest(const PointOfInterest &poi);
+
+    //! Tope de teselas que lee \c importPointsOfInterest (unos 24.000 km2 a latitud
+    //! de Cuba: una provincia grande entra, el pais entero no).
+    static constexpr int kMaxPoiImportTiles = 5000;
+    /*!
+     * \brief Convierte en entidades (puntos) los POI de una zona: «todos los
+     *        hospitales de la provincia».
+     *
+     * Lee la capa `poi` de las teselas vectoriales (overlay hibrido y base) que cubren
+     * \a area (un poligono; un rectangulo son sus cuatro esquinas), se queda con los
+     * que estan dentro y casan con \a text (misma regla que \c searchPointsOfInterest;
+     * vacio = todos) y los anade a la capa \a layerId, que se crea si no existe. Cada
+     * entidad lleva el nombre (o el tipo si no tiene), `type` = clase del MBTiles
+     * ("hospital"), color por tema y los atributos `clase`, `subclase` y `tipo` (en
+     * espanol). Con ellas se puede filtrar, vigilar, guardar o exportar
+     * (\c exportVectorFile) como con cualquier otra entidad.
+     *
+     * Los que ya estan en la capa (mismo tipo, nombre y sitio) no se duplican: se puede
+     * repetir o ampliar sin ensuciarla. Bloquea mientras lee; \a progress (opcional)
+     * recibe (hechas, total) por cada fila de teselas y, si devuelve false, corta.
+     *
+     * \param maxFeatures  tope de entidades nuevas (el resto se cuenta en \c found y
+     *                     se marca \c truncated).
+     */
+    PoiImportResult importPointsOfInterest(const QVector<QGeoCoordinate> &area, const QString &text,
+                                           const QString &layerId,
+                                           const std::function<bool(int, int)> &progress = nullptr,
+                                           int maxFeatures = 5000);
 
     //! Perfil de elevacion del terreno a lo largo de una ruta (polilinea): la
     //! cota en cada lugar, muestreada cada \c params.stepMeters (30 m por

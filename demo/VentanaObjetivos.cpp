@@ -3,6 +3,12 @@
 
 #include "Ventana.h"
 
+#include <QApplication>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QLineEdit>
+#include <QProgressDialog>
+
 using namespace libmapa;
 
 // Prepara el seguimiento de objetivos: dibuja el juego de iconos (una vez) y
@@ -184,8 +190,14 @@ void Ventana::zonaSeleccionada(const QVector<QGeoCoordinate> &zona, bool rectang
            "conviértela en un área de la capa activa."));
     QPushButton *bCrear = box.addButton(tr("Crear área"), QMessageBox::ActionRole);
     QPushButton *bVigilar = box.addButton(tr("Crear y vigilar"), QMessageBox::ActionRole);
+    QPushButton *bSitios = box.addButton(tr("Sitios de la zona..."), QMessageBox::ActionRole);
     QPushButton *bExportar = box.addButton(tr("Exportar zona..."), QMessageBox::ActionRole);
     box.addButton(tr("Cerrar"), QMessageBox::RejectRole);
+    bSitios->setEnabled(m_mapa->canSearchPointsOfInterest());
+    bSitios->setToolTip(m_mapa->canSearchPointsOfInterest()
+        ? tr("Convierte en puntos de una capa los sitios del mapa vectorial que hay dentro "
+             "(todos los hospitales, las farmacias...).")
+        : tr("Hace falta un mapa vectorial (MBTiles pbf) donde buscar sitios."));
     bCrear->setToolTip(tr("Crea un polígono con esta forma en la capa activa."));
     bVigilar->setToolTip(tr("Crea el polígono y avisa cuando un objetivo entre o salga."));
     bExportar->setToolTip(tr("Encuadra la zona y la guarda como imagen o PDF."));
@@ -195,6 +207,10 @@ void Ventana::zonaSeleccionada(const QVector<QGeoCoordinate> &zona, bool rectang
     volverANavegar();
 
     const QAbstractButton *pulsado = box.clickedButton();
+    if (pulsado == bSitios) {
+        sitiosDeLaZona(zona);
+        return;
+    }
     if (pulsado == bExportar) {
         m_mapa->fitBounds(nw, se);
         exportarVista(rectangulo ? tr("Área seleccionada") : tr("Zona seleccionada"));
@@ -224,6 +240,73 @@ void Ventana::zonaSeleccionada(const QVector<QGeoCoordinate> &zona, bool rectang
         statusBar()->showMessage(tr("«%1» creada en la capa '%2'")
                                      .arg(f.name, f.layerId), 5000);
     }
+}
+
+// «Sitios de la zona»: pregunta qué sitios (texto: «hospital», «farmacia»; vacío = todos) y
+// en qué capa, y los convierte en puntos de esa capa con una barra de progreso que se puede
+// cancelar. La capa pasa a ser la activa, así «Datos → Exportar capa activa» la saca a GeoJSON/KML/GPX
+// y se pueden filtrar, editar o guardar como cualquier otra. Zona demasiado grande: lo dice
+// (y cuántas teselas abarca) en vez de pasarse un rato leyendo.
+void Ventana::sitiosDeLaZona(const QVector<QGeoCoordinate> &zona)
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Sitios de la zona"));
+    auto *form = new QFormLayout(&dlg);
+    auto *texto = new QLineEdit(&dlg);
+    texto->setPlaceholderText(tr("hospital, farmacia, gasolinera…  (vacío = todos)"));
+    texto->setToolTip(tr("Nombre o tipo, en español o inglés y sin tildes; varias palabras "
+                         "tienen que casar todas."));
+    auto *capa = new QLineEdit(tr("Sitios"), &dlg);
+    capa->setToolTip(tr("Capa donde se crean los puntos. Si ya existe, se añaden a ella "
+                        "(sin repetir los que ya estén)."));
+    form->addRow(tr("Qué sitios:"), texto);
+    form->addRow(tr("Capa:"), capa);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    form->addRow(bb);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    texto->setFocus();
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    const QString idCapa = capa->text().trimmed().isEmpty() ? tr("Sitios") : capa->text().trimmed();
+
+    QProgressDialog progreso(tr("Leyendo los sitios de la zona…"), tr("Cancelar"), 0, 100, this);
+    progreso.setWindowModality(Qt::WindowModal);
+    progreso.setMinimumDuration(400);                  // las zonas pequeñas no parpadean
+    const PoiImportResult r = m_mapa->importPointsOfInterest(
+        zona, texto->text(), idCapa, [&progreso](int hechas, int total) {
+            progreso.setMaximum(qMax(1, total));
+            progreso.setValue(hechas);
+            QApplication::processEvents();
+            return !progreso.wasCanceled();
+        });
+    progreso.close();
+
+    if (r.tooLarge) {
+        QMessageBox::information(this, tr("Zona demasiado grande"),
+            tr("La zona abarca unas %1 teselas y el máximo es %2 (una provincia grande). "
+               "Márcala más pequeña, o por partes.").arg(r.tiles).arg(MapWidget::kMaxPoiImportTiles));
+        return;
+    }
+    if (r.cancelled) {
+        statusBar()->showMessage(tr("Importación cancelada: no se añadió nada."), 5000);
+        return;
+    }
+    if (!r.error.isEmpty()) {
+        QMessageBox::warning(this, tr("Sitios de la zona"), r.error);
+        return;
+    }
+    if (r.found == 0) {
+        statusBar()->showMessage(tr("No hay sitios que casen con «%1» en esa zona.").arg(texto->text()), 6000);
+        return;
+    }
+    m_mapa->setActiveFeatureLayer(idCapa);
+    QString msg = tr("%1 sitios añadidos a la capa «%2»").arg(r.added).arg(idCapa);
+    if (r.skipped > 0)
+        msg += tr(" (%1 ya estaban)").arg(r.skipped);
+    if (r.truncated)
+        msg += tr(" · se llegó al tope y faltan algunos: acota la zona o el texto");
+    statusBar()->showMessage(msg + tr(". Datos → Exportar capa activa los saca a GeoJSON/KML/GPX."), 10000);
 }
 
 // Abre un historial GPX y lo reproduce con la barra de reproducción. La

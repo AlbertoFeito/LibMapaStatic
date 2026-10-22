@@ -6,6 +6,7 @@
 #include "dem/GeoTiffElevation.h"
 #include "dem/HgtElevation.h"
 #include "dem/SqliteElevation.h"
+#include "geo/GeoMath.h"
 #include "geo/TileMatrix.h"
 #include "geo/WebMercator.h"
 #include "geo/MapDecor.h"
@@ -2720,6 +2721,179 @@ void MapWidget::goToPointOfInterest(const PointOfInterest &poi)
         return;
     setZoom(qMin(17, maxZoom()));
     setCenter(poi.coordinate);
+}
+
+namespace {
+
+// Lee los POI de TODAS las teselas del rectangulo de \a area en un dataset vectorial,
+// fila a fila (una consulta SQLite por fila: la memoria no crece con el tamaño de la
+// zona) y devuelve los que estan dentro del poligono y casan con \a text. Sin cache:
+// una importacion grande la desbordaria y no se repite. \a progress se llama una vez
+// por fila con (filas hechas, filas totales); si devuelve false se corta y \a *cancelled
+// queda a true.
+QVector<PointOfInterest> poisInArea(const TileDataset &dataset, const QVector<QGeoCoordinate> &area,
+                                    const QString &text, const std::function<bool(int, int)> &progress,
+                                    int rowsOffset, int rowsTotal, bool *cancelled)
+{
+    QVector<PointOfInterest> out;
+    const int z = qBound(dataset.minZoom, 14, dataset.maxZoom);
+    const double n = double(1 << z);
+    double s = 90, nn = -90, w = 180, e = -180;
+    for (const QGeoCoordinate &c : area) {
+        s = qMin(s, c.latitude());  nn = qMax(nn, c.latitude());
+        w = qMin(w, c.longitude()); e = qMax(e, c.longitude());
+    }
+    const auto tx = [&](double lon) { return int(std::floor((lon + 180.0) / 360.0 * n)); };
+    const auto ty = [&](double lat) {
+        const double r = qDegreesToRadians(WebMercator::clampLatitude(lat));
+        return int(std::floor((1.0 - std::asinh(std::tan(r)) / M_PI) / 2.0 * n));
+    };
+    const int x0 = qBound(0, tx(w), int(n) - 1), x1 = qBound(0, tx(e), int(n) - 1);
+    const int y0 = qBound(0, ty(nn), int(n) - 1), y1 = qBound(0, ty(s), int(n) - 1);
+
+    TileDataset ds = dataset;
+    ds.id = QStringLiteral("poiimport:") + dataset.filePath;
+    RMapsTileSource src(ds);
+    if (!src.open())
+        return out;
+    const QStringList soloPoi{ QLatin1String(poisearch::kLayer) };
+    for (int y = y0; y <= y1; ++y) {
+        if (progress && !progress(rowsOffset + (y - y0), rowsTotal)) {
+            *cancelled = true;
+            return out;
+        }
+        const QHash<TileKey, QByteArray> fila = src.fetchRange(z, x0, x1, y, y);
+        for (auto it = fila.constBegin(); it != fila.constEnd(); ++it) {
+            mvt::Tile tile;
+            if (it.value().isEmpty() || !mvt::decode(it.value(), &tile, nullptr, soloPoi))
+                continue;
+            QVector<PointOfInterest> candidatos;
+            for (const PointOfInterest &p : poisearch::inTile(tile, it.key()))
+                if (GeoMath::pointInPolygon(p.coordinate.longitude(), p.coordinate.latitude(), area))
+                    candidatos.append(p);
+            out += poisearch::filter(candidatos, text);
+        }
+    }
+    return out;
+}
+
+// Teselas (rectangulo, z14) que abarca la zona en un dataset: lo que hay que leer.
+int tilesOfArea(const TileDataset &dataset, const QVector<QGeoCoordinate> &area, int *rows = nullptr)
+{
+    const int z = qBound(dataset.minZoom, 14, dataset.maxZoom);
+    const double n = double(1 << z);
+    double s = 90, nn = -90, w = 180, e = -180;
+    for (const QGeoCoordinate &c : area) {
+        s = qMin(s, c.latitude());  nn = qMax(nn, c.latitude());
+        w = qMin(w, c.longitude()); e = qMax(e, c.longitude());
+    }
+    const auto ty = [&](double lat) {
+        const double r = qDegreesToRadians(WebMercator::clampLatitude(lat));
+        return int(std::floor((1.0 - std::asinh(std::tan(r)) / M_PI) / 2.0 * n));
+    };
+    const int cols = int(std::floor((e + 180.0) / 360.0 * n)) - int(std::floor((w + 180.0) / 360.0 * n)) + 1;
+    const int filas = qBound(0, ty(s), int(n) - 1) - qBound(0, ty(nn), int(n) - 1) + 1;
+    if (rows)
+        *rows = filas;
+    return qMax(0, cols) * qMax(0, filas);
+}
+
+} // namespace
+
+// Importa como entidades los POI de la zona que casan con el texto.
+PoiImportResult MapWidget::importPointsOfInterest(const QVector<QGeoCoordinate> &area, const QString &text,
+                                                  const QString &layerId,
+                                                  const std::function<bool(int, int)> &progress,
+                                                  int maxFeatures)
+{
+    PoiImportResult r;
+    if (area.size() < 3) {
+        r.error = tr("La zona necesita al menos tres vértices");
+        return r;
+    }
+    if (layerId.isEmpty()) {
+        r.error = tr("Falta la capa de destino");
+        return r;
+    }
+    // Datasets vectoriales donde buscar: overlay (si esta) y base, sin repetir fichero.
+    QVector<const TileDataset *> fuentes;
+    const TileDataset *over = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    const TileDataset *base = d->service.activeDataset();
+    if (over && over->vector)
+        fuentes << over;
+    if (base && base->vector && (!over || base->filePath != over->filePath))
+        fuentes << base;
+    if (fuentes.isEmpty()) {
+        r.error = tr("No hay un mapa vectorial (MBTiles pbf) donde buscar sitios");
+        return r;
+    }
+    int filasTotal = 0;
+    for (const TileDataset *ds : fuentes) {
+        int filas = 0;
+        r.tiles += tilesOfArea(*ds, area, &filas);
+        filasTotal += filas;
+    }
+    if (r.tiles > kMaxPoiImportTiles) {
+        r.tooLarge = true;
+        return r;
+    }
+
+    QVector<PointOfInterest> encontrados;
+    int hechas = 0;
+    for (const TileDataset *ds : fuentes) {
+        bool cortado = false;
+        int filas = 0;
+        tilesOfArea(*ds, area, &filas);
+        encontrados += poisInArea(*ds, area, text, progress, hechas, filasTotal, &cortado);
+        hechas += filas;
+        if (cortado) {
+            r.cancelled = true;
+            return r;                      // a medias: no se anade nada
+        }
+    }
+    if (progress)
+        progress(filasTotal, filasTotal);
+    r.found = int(encontrados.size());
+
+    addFeatureLayer(layerId, layerId);      // si ya existe, no hace nada
+    // Los que ya estan (tipo, nombre y sitio a ~1 m): no se duplican al repetir o ampliar.
+    const auto clave = [](const QString &tipo, const QString &nombre, const QGeoCoordinate &c) {
+        return QStringLiteral("%1|%2|%3|%4").arg(tipo, nombre).arg(c.latitude(), 0, 'f', 5)
+                                            .arg(c.longitude(), 0, 'f', 5);
+    };
+    QSet<QString> yaEstan;
+    for (const MapFeature &f : featuresInLayer(layerId))
+        yaEstan.insert(clave(f.type, f.name, f.position()));
+
+    for (const PointOfInterest &p : encontrados) {
+        const QString k = clave(p.type, p.displayName(), p.coordinate);
+        if (yaEstan.contains(k)) {
+            ++r.skipped;
+            continue;
+        }
+        if (r.added >= maxFeatures) {
+            r.truncated = true;
+            continue;
+        }
+        MapFeature f;
+        f.kind = GeometryKind::Point;
+        f.layerId = layerId;
+        f.type = p.type;
+        f.name = p.displayName();
+        f.geometry = { p.coordinate };
+        f.style.lineColor = poisearch::themeColor(p.type);
+        f.style.fillColor = f.style.lineColor;
+        f.style.pointRadiusPx = 6.0;
+        f.attributes.insert(QStringLiteral("clase"), p.type);
+        f.attributes.insert(QStringLiteral("subclase"), p.subtype);
+        f.attributes.insert(QStringLiteral("tipo"), p.typeLabel());
+        f.attributes.insert(QStringLiteral("origen"), QStringLiteral("mbtiles"));
+        if (addFeature(f) >= 0) {
+            ++r.added;
+            yaEstan.insert(k);
+        }
+    }
+    return r;
 }
 
 // Herramienta activa (arrastrar, medir, dibujar, editar...).

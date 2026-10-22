@@ -6960,3 +6960,43 @@ buscan y se muestran con su nombre en inglés.
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+## 169. Sacar los POI de una zona como entidades
+
+Última de las ideas aparcadas de los POI: «todos los hospitales de la provincia». Con §168 se *buscan* sitios cerca del centro; aquí se
+*convierten en entidades* para trabajar con ellos como con cualquier otra cosa del mapa (filtrar, editar, guardar, exportar).
+
+**Qué hace:** `MapWidget::importPointsOfInterest(zona, texto, capa)` lee los POI de las teselas que cubren un polígono, se queda con los que están
+**dentro** del polígono y casan con el texto (vacío = todos) y los añade como puntos a una capa, que se crea si no existe. Cada punto lleva el nombre
+(o el tipo si no tiene), `type` = la clase del MBTiles, el color de su tema (`poisearch::themeColor`, el mismo de los grupos `poi_*` de los estilos
+de §167, para que el punto y el símbolo del mapa se reconozcan) y los atributos `clase`, `subclase`, `tipo` (español) y `origen`. Como son entidades
+normales, se exportan con `exportVectorFile` a GeoJSON/KML/GPX (lo de «exportarlas» del plan no necesitó código nuevo) y se editan, filtran y guardan.
+
+**Decisiones:**
+- **Zona como polígono.** Un rectángulo son sus cuatro esquinas; así sirve igual la herramienta «Seleccionar área» que «Seleccionar polígono».
+- **Tope de lectura** (`kMaxPoiImportTiles` = 5000 teselas z14, unos 24.000 km² a latitud de Cuba): una provincia grande entra, el país entero no. Se
+  cuenta ANTES de leer y, si se pasa, devuelve `tooLarge` con cuántas teselas abarca, en vez de pasarse minutos leyendo. Se cuentan las teselas del
+  rectángulo que envuelve el polígono, no las del polígono: un polígono muy diagonal cuenta de más.
+- **Fila a fila y sin caché**: una consulta SQLite por fila de teselas, así que la memoria no crece con la zona; la caché de §168 (800 teselas) se
+  desbordaría y una importación no se repite. Solo se guardan los POI que casan.
+- **Progreso y corte**: el callback recibe (filas hechas, totales) y si devuelve `false` se corta. Un corte **no deja nada a medias**: no se añade
+  ninguna entidad.
+- **No duplicar**: un POI ya presente en la capa (mismo tipo, nombre y sitio a ~1 m) se cuenta como `skipped`. Se puede repetir o ampliar («farmacia» y
+  luego todos) sin ensuciar la capa.
+- **Tope de entidades** (`maxFeatures`, 5000): el resto se cuenta en `found` y se marca `truncated`.
+- `poisearch::filter`: la misma regla de la búsqueda (todas las palabras en nombre o tipo) pero sin ordenar, sin tope y sin mínimo de letras;
+  `search` ahora comparte con él la función `casa`.
+
+**En la demo:** al marcar una zona (Datos → Seleccionar área o polígono) la ventana «Zona seleccionada» trae el botón **«Sitios de la zona…»**: pide
+qué sitios y la capa, lee con barra de progreso cancelable, deja la capa como activa (así «Datos → Exportar capa activa» la saca a GeoJSON/KML/GPX
+directamente) y lo cuenta en la barra de estado. Si la zona es demasiado grande lo dice con las teselas que abarca.
+
+**Pruebas:** `tst_vectortiles::filtersPointsOfInterest` (vacío = todos, sin mínimo de letras, orden de entrada, y que el color por tema de cada clase
+coincide con el de la regla `poi_*` del estilo) y `tst_mapwidget::importsPointsOfInterestAsFeatures` (de extremo a extremo con un MBTiles de una sola
+tesela z14: los errores —sin mapa vectorial, zona sin área, sin capa—, las dos farmacias como puntos con tipo, color y atributos, repetir sin duplicar,
+ampliar, el tope, cortar a medias sin añadir nada, zonas sin POI o que el polígono recorta, y zona demasiado grande). 31 tests en verde en Qt 6.4.
+
+**Sin probar:** con el `cuba-osm.mbtiles` real: cuánto tarda una provincia (la estimación es de unos segundos por cada mil teselas) ni en el PC del
+usuario. No hay prueba automática del cuadro de diálogo de la demo (compila). Con esto no queda nada de los POI en `PENDIENTES.md`.
+
+**Estado: 31 tests (28 sin QCustomPlot).**
+
