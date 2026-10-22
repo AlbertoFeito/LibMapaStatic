@@ -6917,3 +6917,46 @@ ven. Queda abierto (PENDIENTES): buscar POI por nombre o tipo y sacar una selecc
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+## 168. Buscar puntos de interés por nombre o tipo
+
+Tercera de las ideas aparcadas. Con los grupos de §167 se *ven* los POI, pero no se podían *buscar*: «¿dónde hay una farmacia por aquí?». El campo de
+búsqueda de la barra (Ctrl+K) solo conocía los lugares del `lugares.sqlitedb` (ciudades, bahías, picos). Ahora también busca sitios.
+
+**Decisión de diseño: sin índice aparte.** `PENDIENTES.md` hablaba de sumarlos al `lugares.sqlitedb`. Se descartó: obligaría a generar y mantener otra base
+de datos por cada MBTiles (con el de Cuba, cientos de miles de POI) y los POI ya están en las teselas. En su lugar se lee la capa `poi` de las teselas
+que rodean el centro del mapa, así que sirve cualquier MBTiles de OpenMapTiles sin preparar nada. El coste es que solo busca **cerca del centro**
+(6 km por defecto, hasta 15 km), no en toda la provincia; para eso haría falta el índice, y queda anotado como posible paso futuro.
+
+**Cómo funciona** (`src/vector/PoiSearch.{h,cpp}`, solo núcleo):
+- `MapWidget::searchPointsOfInterest(texto, límite, radio)` calcula las teselas z14 (o el máximo del MBTiles) que cubren el radio (como mucho 9×9),
+  pide a SQLite **de una sola consulta** el rectángulo de las que faltan, y guarda lo leído en una caché (por fichero y tesela; vacía también cuenta,
+  para no volver a pedir teselas sin POI). Solo la primera búsqueda en una zona lee; teclear después es inmediato.
+- `mvt::decode` gana una variante con lista de capas: se salta las demás sin decodificar sus entidades. Una tesela de ciudad trae miles de edificios y
+  vías, y para buscar POI solo hace falta `poi`; es la diferencia entre decenas de milisegundos y uno por tesela.
+- `poisearch::inTile` saca los puntos con su coordenada geográfica y descarta los del margen de la tesela (los trae la vecina, y si no se duplicarían).
+  El nombre sale de `name:es`, `name` o `name:latin`.
+- `poisearch::search`: cada palabra del texto tiene que estar en el nombre **o** en el tipo. El tipo se busca en español (tabla de clases y subclases con
+  su traducción), en el inglés original (`pharmacy`) y en palabras de uso común que no son traducción literal («cupet», «servicentro», «botica»,
+  «guagua», «paladar»). Así «farmacia» da las farmacias **aunque no tengan nombre** (muchas no lo tienen en OSM), y «hospital calixto» exige las dos
+  cosas. Orden: los que empiezan por lo escrito, luego los que lo contienen en el nombre, luego los que casan solo por el tipo; dentro de cada grupo,
+  más cercanos al centro primero. Con menos de dos letras no devuelve nada (una «a» casaría con todo).
+- API pública: `PointOfInterest` (nombre, tipo, subtipo, coordenada, distancia, `typeLabel()` en español, `displayName()`), `canSearchPointsOfInterest()`,
+  `searchPointsOfInterest` y `goToPointOfInterest`.
+
+**En la demo:** el mismo campo de la barra, con el desplegable en dos tandas: los lugares primero («Guantánamo — ciudad») y los sitios después
+(«Farmacia Central — farmacia · a 1,2 km»). Elegir uno centra el mapa a z17 y lo dice en la barra de estado. El campo se activa si hay índice de lugares
+**o** mapa vectorial (se reevalúa al cambiar de base o de capa híbrida), y su ayuda dice cuál de las dos cosas falta.
+
+**Pruebas:** `tst_vectortiles::decodeOnlyChosenLayers` (la variante por capas, y que un MVT roto siga dando error), `searchesPointsOfInterest` (cuatro POI
+puestos a mano: nombre sin tildes, `name:es`, tipo en español e inglés, «cupet», nombre + tipo, orden por grupo y cercanía, límite, texto corto, el
+punto del margen y la línea que no cuentan) y `tst_mapwidget::searchesPointsOfInterest` (de extremo a extremo con un MBTiles: sin capa vectorial no
+hay donde buscar; con el overlay sí; la sin nombre sale tras la que lo tiene; la caché da lo mismo; fuera del radio no sale; ir al POI centra el mapa).
+En el camino salió que las pruebas de §166 daban tres avisos `-Wconversion` (`qsizetype` a `int` en `FeatureQuery.cpp`), corregidos.
+31 tests en verde en Qt 6.4.
+
+**Sin probar:** con el `cuba-osm.mbtiles` real (tiempo de la primera búsqueda en el centro de La Habana, con cientos de POI por tesela) ni en el PC del
+usuario. El rendimiento se estimó, no se midió con datos reales. La tabla de tipos cubre las clases habituales de OpenMapTiles; las que no conoce se
+buscan y se muestran con su nombre en inglés.
+
+**Estado: 31 tests (28 sin QCustomPlot).**
+

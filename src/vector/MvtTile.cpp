@@ -239,6 +239,19 @@ bool readLayer(PbfReader r, Layer *layer)
     return r.ok();
 }
 
+// Nombre de una capa (campo 1) sin leer sus entidades: sirve para saltarse las que no
+// interesan. Cadena vacía si el bloque no trae nombre.
+QString peekLayerName(PbfReader r)
+{
+    quint32 field = 0, wire = 0;
+    while (r.next(&field, &wire)) {
+        if (field == 1)
+            return r.string();
+        r.skip(wire);
+    }
+    return QString();
+}
+
 } // namespace
 
 // Busca el par clave/valor cuya clave es \a keyIdx entre los tags de la entidad.
@@ -331,6 +344,12 @@ bool decodeGeometry(const QVector<quint32> &commands, GeomType type,
 // Descomprime si hace falta y lee las capas (campo 3 del mensaje Tile).
 bool decode(const QByteArray &bytes, Tile *out, QString *error)
 {
+    return decode(bytes, out, error, QStringList());
+}
+
+// Igual, saltando las capas que no estén en \a onlyLayers (vacío = todas).
+bool decode(const QByteArray &bytes, Tile *out, QString *error, const QStringList &onlyLayers)
+{
     out->layers.clear();
     bool okInflate = false;
     const QByteArray raw = Gzip::inflateIfCompressed(bytes, &okInflate);
@@ -343,8 +362,11 @@ bool decode(const QByteArray &bytes, Tile *out, QString *error)
     quint32 field = 0, wire = 0;
     while (r.next(&field, &wire)) {
         if (field == 3 && wire == LengthDelimited) {
+            const PbfReader block = r.block();
+            if (!onlyLayers.isEmpty() && !onlyLayers.contains(peekLayerName(block)))
+                continue;
             Layer layer;
-            if (!readLayer(r.block(), &layer)) {
+            if (!readLayer(block, &layer)) {
                 if (error) *error = QStringLiteral("capa MVT mal formada");
                 return false;
             }

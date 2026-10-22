@@ -30,7 +30,7 @@ double distToSegment(const QPointF &p, const QPointF &a, const QPointF &b)
 bool inRing(const QPointF &p, const QVector<QPoint> &ring)
 {
     bool inside = false;
-    const int n = ring.size();
+    const int n = int(ring.size());
     for (int i = 0, j = n - 1; i < n; j = i++) {
         const QPoint &a = ring[i], &b = ring[j];
         if ((a.y() > p.y()) != (b.y() > p.y())
@@ -46,7 +46,7 @@ double distToPath(const QPointF &p, const QVector<QPoint> &pts, bool closed)
     double best = std::numeric_limits<double>::infinity();
     if (pts.size() == 1)
         return std::hypot(p.x() - pts[0].x(), p.y() - pts[0].y());
-    const int n = pts.size();
+    const int n = int(pts.size());
     for (int i = 0; i + 1 < n; ++i)
         best = std::min(best, distToSegment(p, pts[i], pts[i + 1]));
     if (closed && n > 2)
@@ -58,7 +58,7 @@ double distToPath(const QPointF &p, const QVector<QPoint> &pts, bool closed)
 double signedArea(const QVector<QPoint> &r)
 {
     double a = 0.0;
-    for (int i = 0, n = r.size(); i < n; ++i) {
+    for (int i = 0, n = int(r.size()); i < n; ++i) {
         const QPoint &p = r[i], &q = r[(i + 1) % n];
         a += double(p.x()) * q.y() - double(q.x()) * p.y();
     }
