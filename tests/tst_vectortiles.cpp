@@ -65,6 +65,7 @@ private slots:
     void loaderChangesHiddenGroups();
     void packageDeclaresHybridOverlay();
     void queryFindsWhatIsHere();
+    void poiGroupsAndShapes();
 
 private:
     QByteArray fixture(const char *name) const;
@@ -802,14 +803,16 @@ void TstVectorTiles::styleGroups()
     QCOMPARE(s.defaultHidden, QStringList{ QStringLiteral("a") });
     QCOMPARE(s.rules[2].group, QString());
 
-    // El estilo por defecto ofrece estos grupos y no apaga ninguno. Ni POI ni
-    // números de portal: en el MBTiles de Cuba no se veían y se quitaron.
+    // El estilo por defecto ofrece estos grupos; los de puntos de interés por tema
+    // (poi_*) arrancan apagados y los demás no. Sin números de portal: no se veían.
     const VectorStyle d = VectorStyle::openMapTiles();
-    QCOMPARE(d.groupIds(), QStringList({ "nombres_calles", "lugares", "edificios", "cimas", "limites" }));
-    QVERIFY(d.defaultHidden.isEmpty());
+    QCOMPARE(d.groupIds(), QStringList({ "nombres_calles", "lugares", "edificios", "cimas", "limites",
+                                         "poi_salud", "poi_seguridad", "poi_combustible",
+                                         "poi_alojamiento", "poi_transporte" }));
+    QCOMPARE(d.defaultHidden, QStringList({ "poi_salud", "poi_seguridad", "poi_combustible",
+                                            "poi_alojamiento", "poi_transporte" }));
     for (const VectorRule &r : d.rules)
-        QVERIFY2(r.layer != QLatin1String("poi") && r.layer != QLatin1String("housenumber"),
-                 qPrintable(r.layer));
+        QVERIFY2(r.layer != QLatin1String("housenumber"), qPrintable(r.layer));
 }
 
 // Un grupo oculto no se pinta; lo que no tiene grupo (el agua) siempre sí.
@@ -829,15 +832,17 @@ void TstVectorTiles::hiddenGroupsAreNotDrawn()
 }
 
 // El estilo híbrido es para ir ENCIMA de otra base: fondo transparente (sin
-// agua ni tierra), las vías sí, y sus grupos (sin POI ni números de portal).
+// agua ni tierra), las vías sí, y sus grupos (los POI por tema, apagados).
 void TstVectorTiles::hybridStyleIsTransparent()
 {
     QJsonParseError pe{};
     QVERIFY(!QJsonDocument::fromJson(VectorStyle::hybridJson(), &pe).isNull());
     const VectorStyle h = VectorStyle::hybrid();
     QCOMPARE(h.background.alpha(), 0);
-    QCOMPARE(h.groupIds(), QStringList({ "vias", "nombres_calles", "lugares", "cimas", "limites" }));
-    QVERIFY(h.defaultHidden.isEmpty());
+    QCOMPARE(h.groupIds(), QStringList({ "vias", "nombres_calles", "lugares", "cimas", "limites",
+                                         "poi_salud", "poi_seguridad", "poi_combustible",
+                                         "poi_alojamiento", "poi_transporte" }));
+    QCOMPARE(h.defaultHidden.size(), 5);                       // los POI por tema, apagados
     QCOMPARE(VectorStyle::defaultFor(true).name, h.name);
     QCOMPARE(VectorStyle::defaultFor(false).name, VectorStyle::openMapTiles().name);
 
@@ -1052,6 +1057,75 @@ void TstVectorTiles::queryFindsWhatIsHere()
     h = aqui(1200, 1200, 5000.0);
     QVERIFY(h.size() >= 3);
     QCOMPARE(h[0].layer, QStringLiteral("building"));
+}
+
+// Puntos de interés por tema: los dos estilos por defecto traen cinco grupos poi_*
+// (salud, seguridad, combustible, alojamiento, transporte), apagados de partida, cada
+// uno con su color y una forma de marcador distinta y visibles desde z13; y las cinco
+// formas se dibujan de verdad, distintas entre sí (se prueba sin rótulos, que
+// necesitan fuentes: un punto sin "label" se dibuja tal cual).
+void TstVectorTiles::poiGroupsAndShapes()
+{
+    for (const VectorStyle &st : { VectorStyle::openMapTiles(), VectorStyle::hybrid() }) {
+        QSet<int> formas;
+        QSet<QRgb> colores;
+        int temas = 0;
+        for (const VectorRule &r : st.rules) {
+            if (!r.group.startsWith(QLatin1String("poi_")))
+                continue;
+            ++temas;
+            QCOMPARE(r.layer, QStringLiteral("poi"));
+            QVERIFY(r.minZoom <= 14);
+            QVERIFY(r.pointRadius > 0);
+            QVERIFY(st.defaultHidden.contains(r.group));
+            formas.insert(int(r.pointShape));
+            colores.insert(r.pointColor.rgba());
+        }
+        QCOMPARE(temas, 5);
+        QCOMPARE(formas.size(), 5);                          // un símbolo distinto por tema
+        QCOMPARE(colores.size(), 5);                         // y un color distinto
+    }
+
+    // Una forma desconocida se queda en círculo; las cinco se leen del JSON.
+    const QList<QPair<QString, PointShape>> casos = {
+        { "circle", PointShape::Circle }, { "square", PointShape::Square },
+        { "triangle", PointShape::Triangle }, { "diamond", PointShape::Diamond },
+        { "cross", PointShape::Cross }, { "estrella", PointShape::Circle } };
+    QVector<QImage> imagenes;
+    for (const auto &c : casos) {
+        VectorStyle s;
+        const QByteArray json = QStringLiteral(R"({ "background": "#000000", "rules": [
+            { "layer": "poi", "pointRadius": 6, "pointColor": "#ff0000", "halo": "#00000000",
+              "pointShape": "%1", "geometry": "point", "label": "name" } ] })").arg(c.first).toUtf8();
+        QVERIFY(VectorStyle::fromJson(QJsonDocument::fromJson(json).object(), &s));
+        QCOMPARE(s.rules[0].pointShape, c.second);
+    }
+    // Dibujo: sin "label" el punto se pinta directamente (con rótulo haría falta un nombre y fuentes).
+    const QByteArray poi = tile({ layer(QStringLiteral("poi"),
+        { { 1, QVector<quint32>{ cmd(1, 1), zz(2048), zz(2048) },
+            { { QStringLiteral("class"), QStringLiteral("x") } } } }) });
+    for (const QString forma : { "circle", "square", "triangle", "diamond", "cross" }) {
+        VectorStyle s;
+        const QByteArray json = QStringLiteral(R"({ "background": "#000000", "rules": [
+            { "layer": "poi", "pointRadius": 6, "pointColor": "#ff0000", "halo": "#00000000",
+              "pointShape": "%1", "geometry": "point", "fill": "#00000000" } ] })").arg(forma).toUtf8();
+        QVERIFY(VectorStyle::fromJson(QJsonDocument::fromJson(json).object(), &s));
+        imagenes << VectorTileRenderer(s).render(poi, 15, 256);
+    }
+    for (const QImage &im : imagenes)
+        QVERIFY(sameColor(im.pixel(128, 128), Qt::red));     // todas pintan el centro
+    // En la esquina (5, 5) solo el cuadrado llega; el círculo, el rombo y la cruz no.
+    QVERIFY(sameColor(imagenes[1].pixel(133, 133), Qt::red));
+    QVERIFY(!sameColor(imagenes[0].pixel(133, 133), Qt::red));
+    QVERIFY(!sameColor(imagenes[3].pixel(133, 133), Qt::red));
+    QVERIFY(!sameColor(imagenes[4].pixel(133, 133), Qt::red));
+    // La cruz llega por sus brazos (5, 0) y el rombo también; el triángulo apunta arriba.
+    QVERIFY(sameColor(imagenes[4].pixel(133, 128), Qt::red));
+    QVERIFY(sameColor(imagenes[2].pixel(128, 123), Qt::red));
+    // Y no hay dos formas iguales.
+    for (int i = 0; i < imagenes.size(); ++i)
+        for (int j = i + 1; j < imagenes.size(); ++j)
+            QVERIFY2(imagenes[i] != imagenes[j], qPrintable(QStringLiteral("%1 = %2").arg(i).arg(j)));
 }
 
 QTEST_MAIN(TstVectorTiles)

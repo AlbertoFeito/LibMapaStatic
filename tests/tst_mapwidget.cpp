@@ -4830,7 +4830,8 @@ void TstMapWidget::hybridOverlayOverAnyBase()
         grupos << g.id;
         if (g.id == QLatin1String("limites")) limites = g.visible;
     }
-    QCOMPARE(grupos, QStringList({ "vias", "nombres_calles", "lugares", "cimas", "limites" }));
+    QCOMPARE(grupos, QStringList({ "vias", "nombres_calles", "lugares", "cimas", "limites", "poi_salud",
+                                   "poi_seguridad", "poi_combustible", "poi_alojamiento", "poi_transporte" }));
     QVERIFY(limites);
     QVERIFY(w.baseLayerGroups().isEmpty());                     // la base es ráster
 

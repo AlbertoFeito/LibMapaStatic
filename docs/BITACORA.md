@@ -6886,3 +6886,34 @@ comprueba la posición del cursor con un margen de 30 px alrededor de la tarjeta
 cerraría al nacer). Se vigila la posición en vez de esperar un evento de salida porque un `Qt::Popup` captura el ratón y el «leave» no es
 fiable. Los 5 s no se pausan con el cursor encima: si hace falta más tiempo, «Todo…» abre la ventana completa, que no caduca.
 
+## 167. Puntos de interés por tema en los estilos por defecto
+
+Segunda de las ideas aparcadas en `PENDIENTES.md`. En §165 se quitaron los POI de los estilos porque la única casilla que había no mostraba nada
+útil (empezaban en z15 y salían todos mezclados). Ahora vuelven, pero **por tema**, y apagados de partida.
+
+**Qué hay:** cinco grupos nuevos en el estilo de base y en el híbrido, cada uno con su color y su símbolo, visibles desde z13 y con el nombre al lado:
+Salud (cruz roja: `hospital`, `doctors`, `pharmacy`, `dentist`, `clinic`, `veterinary`), Seguridad (cuadrado azul: `police`, `fire_station`), Combustible
+(rombo naranja: `fuel`, `charging_station`), Alojamiento (triángulo morado: `lodging`, `campsite`) y Transporte (círculo verde: `bus`, `railway`,
+`ferry_terminal`, `harbor`). Arrancan apagados (`"visible": false` en el grupo), así que un mapa que no los pide se ve igual que antes; cada uno
+sale como una casilla más en la demo, debajo de la capa. En el híbrido van con colores claros y halo oscuro, para leerse sobre satélite.
+
+**Símbolo propio por tema:** hasta ahora un punto solo podía ser un círculo. Se añade `"pointShape"` a las reglas (`circle`, `square`, `triangle`,
+`diamond`, `cross`; una forma desconocida se queda en círculo), con `drawMarker` en el renderizador. Todas menos el círculo llevan un contorno fino del
+color del halo para que se lean sobre cualquier fondo. Así se distingue de un vistazo un hospital de una gasolinera, que con puntos del mismo tamaño
+no se podía.
+
+**Por qué por temas y no una sola casilla «Puntos de interés»:** el MBTiles de Cuba trae cientos de POI por tesela (427 en una z14 del centro de La
+Habana). Encenderlos todos juntos tapa el mapa; por tema, el usuario enciende lo que busca. Las clases son las de OpenMapTiles; quien necesite otras
+tiene en el README la receta del estilo propio, ahora con `pointShape`.
+
+**Pruebas:** `tst_vectortiles::poiGroupsAndShapes` (los dos estilos traen cinco grupos poi_* apagados, cada uno con forma y color distintos y visibles
+desde z14 como mucho; las cinco formas se leen del JSON y se dibujan de verdad, sin dos iguales y con la geometría esperada en puntos concretos). Se
+actualizaron los tests que listaban los grupos de los estilos (`styleGroups`, `hybridStyleIsTransparent`, `hybridOverlayOverAnyBase`). 31 tests en
+verde en Qt 6.4. `docs/estilo_vectorial.json` y `docs/estilo_hibrido.json` se regeneraron con `vector_tile --print-style`.
+
+**Sin probar:** con el `cuba-osm.mbtiles` real. Las clases y el zoom de partida salen de la documentación de OpenMapTiles y de lo que ya se vio en §165;
+si alguna clase no existe en ese fichero, su grupo se queda vacío sin error. Solo salen los POI con nombre: las paradas de autobús sin nombre no se
+ven. Queda abierto (PENDIENTES): buscar POI por nombre o tipo y sacar una selección como entidades.
+
+**Estado: 31 tests (28 sin QCustomPlot).**
+

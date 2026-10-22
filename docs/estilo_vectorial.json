@@ -7,7 +7,12 @@
     { "id": "lugares", "title": "Nombres de lugares" },
     { "id": "edificios", "title": "Edificios" },
     { "id": "cimas", "title": "Cimas" },
-    { "id": "limites", "title": "Límites administrativos" }
+    { "id": "limites", "title": "Límites administrativos" },
+    { "id": "poi_salud", "title": "Salud (hospitales, farmacias)", "visible": false },
+    { "id": "poi_seguridad", "title": "Seguridad (policía, bomberos)", "visible": false },
+    { "id": "poi_combustible", "title": "Combustible", "visible": false },
+    { "id": "poi_alojamiento", "title": "Alojamiento", "visible": false },
+    { "id": "poi_transporte", "title": "Transporte (paradas, puertos)", "visible": false }
   ],
   "rules": [
     { "layer": "landcover", "filter": { "class": ["wood", "forest"] }, "fill": "#d6e6c3" },
@@ -115,6 +120,21 @@
       "filter": { "class": ["tertiary", "minor", "service"] }, "minZoom": 15,
       "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#5a5047" },
     { "layer": "mountain_peak", "group": "cimas", "minZoom": 11, "label": "name:es|name|name:latin",
-      "textSize": 10, "textColor": "#6b4f2f", "pointRadius": 2.5, "pointColor": "#8b6b45" }
+      "textSize": 10, "textColor": "#6b4f2f", "pointRadius": 2.5, "pointColor": "#8b6b45" },
+    { "layer": "poi", "group": "poi_salud", "filter": { "class": ["hospital", "doctors", "pharmacy", "dentist", "clinic", "veterinary"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#d32f2f",
+      "pointRadius": 4, "pointColor": "#d32f2f", "pointShape": "cross" },
+    { "layer": "poi", "group": "poi_seguridad", "filter": { "class": ["police", "fire_station"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#1565c0",
+      "pointRadius": 4, "pointColor": "#1565c0", "pointShape": "square" },
+    { "layer": "poi", "group": "poi_combustible", "filter": { "class": ["fuel", "charging_station"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ef6c00",
+      "pointRadius": 4, "pointColor": "#ef6c00", "pointShape": "diamond" },
+    { "layer": "poi", "group": "poi_alojamiento", "filter": { "class": ["lodging", "campsite"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#7b1fa2",
+      "pointRadius": 4, "pointColor": "#7b1fa2", "pointShape": "triangle" },
+    { "layer": "poi", "group": "poi_transporte", "filter": { "class": ["bus", "railway", "ferry_terminal", "harbor"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#00897b",
+      "pointRadius": 4, "pointColor": "#00897b", "pointShape": "circle" }
   ]
 }
