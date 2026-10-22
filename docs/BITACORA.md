@@ -6854,3 +6854,15 @@ decodificado: es para un clic, no para un bucle.
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+### 166 (ajuste). La ventana «¿Qué hay aquí?» en lenguaje llano
+
+El usuario, probándola en su PC con el MBTiles de Cuba: no le gustó cómo se veía. Con razón: era un volcado de atributos crudos (`class`,
+`oneway`, `brunnel`, `subclass`, en inglés), una tabla por entidad con huecos enormes, y la misma calle repetida una vez por tramo. Ahora:
+- Una línea por cosa: **título** (el nombre o, si no tiene, su tipo traducido: «Carretera principal», «Zona residencial», «Hierba») y debajo, en
+  gris, categoría y detalles («vía · sentido único · puente · a 120 m»). Traduce lo habitual de OpenMapTiles (vías, usos del suelo, terreno,
+  agua, POI, lugares); lo que no conoce lo deja tal cual.
+- Dos bloques: **Aquí** (lo que contiene el punto: el edificio, la zona) y **Cerca** (calles y lugares a unos metros).
+- Los tramos de una misma calle se agrupan («2 tramos»), conservando el más cercano.
+- Los atributos crudos del MBTiles quedan tras la casilla «Mostrar todos los atributos del mapa».
+Es solo la demo (`Ventana::queHayAqui`); la API (`vectorFeaturesAt`) no cambia. Compila; no lo he visto en pantalla con datos reales.
+

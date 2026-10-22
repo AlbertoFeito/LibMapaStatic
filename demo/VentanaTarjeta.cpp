@@ -12,7 +12,9 @@
 #include "libmapa/Coordinates.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QDialog>
+#include <QHash>
 #include <QFrame>
 #include <QLabel>
 #include <QTextBrowser>
@@ -237,50 +239,228 @@ void Ventana::mostrarTarjeta(const MapHit &hit, const QPoint &global)
     tarjeta->show();
 }
 
-// «¿Qué hay aquí?»: las calles, edificios, parques y lugares del MBTiles vectorial
-// bajo el punto, con sus atributos. Primero lo que contiene el punto y luego lo más
-// cercano; si ninguna capa visible es vectorial, o no hay nada cerca, lo dice.
+namespace {
+
+// Qué es una entidad vectorial, en español y legible: categoría ("Calle"), título
+// ("Obispo" o, sin nombre, su tipo: "Carretera principal") y detalles sueltos
+// ("sentido único", "puente", "altura 12 m"). Traduce lo habitual de OpenMapTiles;
+// lo que no conoce lo deja tal cual en vez de esconderlo.
+struct DescripcionVectorial
+{
+    QString categoria;
+    QString titulo;
+    QStringList detalles;
+};
+
+// Traducción de un valor de "class" (o "subclass"), según la capa en que aparece:
+// "residential" es una zona en landuse y una calle en transportation.
+QString traducirClase(const QString &capa, const QString &clase)
+{
+    static const QHash<QString, QString> t = {
+        { "transportation:motorway", QObject::tr("Autopista") },
+        { "transportation:trunk", QObject::tr("Vía troncal") },
+        { "transportation:primary", QObject::tr("Carretera principal") },
+        { "transportation:secondary", QObject::tr("Carretera secundaria") },
+        { "transportation:tertiary", QObject::tr("Carretera terciaria") },
+        { "transportation:minor", QObject::tr("Calle") },
+        { "transportation:residential", QObject::tr("Calle residencial") },
+        { "transportation:service", QObject::tr("Vía de servicio") },
+        { "transportation:track", QObject::tr("Camino") },
+        { "transportation:path", QObject::tr("Sendero") },
+        { "transportation:pedestrian", QObject::tr("Calle peatonal") },
+        { "transportation:rail", QObject::tr("Ferrocarril") },
+        { "landuse:residential", QObject::tr("Zona residencial") },
+        { "landuse:commercial", QObject::tr("Zona comercial") },
+        { "landuse:industrial", QObject::tr("Zona industrial") },
+        { "landuse:cemetery", QObject::tr("Cementerio") },
+        { "landuse:school", QObject::tr("Centro educativo") },
+        { "landuse:hospital", QObject::tr("Hospital") },
+        { "landuse:military", QObject::tr("Zona militar") },
+        { "landuse:railway", QObject::tr("Zona ferroviaria") },
+        { "landuse:pitch", QObject::tr("Campo deportivo") },
+        { "landuse:playground", QObject::tr("Parque infantil") },
+        { "landcover:grass", QObject::tr("Hierba") },
+        { "landcover:wood", QObject::tr("Bosque") },
+        { "landcover:farmland", QObject::tr("Cultivos") },
+        { "landcover:wetland", QObject::tr("Humedal") },
+        { "landcover:sand", QObject::tr("Arena") },
+        { "landcover:rock", QObject::tr("Roca") },
+        { "water:river", QObject::tr("Río") },
+        { "water:lake", QObject::tr("Lago") },
+        { "water:ocean", QObject::tr("Mar") },
+        { "water:pond", QObject::tr("Estanque") },
+        { "waterway:river", QObject::tr("Río") },
+        { "waterway:stream", QObject::tr("Arroyo") },
+        { "waterway:canal", QObject::tr("Canal") },
+        { "poi:hospital", QObject::tr("Hospital") },
+        { "poi:doctors", QObject::tr("Consultorio") },
+        { "poi:pharmacy", QObject::tr("Farmacia") },
+        { "poi:police", QObject::tr("Policía") },
+        { "poi:fire_station", QObject::tr("Bomberos") },
+        { "poi:fuel", QObject::tr("Gasolinera") },
+        { "poi:bank", QObject::tr("Banco") },
+        { "poi:atm", QObject::tr("Cajero") },
+        { "poi:school", QObject::tr("Escuela") },
+        { "poi:college", QObject::tr("Universidad") },
+        { "poi:lodging", QObject::tr("Alojamiento") },
+        { "poi:restaurant", QObject::tr("Restaurante") },
+        { "poi:cafe", QObject::tr("Cafetería") },
+        { "poi:bar", QObject::tr("Bar") },
+        { "poi:bus", QObject::tr("Parada de autobús") },
+        { "poi:place_of_worship", QObject::tr("Lugar de culto") },
+        { "poi:theatre", QObject::tr("Teatro") },
+        { "poi:cinema", QObject::tr("Cine") },
+        { "poi:stadium", QObject::tr("Estadio") },
+        { "poi:post", QObject::tr("Correos") },
+        { "poi:shop", QObject::tr("Tienda") },
+        { "poi:grocery", QObject::tr("Mercado") },
+        { "place:city", QObject::tr("Ciudad") },
+        { "place:town", QObject::tr("Pueblo") },
+        { "place:village", QObject::tr("Aldea") },
+        { "place:suburb", QObject::tr("Barrio") },
+        { "place:neighbourhood", QObject::tr("Reparto") },
+        { "place:island", QObject::tr("Isla") },
+    };
+    return t.value(capa + QLatin1Char(':') + clase);
+}
+
+// Lo que dice una entidad de sí misma: ver DescripcionVectorial.
+DescripcionVectorial describirVectorial(const VectorFeatureInfo &h)
+{
+    static const QHash<QString, QString> capas = {
+        { "transportation", QObject::tr("Vía") }, { "transportation_name", QObject::tr("Vía") },
+        { "building", QObject::tr("Edificio") }, { "landuse", QObject::tr("Uso del suelo") },
+        { "landcover", QObject::tr("Terreno") }, { "water", QObject::tr("Agua") },
+        { "waterway", QObject::tr("Agua") }, { "park", QObject::tr("Parque") },
+        { "place", QObject::tr("Lugar") }, { "poi", QObject::tr("Punto de interés") },
+        { "boundary", QObject::tr("Límite") }, { "aeroway", QObject::tr("Aeropuerto") },
+        { "mountain_peak", QObject::tr("Cima") }, { "housenumber", QObject::tr("Portal") },
+    };
+    DescripcionVectorial d;
+    d.categoria = capas.value(h.layer, h.layer);
+    const QString clase = h.attributes.value(QStringLiteral("class")).toString();
+    const QString traducida = traducirClase(h.layer, clase);
+    const QString tipo = !traducida.isEmpty() ? traducida : clase;
+    d.titulo = h.name();
+    if (d.titulo.isEmpty())
+        d.titulo = !tipo.isEmpty() ? tipo : (h.layer == QLatin1String("building") ? QObject::tr("Edificio") : d.categoria);
+    else if (!tipo.isEmpty() && tipo != d.titulo)
+        d.detalles << tipo.toLower();
+
+    const auto txt = [&h](const char *k) { return h.attributes.value(QLatin1String(k)).toString(); };
+    if (txt("oneway") == QLatin1String("1"))
+        d.detalles << QObject::tr("sentido único");
+    if (txt("brunnel") == QLatin1String("bridge"))
+        d.detalles << QObject::tr("puente");
+    else if (txt("brunnel") == QLatin1String("tunnel"))
+        d.detalles << QObject::tr("túnel");
+    else if (txt("brunnel") == QLatin1String("ford"))
+        d.detalles << QObject::tr("vado");
+    if (!txt("surface").isEmpty())
+        d.detalles << QObject::tr("firme %1").arg(txt("surface"));
+    if (!txt("render_height").isEmpty())
+        d.detalles << QObject::tr("altura %1 m").arg(txt("render_height"));
+    if (!txt("ele").isEmpty())
+        d.detalles << QObject::tr("altitud %1 m").arg(txt("ele"));
+    if (!txt("admin_level").isEmpty())
+        d.detalles << QObject::tr("nivel administrativo %1").arg(txt("admin_level"));
+    return d;
+}
+
+} // namespace
+
+// «¿Qué hay aquí?»: lo que el MBTiles vectorial dice del punto, en lenguaje llano.
+// Sale en dos bloques, «Aquí» (lo que contiene el punto: el edificio, la zona) y
+// «Cerca» (calles, lugares a unos metros), una línea por cosa con su tipo y
+// detalles. Los tramos repetidos de una misma calle se agrupan en una línea. Los
+// atributos crudos del MBTiles (claves en inglés) quedan tras una casilla, para
+// quien los quiera.
 void Ventana::queHayAqui(const QGeoCoordinate &p)
 {
     const QVector<VectorFeatureInfo> hits = m_mapa->vectorFeaturesAt(p);
-    QString html;
-    int mostrados = 0;
-    for (const VectorFeatureInfo &h : hits) {
-        if (++mostrados > 12)
-            break;
-        const QString clase = h.attributes.value(QStringLiteral("class")).toString();
-        QString titulo = h.name();
-        if (titulo.isEmpty())
-            titulo = clase.isEmpty() ? h.layer : clase;
-        const QString donde = h.distanceM < 0.5 ? tr("aquí")
-                                                : tr("a %1").arg(textoDistancia(h.distanceM));
-        html += QStringLiteral("<p><b>%1</b> <span style='color:gray'>%2 · %3 · %4%5</span><br><table>")
-                    .arg(titulo.toHtmlEscaped(), h.layer.toHtmlEscaped(), h.geometry, donde,
-                         h.fromOverlay ? tr(" · híbrido") : QString());
-        for (auto it = h.attributes.constBegin(); it != h.attributes.constEnd(); ++it) {
-            if (it.key().startsWith(QLatin1String("name:")))
-                continue;                       // traducciones del nombre: ruido
-            html += fila(it.key().toHtmlEscaped(), it.value().toString().toHtmlEscaped());
-        }
-        html += QStringLiteral("</table></p>");
-    }
-    if (html.isEmpty())
-        html = tr("<p>No hay nada vectorial cerca de este punto (hace falta un MBTiles vectorial "
-                  "como base o como capa híbrida).</p>");
-    else if (hits.size() > 12)
-        html += tr("<p>…y %1 más.</p>").arg(hits.size() - 12);
 
-    QDialog dlg(this);
-    dlg.setWindowTitle(tr("¿Qué hay aquí? · %1").arg(formatCoordinate(p, m_formatoCoord)));
-    auto *caja = new QVBoxLayout(&dlg);
-    auto *txt = new QTextBrowser(&dlg);
-    txt->setHtml(html);
-    txt->setMinimumSize(380, 300);
-    caja->addWidget(txt);
-    auto *cerrar = new QPushButton(tr("Cerrar"), &dlg);
-    connect(cerrar, &QPushButton::clicked, &dlg, &QDialog::accept);
+    // Una línea por (capa, tipo, nombre): los tramos de una calle se cuentan, no se repiten.
+    struct Linea
+    {
+        VectorFeatureInfo h;      // el más cercano del grupo
+        int tramos = 1;
+    };
+    QVector<Linea> lineas;
+    for (const VectorFeatureInfo &h : hits) {
+        const QString clave = h.layer + QLatin1Char('|') + h.attributes.value(QStringLiteral("class")).toString()
+                              + QLatin1Char('|') + h.name() + QLatin1Char('|') + h.geometry;
+        bool repetida = false;
+        for (Linea &l : lineas) {
+            const QString k = l.h.layer + QLatin1Char('|') + l.h.attributes.value(QStringLiteral("class")).toString()
+                              + QLatin1Char('|') + l.h.name() + QLatin1Char('|') + l.h.geometry;
+            if (k == clave) {
+                ++l.tramos;
+                repetida = true;
+                break;
+            }
+        }
+        if (!repetida)
+            lineas.append({ h, 1 });
+    }
+
+    auto *dlg = new QDialog(this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->setWindowTitle(tr("¿Qué hay aquí?"));
+    auto *caja = new QVBoxLayout(dlg);
+    auto *coord = new QLabel(formatCoordinate(p, m_formatoCoord).toHtmlEscaped(), dlg);
+    coord->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    caja->addWidget(coord);
+    auto *txt = new QTextBrowser(dlg);
+    txt->setFrameShape(QFrame::NoFrame);
+    txt->setMinimumSize(400, 260);
+    caja->addWidget(txt, 1);
+    auto *crudos = new QCheckBox(tr("Mostrar todos los atributos del mapa"), dlg);
+    caja->addWidget(crudos);
+    auto *cerrar = new QPushButton(tr("Cerrar"), dlg);
+    connect(cerrar, &QPushButton::clicked, dlg, &QDialog::close);
     caja->addWidget(cerrar, 0, Qt::AlignRight);
-    dlg.exec();
+
+    // Se vuelve a componer al marcar o desmarcar la casilla.
+    const auto componer = [this, txt, lineas, crudos] {
+        QString html;
+        const auto bloque = [&](const QString &cabecera, bool dentro) {
+            QString cuerpo;
+            for (const Linea &l : lineas) {
+                if ((l.h.distanceM < 0.5) != dentro)
+                    continue;
+                const DescripcionVectorial d = describirVectorial(l.h);
+                QStringList sub{ d.categoria.toLower() };
+                sub << d.detalles;
+                if (l.tramos > 1)
+                    sub << tr("%1 tramos").arg(l.tramos);
+                if (!dentro)
+                    sub << tr("a %1").arg(textoDistancia(l.h.distanceM));
+                cuerpo += QStringLiteral("<p style='margin:0 0 7px 0'><b>%1</b><br>"
+                                         "<span style='color:gray'>%2</span>")
+                              .arg(d.titulo.toHtmlEscaped(), sub.join(QStringLiteral(" · ")).toHtmlEscaped());
+                if (crudos->isChecked()) {
+                    QStringList kv;
+                    for (auto it = l.h.attributes.constBegin(); it != l.h.attributes.constEnd(); ++it)
+                        if (!it.key().startsWith(QLatin1String("name:")))
+                            kv << QStringLiteral("%1=%2").arg(it.key(), it.value().toString());
+                    cuerpo += QStringLiteral("<br><span style='color:gray;font-size:small'>%1</span>")
+                                  .arg(kv.join(QStringLiteral("  ")).toHtmlEscaped());
+                }
+                cuerpo += QStringLiteral("</p>");
+            }
+            if (!cuerpo.isEmpty())
+                html += QStringLiteral("<h4 style='margin:8px 0 4px 0'>%1</h4>").arg(cabecera.toHtmlEscaped()) + cuerpo;
+        };
+        bloque(tr("Aquí"), true);
+        bloque(tr("Cerca"), false);
+        if (html.isEmpty())
+            html = tr("<p>No hay nada vectorial cerca de este punto. Hace falta un MBTiles "
+                      "vectorial como base o como capa híbrida.</p>");
+        txt->setHtml(html);
+    };
+    connect(crudos, &QCheckBox::toggled, dlg, componer);
+    componer();
+    dlg->show();
 }
 
 // Diálogo con todos los gestos del ratón y del teclado sobre el mapa.
