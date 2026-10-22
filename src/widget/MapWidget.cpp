@@ -19,6 +19,7 @@
 #include "vector/FeatureQuery.h"
 #include "vector/MvtTile.h"
 #include "vector/PoiSearch.h"
+#include "vector/StreetSearch.h"
 #include "vector/VectorStyle.h"
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
@@ -120,6 +121,8 @@ public:
     //! POI ya leidos de las teselas, por "fichero|z/x/y" (vacio = tesela sin POI):
     //! buscar mientras se teclea no vuelve a abrir la base de datos.
     mutable QHash<QString, QVector<PointOfInterest>> poiCache;
+    //! Lo mismo para los tramos de calle (capa transportation_name).
+    mutable QHash<QString, QVector<streetsearch::Segment>> streetCache;
 
     // Persistencia automatica de entidades (opcional). Vacio = apagada. El timer
     // agrupa las rafagas de cambios; suppressAutosave evita guardar durante la
@@ -2620,14 +2623,11 @@ void MapWidget::goToPlace(const Place &place)
 
 namespace {
 
-// POI de las teselas que rodean \a centro en un dataset vectorial, a menos de
-// \a radiusM. Lee de la cache lo que ya vio y pide a la base de datos, de una vez, el
-// rectangulo que cubre lo que falta; las teselas que no existen (o sin POI) se
-// guardan vacias para no volver a pedirlas.
-QVector<PointOfInterest> poisAround(const TileDataset &dataset, const QGeoCoordinate &centro,
-                                    double radiusM, QHash<QString, QVector<PointOfInterest>> *cache)
+template <typename T, typename Parse, typename Keep>
+QVector<T> itemsAround(const TileDataset &dataset, const QGeoCoordinate &centro, double radiusM,
+                       const QString &capa, QHash<QString, QVector<T>> *cache, Parse parse, Keep keep)
 {
-    QVector<PointOfInterest> out;
+    QVector<T> out;
     if (!dataset.vector)
         return out;
     const int z = qBound(dataset.minZoom, 14, dataset.maxZoom);
@@ -2653,7 +2653,7 @@ QVector<PointOfInterest> poisAround(const TileDataset &dataset, const QGeoCoordi
             }
     if (mx1 >= 0) {
         TileDataset ds = dataset;
-        ds.id = QStringLiteral("poi:") + dataset.filePath;      // conexion propia de este hilo
+        ds.id = QStringLiteral("buscar:") + dataset.filePath;   // conexion propia de este hilo
         RMapsTileSource src(ds);
         if (!src.open())
             return out;
@@ -2664,23 +2664,44 @@ QVector<PointOfInterest> poisAround(const TileDataset &dataset, const QGeoCoordi
             for (int y = my0; y <= my1; ++y) {
                 if (cache->contains(clave(x, y)))
                     continue;
-                QVector<PointOfInterest> pois;
+                QVector<T> items;
                 const TileKey key{ z, x, y };
                 const QByteArray bytes = crudas.value(key);
                 mvt::Tile tile;
-                // Solo la capa poi: saltarse edificios y vias es lo que lo hace rapido.
-                if (!bytes.isEmpty()
-                    && mvt::decode(bytes, &tile, nullptr, QStringList{ QLatin1String(poisearch::kLayer) }))
-                    pois = poisearch::inTile(tile, key);
-                cache->insert(clave(x, y), pois);
+                // Solo la capa que interesa: saltarse edificios y vias es lo que lo hace rapido.
+                if (!bytes.isEmpty() && mvt::decode(bytes, &tile, nullptr, QStringList{ capa }))
+                    items = parse(tile, key);
+                cache->insert(clave(x, y), items);
             }
     }
     for (int x = x0; x <= x1; ++x)
         for (int y = y0; y <= y1; ++y)
-            for (const PointOfInterest &p : cache->value(clave(x, y)))
-                if (centro.distanceTo(p.coordinate) <= radiusM)
-                    out.append(p);
+            for (const T &item : cache->value(clave(x, y)))
+                if (keep(item))
+                    out.append(item);
     return out;
+}
+
+// POI de las teselas que rodean \a centro, a menos de \a radiusM.
+QVector<PointOfInterest> poisAround(const TileDataset &dataset, const QGeoCoordinate &centro,
+                                    double radiusM, QHash<QString, QVector<PointOfInterest>> *cache)
+{
+    return itemsAround<PointOfInterest>(
+        dataset, centro, radiusM, QLatin1String(poisearch::kLayer), cache,
+        [](const mvt::Tile &t, const TileKey &k) { return poisearch::inTile(t, k); },
+        [&](const PointOfInterest &p) { return centro.distanceTo(p.coordinate) <= radiusM; });
+}
+
+// Tramos de calle de las teselas que rodean \a centro (todos los de esas teselas: el
+// filtro por distancia se aplica despues, a la calle entera, no al tramo).
+QVector<streetsearch::Segment> segmentsAround(const TileDataset &dataset, const QGeoCoordinate &centro,
+                                              double radiusM,
+                                              QHash<QString, QVector<streetsearch::Segment>> *cache)
+{
+    return itemsAround<streetsearch::Segment>(
+        dataset, centro, radiusM, QLatin1String(streetsearch::kLayer), cache,
+        [](const mvt::Tile &t, const TileKey &k) { return streetsearch::inTile(t, k); },
+        [](const streetsearch::Segment &) { return true; });
 }
 
 } // namespace
@@ -2712,6 +2733,54 @@ QVector<PointOfInterest> MapWidget::searchPointsOfInterest(const QString &text, 
     if (base && (!over || base->filePath != over->filePath))
         todos += poisAround(*base, centro, radio, &d->poiCache);
     return poisearch::search(todos, text, centro, limit);
+}
+
+// ¿Hay donde buscar calles? Mismo criterio que los POI: una capa vectorial.
+bool MapWidget::canSearchStreets() const
+{
+    return canSearchPointsOfInterest();
+}
+
+// Busca calles por nombre en las teselas vectoriales que rodean el centro del mapa.
+QVector<Street> MapWidget::searchStreets(const QString &text, int limit, double radiusMeters) const
+{
+    if (text.trimmed().size() < 2 || limit <= 0)
+        return {};
+    const QGeoCoordinate centro = center();
+    if (!centro.isValid())
+        return {};
+    const double radio = qBound(1000.0, radiusMeters, 15000.0);
+    QVector<streetsearch::Segment> todos;
+    const TileDataset *over = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    const TileDataset *base = d->service.activeDataset();
+    if (over)
+        todos += segmentsAround(*over, centro, radio, &d->streetCache);
+    if (base && (!over || base->filePath != over->filePath))
+        todos += segmentsAround(*base, centro, radio, &d->streetCache);
+    // Las calles son de varias teselas: se arman enteras y despues se descartan las
+    // que quedan a mas del radio del centro (una avenida larga sigue entrando si pasa cerca).
+    QVector<Street> calles = streetsearch::search(todos, text, centro, 1000);
+    QVector<Street> out;
+    for (const Street &s : calles)
+        if (s.distanceM <= radio && out.size() < limit)
+            out.append(s);
+    return out;
+}
+
+// Encuadra la calle (o la centra con zoom 17 si es muy corta).
+void MapWidget::goToStreet(const Street &street)
+{
+    if (!street.nearest.isValid())
+        return;
+    const double span = street.northWest.distanceTo(street.southEast);
+    if (span < 150.0) {
+        setZoom(qMin(17, maxZoom()));
+        setCenter(street.nearest);
+    } else {
+        fitBounds(street.northWest, street.southEast);
+        if (zoom() > 17)
+            setZoom(qMin(17, maxZoom()));
+    }
 }
 
 // Centra en el POI con el zoom mas cercano que tenga teselas.

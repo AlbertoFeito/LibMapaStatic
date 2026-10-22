@@ -812,6 +812,32 @@ public:
     //! Centra el mapa en \a poi con zoom 17 (o el maximo de la capa activa).
     void goToPointOfInterest(const PointOfInterest &poi);
 
+    // --- Busqueda de calles (MBTiles vectorial) ----------------------------
+    //! ¿Hay alguna capa vectorial donde buscar calles? (como \c canSearchPointsOfInterest)
+    bool canSearchStreets() const;
+    /*!
+     * \brief Calles cuyo nombre casa con \a text, cerca del centro del mapa.
+     *
+     * Lee la capa `transportation_name` de las teselas vectoriales (z14 o la mas alta
+     * del MBTiles) que rodean el centro, del overlay hibrido y de la base. Cada palabra
+     * de \a text (sin tildes ni mayusculas) tiene que estar en el nombre o en la
+     * referencia; «calle», «avenida», «carretera»... son opcionales, asi que «calle
+     * obispo» encuentra «Obispo». Los tramos del mismo nombre que se tocan forman UNA
+     * calle (una avenida que las teselas cortan sale entera); dos «Calle 5» de barrios
+     * distintos son dos. Primero las que empiezan por lo escrito, luego las que lo
+     * contienen; dentro de cada grupo, las mas cercanas al centro.
+     *
+     * Como \c searchPointsOfInterest: la primera busqueda en una zona lee las teselas
+     * y las siguientes salen de una cache; bloquea mientras lee.
+     *
+     * \param radiusMeters  radio de busqueda alrededor del centro, acotado a 1-15 km;
+     *                      cuenta la distancia de la calle mas cercana al centro.
+     * \return vacio con menos de dos letras, sin capa vectorial o sin coincidencias.
+     */
+    QVector<Street> searchStreets(const QString &text, int limit = 10,
+                                  double radiusMeters = 6000.0) const;
+    //! Encuadra la calle entera en el mapa (o la centra con zoom 17 si es muy corta).
+    void goToStreet(const Street &street);
     //! Tope de teselas que lee \c importPointsOfInterest (unos 24.000 km2 a latitud
     //! de Cuba: una provincia grande entra, el pais entero no).
     static constexpr int kMaxPoiImportTiles = 5000;

@@ -29,7 +29,6 @@ zona alrededor, pero nadie lo ha pedido.
 
 ## Otras ideas del mismo MBTiles (plan del 2026-10-21)
 
-- **Búsqueda de calles** («Obispo») sin conexión, desde `transportation_name`.
 - **Rutas sin conexión** por la red vial (tipo de vía, sentido único, acceso). Es
   lo más costoso: hay que coser los tramos que las teselas cortan.
 - Recordar la licencia del dato: **ODbL**, «© OpenStreetMap contributors, © OpenMapTiles».

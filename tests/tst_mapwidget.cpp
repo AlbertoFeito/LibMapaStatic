@@ -61,6 +61,7 @@ private slots:
     void buildsFromDatasetsJson();
     void hybridOverlayOverAnyBase();
     void searchesPointsOfInterest();
+    void searchesStreets();
     void importsPointsOfInterestAsFeatures();
     void reportsErrorOnMissingJson();
 
@@ -4769,6 +4770,46 @@ QByteArray poiTile()
     return tile;
 }
 
+// Tesela MVT con una calle, «Obispo», que cruza la tesela de lado a lado por el centro
+// (capa transportation_name, class minor). La geometría sale 100 unidades por cada lado
+// para que, en teselas vecinas, los tramos se toquen.
+QByteArray streetTile()
+{
+    auto zz = [](int v) { return quint64((v << 1) ^ (v >> 31)); };
+    QByteArray geom;
+    pbVarint(geom, (1 & 7) | (1 << 3));                  // MoveTo 1
+    pbVarint(geom, zz(-100));
+    pbVarint(geom, zz(2048));
+    pbVarint(geom, (2 & 7) | (1 << 3));                  // LineTo 1
+    pbVarint(geom, zz(4296));
+    pbVarint(geom, zz(0));
+    QByteArray tags;
+    pbVarint(tags, 0); pbVarint(tags, 0);                // name = Obispo
+    pbVarint(tags, 1); pbVarint(tags, 1);                // class = minor
+    QByteArray feat;
+    pbBytes(feat, 2, tags);
+    pbVarint(feat, (3 << 3) | 0);
+    pbVarint(feat, 2);                                   // LineString
+    pbBytes(feat, 4, geom);
+    QByteArray layer;
+    pbVarint(layer, (15 << 3) | 0);
+    pbVarint(layer, 2);
+    pbBytes(layer, 1, QByteArray("transportation_name"));
+    pbBytes(layer, 2, feat);
+    pbBytes(layer, 3, QByteArray("name"));
+    pbBytes(layer, 3, QByteArray("class"));
+    for (const char *v : { "Obispo", "minor" }) {
+        QByteArray val;
+        pbBytes(val, 1, QByteArray(v));
+        pbBytes(layer, 4, val);
+    }
+    pbVarint(layer, (5 << 3) | 0);
+    pbVarint(layer, 4096);
+    QByteArray tile;
+    pbBytes(tile, 3, layer);
+    return tile;
+}
+
 // MBTiles de los zooms 3 y 4 del mundo entero: PNG gris liso o, con \a vector,
 // la tesela MVT de arriba en todas las posiciones.
 bool makeWorldMBTiles(const QString &path, bool vector, const QByteArray &vectorData = QByteArray())
@@ -5148,6 +5189,83 @@ void TstMapWidget::importsPointsOfInterestAsFeatures()
     QVERIFY(!r.ok());
     QVERIFY(r.tiles > MapWidget::kMaxPoiImportTiles);
     QVERIFY(w.featuresInLayer(QStringLiteral("grande")).isEmpty());
+}
+
+// Buscar calles en el MBTiles vectorial (overlay híbrido) alrededor del centro: por nombre
+// con y sin la palabra genérica, que los tramos de varias teselas salgan como UNA calle,
+// el límite, que no salga nada sin capa vectorial / con poco texto / lejos de la calle, y
+// que ir a la calle encuadre su extensión.
+void TstMapWidget::searchesStreets()
+{
+    const QString base = m_dir.filePath(QStringLiteral("gris_calles.mbtiles"));
+    const QString vec = m_dir.filePath(QStringLiteral("calles.mbtiles"));
+    QVERIFY(makeWorldMBTiles(base, false));
+    QVERIFY(makeWorldMBTiles(vec, true, streetTile()));
+    const QString json = m_dir.filePath(QStringLiteral("gris_calles.json"));
+    {
+        QFile f(json);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QJsonDocument(QJsonObject{ { QStringLiteral("datasets"),
+            QJsonArray{ QJsonObject{ { QStringLiteral("id"), QStringLiteral("gris") },
+                                     { QStringLiteral("filePath"), base } } } } }).toJson());
+    }
+    // Centro de la tesela z4 (7, 6): la calle la cruza justo por ahí.
+    const double pi = 3.14159265358979323846;
+    const QGeoCoordinate centro(std::atan(std::sinh(pi * (1.0 - 2.0 * 6.5 / 16.0))) * 180.0 / pi,
+                                (7.5 / 16.0) * 360.0 - 180.0);
+    MapConfig cfg = baseConfig(json);
+    cfg.initialZoom = 4;
+    cfg.initialCenter = centro;
+    MapWidget w(cfg);
+    QVERIFY2(w.isReady(), qPrintable(w.lastError()));
+    w.resize(600, 400);
+
+    // Sin capa vectorial (la base es ráster) no hay donde buscar.
+    QVERIFY(!w.canSearchStreets());
+    QVERIFY(w.searchStreets(QStringLiteral("obispo")).isEmpty());
+
+    QString error;
+    QVERIFY2(w.setVectorOverlay(vec, &error), qPrintable(error));
+    QVERIFY(w.canSearchStreets());
+
+    // Las tres teselas de la fila del centro (a z4 el radio de 6 km abarca 3x3) dan tres
+    // tramos que se tocan: UNA calle. Las filas de arriba y de abajo quedan a miles de km.
+    auto r = w.searchStreets(QStringLiteral("obispo"));
+    QCOMPARE(r.size(), 1);
+    QCOMPARE(r[0].name, QStringLiteral("Obispo"));
+    QCOMPARE(r[0].typeLabel(), QStringLiteral("calle"));
+    QCOMPARE(r[0].parts.size(), 3);
+    QVERIFY(r[0].distanceM < 100.0);
+    QVERIFY(r[0].northWest.distanceTo(r[0].southEast) > 1000000.0);          // cubre las tres teselas
+
+    QCOMPARE(w.searchStreets(QStringLiteral("calle obispo")).size(), 1);      // la genérica es opcional
+    QCOMPARE(w.searchStreets(QStringLiteral("OBISPO")).size(), 1);
+    QCOMPARE(w.searchStreets(QStringLiteral("obispo"), 0).size(), 0);          // límite 0
+    QCOMPARE(w.searchStreets(QStringLiteral("obispo")).size(), 1);             // y con la caché, lo mismo
+    QVERIFY(w.searchStreets(QStringLiteral("o")).isEmpty());                  // poco texto
+    QVERIFY(w.searchStreets(QStringLiteral("zzzz")).isEmpty());
+
+    // Lejos de la calle (a miles de km) no sale.
+    w.setCenter(QGeoCoordinate(centro.latitude() + 8.0, centro.longitude()));
+    QVERIFY(w.searchStreets(QStringLiteral("obispo")).isEmpty());
+    w.setCenter(centro);
+
+    // Ir a la calle encuadra su extensión: el centro queda sobre ella.
+    const Street s = w.searchStreets(QStringLiteral("obispo")).first();
+    w.goToStreet(s);
+    QVERIFY(w.center().distanceTo(s.nearest) < 500000.0);
+    QVERIFY(w.zoom() <= 17);
+
+    // Una calle corta (menos de 150 m) se centra con zoom 17.
+    Street corta = s;
+    corta.northWest = QGeoCoordinate(centro.latitude() + 0.0003, centro.longitude() - 0.0003);
+    corta.southEast = QGeoCoordinate(centro.latitude() - 0.0003, centro.longitude() + 0.0003);
+    corta.nearest = centro;
+    w.goToStreet(corta);
+    QVERIFY(w.center().distanceTo(centro) < 50.0);
+
+    w.clearVectorOverlay();
+    QVERIFY(!w.canSearchStreets());
 }
 
 QTEST_MAIN(TstMapWidget)
