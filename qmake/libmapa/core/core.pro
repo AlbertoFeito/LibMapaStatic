@@ -43,6 +43,7 @@ SOURCES += \
     $$ROOT/src/vector/LandMask.cpp \
     $$ROOT/src/vector/MvtTile.cpp \
     $$ROOT/src/vector/PoiSearch.cpp \
+    $$ROOT/src/vector/StreetSearch.cpp \
     $$ROOT/src/vector/VectorStyle.cpp \
     $$ROOT/src/vector/VectorTileRenderer.cpp \
     $$ROOT/third_party/miniz/miniz.c \

@@ -9,6 +9,7 @@
 #include "vector/LandMask.h"
 #include "vector/MvtTile.h"
 #include "vector/PoiSearch.h"
+#include "vector/StreetSearch.h"
 #include "vector/VectorStyle.h"
 #include "vector/VectorTileRenderer.h"
 
@@ -69,6 +70,7 @@ private slots:
     void poiGroupsAndShapes();
     void decodeOnlyChosenLayers();
     void searchesPointsOfInterest();
+    void searchesStreets();
 
 private:
     QByteArray fixture(const char *name) const;
@@ -1210,6 +1212,104 @@ void TstVectorTiles::searchesPointsOfInterest()
     QVERIFY(poisearch::search(todos, QStringLiteral("a"), centro, 10).isEmpty());
     QVERIFY(poisearch::search(todos, QString(), centro, 10).isEmpty());
     QVERIFY(poisearch::search(todos, QStringLiteral("zzzz"), centro, 10).isEmpty());
+}
+
+// Buscar calles: tres tesela z14 puestas a mano. «Obispo» corre por la tesela A y sigue en
+// la vecina B (la unión de teselas la parte en dos tramos que se tocan: debe salir UNA calle);
+// «Calle 5» aparece en A y en una tesela C lejana (dos barrios: debe salir DOS veces, la más
+// cercana primero); y una carretera solo con referencia. Se busca sin tildes, con la palabra
+// genérica «calle», por referencia, y se comprueba el nombre en español y que un texto corto no
+// devuelva nada.
+void TstVectorTiles::searchesStreets()
+{
+    const int z = 14, x = 4000, y = 7000;
+    auto linea = [](const QVector<QPoint> &pts) { return path(pts, false); };
+    auto props = [](const char *nombre, const char *clase, const char *ref = nullptr) {
+        QVector<QPair<QString, QString>> p;
+        if (nombre && *nombre) p.append({ QStringLiteral("name"), QString::fromUtf8(nombre) });
+        p.append({ QStringLiteral("class"), QString::fromLatin1(clase) });
+        if (ref) p.append({ QStringLiteral("ref"), QString::fromLatin1(ref) });
+        return p;
+    };
+    // Tesela A: Obispo de borde a borde, y una Calle 5 corta al norte; una vía de otro tipo sin nombre ni ref.
+    const QByteArray tileA = tile({ layer(QStringLiteral("transportation_name"), {
+        { 2, linea({ { 0, 2048 }, { 4096, 2048 } }), props("Obispo", "minor") },
+        { 2, linea({ { 1000, 500 }, { 2000, 500 } }), props("Calle 5", "residential") },
+        { 2, linea({ { 0, 3000 }, { 4096, 3000 } }), props("", "service") },
+        { 2, linea({ { 500, 3500 }, { 900, 3500 } }), props("Línea", "tertiary") },
+        { 1, QVector<quint32>{ cmd(1, 1), zz(100), zz(100) }, props("Un punto no es calle", "minor") },
+    }) });
+    // Tesela B (a la derecha de A): Obispo continúa desde el borde izquierdo; y una carretera con ref.
+    const QByteArray tileB = tile({ layer(QStringLiteral("transportation_name"), {
+        { 2, linea({ { 0, 2048 }, { 2000, 2048 } }), props("Obispo", "minor") },
+        { 2, linea({ { 0, 1000 }, { 4096, 1000 } }), props("", "primary", "CC") },
+    }) });
+    // Tesela C (lejos): otra Calle 5.
+    const QByteArray tileC = tile({ layer(QStringLiteral("transportation_name"), {
+        { 2, linea({ { 1000, 500 }, { 2000, 500 } }), props("Calle 5", "residential") },
+    }) });
+
+    QVector<streetsearch::Segment> todos;
+    for (const auto &c : { qMakePair(tileA, TileKey{ z, x, y }), qMakePair(tileB, TileKey{ z, x + 1, y }),
+                           qMakePair(tileC, TileKey{ z, x + 30, y }) }) {
+        mvt::Tile t;
+        QVERIFY(mvt::decode(c.first, &t, nullptr, QStringList{ QStringLiteral("transportation_name") }));
+        todos += streetsearch::inTile(t, c.second);
+    }
+    QCOMPARE(todos.size(), 3 + 2 + 1);                         // sin el punto ni la vía sin nombre ni referencia
+
+    const QGeoCoordinate centro = tilePoint(z, x, y, 0.5, 0.5);
+
+    // Obispo: dos tramos en dos teselas que se tocan en el borde → UNA calle con dos partes.
+    auto r = streetsearch::search(todos, QStringLiteral("obispo"), centro, 10);
+    QCOMPARE(r.size(), 1);
+    QCOMPARE(r[0].name, QStringLiteral("Obispo"));
+    QCOMPARE(r[0].typeLabel(), QStringLiteral("calle"));
+    QCOMPARE(r[0].parts.size(), 2);
+    QVERIFY(r[0].distanceM < 5.0);                             // pasa por el centro de A
+    // Cubre de A a la mitad de B: ~1,5 tesela de ancho (unos 3 km a esta latitud).
+    QVERIFY(r[0].northWest.longitude() < r[0].southEast.longitude());
+    QVERIFY(r[0].northWest.distanceTo(r[0].southEast) > 2500.0);
+
+    // Palabra genérica opcional, mayúsculas y tildes sin importar.
+    QCOMPARE(streetsearch::search(todos, QStringLiteral("CALLE Obispo"), centro, 10).size(), 1);
+    QCOMPARE(streetsearch::search(todos, QStringLiteral("linea"), centro, 10).first().name, QStringLiteral("Línea"));
+    QCOMPARE(streetsearch::search(todos, QStringLiteral("avenida linea"), centro, 10).size(), 1);
+    // Pero solo la genérica no casa con todo: «calle» busca «calle» (Calle 5).
+    QCOMPARE(streetsearch::search(todos, QStringLiteral("calle"), centro, 10).size(), 2);
+
+    // Dos «Calle 5» lejanas son dos calles; la de A (más cercana) primero.
+    r = streetsearch::search(todos, QStringLiteral("calle 5"), centro, 10);
+    QCOMPARE(r.size(), 2);
+    QVERIFY(r[0].distanceM < r[1].distanceM);
+    QVERIFY(r[1].distanceM > 50000.0);
+    QCOMPARE(r[0].parts.size(), 1);
+    QCOMPARE(streetsearch::search(todos, QStringLiteral("calle 5"), centro, 1).size(), 1);       // límite
+
+    // Por referencia (una carretera sin nombre).
+    r = streetsearch::search(todos, QStringLiteral("cc"), centro, 10);
+    QCOMPARE(r.size(), 1);
+    QCOMPARE(r[0].name, QStringLiteral("CC"));
+    QCOMPARE(r[0].ref, QStringLiteral("CC"));
+    QCOMPARE(r[0].typeLabel(), QStringLiteral("carretera principal"));
+
+    // Lo que empieza por lo escrito va antes que lo que solo lo contiene.
+    QVector<streetsearch::Segment> dos = todos;
+    streetsearch::Segment extra;
+    extra.name = QStringLiteral("Paseo del Obispo Viejo");
+    extra.type = QStringLiteral("tertiary");
+    extra.line = { centro, tilePoint(z, x, y, 0.55, 0.5) };
+    dos.append(extra);
+    r = streetsearch::search(dos, QStringLiteral("obispo"), centro, 10);
+    QCOMPARE(r.size(), 2);
+    QCOMPARE(r[0].name, QStringLiteral("Obispo"));             // empieza por lo escrito
+    QCOMPARE(r[1].name, QStringLiteral("Paseo del Obispo Viejo"));
+
+    // Poco texto o nada que casar: nada.
+    QVERIFY(streetsearch::search(todos, QStringLiteral("o"), centro, 10).isEmpty());
+    QVERIFY(streetsearch::search(todos, QString(), centro, 10).isEmpty());
+    QVERIFY(streetsearch::search(todos, QStringLiteral("zzzz"), centro, 10).isEmpty());
+    QVERIFY(streetsearch::search(todos, QStringLiteral("un punto"), centro, 10).isEmpty());      // los puntos no son calles
 }
 
 QTEST_MAIN(TstVectorTiles)
