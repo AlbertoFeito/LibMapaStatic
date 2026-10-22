@@ -25,7 +25,12 @@ const char kOpenMapTilesStyle[] = R"JSON({
     { "id": "lugares", "title": "Nombres de lugares" },
     { "id": "edificios", "title": "Edificios" },
     { "id": "cimas", "title": "Cimas" },
-    { "id": "limites", "title": "Límites administrativos" }
+    { "id": "limites", "title": "Límites administrativos" },
+    { "id": "poi_salud", "title": "Salud (hospitales, farmacias)", "visible": false },
+    { "id": "poi_seguridad", "title": "Seguridad (policía, bomberos)", "visible": false },
+    { "id": "poi_combustible", "title": "Combustible", "visible": false },
+    { "id": "poi_alojamiento", "title": "Alojamiento", "visible": false },
+    { "id": "poi_transporte", "title": "Transporte (paradas, puertos)", "visible": false }
   ],
   "rules": [
     { "layer": "landcover", "filter": { "class": ["wood", "forest"] }, "fill": "#d6e6c3" },
@@ -133,7 +138,22 @@ const char kOpenMapTilesStyle[] = R"JSON({
       "filter": { "class": ["tertiary", "minor", "service"] }, "minZoom": 15,
       "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#5a5047" },
     { "layer": "mountain_peak", "group": "cimas", "minZoom": 11, "label": "name:es|name|name:latin",
-      "textSize": 10, "textColor": "#6b4f2f", "pointRadius": 2.5, "pointColor": "#8b6b45" }
+      "textSize": 10, "textColor": "#6b4f2f", "pointRadius": 2.5, "pointColor": "#8b6b45" },
+    { "layer": "poi", "group": "poi_salud", "filter": { "class": ["hospital", "doctors", "pharmacy", "dentist", "clinic", "veterinary"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#d32f2f",
+      "pointRadius": 4, "pointColor": "#d32f2f", "pointShape": "cross" },
+    { "layer": "poi", "group": "poi_seguridad", "filter": { "class": ["police", "fire_station"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#1565c0",
+      "pointRadius": 4, "pointColor": "#1565c0", "pointShape": "square" },
+    { "layer": "poi", "group": "poi_combustible", "filter": { "class": ["fuel", "charging_station"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ef6c00",
+      "pointRadius": 4, "pointColor": "#ef6c00", "pointShape": "diamond" },
+    { "layer": "poi", "group": "poi_alojamiento", "filter": { "class": ["lodging", "campsite"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#7b1fa2",
+      "pointRadius": 4, "pointColor": "#7b1fa2", "pointShape": "triangle" },
+    { "layer": "poi", "group": "poi_transporte", "filter": { "class": ["bus", "railway", "ferry_terminal", "harbor"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#00897b",
+      "pointRadius": 4, "pointColor": "#00897b", "pointShape": "circle" }
   ]
 })JSON";
 
@@ -151,7 +171,12 @@ const char kHybridStyle[] = R"JSON({
     { "id": "nombres_calles", "title": "Nombres de calles" },
     { "id": "lugares", "title": "Nombres de lugares" },
     { "id": "cimas", "title": "Cimas" },
-    { "id": "limites", "title": "Límites administrativos" }
+    { "id": "limites", "title": "Límites administrativos" },
+    { "id": "poi_salud", "title": "Salud (hospitales, farmacias)", "visible": false },
+    { "id": "poi_seguridad", "title": "Seguridad (policía, bomberos)", "visible": false },
+    { "id": "poi_combustible", "title": "Combustible", "visible": false },
+    { "id": "poi_alojamiento", "title": "Alojamiento", "visible": false },
+    { "id": "poi_transporte", "title": "Transporte (paradas, puertos)", "visible": false }
   ],
   "rules": [
     { "layer": "boundary", "group": "limites", "filter": { "admin_level": ["3", "4"] }, "minZoom": 5,
@@ -197,7 +222,22 @@ const char kHybridStyle[] = R"JSON({
       "filter": { "class": ["tertiary", "minor", "service"] }, "minZoom": 15,
       "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000" },
     { "layer": "mountain_peak", "group": "cimas", "minZoom": 11, "label": "name:es|name|name:latin",
-      "textSize": 10, "textColor": "#fff0d0", "halo": "#d0000000", "pointRadius": 2.5, "pointColor": "#fff0d0" }
+      "textSize": 10, "textColor": "#fff0d0", "halo": "#d0000000", "pointRadius": 2.5, "pointColor": "#fff0d0" },
+    { "layer": "poi", "group": "poi_salud", "filter": { "class": ["hospital", "doctors", "pharmacy", "dentist", "clinic", "veterinary"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000",
+      "pointRadius": 4, "pointColor": "#ff7b7b", "pointShape": "cross" },
+    { "layer": "poi", "group": "poi_seguridad", "filter": { "class": ["police", "fire_station"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000",
+      "pointRadius": 4, "pointColor": "#7bbcff", "pointShape": "square" },
+    { "layer": "poi", "group": "poi_combustible", "filter": { "class": ["fuel", "charging_station"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000",
+      "pointRadius": 4, "pointColor": "#ffb85c", "pointShape": "diamond" },
+    { "layer": "poi", "group": "poi_alojamiento", "filter": { "class": ["lodging", "campsite"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000",
+      "pointRadius": 4, "pointColor": "#cfa5ff", "pointShape": "triangle" },
+    { "layer": "poi", "group": "poi_transporte", "filter": { "class": ["bus", "railway", "ferry_terminal", "harbor"] }, "minZoom": 13,
+      "label": "name:es|name|name:latin", "textSize": 10, "textColor": "#ffffff", "halo": "#d0000000",
+      "pointRadius": 4, "pointColor": "#6be8c8", "pointShape": "circle" }
   ]
 })JSON";
 
@@ -346,6 +386,15 @@ bool VectorStyle::fromJson(const QJsonObject &json, VectorStyle *out, QString *e
         const QColor pc = parseColor(o.value(QStringLiteral("pointColor")));
         if (pc.isValid())
             r.pointColor = pc;
+        const QString shape = o.value(QStringLiteral("pointShape")).toString().toLower();
+        if (shape == QLatin1String("square"))
+            r.pointShape = PointShape::Square;
+        else if (shape == QLatin1String("triangle"))
+            r.pointShape = PointShape::Triangle;
+        else if (shape == QLatin1String("diamond"))
+            r.pointShape = PointShape::Diamond;
+        else if (shape == QLatin1String("cross"))
+            r.pointShape = PointShape::Cross;
 
         if (r.layer.isEmpty() || (!r.fill.isValid() && !r.line.isValid() && r.labelFields.isEmpty()))
             continue;

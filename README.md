@@ -422,8 +422,8 @@ fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motiv
 - **Estilo por defecto:** el del esquema OpenMapTiles (colores tipo OSM Bright):
   agua, bosques y usos del suelo, parques, edificios (z13+), vías por categoría
   con borde, ferrocarril, límites por `admin_level`, aeropuertos y rótulos de
-  lugares y aguas (`name:es`, `name` o `name:latin`, el primero que haya). Sin
-  puntos de interés ni números de portal: ver «Añadir puntos de interés» abajo.
+  lugares y aguas (`name:es`, `name` o `name:latin`, el primero que haya). Los
+  puntos de interés van en cinco grupos por tema, apagados de partida (ver «Puntos de interés» abajo); sin números de portal.
 - **Estilo propio:** `"vectorStyle": "estilo.json"` en la entrada del dataset
   (relativo al JSON; viaja con el paquete). Formato sencillo: fondo y una lista de
   reglas por capa con filtro, zooms, relleno, trazo, grosor por zoom y rótulo.
@@ -437,26 +437,40 @@ fichero que dice ser `pbf` pero cuyas teselas no son MVT se rechaza con su motiv
 - **Capas dentro de la capa:** el estilo reparte sus reglas en grupos que se
   encienden y apagan (`MapWidget::baseLayerGroups` / `setBaseLayerGroupVisible`;
   en la demo, casillas debajo de la capa base): Nombres de calles, Nombres de
-  lugares, Edificios, Cimas y Límites administrativos. De partida,
+  lugares, Edificios, Cimas, Límites administrativos y los cinco de puntos de
+  interés. De partida,
   `"hiddenGroups": ["edificios"]` en la entrada del dataset (o, en un estilo propio,
   `"visible": false` en el grupo).
-- **Añadir puntos de interés:** los estilos por defecto no los traen, pero el
-  MBTiles sí (capa `poi`, con `class`: hospital, fuel, police, pharmacy, school,
-  bank, lodging…; `vector_tile --info` lista las de una zona). Para ver solo los
-  que interesen, un estilo propio (copia de `docs/estilo_vectorial.json` o de
-  `docs/estilo_hibrido.json`) con un grupo y una regla:
+- **Puntos de interés (POI):** el MBTiles trae la capa `poi` (con `class`: hospital,
+  fuel, police, pharmacy, school, bank, lodging…; `vector_tile --info` lista las de
+  una zona) y los dos estilos por defecto la reparten en cinco grupos por tema,
+  **apagados de partida** (se encienden con su casilla) y visibles desde z13, cada
+  uno con su color y un símbolo distinto, con el nombre al lado:
+
+  | Grupo | Clases | Símbolo |
+  |---|---|---|
+  | `poi_salud` | hospital, doctors, pharmacy, dentist, clinic, veterinary | cruz roja |
+  | `poi_seguridad` | police, fire_station | cuadrado azul |
+  | `poi_combustible` | fuel, charging_station | rombo naranja |
+  | `poi_alojamiento` | lodging, campsite | triángulo morado |
+  | `poi_transporte` | bus, railway, ferry_terminal, harbor | círculo verde |
+
+  Solo salen los que tienen nombre. Para otros temas o clases, un estilo propio (copia
+  de `docs/estilo_vectorial.json` o de `docs/estilo_hibrido.json`) con un grupo y una
+  regla, y `"vectorStyle": "estilo.json"` en la capa (o en `"vectorOverlay"`):
 
   ```json
-  "groups": [ …, { "id": "servicios", "title": "Hospitales y policía" } ],
-  "rules":  [ …, { "layer": "poi", "group": "servicios", "minZoom": 13,
-                   "filter": { "class": ["hospital", "police"] },
+  "groups": [ …, { "id": "bancos", "title": "Bancos", "visible": false } ],
+  "rules":  [ …, { "layer": "poi", "group": "bancos", "minZoom": 14,
+                   "filter": { "class": ["bank", "atm"] },
                    "label": "name:es|name|name:latin", "textSize": 10,
-                   "textColor": "#b00020", "pointRadius": 3, "pointColor": "#b00020" } ]
+                   "textColor": "#1b5e20", "pointRadius": 4, "pointColor": "#1b5e20",
+                   "pointShape": "square" } ]
   ```
 
-  y `"vectorStyle": "estilo.json"` en la capa (o en `"vectorOverlay"`). El grupo
-  sale como una casilla más. Los POI por tema, su búsqueda y la tarjeta al pinchar
-  están aparcados en [`docs/PENDIENTES.md`](docs/PENDIENTES.md).
+  `"pointShape"` admite `circle` (por defecto), `square`, `triangle`, `diamond` y
+  `cross`. Buscar POI por nombre y sacar una selección como entidades siguen en
+  [`docs/PENDIENTES.md`](docs/PENDIENTES.md).
 - **«¿Qué hay aquí?»:** `MapWidget::vectorFeaturesAt(punto, radioMetros)` devuelve las entidades vectoriales bajo un punto (calle, edificio, lugar…) con sus atributos (`class`, `name`, `surface`, `render_height`…), del overlay híbrido y de la base. La demo lo ofrece en el menú del clic derecho; en consola, `vector_tile --mbtiles f.mbtiles --at lat,lon`.
 - **Comprobar sin abrir la demo:** `vector_tile --mbtiles f.mbtiles --info`
   (capas, claves y clases de la tesela de un punto) y `--out vista.png` (pinta

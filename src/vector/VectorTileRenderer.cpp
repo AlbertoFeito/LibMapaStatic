@@ -232,6 +232,50 @@ bool placeAlongLine(QPainter &p, const LabelCandidate &c, const QFont &font,
     return false;
 }
 
+// Dibuja el marcador de un punto centrado en \a at, con la forma, el tamaño y el
+// color de la regla. El círculo va liso (como siempre); las demás formas llevan un
+// contorno fino del color del halo, para que se lean sobre cualquier fondo.
+void drawMarker(QPainter &p, const QPointF &at, const VectorRule &r)
+{
+    const double k = r.pointRadius;
+    p.setBrush(r.pointColor);
+    if (r.pointShape == PointShape::Circle) {
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(at, k, k);
+        return;
+    }
+    p.setPen(QPen(r.haloColor, 1.0, Qt::SolidLine, Qt::SquareCap, Qt::MiterJoin));
+    switch (r.pointShape) {
+    case PointShape::Square:
+        p.drawRect(QRectF(at.x() - k, at.y() - k, 2 * k, 2 * k));
+        break;
+    case PointShape::Triangle: {
+        const QPointF tri[3] = { QPointF(at.x(), at.y() - k * 1.15), QPointF(at.x() + k * 1.1, at.y() + k * 0.85),
+                                 QPointF(at.x() - k * 1.1, at.y() + k * 0.85) };
+        p.drawPolygon(tri, 3);
+        break;
+    }
+    case PointShape::Diamond: {
+        const QPointF d[4] = { QPointF(at.x(), at.y() - k * 1.2), QPointF(at.x() + k * 1.2, at.y()),
+                               QPointF(at.x(), at.y() + k * 1.2), QPointF(at.x() - k * 1.2, at.y()) };
+        p.drawPolygon(d, 4);
+        break;
+    }
+    case PointShape::Cross: {
+        const double a = k * 1.25, t = k * 0.45;     // brazo y mitad del grosor
+        const QPointF c[12] = { { -t, -a }, { t, -a }, { t, -t }, { a, -t }, { a, t }, { t, t },
+                                { t, a }, { -t, a }, { -t, t }, { -a, t }, { -a, -t }, { -t, -t } };
+        QPointF pts[12];
+        for (int i = 0; i < 12; ++i)
+            pts[i] = at + c[i];
+        p.drawPolygon(pts, 12);
+        break;
+    }
+    case PointShape::Circle:
+        break;
+    }
+}
+
 // Coloca y pinta los rótulos, en el orden de las reglas: con halo, dentro de la
 // tesela y sin solaparse (el primero que llega se queda el sitio).
 void drawLabels(QPainter &p, const QVector<LabelCandidate> &labels, int sizePx)
@@ -270,11 +314,8 @@ void drawLabels(QPainter &p, const QVector<LabelCandidate> &labels, int sizePx)
             continue;
         placed.append(guard);
 
-        if (r.pointRadius > 0) {
-            p.setPen(Qt::NoPen);
-            p.setBrush(r.pointColor);
-            p.drawEllipse(c.anchor, r.pointRadius, r.pointRadius);
-        }
+        if (r.pointRadius > 0)
+            drawMarker(p, c.anchor, r);
         QPainterPath path;
         path.addText(QPointF(box.left(), box.top() + fm.ascent()), font, c.text);
         p.strokePath(path, QPen(r.haloColor, 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
@@ -408,10 +449,8 @@ QImage VectorTileRenderer::renderImpl(const mvt::Tile &tile, int zoom, const Til
         if (!lines.isEmpty() && rule.line.isValid())
             p.strokePath(lines, strokePen(rule, width));
         if (!dots.isEmpty()) {
-            p.setPen(Qt::NoPen);
-            p.setBrush(rule.pointColor);
             for (const QPointF &d : dots)
-                p.drawEllipse(d, rule.pointRadius, rule.pointRadius);
+                drawMarker(p, d, rule);
         }
     }
 

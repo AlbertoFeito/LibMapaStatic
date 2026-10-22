@@ -13,6 +13,16 @@
 
 namespace libmapa {
 
+//! Forma del marcador de un punto (\c VectorRule::pointShape): un símbolo distinto
+//! por tema permite distinguir de un vistazo hospitales de gasolineras.
+enum class PointShape {
+    Circle,     //!< círculo (por defecto)
+    Square,     //!< cuadrado
+    Triangle,   //!< triángulo con la punta arriba
+    Diamond,    //!< rombo
+    Cross       //!< cruz gruesa (el símbolo de salud)
+};
+
 /*!
  * \brief Una regla de dibujo de teselas vectoriales.
  *
@@ -56,6 +66,9 @@ struct VectorRule
     bool italic = false;
     double pointRadius = 0.0;                        //!< punto dibujado bajo el rótulo (px)
     QColor pointColor = QColor(120, 120, 120);
+    //! Forma del punto. Todas menos el círculo llevan un contorno fino del color del
+    //! halo, para que se lean sobre cualquier fondo.
+    PointShape pointShape = PointShape::Circle;
 
     //! ¿La regla vale para este zoom y este tipo de geometría?
     bool appliesTo(int zoom, mvt::GeomType type) const;
@@ -124,7 +137,8 @@ public:
      * que se pueden apagar ([{"id": "poi", "title": "Puntos de interés"}, …]) y cada
      * regla dice el suyo con "group". Otras claves de regla: "exclude", "maxZoom", "geometry" ("point", "line",
      * "polygon" o una lista), "widthOffset", "dash", "textColor", "halo",
-     * "italic", "pointRadius", "pointColor".
+     * "italic", "pointRadius", "pointColor", "pointShape" ("circle", "square", "triangle",
+     * "diamond" o "cross").
      * \return false si el JSON no tiene reglas válidas; el motivo, en \a error.
      */
     static bool fromJson(const QJsonObject &json, VectorStyle *out, QString *error = nullptr);
