@@ -6879,3 +6879,10 @@ derecho). Decisiones:
 - La composición del texto (agrupar tramos, «Aquí»/«Cerca», traducciones) es una sola, compartida por la tarjeta y la ventana.
 Solo la demo; la API no cambia. Compila y los 31 tests siguen en verde; sin ver en pantalla con datos reales.
 
+### 166 (ajuste 3). La tarjeta del clic izquierdo se cierra sola
+
+Petición del usuario: que la tarjeta dure **5 segundos** y se cierre si el ratón sale de ella. Un temporizador de 5 s y otro de 100 ms que
+comprueba la posición del cursor con un margen de 30 px alrededor de la tarjeta (sale 12 px en diagonal del cursor, así que sin margen se
+cerraría al nacer). Se vigila la posición en vez de esperar un evento de salida porque un `Qt::Popup` captura el ratón y el «leave» no es
+fiable. Los 5 s no se pausan con el cursor encima: si hace falta más tiempo, «Todo…» abre la ventana completa, que no caduca.
+

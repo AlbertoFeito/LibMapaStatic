@@ -15,6 +15,7 @@
 #include <functional>
 
 #include <QCheckBox>
+#include <QCursor>
 #include <QDialog>
 #include <QHash>
 #include <QFrame>
@@ -495,7 +496,7 @@ void Ventana::queHayAqui(const QGeoCoordinate &p)
 
 // Clic izquierdo en un lugar vacío del mapa: una tarjeta pequeña junto al cursor con
 // lo más relevante del punto (hasta 4 líneas) y un botón «Todo…» para la ventana
-// completa. Si no hay nada vectorial cerca (o la base no es vectorial) no sale nada:
+// completa; se cierra sola a los 5 s o al alejar el cursor. Si no hay nada vectorial cerca (o la base no es vectorial) no sale nada:
 // un clic en el vacío no debe abrir cosas sin motivo.
 void Ventana::tarjetaQueHayAqui(const QGeoCoordinate &p, const QPoint &global)
 {
@@ -531,6 +532,22 @@ void Ventana::tarjetaQueHayAqui(const QGeoCoordinate &p, const QPoint &global)
     }
     tarjeta->move(pos);
     tarjeta->show();
+
+    // Se cierra sola a los 5 s, y en cuanto el cursor se aleja de ella. Un Popup tiene
+    // el ratón capturado, así que no llega un «leave» fiable: se vigila la posición del
+    // cursor. El margen de 30 px cubre el desplazamiento con que sale junto al cursor
+    // (12 px) y el temblor del ratón; los temporizadores son hijos de la tarjeta y
+    // mueren con ella.
+    auto *plazo = new QTimer(tarjeta);
+    plazo->setSingleShot(true);
+    connect(plazo, &QTimer::timeout, tarjeta, &QWidget::close);
+    plazo->start(5000);
+    auto *vigia = new QTimer(tarjeta);
+    connect(vigia, &QTimer::timeout, tarjeta, [tarjeta] {
+        if (!tarjeta->frameGeometry().adjusted(-30, -30, 30, 30).contains(QCursor::pos()))
+            tarjeta->close();
+    });
+    vigia->start(100);
 }
 
 // Diálogo con todos los gestos del ratón y del teclado sobre el mapa.
