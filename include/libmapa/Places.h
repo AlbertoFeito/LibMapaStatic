@@ -55,6 +55,31 @@ struct LIBMAPA_EXPORT PointOfInterest
 };
 
 /*!
+ * \brief Una calle (o carretera, camino…) del MBTiles vectorial.
+ *
+ * Sale de `MapWidget::searchStreets`. Se arma uniendo los tramos con el mismo nombre
+ * que se tocan: una avenida larga que las teselas cortan sale como UNA calle, y dos
+ * «Calle 5» de barrios distintos salen como dos.
+ */
+struct LIBMAPA_EXPORT Street
+{
+    QString name;                  //!< Nombre ("Obispo"); la referencia ("A1") si no tiene.
+    QString ref;                   //!< Referencia de la carretera ("CC", "A1"); puede estar vacía.
+    QString type;                  //!< `class` de OpenMapTiles: "primary", "minor"…
+    QGeoCoordinate nearest;        //!< Punto de la calle más cercano al centro del mapa en la búsqueda.
+    QGeoCoordinate northWest;      //!< Esquina noroeste de lo que cubre.
+    QGeoCoordinate southEast;      //!< Esquina sureste.
+    double distanceM = 0.0;        //!< Distancia de \a nearest al centro del mapa.
+    //! La geometría: un trazado por tramo (pueden solaparse unos metros en las
+    //! uniones de teselas). Sirve para resaltarla en el mapa.
+    QVector<QVector<QGeoCoordinate>> parts;
+
+    //! Tipo en español para mostrarlo ("calle", "carretera principal"…); el tipo
+    //! tal cual si no lo conoce.
+    QString typeLabel() const;
+};
+
+/*!
  * \brief Resultado de \c MapWidget::importPointsOfInterest.
  *
  * Si \c tooLarge, no se leyó nada: la zona abarca \c tiles teselas y el tope es

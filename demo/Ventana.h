@@ -98,12 +98,15 @@ private:
     void buscarLugares(const QString &texto);
     void irALugar(const Place &lugar);
     void irAPoi(const PointOfInterest &poi);
+    void irACalle(const Street &calle);
+    void quitarResaltadoCalle();
     void irAResultado(int indice);
     void enfocarBuscador();
     QLineEdit *m_buscador = nullptr;          //!< campo «Buscar lugar…» de la barra
     QStringListModel *m_sugerencias = nullptr; //!< filas del desplegable («nombre — tipo»)
     QVector<Place> m_lugaresVistos;            //!< lugares de la última búsqueda (primero en el desplegable)
     QVector<PointOfInterest> m_poisVistos;     //!< puntos de interés de la última búsqueda (tras los lugares)
+    QVector<Street> m_callesVistas;            //!< calles de la última búsqueda (tras los sitios)
     QAction *m_accDemCarpeta = nullptr;     //!< Cargar elevación: carpeta de GeoTIFF o .hgt
     QAction *m_accDemFichero = nullptr;     //!< Cargar elevación: un GeoTIFF o una BD .sqlitedb
 

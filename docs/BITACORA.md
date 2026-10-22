@@ -7000,6 +7000,59 @@ usuario. No hay prueba automática del cuadro de diálogo de la demo (compila). 
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+## 170. Búsqueda de calles sin conexión
+
+Primera de «Otras ideas del mismo MBTiles». Con §168 se buscan sitios; faltaba «Obispo»: escribir el nombre de una calle y que el mapa vaya a ella.
+Esta rama sale de `main` sin esperar a #35 (importar POI como entidades) porque no depende de ella; si #35 se fusiona antes, `BITACORA.md`
+(§169 y esta) y las filas de `CLAUDE.md` chocan en texto y se resuelven manteniendo las dos.
+
+**Qué hace:** `MapWidget::searchStreets(texto, límite, radio)` lee la capa `transportation_name` (la que lleva los nombres de las vías en OpenMapTiles)
+de las teselas z14 que rodean el centro, como §168 hace con los POI, sin índice aparte. `goToStreet` la encuadra entera, o la centra a z17 si mide menos
+de 150 m. En la demo, el mismo campo de la barra (Ctrl+K) muestra tras los lugares y los sitios las calles («Obispo — calle · a 1,2 km»); al elegir una
+se resalta con una línea naranja en una capa temporal («Búsqueda», no se guarda ni se elige con el ratón) y se encuadra. El resalte se quita al vaciar
+el campo.
+
+**Lo difícil: una calle no es un tramo.** Las teselas parten las calles. Una avenida larga llega como decenas de trozos, uno por tesela (y por cada
+cruce), con un margen que hace que los trozos de teselas vecinas se solapen unos metros. Y «Calle 5» no es una calle: hay una en cada barrio.
+`streetsearch::search` agrupa los tramos por nombre y, dentro de cada nombre, **une los que se tocan** a menos de 15 m (vértices de uno contra los
+segmentos del otro, con descarte por cajas) con un union-find. Así una avenida cortada sale como UNA calle con todos sus trozos, y dos «Calle 5»
+lejanas salen como dos, la más cercana primero. 15 m cubre el solape de las teselas y los cortes por una intersección; una calle con un hueco de
+más de 15 m se vería como dos. El «punto más cercano» de cada calle (a donde se va) es el de su trazado más próximo al centro, no su mitad.
+
+**Cómo se casa el texto:** cada palabra (sin tildes ni mayúsculas) tiene que estar en el nombre o en la referencia (`ref`: «CC», «A1»; así se encuentran
+carreteras sin nombre). Las genéricas «calle», «avenida», «carretera», «calzada», «paseo», «camino»… son **opcionales**: «calle obispo» encuentra «Obispo»
+aunque el MBTiles no ponga «Calle» en el nombre (OSM en Cuba a menudo no lo pone). Si lo único que se escribe es una genérica, se busca esa palabra.
+Orden: las que empiezan por lo escrito, luego las que lo contienen; dentro de cada grupo, las más cercanas. Menos de dos letras: nada. Las vías sin
+nombre ni referencia y los puntos de la capa no cuentan.
+
+**Refactor:** la lectura de teselas alrededor del centro (rectángulo, una consulta SQLite por zona, caché, solo una capa decodificada) estaba escrita
+para los POI; pasa a una plantilla `itemsAround` que usan los POI y las calles, cada uno con su caché. `Street::typeLabel()` traduce los tipos de vía
+(autopista, vía troncal, carretera principal/secundaria/terciaria, calle, vía de servicio, camino, sendero…).
+
+**Pruebas:** `tst_vectortiles::searchesStreets` (tres teselas a mano: «Obispo» cortada en dos teselas que se tocan = una calle de dos partes; dos «Calle 5»
+lejanas = dos, ordenadas; palabra genérica opcional y solo-genérica; por referencia; tildes y mayúsculas; empiezan-por antes que contienen; límite; texto
+corto; los puntos y las vías sin nombre no cuentan) y `tst_mapwidget::searchesStreets` (de extremo a extremo con un MBTiles: tres teselas de la misma fila
+forman una calle de tres partes y las filas lejanas no entran; sin capa vectorial no hay donde buscar; poco texto; lejos no sale; ir a la calle la encuadra y
+una calle corta se centra a z17). 31 tests en verde en Qt 6.4.
+
+**Sin probar:** con el `cuba-osm.mbtiles` real: que `transportation_name` traiga a z14 todas las calles con nombre (en OpenMapTiles las menores salen entre
+z12 y z14, según su clase) y cuánto tarda la primera búsqueda. Si en z14 faltaran calles menores, habría que subir el zoom de lectura (z15, el doble de
+teselas por lado). El resalte de la demo solo se ha compilado, no visto. Solo busca cerca del centro (6 km por defecto, 15 km como máximo), no en toda la
+ciudad: para eso haría falta un índice de calles, igual que con los POI.
+
+**Estado: 31 tests (28 sin QCustomPlot).**
+
+### 170 (ajuste). El buscador dice cuándo no mira donde está el usuario
+
+El usuario escribió «Obi» a zoom 10 con el centro del mapa en el mar, al sur de Artemisa: salieron cinco lugares del índice y ninguna calle ni sitio, y
+pareció que «Obispo» no existía. Sí existe, pero a unos 30 km del centro, y sitios y calles solo se buscan alrededor del centro (6 km). Nada en pantalla lo
+decía, y es lo que dije que pasaría en «Sin probar»: en uso real se tropieza a la primera. Dos cambios en la demo, sin tocar la API:
+- El radio sigue al zoom: lo que se ve de ancho (metros por píxel × ancho / 2), entre 6 y 15 km. A zoom lejano mira más, a zoom cercano se queda en 6.
+- Si no sale ni un sitio ni una calle, el desplegable lo dice («sin sitios ni calles a 15 km del centro: acerca el mapa a la zona»), en una fila que es solo
+  un aviso (elegirla no hace nada).
+Con el MBTiles de Cuba y 15 km sigue sin llegar de Artemisa a La Habana desde el centro del mar. La solución de verdad, buscar en todo el mapa, es un índice de
+calles y sitios del MBTiles entero, generado una vez y consultado como el de lugares; no está hecho.
+
 ## 171. Rutas sin conexión por la red vial (coche)
 
 Última de «Otras ideas del mismo MBTiles» y, como se anotó, la más costosa. Dos decisiones del usuario acotaron la primera versión: la red vial se

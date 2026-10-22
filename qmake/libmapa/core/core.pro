@@ -45,6 +45,7 @@ SOURCES += \
     $$ROOT/src/vector/PoiSearch.cpp \
     $$ROOT/src/vector/RoadGraph.cpp \
     $$ROOT/src/vector/RoutePlanner.cpp \
+    $$ROOT/src/vector/StreetSearch.cpp \
     $$ROOT/src/vector/VectorStyle.cpp \
     $$ROOT/src/vector/VectorTileRenderer.cpp \
     $$ROOT/third_party/miniz/miniz.c \

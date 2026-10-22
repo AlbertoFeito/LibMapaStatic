@@ -29,7 +29,6 @@ zona alrededor, pero nadie lo ha pedido.
 
 ## Otras ideas del mismo MBTiles (plan del 2026-10-21)
 
-- **Búsqueda de calles** («Obispo») sin conexión, desde `transportation_name`.
 - **Rutas: lo que quedó fuera de la primera versión** (§171, coche, leída de las teselas al vuelo):
   - *Más modos*: a pie (senderos, calles peatonales; no autopistas) y en bici, cada uno con sus
     vías y su velocidad. El grafo ya guarda la clase de cada tramo; falta el filtro y la tabla de velocidades por modo.
