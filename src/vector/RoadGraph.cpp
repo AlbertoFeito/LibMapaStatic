@@ -386,6 +386,11 @@ RouteResult Graph::route(const QGeoCoordinate &from, const QGeoCoordinate &to, d
         r.durationS = directoT;
         porClase[directoCls] += directoLen;
         trazado = { pS, pT };
+        RouteLeg leg;
+        leg.type = directoCls;
+        leg.path = { pS, pT };
+        leg.lengthM = directoLen;
+        r.legs.append(leg);
     } else {
         if (!(g[T] < inf)) {
             r.error = QStringLiteral("No hay ruta entre esos puntos: las vías no llegan a unirse (o es otra isla)");
@@ -399,6 +404,20 @@ RouteResult Graph::route(const QGeoCoordinate &from, const QGeoCoordinate &to, d
             r.distanceM += double(e.lengthM);
             r.durationS += double(e.timeS);
             porClase[m_classes.value(e.cls)] += double(e.lengthM);
+            // Tramos seguidos de una misma clase: cada arista alarga el actual o abre uno nuevo. Las aristas
+            // de longitud cero (el punto de salida o de llegada cae justo en un cruce y su tramo parcial mide 0)
+            // no abren tramo: saldría una «calle» de 0 m delante de la carretera por la que se va de verdad.
+            if (double(e.lengthM) < 0.01)
+                continue;
+            const QString clase = m_classes.value(e.cls);
+            if (r.legs.isEmpty() || r.legs.last().type != clase) {
+                RouteLeg leg;
+                leg.type = clase;
+                leg.path.append(coord(nodos[i - 1]));
+                r.legs.append(leg);
+            }
+            r.legs.last().path.append(coord(nodos[i]));
+            r.legs.last().lengthM += double(e.lengthM);
         }
         for (int v : nodos)
             trazado.append(coord(v));

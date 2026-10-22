@@ -5,6 +5,7 @@
 #include "tiles/TileDataset.h"
 
 #include <QGeoCoordinate>
+#include <QVector>
 
 #include <functional>
 
@@ -31,6 +32,16 @@ constexpr int kMaxTiles = 3000;
  */
 RouteResult findRoute(const TileDataset &dataset, const QGeoCoordinate &from, const QGeoCoordinate &to,
                       const std::function<bool(int, int)> &progress = nullptr);
+
+/*!
+ * \brief El contorno de los destinos a los que \c findRoute se atreve a ir desde \a from: \a bearings
+ *        puntos, uno por rumbo (el primero al norte, en sentido horario), cada uno a la distancia
+ *        máxima en esa dirección antes de pasar de \c kMaxTiles. Vacío si no hay mapa vectorial.
+ *
+ * Es el rectángulo de lectura, no un círculo: en línea recta (este-oeste) llega más lejos que en
+ * diagonal, y no promete que haya camino, solo que no saldrá «ruta demasiado larga».
+ */
+QVector<QGeoCoordinate> routeReach(const TileDataset &dataset, const QGeoCoordinate &from, int bearings = 72);
 
 } // namespace routeplanner
 

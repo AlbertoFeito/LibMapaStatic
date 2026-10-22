@@ -100,6 +100,14 @@ struct LIBMAPA_EXPORT PoiImportResult
     bool ok() const { return error.isEmpty() && !tooLarge && !cancelled; }
 };
 
+//! Un tramo seguido de una ruta por el mismo tipo de via (\c RouteResult::legs).
+struct LIBMAPA_EXPORT RouteLeg
+{
+    QString type;                           //!< `class` de OpenMapTiles: "primary", "track"...
+    QVector<QGeoCoordinate> path;           //!< El trazado del tramo (empieza donde acaba el anterior).
+    double lengthM = 0.0;                   //!< Su longitud (m).
+};
+
 /*!
  * \brief Una ruta por la red vial (resultado de \c MapWidget::findRoute).
  *
@@ -109,6 +117,11 @@ struct LIBMAPA_EXPORT RouteResult
 {
     QString error;                          //!< Vacio si se encontro ruta.
     QVector<QGeoCoordinate> path;           //!< El trazado, del origen al destino.
+    //! El mismo trazado partido en tramos seguidos de un mismo tipo de via (para pintar
+    //! cada tipo de un color, p. ej. los caminos de tierra). No incluye lo que se anda del
+    //! punto pedido a la via: empieza y acaba en la via. Vacio si el origen y el destino
+    //! caen en el mismo punto.
+    QVector<RouteLeg> legs;
     double distanceM = 0.0;                 //!< Longitud (m), con los tramos de enlace a la via.
     double durationS = 0.0;                 //!< Tiempo estimado en coche (s), por la velocidad de cada tipo de via.
     //! Metros por tipo de via ("primary", "minor"...), de mas a menos.

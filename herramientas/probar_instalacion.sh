@@ -11,7 +11,8 @@
 #       el indice de lugares de prueba; sin red);
 #    3. compila TODOS los ejemplos (examples/CMakeLists.txt) contra el prefijo;
 #    4. arranca app_minima, visor_gpx, editor_rutas, buscador_lugares, medidor_campo, monitor_trafico, vigilancia_zonas,
-#       analisis_terreno, emisor_nmea y cliente_telemetria con --comprobar, y check_data, sobre ese paquete.
+#       analisis_terreno, rutas_tierra (con su propia red de demostracion), emisor_nmea y cliente_telemetria con
+#       --comprobar, y check_data, sobre ese paquete.
 #
 #  libtelemetria (decodificador NMEA/AIS) se instala en el mismo prefijo que libmapa: tambien se comprueba aqui.
 #
@@ -150,6 +151,12 @@ VIGILANCIA="$(find "$TRABAJO/ejemplos" -type f -name vigilancia_zonas -perm -u+x
 TERRENO="$(find "$TRABAJO/ejemplos" -type f -name analisis_terreno -perm -u+x | head -1)"
 [ -n "$TERRENO" ] || fallo "no se encuentra analisis_terreno compilado"
 "$TERRENO" "$PAQ" --comprobar || fallo "analisis_terreno --comprobar no sale con 0"
+
+# rutas_tierra: arma su propia red vial de demostracion (un MBTiles vectorial de una tesela), calcula tres
+# rutas de longitud conocida con tramos de asfalto y de tierra y exporta una a GPX. No usa el paquete $PAQ.
+RUTAS="$(find "$TRABAJO/ejemplos" -type f -name rutas_tierra -perm -u+x | head -1)"
+[ -n "$RUTAS" ] || fallo "no se encuentra rutas_tierra compilado"
+"$RUTAS" --comprobar || fallo "rutas_tierra --comprobar no sale con 0"
 
 # emisor_nmea: simula 120 s de NMEA/AIS, lo decodifica con libtelemetria y manda un datagrama UDP por localhost.
 EMISOR="$(find "$TRABAJO/ejemplos" -type f -name emisor_nmea -perm -u+x | head -1)"

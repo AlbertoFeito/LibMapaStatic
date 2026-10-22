@@ -10,6 +10,7 @@
 #include "vector/MvtTile.h"
 #include "vector/PoiSearch.h"
 #include "vector/RoadGraph.h"
+#include "vector/RoutePlanner.h"
 #include "vector/StreetSearch.h"
 #include "vector/VectorStyle.h"
 #include "vector/VectorTileRenderer.h"
@@ -72,6 +73,7 @@ private slots:
     void decodeOnlyChosenLayers();
     void searchesPointsOfInterest();
     void roadGraphRoutes();
+    void routeReachContour();
     void roadGraphWeldsTileSeams();
     void searchesStreets();
     void filtersPointsOfInterest();
@@ -1407,6 +1409,20 @@ void TstVectorTiles::roadGraphRoutes()
     QVERIFY(r.path.size() >= 4);
     QVERIFY(r.path.first().distanceTo(enMetros(0, 0)) < 1.0);
     QVERIFY(r.path.last().distanceTo(enMetros(1000, 0)) < 1.0);
+    // Los tramos por tipo de vía: calle (sube), principal (recorre), calle (baja); seguidos y sin huecos.
+    QCOMPARE(r.legs.size(), 3);
+    QCOMPARE(r.legs[0].type, QStringLiteral("minor"));
+    QCOMPARE(r.legs[1].type, QStringLiteral("primary"));
+    QCOMPARE(r.legs[2].type, QStringLiteral("minor"));
+    QVERIFY(qAbs(r.legs[1].lengthM - 1000.0) < 15.0);
+    double sumaTramos = 0.0;
+    for (int i = 0; i < r.legs.size(); ++i) {
+        sumaTramos += r.legs[i].lengthM;
+        QVERIFY(r.legs[i].path.size() >= 2);
+        if (i > 0)
+            QVERIFY(r.legs[i].path.first().distanceTo(r.legs[i - 1].path.last()) < 0.5);   // el tramo empieza donde acaba el anterior
+    }
+    QVERIFY(qAbs(sumaTramos - r.distanceM) < 1.0);                                      // sin enganche, suman la distancia
     // La vuelta es igual (todo es de doble sentido).
     r = g.route(enMetros(1000, 0), enMetros(0, 0));
     QVERIFY(r.ok());
@@ -1447,6 +1463,23 @@ void TstVectorTiles::roadGraphRoutes()
     p.add({ via(QStringLiteral("minor"), { { 500, 300 }, { 700, 300 } }) });
     QVERIFY(p.route(enMetros(700, 300), enMetros(500, -300)).ok());
 
+    // Salida o llegada justo en un cruce: el tramo parcial del enganche mide 0 y no debe abrir un tramo
+    // «de calle» de 0 m delante de la carretera por la que se va de verdad.
+    roadgraph::Graph cr(23.0);
+    cr.add({ via(QStringLiteral("minor"), { { 0, 0 }, { 500, 0 }, { 1000, 0 } }),
+             via(QStringLiteral("primary"), { { 500, 0 }, { 500, 300 } }) });
+    r = cr.route(enMetros(500, 0), enMetros(500, 300));
+    QVERIFY2(r.ok(), qPrintable(r.error));
+    QCOMPARE(r.legs.size(), 1);
+    QCOMPARE(r.legs[0].type, QStringLiteral("primary"));
+    QVERIFY(qAbs(r.legs[0].lengthM - 300.0) < 5.0);
+    r = cr.route(enMetros(500, 300), enMetros(500, 0));
+    QVERIFY(r.ok());
+    QCOMPARE(r.legs.size(), 1);
+    QCOMPARE(r.legs[0].type, QStringLiteral("primary"));
+    for (const RouteLeg &leg : r.legs)
+        QVERIFY(leg.lengthM > 0.0);                                  // ningún tramo vacío
+
     // Enganche: un punto a 100 m de la vía se engancha y esos metros cuentan; a más de 500 m, error.
     roadgraph::Graph e(23.0);
     e.add({ via(QStringLiteral("minor"), { { 0, 0 }, { 100, 0 }, { 200, 0 } }) });
@@ -1472,6 +1505,9 @@ void TstVectorTiles::roadGraphRoutes()
     QVERIFY2(qAbs(r.snapFromM - 50.0) < 1.0, qPrintable(QString::number(r.snapFromM)));
     QVERIFY(qAbs(r.durationS - (3000.0 / (60.0 / 3.6) + 100.0 / (15.0 / 3.6))) < 3.0);          // 180 s en carretera + el enganche
     QVERIFY(r.path.size() >= 4);                                                              // punto, enganche, enganche, punto
+    QCOMPARE(r.legs.size(), 1);                                                               // todo por la misma carretera
+    QCOMPARE(r.legs[0].type, QStringLiteral("primary"));
+    QVERIFY(qAbs(r.legs[0].lengthM - 3000.0) < 10.0);                                         // sin los 100 m de enganche
     // Los dos puntos en el mismo tramo de sentido único: hacia delante sí, hacia atrás no.
     roadgraph::Graph una(23.0);
     una.add({ via(QStringLiteral("primary"), { { 0, 0 }, { 5000, 0 } }, 1) });
@@ -1544,6 +1580,33 @@ void TstVectorTiles::roadGraphWeldsTileSeams()
     // La vía cerrada no cuenta aunque esté en el mapa: el único camino es la carretera.
     QCOMPARE(r.byClass.size(), 1);
     QCOMPARE(r.byClass.first().first, QStringLiteral("primary"));
+}
+
+// El contorno de alcance: un punto por rumbo, ninguno a menos de 10 km, en línea recta llega más lejos
+// que en diagonal (el rectángulo de teselas crece con el lado mayor) y un destino algo más allá del
+// borde ya da «ruta demasiado larga», uno algo más acá no.
+void TstVectorTiles::routeReachContour()
+{
+    TileDataset ds;
+    ds.vector = true;
+    ds.minZoom = 0;
+    ds.maxZoom = 14;
+    const QGeoCoordinate a(22.0, -80.0);
+    const QVector<QGeoCoordinate> borde = routeplanner::routeReach(ds, a, 72);
+    QCOMPARE(borde.size(), 72);
+    double minM = 1e18, maxM = 0.0;
+    for (const QGeoCoordinate &c : borde) {
+        minM = qMin(minM, a.distanceTo(c));
+        maxM = qMax(maxM, a.distanceTo(c));
+    }
+    QVERIFY2(minM > 10000.0, qPrintable(QString::number(minM)));
+    QVERIFY2(maxM > minM * 1.1, qPrintable(QStringLiteral("%1 vs %2").arg(minM).arg(maxM)));
+    for (int i = 0; i < 72; i += 8) {
+        const double d = a.distanceTo(borde[i]), az = a.azimuthTo(borde[i]);
+        QVERIFY(!routeplanner::findRoute(ds, a, a.atDistanceAndAzimuth(d * 0.9, az)).error.contains(QLatin1String("demasiado larga")));
+        QVERIFY(routeplanner::findRoute(ds, a, a.atDistanceAndAzimuth(d * 1.2, az)).error.contains(QLatin1String("demasiado larga")));
+    }
+    QVERIFY(routeplanner::routeReach(TileDataset(), a, 72).isEmpty());   // sin mapa vectorial no hay alcance
 }
 
 QTEST_MAIN(TstVectorTiles)

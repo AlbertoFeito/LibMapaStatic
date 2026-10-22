@@ -2989,6 +2989,17 @@ RouteResult MapWidget::findRoute(const QGeoCoordinate &from, const QGeoCoordinat
     return routeplanner::findRoute(*ds, from, to, progress);
 }
 
+// Contorno de los destinos que findRoute acepta desde \a from (la lógica vive en RoutePlanner).
+QVector<QGeoCoordinate> MapWidget::routeReach(const QGeoCoordinate &from, int bearings) const
+{
+    const TileDataset *base = d->service.activeDataset();
+    const TileDataset *over = d->vectorOverlay ? d->vectorOverlay->activeDataset() : nullptr;
+    const TileDataset *ds = (base && base->vector) ? base : ((over && over->vector) ? over : nullptr);
+    if (!ds)
+        return {};
+    return routeplanner::routeReach(*ds, from, bearings);
+}
+
 // Herramienta activa (arrastrar, medir, dibujar, editar...).
 MapTool MapWidget::activeTool() const
 {

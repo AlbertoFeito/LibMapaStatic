@@ -6854,6 +6854,10 @@ decodificado: es para un clic, no para un bucle.
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+### Alcance de B desde A en `rutas_tierra`
+
+Se pidió ver, desde el punto A, hasta dónde puede estar B. El límite real es `kMaxRouteTiles` (3000 teselas z14): `findRoute` lee el rectángulo origen-destino con margen y, si pasa del tope, da «ruta demasiado larga». Para no duplicar esa cuenta en la app, el cálculo del rectángulo se sacó a un ayudante único (`rectFor`) que usan `findRoute` y la función nueva `routeplanner::routeReach` / `MapWidget::routeReach(from, bearings = 72)`: por cada rumbo busca por bisección la distancia máxima que cabe (las teselas crecen siempre con la distancia). Devuelve el contorno, que **no es un círculo**: en línea recta llega a ~140 km y en diagonal a ~110 km a la latitud de Cuba. El ejemplo lo dibuja en verde discontinuo (capa «Alcance de B», bajo la ruta) en cuanto se pone A, lo redibuja al arrastrar A y lo explica en el panel. Solo promete que no saldrá «demasiado larga», no que haya camino. Prueba: `routeReachContour` en `tst_vectortiles` y una comprobación más en `rutas_tierra --comprobar` (al 90 % del borde no da «demasiado larga», al 120 % sí).
+
 ### 166 (ajuste). La ventana «¿Qué hay aquí?» en lenguaje llano
 
 El usuario, probándola en su PC con el MBTiles de Cuba: no le gustó cómo se veía. Con razón: era un volcado de atributos crudos (`class`,
@@ -7102,6 +7106,37 @@ por tipo, el progreso, la vuelta mide lo mismo, punto lejos de la vía, cancelad
 **Sin probar:** con el `cuba-osm.mbtiles` real: cuánto tarda una ruta de decenas de km (el grafo de una provincia tiene cientos de miles de nodos; el enganche recorre
 todas las aristas, unos milisegundos), y sobre todo si las **intersecciones llegan cosidas**: si el MBTiles simplifica a z14 y pierde el vértice donde una calle toca otra, el
 grafo no las une y la ruta falla con «las vías no llegan a unirse». Es lo primero que hay que mirar con datos reales. La demo solo se ha compilado.
+
+**Estado: 31 tests (28 sin QCustomPlot).**
+
+## 172. Ejemplo `rutas_tierra`: probar las rutas por tierra
+
+Petición del usuario: «crea una app de ejemplo en examples para probar rutas de tierra», para probar con datos suyos lo de §171. Se entendió «rutas por tierra» como rutas por la
+red vial y, dentro de ellas, **los caminos de tierra** (la clase `track` de OpenMapTiles), que son los que más dudas dan: cuánto de una ruta es de tierra y si el cálculo los usa
+como se espera.
+
+**El ejemplo** (`examples/rutas_tierra`, un solo `main.cpp` de ~700 líneas, con su `README.md`, `CMakeLists.txt` y `.pro`, como los demás): dos clics en el mapa ponen A y B, o se escriben
+en cualquier formato de coordenada, o se **arrastran los marcadores** y la ruta se recalcula al soltar. La ruta se pinta **por tramos de un mismo tipo de vía**: asfalto en azul y caminos de
+tierra en marrón y discontinuos; un panel da la distancia, el tiempo estimado, lo que se anda hasta la vía, la tabla de kilómetros y % por tipo (la fila de tierra resaltada) y un aviso con
+cuánta tierra lleva. Barra de progreso cancelable, invertir, limpiar y guardar a GPX/KML/GeoJSON.
+
+**Red de demostración propia.** Probar rutas necesita un MBTiles vectorial con vías, y no todo el mundo lo tiene a mano. El ejemplo **escribe el suyo** en una carpeta temporal (una tesela z14
+con la capa `transportation`, codificada a mano en MVT, más el `mapa.json`): un pueblo a cada lado unidos por un camino de tierra casi recto (~1,9 km), una calle de asfalto que da la
+vuelta por el sur (~4,6 km), una carretera principal que sube hasta el camino y un ramal de tierra sin salida a una finca. Con `--demo`, o sin paquete de datos, se usa; con un paquete real, se usa ese.
+Hay tres rutas de ejemplo en un desplegable. Es el mismo patrón que el terreno de demostración de `analisis_terreno`.
+
+**Cambio en la biblioteca: `RouteResult::legs`.** Para pintar la tierra de otro color, la ruta tenía que decir qué tramo es de qué tipo de vía; hasta entonces solo daba el trazado entero y
+los totales por tipo. Ahora `legs` parte el trazado en tramos seguidos de un mismo tipo (`RouteLeg`: tipo, trazado, longitud), cada uno empezando donde acabó el anterior. Al probarlo salió
+un fallo: si el origen cae justo en un cruce, el tramo parcial del enganche mide 0 m y abría un tramo «de calle» de 0 m delante de la carretera por la que se iba (la ruta cruce → finca salía
+en tres tramos en vez de dos). Las aristas de longitud cero ya no abren tramo, con su caso en `roadGraphRoutes`.
+
+**Prueba sin ventana** (`rutas_tierra --comprobar`): tres rutas de longitud conocida sobre la demo (pueblo oeste → pueblo este: ~1,9 km, todo de tierra, un solo tramo; cruce → finca: carretera
+principal y luego tierra, dos tramos seguidos; pueblo oeste → finca: solo tierra), que la vuelta mida lo mismo y la exportación a GPX. Entra en `herramientas/probar_instalacion.sh`, que se ha
+corrido entero contra una instalación local (los diez ejemplos). 32 casos de `tst_vectortiles` en verde, 31 tests.
+
+**Límites, sin rodeos:** lo de §171 (tiempo estimado, sin giros prohibidos). Y una cosa más: el ejemplo **no puede evitar** los caminos de tierra, solo mostrar cuánto hay; evitarlos pide
+una opción en `findRoute` (anotada en `PENDIENTES.md`). Con datos reales, lo primero que hay que mirar sigue siendo si las intersecciones llegan unidas, y cuántos `track` trae el MBTiles de la zona.
+La ventana no se ha visto en pantalla (compila y su prueba sin ventana pasa); el dibujo discontinuo de la tierra es lo primero que hay que mirar.
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
