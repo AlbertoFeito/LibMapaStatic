@@ -4,6 +4,7 @@
 #include "tiles/TileDataset.h"
 #include "tiles/TileLoader.h"
 #include "tiles/TileService.h"
+#include "vector/FeatureQuery.h"
 #include "vector/Gzip.h"
 #include "vector/LandMask.h"
 #include "vector/MvtTile.h"
@@ -63,6 +64,7 @@ private slots:
     void namesFollowTheLine();
     void loaderChangesHiddenGroups();
     void packageDeclaresHybridOverlay();
+    void queryFindsWhatIsHere();
 
 private:
     QByteArray fixture(const char *name) const;
@@ -980,6 +982,76 @@ void TstVectorTiles::packageDeclaresHybridOverlay()
     QVERIFY(pkg.has_value());
     QVERIFY(!pkg->vectorOverlay.has_value());
     QVERIFY(pkg->warnings.join(QLatin1Char(' ')).contains(QStringLiteral("vectorOverlay")));
+}
+
+// «Qué hay aquí»: un edificio con patio, una calle con nombre y un hospital, con la
+// geometría puesta a mano en la tesela z12 x1111 y1776. Se consulta cada sitio por
+// su posición geográfica (la misma conversión que haría un clic): dentro del
+// edificio, en el patio (no hay nada), junto a la calle, junto al hospital y lejos
+// de todo. Las distancias se comprueban en metros, no en unidades de tesela.
+void TstVectorTiles::queryFindsWhatIsHere()
+{
+    const int z = 12, x = 1111, y = 1776;
+    const TileKey key{ z, x, y };
+    // Anillo exterior (área positiva) y patio (negativa), en una sola entidad.
+    QVector<quint32> edificio = path({ { 1000, 1000 }, { 2000, 1000 }, { 2000, 2000 }, { 1000, 2000 } }, true);
+    // El MoveTo de cada anillo es relativo al cursor, que tras el primero queda en (1000, 2000).
+    QVector<quint32> patio = path({ { 1400, 1400 }, { 1400, 1600 }, { 1600, 1600 }, { 1600, 1400 } }, true);
+    patio[1] = zz(1400 - 1000);
+    patio[2] = zz(1400 - 2000);
+    edificio += patio;
+    const QByteArray bytes = tile({
+        layer(QStringLiteral("building"),
+              { { 3, edificio, { { QStringLiteral("render_height"), QStringLiteral("12") } } } }),
+        layer(QStringLiteral("transportation"),
+              { { 2, path({ { 0, 3000 }, { 4096, 3000 } }, false),
+                  { { QStringLiteral("class"), QStringLiteral("primary") },
+                    { QStringLiteral("name"), QStringLiteral("Obispo") } } } }),
+        layer(QStringLiteral("poi"),
+              { { 1, QVector<quint32>{ cmd(1, 1), zz(3000), zz(500) },
+                  { { QStringLiteral("class"), QStringLiteral("hospital") } } } }) });
+    mvt::Tile t;
+    QVERIFY(mvt::decode(bytes, &t));
+
+    auto aqui = [&](double ux, double uy, double radio) {
+        const QGeoCoordinate c = tilePoint(z, x, y, ux / 4096.0, uy / 4096.0);
+        return featurequery::query(t, key, c.latitude(), c.longitude(), radio);
+    };
+
+    // Dentro del edificio, fuera del patio: el polígono, a distancia 0, con su altura.
+    auto h = aqui(1200, 1200, 5.0);
+    QCOMPARE(h.size(), 1);
+    QCOMPARE(h[0].layer, QStringLiteral("building"));
+    QCOMPARE(h[0].type, mvt::GeomType::Polygon);
+    QCOMPARE(h[0].distanceM, 0.0);
+    QCOMPARE(h[0].attributes.value(QStringLiteral("render_height")).toString(), QStringLiteral("12"));
+
+    // En medio del patio: no está «dentro»; el borde queda a ~100 unidades (a z12 son unos 2,2 m cada una).
+    QVERIFY(aqui(1500, 1500, 5.0).isEmpty());
+    h = aqui(1500, 1500, 500.0);
+    QCOMPARE(h.size(), 1);
+    QVERIFY(h[0].distanceM > 150.0 && h[0].distanceM < 300.0);
+
+    // Junto a la calle (5 unidades al norte de ella, unos 11 m): la línea, con su nombre y su distancia real.
+    h = aqui(500, 2995, 30.0);
+    QCOMPARE(h.size(), 1);
+    QCOMPARE(h[0].layer, QStringLiteral("transportation"));
+    QCOMPARE(h[0].attributes.value(QStringLiteral("name")).toString(), QStringLiteral("Obispo"));
+    QVERIFY2(h[0].distanceM > 5.0 && h[0].distanceM < 20.0, qPrintable(QString::number(h[0].distanceM)));
+
+    // Junto al hospital.
+    h = aqui(3003, 503, 30.0);
+    QCOMPARE(h.size(), 1);
+    QCOMPARE(h[0].type, mvt::GeomType::Point);
+    QCOMPARE(h[0].attributes.value(QStringLiteral("class")).toString(), QStringLiteral("hospital"));
+
+    // Lejos de todo.
+    QVERIFY(aqui(3500, 3500, 5.0).isEmpty());
+
+    // Con radio grande salen varias; el polígono que contiene el punto va primero.
+    h = aqui(1200, 1200, 5000.0);
+    QVERIFY(h.size() >= 3);
+    QCOMPARE(h[0].layer, QStringLiteral("building"));
 }
 
 QTEST_MAIN(TstVectorTiles)

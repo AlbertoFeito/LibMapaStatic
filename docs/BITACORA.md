@@ -6807,3 +6807,82 @@ de §163: **`--style` no funcionaba nunca**. Qt se queda con `-style`/`--style` 
 que la vea `QCommandLineParser`, así que la herramienta pintaba siempre con el estilo por defecto sin decir nada. La opción pasa a ser
 `--style-file`. Con ella, el ejemplo pinta 717 píxeles rojos de hospitales y comisarías en el Vedado y Centro Habana. A la librería no le
 afectaba: `"vectorStyle"` va en el JSON, no por la línea de comandos.
+
+## 166. «¿Qué hay aquí?»: las entidades del MBTiles vectorial bajo un punto
+
+Primera de las ideas aparcadas en `PENDIENTES.md`. Hasta ahora una tesela vectorial solo servía para **pintar**: se decodificaba, se
+convertía en píxeles y la información de cada calle o edificio se perdía. Pero el MBTiles de OpenMapTiles trae mucho más de lo que se ve
+(tipo de vía, superficie, altura del edificio, nombre, clase del lugar…), y para «qué es esto que acabo de pinchar» hace falta la consulta
+inversa: dado un punto, qué entidades hay debajo.
+
+**Cómo se hace** (`src/vector/FeatureQuery.{h,cpp}`, solo núcleo, sin Gui):
+- `featurequery::query(tile, key, lat, lon, radiusM)` pasa el punto a coordenadas de la tesela (la misma proyección Web Mercator de
+  siempre) y mide contra cada entidad de cada capa: distancia a un punto, a la polilínea más cercana, o 0 si cae **dentro** de un polígono.
+- Los polígonos MVT traen los huecos como anillos de área negativa a continuación de su exterior; se evalúan por grupos para que el patio
+  de un edificio no cuente como «dentro» pero tampoco anule al edificio vecino. Un punto en un patio queda a la distancia de su borde.
+- El radio va en **metros** y la conversión usa el tamaño real de la tesela a esa latitud (Mercator estira con 1/cos), no unidades de
+  tesela: a z12 una unidad son ~2,2 m y a z16 ~0,14 m, y el mismo radio en píxeles abarca cosas distintas.
+- Orden: primero los polígonos que contienen el punto, luego por cercanía; a igualdad (±0,5 m), puntos antes que líneas y líneas antes que
+  polígonos, que es lo más específico arriba.
+
+**API pública:** `MapWidget::vectorFeaturesAt(position, radiusMeters = -1)` devuelve `QVector<VectorFeatureInfo>` (capa, geometría
+`point`/`line`/`polygon`, distancia, atributos, y si vino del overlay híbrido). Con radio negativo usa ~8 px al zoom actual. Mira primero el
+overlay (si está visible) y luego la base, y solo las que son vectoriales. Si el zoom actual supera el máximo del MBTiles (se está
+ampliando) baja hasta el nivel más alto que tenga la tesela: la geometría es la misma, menos detallada. Abre su propia conexión SQLite con
+un id distinto del de los hilos de carga (las conexiones no se comparten entre hilos) y bloquea lo que tarde una lectura más un
+decodificado: es para un clic, no para un bucle.
+
+**Dónde se ve:**
+- Demo: clic derecho en el mapa → **«¿Qué hay aquí?»** abre una ventana con cada entidad (nombre o clase como título, capa, geometría,
+  distancia y todos sus atributos; se omiten las traducciones `name:xx`, que solo hacen ruido).
+- Consola: `vector_tile --mbtiles f.mbtiles --at lat,lon [--zoom 16] [--radius 15]` lista lo mismo, para comprobar un MBTiles o afinar el
+  radio sin abrir la demo.
+
+**Pruebas:**
+- `tst_vectortiles::queryFindsWhatIsHere`: un edificio con patio, una calle con nombre y un hospital puestos a mano en una tesela z12;
+  dentro del edificio (distancia 0 y su `render_height`), en el patio (vacío con radio corto; con radio largo, a la distancia del borde),
+  junto a la calle (con su nombre, a ~11 m), junto al hospital, lejos de todo, y el orden con radio grande. Al escribir la prueba salió un
+  detalle del formato que conviene recordar: el `MoveTo` de cada anillo de un polígono es **relativo al cursor** tras el anillo anterior,
+  no a (0,0); el patio mal codificado se leía en otro sitio de la tesela y la consulta daba «dentro» de forma legítima.
+- `tst_mapwidget::hybridOverlayOverAnyBase` (ampliado): sobre el overlay de prueba, la frontera bajo el centro de una tesela sale con su
+  `admin_level`, marcada como del overlay; un 10 % de tesela más arriba no sale; sin radio usa ~8 px; con el overlay apagado y una base
+  ráster no hay nada.
+- Qt 6.4: 31 tests en verde.
+
+**Sin probar:** con el `cuba-osm.mbtiles` real y en el PC del usuario (aquí no está el fichero). Queda abierto, y es lo que sigue en
+`PENDIENTES.md`, enseñar el resultado en una tarjeta al **pinchar** (clic izquierdo) en vez de por el menú, y los grupos de POI por tema.
+
+**Estado: 31 tests (28 sin QCustomPlot).**
+
+### 166 (ajuste). La ventana «¿Qué hay aquí?» en lenguaje llano
+
+El usuario, probándola en su PC con el MBTiles de Cuba: no le gustó cómo se veía. Con razón: era un volcado de atributos crudos (`class`,
+`oneway`, `brunnel`, `subclass`, en inglés), una tabla por entidad con huecos enormes, y la misma calle repetida una vez por tramo. Ahora:
+- Una línea por cosa: **título** (el nombre o, si no tiene, su tipo traducido: «Carretera principal», «Zona residencial», «Hierba») y debajo, en
+  gris, categoría y detalles («vía · sentido único · puente · a 120 m»). Traduce lo habitual de OpenMapTiles (vías, usos del suelo, terreno,
+  agua, POI, lugares); lo que no conoce lo deja tal cual.
+- Dos bloques: **Aquí** (lo que contiene el punto: el edificio, la zona) y **Cerca** (calles y lugares a unos metros).
+- Los tramos de una misma calle se agrupan («2 tramos»), conservando el más cercano.
+- Los atributos crudos del MBTiles quedan tras la casilla «Mostrar todos los atributos del mapa».
+Es solo la demo (`Ventana::queHayAqui`); la API (`vectorFeaturesAt`) no cambia. Compila; no lo he visto en pantalla con datos reales.
+
+### 166 (ajuste 2). «¿Qué hay aquí?» también en el clic izquierdo, como tarjeta
+
+Tras ver la ventana rehecha, el usuario aceptó la propuesta de una **tarjeta pequeña junto al cursor**, como la de los objetivos, enganchada al
+clic izquierdo. Ahora un clic izquierdo en un lugar **vacío** (navegando, sin captura de punto en curso y sin nada elegible debajo) abre una
+tarjeta con hasta 4 líneas de lo más relevante del punto y un botón «Todo… (N más)» que abre la ventana completa de antes (la del clic
+derecho). Decisiones:
+- Si no hay nada vectorial cerca, o la base no es vectorial, **no sale nada**: un clic en el vacío no abre cosas sin motivo.
+- Se espera lo que tarda un doble clic (`QApplication::doubleClickInterval`) y se cancela si el zoom cambió, porque el doble clic en vacío acerca
+  el mapa y la tarjeta saldría encima del zoom.
+- Sobre un elemento (objetivo, entidad, marca) sigue saliendo su tarjeta de siempre; esta solo cubre el vacío.
+- La composición del texto (agrupar tramos, «Aquí»/«Cerca», traducciones) es una sola, compartida por la tarjeta y la ventana.
+Solo la demo; la API no cambia. Compila y los 31 tests siguen en verde; sin ver en pantalla con datos reales.
+
+### 166 (ajuste 3). La tarjeta del clic izquierdo se cierra sola
+
+Petición del usuario: que la tarjeta dure **5 segundos** y se cierre si el ratón sale de ella. Un temporizador de 5 s y otro de 100 ms que
+comprueba la posición del cursor con un margen de 30 px alrededor de la tarjeta (sale 12 px en diagonal del cursor, así que sin margen se
+cerraría al nacer). Se vigila la posición en vez de esperar un evento de salida porque un `Qt::Popup` captura el ratón y el «leave» no es
+fiable. Los 5 s no se pausan con el cursor encima: si hace falta más tiempo, «Todo…» abre la ventana completa, que no caduca.
+

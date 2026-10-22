@@ -134,6 +134,8 @@ add_library(libmapa_core STATIC
     src/vector/Gzip.h
     src/vector/LandMask.cpp
     src/vector/LandMask.h
+    src/vector/FeatureQuery.cpp
+    src/vector/FeatureQuery.h
     src/vector/MvtTile.cpp
     src/vector/MvtTile.h
     src/vector/VectorStyle.cpp

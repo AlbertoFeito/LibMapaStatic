@@ -33,8 +33,9 @@ hospitales y policía en La Habana a z15.
    - «Transporte»: `bus`, `railway`, `ferry_terminal`;
    - …
    Cada grupo con su color y un símbolo distinto por tema: hoy solo hay un punto de color.
-2. **Ver un POI concreto**: al pinchar, la tarjeta de la demo con su nombre y tipo
-   (necesita el «qué hay aquí» de abajo).
+2. **Ver un POI concreto**: al pinchar (clic izquierdo), la tarjeta de la demo con su nombre y tipo.
+   Ya existe la consulta (`MapWidget::vectorFeaturesAt`, §166) y la ventana del menú «¿Qué hay aquí?»;
+   falta engancharla a la tarjeta del clic.
 3. **Buscar POI** por nombre o tipo («farmacia») cerca de la vista, sumándolo al
    índice de lugares (`lugares.sqlitedb`).
 4. **Sacar una selección como entidades** («todos los hospitales de la provincia»):
@@ -42,9 +43,6 @@ hospitales y policía en La Habana a z15.
 
 ## Otras ideas del mismo MBTiles (plan del 2026-10-21)
 
-- **Qué hay aquí**: al hacer clic, qué calle, POI o edificio hay debajo, con sus
-  atributos (tipo de vía, superficie, altura del edificio…). Para eso hay que
-  decodificar la tesela del punto y buscar la entidad más cercana.
 - **Búsqueda de calles** («Obispo») sin conexión, desde `transportation_name`.
 - **Rutas sin conexión** por la red vial (tipo de vía, sentido único, acceso). Es
   lo más costoso: hay que coser los tramos que las teselas cortan.

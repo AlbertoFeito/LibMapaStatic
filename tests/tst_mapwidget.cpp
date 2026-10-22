@@ -4844,7 +4844,31 @@ void TstMapWidget::hybridOverlayOverAnyBase()
     QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) > sinOverlay + 50, 20000);
     QVERIFY(!w.setVectorOverlayGroupVisible(QStringLiteral("no_existe"), false));
 
+    // «Que hay aqui»: la frontera cruza por la mitad de cada tesela, asi que el
+    // centro de una tesela z4 la tiene debajo; un poco mas arriba (a un 10 %) no.
+    {
+        auto lugar = [](int y, double fy) {
+            const double pi = 3.14159265358979323846;
+            return QGeoCoordinate(std::atan(std::sinh(pi * (1.0 - 2.0 * (y + fy) / 16.0))) * 180.0 / pi,
+                                  (7.5 / 16.0) * 360.0 - 180.0);
+        };
+        const auto aqui = w.vectorFeaturesAt(lugar(6, 0.5), 20000.0);
+        QCOMPARE(aqui.size(), 1);
+        QCOMPARE(aqui[0].layer, QStringLiteral("boundary"));
+        QCOMPARE(aqui[0].geometry, QStringLiteral("line"));
+        QCOMPARE(aqui[0].attributes.value(QStringLiteral("admin_level")).toString(), QStringLiteral("2"));
+        QVERIFY(aqui[0].fromOverlay);
+        QVERIFY(aqui[0].distanceM < 2000.0);
+        QVERIFY(w.vectorFeaturesAt(lugar(6, 0.1), 20000.0).isEmpty());
+        // Sin radio, usa unos 8 px: en la linea si, a un 10 % de tesela (~25 px) no.
+        QCOMPARE(w.vectorFeaturesAt(lugar(6, 0.5)).size(), 1);
+        QVERIFY(w.vectorFeaturesAt(lugar(6, 0.1)).isEmpty());
+    }
+
     // Apagar el overlay entero, y quitarlo.
+    w.setVectorOverlayVisible(false);
+    QVERIFY(w.vectorFeaturesAt(QGeoCoordinate(40.0, -100.0), 1e6).isEmpty());   // base ráster
+    w.setVectorOverlayVisible(true);
     w.setVectorOverlayVisible(false);
     QVERIFY(!w.isVectorOverlayVisible());
     QTRY_VERIFY_WITH_TIMEOUT(notGray(w.grab().toImage()) <= sinOverlay, 20000);

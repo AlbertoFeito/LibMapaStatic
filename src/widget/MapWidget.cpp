@@ -15,6 +15,8 @@
 #include "tiles/RMapsTileSource.h"
 #include "tiles/TileDatasetProbe.h"
 #include "tiles/TileService.h"
+#include "vector/FeatureQuery.h"
+#include "vector/MvtTile.h"
 #include "vector/VectorStyle.h"
 #include "db/VectorRepository.h"
 #include "io/DataPackage.h"
@@ -883,6 +885,81 @@ bool MapWidget::setBaseLayerGroupVisible(const QString &group, bool visible,
         d->view->refreshPlan();
     }
     return true;
+}
+
+// ---------------------------------------------------- «que hay aqui» ------
+
+namespace {
+
+// Entidades de un dataset vectorial bajo el punto. Abre la fuente en el hilo que
+// llama (la conexion SQLite es de quien la abre) con un id propio, para no
+// compartir conexion con el hilo trabajador ni con otro fichero. Si el zoom pedido
+// no tiene teselas (se mira por encima del maximo del MBTiles), usa la del nivel
+// mas alto que si la tenga: la geometria es la misma, solo menos detallada.
+QVector<VectorFeatureInfo> featuresInDataset(const TileDataset &dataset, bool overlay,
+                                             const QGeoCoordinate &pos, int zoom, double radiusM)
+{
+    QVector<VectorFeatureInfo> out;
+    if (!dataset.vector)
+        return out;
+    TileDataset ds = dataset;
+    ds.id = QStringLiteral("quehayaqui:") + dataset.filePath;
+    RMapsTileSource src(ds);
+    if (!src.open())
+        return out;
+
+    for (int z = qMin(zoom, ds.maxZoom); z >= ds.minZoom; --z) {
+        const double n = double(1 << z);
+        const double latR = qDegreesToRadians(WebMercator::clampLatitude(pos.latitude()));
+        const TileKey key{ z,
+                           int(std::floor((pos.longitude() + 180.0) / 360.0 * n)),
+                           int(std::floor((1.0 - std::asinh(std::tan(latR)) / M_PI) / 2.0 * n)) };
+        const QByteArray bytes = src.fetch(key);
+        if (bytes.isEmpty())
+            continue;
+        mvt::Tile tile;
+        if (!mvt::decode(bytes, &tile))
+            return out;
+        for (const featurequery::Hit &h : featurequery::query(tile, key, pos.latitude(),
+                                                             pos.longitude(), radiusM)) {
+            VectorFeatureInfo info;
+            info.layer = h.layer;
+            info.geometry = h.type == mvt::GeomType::Point ? QStringLiteral("point")
+                          : h.type == mvt::GeomType::LineString ? QStringLiteral("line")
+                                                                : QStringLiteral("polygon");
+            info.distanceM = h.distanceM;
+            info.attributes = h.attributes;
+            info.fromOverlay = overlay;
+            out.append(info);
+        }
+        break;
+    }
+    return out;
+}
+
+} // namespace
+
+// Entidades vectoriales bajo \a position: primero las del overlay, luego las de la base.
+QVector<VectorFeatureInfo> MapWidget::vectorFeaturesAt(const QGeoCoordinate &position,
+                                                       double radiusMeters) const
+{
+    QVector<VectorFeatureInfo> out;
+    if (!position.isValid())
+        return out;
+    const int z = zoom();
+    double radius = radiusMeters;
+    if (radius < 0.0) {
+        const double mPerPx = 156543.03392804097
+            * std::cos(qDegreesToRadians(position.latitude())) / double(1 << qBound(0, z, 30));
+        radius = 8.0 * mPerPx;
+    }
+    if (d->vectorOverlay && d->vectorOverlayVisible) {
+        if (const TileDataset *ds = d->vectorOverlay->activeDataset())
+            out += featuresInDataset(*ds, true, position, z, radius);
+    }
+    if (const TileDataset *ds = d->service.activeDataset())
+        out += featuresInDataset(*ds, false, position, z, radius);
+    return out;
 }
 
 // ------------------------------------------------- mapa hibrido (overlay) --

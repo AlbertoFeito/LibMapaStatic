@@ -585,6 +585,8 @@ void Ventana::menuPunto(QMenu *menu, const QGeoCoordinate &p, bool enElemento)
     }
     connect(menu->addAction(tr("Centrar aquí")), &QAction::triggered, this,
             [this, p] { m_mapa->setCenter(p); });
+    connect(menu->addAction(tr("¿Qué hay aquí?")), &QAction::triggered, this,
+            [this, p] { queHayAqui(p); });
 
     if (!enElemento) {
         menu->addSeparator();

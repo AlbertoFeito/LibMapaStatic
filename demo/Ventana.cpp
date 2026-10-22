@@ -3,6 +3,10 @@
 
 #include "Ventana.h"
 
+#include <QApplication>
+#include <QCursor>
+#include <QTimer>
+
 using namespace libmapa;
 
 // \a origen es un datasets.json o, si \a esPaquete, la carpeta de un
@@ -95,6 +99,22 @@ void Ventana::conectarSenales()
     connect(m_mapa, &MapWidget::contextMenuRequested, this, &Ventana::menuContextual);
     // Clic izquierdo sobre un elemento: tarjeta con sus datos y acciones rápidas.
     connect(m_mapa, &MapWidget::elementClicked, this, &Ventana::mostrarTarjeta);
+    // Clic izquierdo en un lugar vacío (navegando, sin captura de punto en curso):
+    // tarjeta «¿Qué hay aquí?» del mapa vectorial. Se espera lo que tarda un doble clic
+    // y se cancela si el mapa hizo zoom (el doble clic en vacío acerca).
+    connect(m_mapa, &MapWidget::clicked, this, [this](const QGeoCoordinate &p, Qt::MouseButton boton) {
+        if (boton != Qt::LeftButton || m_mapa->activeTool() != MapTool::None || m_picking != Pick::Ninguno)
+            return;
+        const QPoint global = QCursor::pos();
+        if (!m_mapa->hitTest(m_mapa->mapFromGlobal(global)).isEmpty())
+            return;                         // sobre un elemento ya sale su tarjeta
+        const int zoom = m_mapa->zoom();
+        QTimer::singleShot(QApplication::doubleClickInterval(), this, [this, p, global, zoom] {
+            if (m_mapa->zoom() == zoom && m_mapa->activeTool() == MapTool::None
+                && m_picking == Pick::Ninguno)
+                tarjetaQueHayAqui(p, global);
+        });
+    });
     // Esc o clic derecho durante una captura de punto: se cancela.
     connect(m_mapa, &MapWidget::pickCancelled, this, &Ventana::cancelarCaptura);
     // Lo que el ratón o el teclado rechazan (capa bloqueada, vértices mínimos...).
