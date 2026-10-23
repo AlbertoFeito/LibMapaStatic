@@ -115,7 +115,7 @@ void TstDecoder::countsBadAndIgnored()
     QCOMPARE(d.stats().decoded, quint64(0));
 }
 
-// !AIVDO es el propio barco; un tipo AIS que no se decodifica (4) se ignora pero se cuenta.
+// !AIVDO es el propio barco; un tipo AIS que no se decodifica (28, reservado) se ignora pero se cuenta.
 void TstDecoder::ownShipAndUnsupportedAis()
 {
     AisMessage m;
@@ -130,11 +130,11 @@ void TstDecoder::ownShipAndUnsupportedAis()
     QVERIFY(ev.first().ownShip);
     QCOMPARE(ev.first().ais.mmsi, quint32(316000999));
 
-    const QByteArray tipo4 = formatSentence("AIVDM", { "1", "1", "", "A", "4" + QByteArray("0") + QByteArray(30, '0'), "0" }, true);
-    ev = d.feed(tipo4 + "\r\n");
+    const QByteArray tipo28 = formatSentence("AIVDM", { "1", "1", "", "A", "L" + QByteArray("0") + QByteArray(30, '0'), "0" }, true);
+    ev = d.feed(tipo28 + "\r\n");
     QCOMPARE(ev.size(), 1);
     QCOMPARE(ev.first().kind, Event::Kind::Ignored);
-    QCOMPARE(ev.first().detail, QStringLiteral("AIS tipo 4"));
+    QCOMPARE(ev.first().detail, QStringLiteral("AIS tipo 28"));
     QCOMPARE(d.stats().aisMessages, quint64(2));
     QCOMPARE(d.stats().aisUnsupported, quint64(1));
 }
