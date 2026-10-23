@@ -45,6 +45,11 @@ zona alrededor, pero nadie lo ha pedido.
 - **Comprobar los grupos de POI con el `cuba-osm.mbtiles` real** (§167): las clases y el zoom de salida
   salieron de la documentación de OpenMapTiles, no del dato.
 
+## Carta náutica cubana (investigación del 2026-10-23)
+
+Importadores BSB/KAP (N2) y S-57 (N3) y actualización por fichero: ver [`Randy.md`](Randy.md).
+Pendiente de conseguir un `.KAP` real y de consultar al ONHG / IC-ENC por las celdas y su licencia.
+
 ## Ideas nuevas (repaso del 2026-10-22)
 
 Salieron de repasar lo que hay; ninguna está pedida todavía. Encajan con la arquitectura actual.
