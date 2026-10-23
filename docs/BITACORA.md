@@ -7143,8 +7143,7 @@ La ventana no se ha visto en pantalla (compila y su prueba sin ventana pasa); el
 ## 173. Los 27 tipos AIS en `libtelemetria` (aportación del fork `randoloc`) y un catálogo en el emisor
 
 **Origen.** Al revisar el fork `randoloc/LibMapaStatic` apareció la rama `port-ais-libtelemetria` (un commit, 2026-10-23): pasa el decodificador y el codificador AIS de 7 tipos (1, 2, 3, 5, 18, 19, 24) a
-los **27 de ITU-R M.1371**, trasladando la cobertura del `CAisDecoder` de su proyecto Sas-3 a la estructura única `AisMessage` de la biblioteca. Se trajo solo `libtelemetria/` (código, tests y README) y
-`PORT_AIS.md` (la tabla de campos y la verificación cruzada); se dejó fuera lo propio de su máquina (la reinstalación de sus prefijos qmake) y se corrigió el texto que decía «sin commit ni push».
+los **27 de ITU-R M.1371**, trasladando la cobertura del `CAisDecoder` de su proyecto Sas-3 a la estructura única `AisMessage` de la biblioteca. El autor abrió ese mismo cambio como el PR #40 y se fusionó en `main` mientras esta rama estaba abierta, así que el port (código, tests, README y `PORT_AIS.md`) llega a `main` por #40 y esta rama se puso al día con un merge. Lo que aporta esta rama encima: el arreglo del tipo 19, el nivel de API 3, el catálogo del emisor y el cliente (abajo), y una sección «Después del port» en `PORT_AIS.md`.
 
 **Qué cambia en la biblioteca.** Los campos nuevos de `AisMessage` son aditivos y no rompen a ningún consumidor: fecha y hora UTC (4 y 11), aeronave SAR (9), ayuda a la navegación (21, con el nombre de 20
 caracteres más su extensión), textos de seguridad (12, 14), acuses (7, 13), interrogación (15), modo asignado (16), correcciones DGNSS (17), enlace de datos (20), canales (22), grupo (23), largo alcance (27) y

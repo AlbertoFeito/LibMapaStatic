@@ -8,9 +8,8 @@ aquel a la **ingeniería** de esta biblioteca: misma estructura única
 0 según el campo), memoria acotada y sin tocar la API existente. Los campos
 nuevos son aditivos; ningún consumidor actual se rompe.
 
-Origen: la rama `port-ais-libtelemetria` del fork `randoloc/LibMapaStatic` (un solo
-commit, 2026-10-23), traída aquí sin cambios de comportamiento salvo lo anotado en
-«Después del port».
+Queda **en el árbol local, sin commit ni push**: la decisión de subirlo es del
+autor del proyecto Sas-3 y del mantenedor de este repositorio.
 
 ## Tipos portados y campos
 
@@ -65,6 +64,19 @@ Ayudantes de texto nuevos, en español como los existentes:
   codificar (no se guarda en `AisMessage`), como ya se hacía con los campos
   de radio de los tipos originales.
 
+## Reinstalación qmake (previa al port)
+
+Las instalaciones de `~/workspace/libmapa-inst/` estaban cruzadas, como se
+sospechaba: la de **qt6** traía un `telemetria_qt.pri` que decía
+`TELEMETRIA_QT_MAJOR = 5` / `5.15.13` (una compilación con Qt 5 instalada en
+el prefijo de Qt 6), y en la de **qt5** ni siquiera existían
+`telemetria.pri`/`telemetria_qt.pri`. Se reinstaló **en secuencia** (nunca en
+paralelo: el `.pro` genera `telemetria_qt.pri` y dos builds a la vez se lo
+pisan), primero Qt 5 y después Qt 6, y se repitió la misma secuencia al
+terminar el port para que las instalaciones lleven el código nuevo.
+Resultado verificado en ambos prefijos: qt5 → `5 / 5.15.13`, qt6 → `6 / 6.4.2`,
+con cabeceras y bibliotecas (`libtelemetria.a`, `libtelemetriad.a`) presentes.
+
 ## Pruebas
 
 En `tests/tst_ais.cpp` (estilo gpsd de la casa: vectores fijos + ida y vuelta):
@@ -89,6 +101,15 @@ Resultados (0 avisos con `-Wall -Wextra -Wconversion` y compañía):
 | tst_nmea | 14/14 | 14/14 |
 | tst_ais | 24/24 | 24/24 |
 | tst_decoder | 10/10 | 10/10 |
+
+Nota sobre el Qt 6: en esta máquina, `find_package(QT NAMES Qt6 Qt5 …)` de
+CMake resuelve **Qt 5** aunque Qt 6 esté instalado — el `Qt6Config.cmake` de
+Debian (6.4.2) se niega a cargarse cuando `CMAKE_FIND_PACKAGE_NAME` no es
+exactamente `Qt6` (línea 125 del propio fichero), y CMake pasa entonces al
+siguiente nombre. Por eso la validación de Qt 6 se hizo con qmake (la vía que
+el propio repositorio documenta para la biblioteca), verificando que los
+binarios enlazan `libQt6Core.so.6`. Con `find_package(Qt6 …)` directo, CMake
+sí encuentra Qt 6.4.2.
 
 ## Verificación cruzada contra el decodificador de Sas-3
 
