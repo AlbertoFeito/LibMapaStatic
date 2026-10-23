@@ -7169,3 +7169,22 @@ que no describen a una estación (binarios, acuses, gestión de canales...) se c
 en pantalla (su prueba sin ventana, sí); los colores y el orden de la tabla son lo primero que hay que mirar.
 
 **Estado: 31 tests (28 sin QCustomPlot).** Verificado: los tres tests de `libtelemetria`, el contrato de instalación (`herramientas/probar_instalacion.sh`, con los diez ejemplos y sus `--comprobar`).
+
+## 174. `vigilar_randy.sh`: aviso cuando cambia `docs/Randy.md`
+
+El usuario pidió un script que revisara `docs/Randy.md` dos veces al día (es el documento de investigación de la carta náutica cubana, que otras personas pueden seguir tocando). Un script no puede
+programarse a sí mismo, así que son dos piezas: `herramientas/vigilar_randy.sh` y la línea de planificación que va en su cabecera (cron en Linux, una tarea de Git Bash en el Programador de tareas de Windows,
+a las 9:00 y a las 18:00). **No se ha instalado ninguna tarea programada**: eso lo decide el usuario en su máquina.
+
+**Cómo decide que ha cambiado.** Hace `git fetch` de `origin/main` y compara el *blob* de `docs/Randy.md` (el SHA del contenido, no la fecha ni el commit) con el último que vio, guardado en `.git/vigilar_randy.estado`
+(dentro de `.git`, así que no se commitea ni ensucia el árbol). Comparar el contenido evita avisar por un merge o un commit que toca otros ficheros. La primera vez solo apunta la versión. Si cambió, enseña los
+commits que tocaron el fichero y el diff contra la versión anterior, y apunta la nueva. No toca la rama ni el árbol de trabajo: solo `fetch` y lectura.
+
+**Códigos de salida**, para encadenar un aviso: 0 sin cambios o primera vez, 10 cambió, 11 el fichero ya no existe en el remoto, 1 error (sin red, remoto inexistente). `--sin-guardar` mira sin apuntar, para probar o para
+seguir viendo el aviso hasta haberlo leído. `--fichero`, `--rama` y `--remoto` sirven para vigilar otro fichero con el mismo script.
+
+**Probado** en este contenedor, en sus seis caminos: primera vez, sin cambios, cambio (simulado apuntando como «vista» la versión de `Randy.md` del commit `dd498d3`, que sí enseñó los dos commits y las 56 líneas
+añadidas después), fichero inexistente, remoto malo y ejecución desde otra carpeta. **Sin probar:** en Windows con Git Bash ni con el Programador de tareas, ni con cron de verdad; y el script **no avisa por sí
+solo**: con cron deja el resultado en `.git/vigilar_randy.log`, y un aviso al móvil o al correo habría que encadenarlo a mano.
+
+**Estado: 31 tests (28 sin QCustomPlot).** Es un script, sin código de la librería.
