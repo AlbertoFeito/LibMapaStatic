@@ -42,3 +42,22 @@ zona alrededor, pero nadie lo ha pedido.
     `examples/rutas_tierra` solo MUESTRA cuánta tierra lleva la ruta. Haría falta un `RouteOptions` en `findRoute`
     (p. ej. `avoidTracks`, que pondría el coste de `track` muy alto o lo quitaría del grafo).
 - Recordar la licencia del dato: **ODbL**, «© OpenStreetMap contributors, © OpenMapTiles».
+- **Comprobar los grupos de POI con el `cuba-osm.mbtiles` real** (§167): las clases y el zoom de salida
+  salieron de la documentación de OpenMapTiles, no del dato.
+
+## Ideas nuevas (repaso del 2026-10-22)
+
+Salieron de repasar lo que hay; ninguna está pedida todavía. Encajan con la arquitectura actual.
+
+- **Ejemplo `planificador_viajes`**: varios destinos, orden óptimo y exportación a GPX, sobre `findRoute`.
+- **Isócronas**: la zona que se alcanza en N minutos desde un punto, con el mismo grafo vial.
+- **Geocodificación inversa**: «calle y lugar más cercano» al pinchar, con los índices de calles y lugares.
+- **Capa meteorológica o de mareas**: un overlay con datos cargados desde fichero, sin conexión.
+- **Grabar y reproducir el flujo de telemetría en vivo**, para repetir sesiones.
+- **Más protocolos en `libtelemetria`**: ADS-B (Mode S / SBS-1) y MAVLink, con dato publicado por fuente independiente.
+- **Plantillas de simbología**: un juego de iconos estándar (p. ej. tipos AIS) como hook opcional.
+- **Edición avanzada**: deshacer/rehacer global, snapping a vértices y estilos de capa guardados.
+- **Atlas impreso**: varias páginas por cuadrícula, con leyenda, a partir de `exportView`.
+- **Rendimiento vectorial**: caché en disco de teselas ya renderizadas y precarga de las vecinas.
+- **Empaquetador de datos**: herramienta que, dada una zona, genere el paquete completo (`mapa.json` incluido).
+- **Calidad y distribución**: tests de interfaz con capturas y paquetes (vcpkg o Conan).
