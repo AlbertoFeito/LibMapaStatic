@@ -83,3 +83,59 @@ como producto y bajo qué licencia.
 - Consulta al ONHG / IC-ENC sobre celdas cubanas y licencia.
 - Conseguir un `.KAP` real (de GEOCUBA o de otro servicio) para N2.
 - Aclarar la «migración de Sas» que mencionaba el texto original: no aparece en este repo.
+
+---
+
+# Otro tema a revisar: el ratón de la librería frente a una app con sus propias acciones
+
+Revisión del 2026-10-23, leyendo `src/widget/MapView.cpp` y `include/libmapa/MapWidget.h`. No se ha
+cambiado código. Pregunta: una app que ya tiene acciones propias con el ratón sobre el mapa, ¿choca
+con lo que hace la librería? Respuesta: **sí puede**, y hoy la app no puede apagar nada.
+
+## Cómo recibe el ratón la librería
+
+`MapWidget` contiene un `MapView` que ocupa todo el área y recibe él los eventos de ratón y
+teclado. `MapView` los acepta (`event->accept()`), así que el `MapWidget` y la ventana de la app
+**no los ven**. Heredar de `MapWidget` o ponerle un filtro de eventos no sirve.
+
+## Lo que la librería hace siempre (con `MapTool::None`)
+
+| Gesto | Efecto fijo |
+|---|---|
+| Arrastrar con el botón izquierdo | Mueve el mapa; si empieza sobre una etiqueta o una entidad `draggable`, arrastra eso. |
+| Botón central | Mueve el mapa con cualquier herramienta. |
+| Rueda | Zoom hacia el cursor. |
+| Doble clic en vacío | Acerca un nivel. |
+| Clic sobre un elemento / en vacío | Selecciona / deselecciona. |
+| Clic derecho | Cancela la herramienta si tiene algo a medias; si no, emite `contextMenuRequested`. |
+| Teclado | Esc, Intro, Supr, Retroceso, flechas, `+`, `-`, RePág y AvPág. |
+
+## Qué choca y qué no
+
+- **Conviven bien**: acciones que solo reaccionan a un clic o al movimiento, con los avisos pasivos
+  `mouseMoved`, `clicked(coordenada, botón)` (solo en clic sin arrastre), `elementClicked` y
+  `contextMenuRequested`.
+- **Chocan**: arrastres propios con el botón izquierdo (la app no sabe que empezó), rueda o doble
+  clic con otro significado, y las teclas que la librería acepta (Esc, Supr, flechas, `+`/`-`).
+- **Sin información**: `clicked` no trae modificadores (Ctrl, Mayús); un «Ctrl+clic» no se distingue.
+- **Menú propio**: usar `contextMenuRequested`, no el `contextMenuEvent` de Qt; con una herramienta a
+  medias, el clic derecho solo la cancela y no abre menú.
+
+## Qué se puede hacer hoy sin tocar la librería
+
+1. Usar las herramientas incorporadas (`setActiveTool`): `PickPoint`, `SelectArea`, `SelectPolygon`,
+   `Measure`. Con una activa, el arrastre izquierdo no mueve el mapa (el central sí).
+2. Filtro de eventos en el widget hijo (`mapa->findChildren<QWidget*>()`), devolviendo `true` para lo
+   que sea de la app. Funciona, pero depende de la estructura interna y puede romperse.
+
+## Propuesta para la librería (sin hacer)
+
+- `setMouseNavigation(flags)`: encender y apagar por separado arrastre, rueda, doble clic y teclas.
+  Por defecto todo encendido, para no cambiar lo actual.
+- Avisos `mousePressed` y `mouseReleased` con modificadores, y modificadores en `clicked`.
+
+## Pendiente
+
+- Saber qué gestos usa la app (clic, arrastre, rueda, teclas, clic derecho) para ver cuáles chocan
+  de verdad y si hace falta la rama con esos cambios.
+- Si hace falta el API, añadirlo a `README.md` («Ratón y teclado») y probarlo en `tst_mapwidget`.
