@@ -7140,3 +7140,33 @@ La ventana no se ha visto en pantalla (compila y su prueba sin ventana pasa); el
 
 **Estado: 31 tests (28 sin QCustomPlot).**
 
+## 173. Los 27 tipos AIS en `libtelemetria` (aportación del fork `randoloc`) y un catálogo en el emisor
+
+**Origen.** Al revisar el fork `randoloc/LibMapaStatic` apareció la rama `port-ais-libtelemetria` (un commit, 2026-10-23): pasa el decodificador y el codificador AIS de 7 tipos (1, 2, 3, 5, 18, 19, 24) a
+los **27 de ITU-R M.1371**, trasladando la cobertura del `CAisDecoder` de su proyecto Sas-3 a la estructura única `AisMessage` de la biblioteca. Se trajo solo `libtelemetria/` (código, tests y README) y
+`PORT_AIS.md` (la tabla de campos y la verificación cruzada); se dejó fuera lo propio de su máquina (la reinstalación de sus prefijos qmake) y se corrigió el texto que decía «sin commit ni push».
+
+**Qué cambia en la biblioteca.** Los campos nuevos de `AisMessage` son aditivos y no rompen a ningún consumidor: fecha y hora UTC (4 y 11), aeronave SAR (9), ayuda a la navegación (21, con el nombre de 20
+caracteres más su extensión), textos de seguridad (12, 14), acuses (7, 13), interrogación (15), modo asignado (16), correcciones DGNSS (17), enlace de datos (20), canales (22), grupo (23), largo alcance (27) y
+los binarios (6, 8, 25, 26), de los que se entrega la carga **sin interpretar** (`dac`, `fid`, `binaryData`, `binaryBits`). Más `aisAtonTypeText` y `aisEpfsTypeText`. Un detalle de diseño: la posición de las
+correcciones DGNSS (17) es la de la **estación de referencia**, no la del emisor, así que va en `dgnssLat`/`dgnssLon` y `hasPosition()` no la cuenta. Los tipos reservados (0, 28 a 31) siguen devolviendo solo tipo y MMSI.
+`TELEMETRIA_API_LEVEL` pasa a **3** y los dos ejemplos de telemetría lo exigen (así una instalación vieja da el mensaje «reinstálala» y no un «no está declarado»).
+
+**Un fallo que apareció al probarlo.** El decodificador del tipo 19 leía `epfsType` y `assigned`, pero `encodeAis` escribía ese bloque a ceros: un 19 con GPS salía del emisor sin fijador. Lo vio el catálogo del emisor
+(abajo), no los tests del fork. Ahora se escribe y `roundTripClassB` lo comprueba.
+
+**Lo que NO es.** La verificación independiente de los tipos nuevos son los vectores fijos de `tst_ais`, que el autor generó con un codificador Python escrito desde la tabla de M.1371 y contrastó con el decodificador de
+Sas-3 (160 campos coincidentes, 5 diferencias que son fallos del otro decodificador: minuto y segundo de 5 bits en los tipos 4 y 11, y la tabla de textos de las ayudas). **No** son frases publicadas por una fuente
+independiente (como el ejemplo de gpsd del tipo 1), que es lo que pide la norma de la biblioteca; sigue pendiente conseguir alguna por tipo. No se ha probado con un receptor AIS real.
+
+**Los ejemplos.** `emisor_nmea` emite ahora, además de los barcos, tres **estaciones fijas** (el faro del Morro y una boya del canal, tipo 21 cada 30 s, y la estación base del puerto, tipo 4 cada 10 s y un aviso
+de seguridad, tipo 14, cada minuto) y un **catálogo** de 23 mensajes: un ejemplo de cada tipo y variante que faltaba (direccionado y difundido, con y sin DAC/FID, área y destinos, una ayuda virtual con nombre largo),
+uno por segundo cada minuto, por el canal B para que sus identificadores de secuencia no se mezclen con los tipos 5 de los barcos. Cada ejemplo lleva en el código **su comprobación** (qué campos debe conservar), y
+`--comprobar` verifica los 23 y que **salen los 27 tipos**. `cliente_telemetria` ahora distingue qué es cada estación: las ayudas (morado, «virtual» si no existen), las bases (gris azulado) y las aeronaves SAR (rojo) son
+objetivos aparte, con su tipo y su clase en la tabla; las ayudas, que informan cada ~3 min, se dan por perdidas a los 10 min (a los 60 s un barco); los avisos de seguridad (12 y 14) se anotan en el registro; y los tipos
+que no describen a una estación (binarios, acuses, gestión de canales...) se cuentan pero **no crean un contacto vacío**. La demostración (`--demo`) incluye ahora las estaciones fijas.
+
+**Límites.** Del AIS el cliente no interpreta ningún binario de aplicación (el significado de un DAC/FID lo decide una aplicación). El catálogo es ida y vuelta con la propia biblioteca. La ventana del cliente no se ha visto
+en pantalla (su prueba sin ventana, sí); los colores y el orden de la tabla son lo primero que hay que mirar.
+
+**Estado: 31 tests (28 sin QCustomPlot).** Verificado: los tres tests de `libtelemetria`, el contrato de instalación (`herramientas/probar_instalacion.sh`, con los diez ejemplos y sus `--comprobar`).

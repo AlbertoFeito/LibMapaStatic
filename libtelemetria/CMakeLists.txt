@@ -3,7 +3,7 @@
 # Biblioteca APARTE de libmapa: no sabe nada de mapas ni de ventanas. Solo Qt Core.
 # Convierte lineas de texto (lo que llega por UDP, TCP, serie o de un fichero de
 # captura) en datos: posicion y rumbo propios (RMC, GGA, VTG, HDT) y mensajes AIS de
-# los demas barcos (tipos 1, 2, 3, 5, 18, 19 y 24). Tambien los codifica, para
+# los demas barcos (los 27 tipos de ITU-R M.1371). Tambien los codifica, para
 # simular un receptor y para probar el decodificador.
 #
 # Se compila sola o metida en la raiz del repositorio (add_subdirectory) y se

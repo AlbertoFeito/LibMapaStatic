@@ -72,6 +72,21 @@ public:
         return r.trimmed();
     }
 
+    // Los \a len bits desde \a pos como bytes, el primero el mas significativo
+    // (el ultimo byte se completa con ceros si \a len no es multiplo de 8).
+    QByteArray bytes(int pos, int len) const
+    {
+        QByteArray out;
+        for (int i = 0; i < len; i += 8) {
+            const int n = std::min(8, len - i);
+            int v = 0;
+            for (int b = 0; b < n; ++b)
+                v = (v << 1) | int(m_bits.at(pos + i + b));
+            out.append(char(v << (8 - n)));
+        }
+        return out;
+    }
+
 private:
     QVector<quint8> m_bits;
 };
@@ -103,6 +118,16 @@ public:
                     v = 32;                              // lo que no cabe en 6 bits, espacio
             }
             u(v, 6);
+        }
+    }
+
+    // Los \a bits primeros bits de \a data, el primero el mas significativo.
+    void raw(const QByteArray &data, int bits)
+    {
+        for (int i = 0; i < bits; ++i) {
+            const int byte = i / 8;
+            const quint8 v = byte < data.size() ? quint8(data.at(byte)) : quint8(0);
+            m_bits.append(quint8((v >> (7 - i % 8)) & 1));
         }
     }
 
@@ -140,6 +165,23 @@ double fromAisCoord(qint32 v, qint32 noDisponible, double limit)
         return notAvailable();
     const double deg = double(v) / 600000.0;
     return std::abs(deg) <= limit ? deg : notAvailable();
+}
+
+// Los tipos 17, 22, 23 y 27 guardan las coordenadas en 1/10 de minuto (mas basto).
+const qint32 kLonNoDisponibleC = 108600;
+const qint32 kLatNoDisponibleC = 54600;
+
+double fromAisCoordC(qint32 v, qint32 noDisponible, double limit)
+{
+    if (v == noDisponible)
+        return notAvailable();
+    const double deg = double(v) / 600.0;
+    return std::abs(deg) <= limit ? deg : notAvailable();
+}
+
+qint32 toAisCoordC(double deg, qint32 noDisponible)
+{
+    return std::isfinite(deg) ? qint32(std::lround(deg * 600.0)) : noDisponible;
 }
 
 // Campos comunes de posicion de clase B (tipos 18 y 19): del bit 46 en adelante.
@@ -188,6 +230,24 @@ bool decodeAis(const QByteArray &payload, int fillBits, AisMessage *out)
         m.second = int(r.u(137, 6));
         break;
     }
+    case 4: case 11: {
+        // Estacion base (4) y respuesta a la peticion de fecha y hora (11):
+        // misma estructura, con la hora UTC completa y la posicion de la estacion.
+        if (r.size() < 168)
+            return false;
+        m.supported = true;
+        m.utcYear = int(r.u(38, 14));
+        m.utcMonth = int(r.u(52, 4));
+        m.utcDay = int(r.u(56, 5));
+        m.utcHour = int(r.u(61, 5));
+        m.utcMinute = int(r.u(66, 6));
+        m.utcSecond = int(r.u(72, 6));
+        m.accuracy = r.u(78, 1) != 0;
+        m.lon = fromAisCoord(r.s(79, 28), kLonNoDisponible, 180.0);
+        m.lat = fromAisCoord(r.s(107, 27), kLatNoDisponible, 90.0);
+        m.epfsType = int(r.u(134, 4));
+        break;
+    }
     case 5: {
         if (r.size() < 420)                              // el ultimo bit de relleno puede faltar
             return false;
@@ -207,6 +267,145 @@ bool decodeAis(const QByteArray &payload, int fillBits, AisMessage *out)
         const quint32 draught = r.u(294, 8);
         m.draughtM = double(draught) / 10.0;
         m.destination = r.text(302, 20);
+        break;
+    }
+    case 6: {
+        // Binario direccionado: destino, DAC/FID y la carga de aplicacion sin tocar.
+        if (r.size() < 88)
+            return false;
+        m.supported = true;
+        m.sequence = int(r.u(38, 2));
+        m.destMmsi = r.u(40, 30);
+        m.retransmit = r.u(70, 1) != 0;
+        m.dac = int(r.u(72, 10));
+        m.fid = int(r.u(82, 6));
+        m.binaryBits = r.size() - 88;
+        m.binaryData = r.bytes(88, m.binaryBits);
+        break;
+    }
+    case 7: case 13: {
+        // Acuses: hasta cuatro parejas (MMSI, secuencia) tras la cabecera.
+        if (r.size() < 72)
+            return false;
+        m.supported = true;
+        for (int i = 0; i < 4; ++i) {
+            const int base = 40 + 32 * i;
+            if (r.size() < base + 32)
+                break;
+            m.ackMmsi.append(r.u(base, 30));
+            m.ackSequence.append(int(r.u(base + 30, 2)));
+        }
+        break;
+    }
+    case 8: {
+        // Binario difundido: DAC/FID y la carga de aplicacion sin tocar.
+        if (r.size() < 56)
+            return false;
+        m.supported = true;
+        m.dac = int(r.u(40, 10));
+        m.fid = int(r.u(50, 6));
+        m.binaryBits = r.size() - 56;
+        m.binaryData = r.bytes(56, m.binaryBits);
+        break;
+    }
+    case 9: {
+        // Aeronave SAR: como el informe de clase A, pero con altitud y con la
+        // velocidad en nudos enteros (1023 = no disponible), y sin proa.
+        if (r.size() < 168)
+            return false;
+        m.supported = true;
+        const quint32 alt = r.u(38, 12);
+        m.altitudeM = alt == 4095 ? notAvailable() : double(alt);
+        const quint32 sog = r.u(50, 10);
+        m.sogKn = sog == 1023 ? notAvailable() : double(sog);
+        m.accuracy = r.u(60, 1) != 0;
+        m.lon = fromAisCoord(r.s(61, 28), kLonNoDisponible, 180.0);
+        m.lat = fromAisCoord(r.s(89, 27), kLatNoDisponible, 90.0);
+        const quint32 cog = r.u(116, 12);
+        m.cogDeg = cog >= 3600 ? notAvailable() : double(cog) / 10.0;
+        m.second = int(r.u(128, 6));
+        m.assigned = r.u(146, 1) != 0;
+        break;
+    }
+    case 10: {
+        if (r.size() < 72)
+            return false;
+        m.supported = true;
+        m.destMmsi = r.u(40, 30);
+        break;
+    }
+    case 12: {
+        // Texto de seguridad direccionado: el texto ocupa lo que quede de mensaje.
+        if (r.size() < 72)
+            return false;
+        m.supported = true;
+        m.sequence = int(r.u(38, 2));
+        m.destMmsi = r.u(40, 30);
+        m.retransmit = r.u(70, 1) != 0;
+        m.text = r.text(72, (r.size() - 72) / 6);
+        break;
+    }
+    case 14: {
+        // Texto de seguridad difundido.
+        if (r.size() < 40)
+            return false;
+        m.supported = true;
+        m.text = r.text(40, (r.size() - 40) / 6);
+        break;
+    }
+    case 15: {
+        // Interrogacion: una estacion obligatoria y una segunda si el mensaje
+        // llega a 160 bits; a la primera se le pueden pedir dos tipos.
+        if (r.size() < 88)
+            return false;
+        m.supported = true;
+        AisMessage::Interrogation q;
+        q.mmsi = r.u(40, 30);
+        q.type1 = int(r.u(70, 6));
+        q.offset1 = int(r.u(76, 12));
+        if (r.size() >= 110) {
+            q.type2 = int(r.u(90, 6));
+            q.offset2 = int(r.u(96, 12));
+        }
+        m.interrogations.append(q);
+        if (r.size() >= 160) {
+            AisMessage::Interrogation q2;
+            q2.mmsi = r.u(110, 30);
+            q2.type1 = int(r.u(140, 6));
+            q2.offset1 = int(r.u(146, 12));
+            m.interrogations.append(q2);
+        }
+        break;
+    }
+    case 16: {
+        // Asignacion de modo: una estacion, o dos si el mensaje llega a 144 bits.
+        if (r.size() < 96)
+            return false;
+        m.supported = true;
+        AisMessage::Assignment a;
+        a.mmsi = r.u(40, 30);
+        a.offset = int(r.u(70, 12));
+        a.increment = int(r.u(82, 10));
+        m.assignments.append(a);
+        if (r.size() >= 144) {
+            AisMessage::Assignment b;
+            b.mmsi = r.u(92, 30);
+            b.offset = int(r.u(122, 12));
+            b.increment = int(r.u(134, 10));
+            m.assignments.append(b);
+        }
+        break;
+    }
+    case 17: {
+        // Correcciones DGNSS difundidas: posicion de la estacion (en 1/10 de
+        // minuto) y la carga de correcciones sin tocar.
+        if (r.size() < 80)
+            return false;
+        m.supported = true;
+        m.dgnssLon = fromAisCoordC(r.s(40, 18), kLonNoDisponibleC, 180.0);
+        m.dgnssLat = fromAisCoordC(r.s(58, 17), kLatNoDisponibleC, 90.0);
+        m.binaryBits = r.size() - 80;
+        m.binaryData = r.bytes(80, m.binaryBits);
         break;
     }
     case 18: {
@@ -229,6 +428,92 @@ bool decodeAis(const QByteArray &payload, int fillBits, AisMessage *out)
         m.toSternM = int(r.u(280, 9));
         m.toPortM = int(r.u(289, 6));
         m.toStarboardM = int(r.u(295, 6));
+        m.epfsType = int(r.u(301, 4));
+        m.assigned = r.u(307, 1) != 0;
+        break;
+    }
+    case 20: {
+        // Gestion del enlace de datos: de una a cuatro reservas de 30 bits.
+        if (r.size() < 72)
+            return false;
+        m.supported = true;
+        for (int i = 0; i < 4; ++i) {
+            const int base = 40 + 30 * i;
+            if (r.size() < base + 30)
+                break;
+            AisMessage::Reservation v;
+            v.offset = int(r.u(base, 12));
+            v.slotCount = int(r.u(base + 12, 4));
+            v.timeout = int(r.u(base + 16, 3));
+            v.increment = int(r.u(base + 19, 11));
+            m.reservations.append(v);
+        }
+        break;
+    }
+    case 21: {
+        // Ayuda a la navegacion: tipo, nombre (20 caracteres mas la extension
+        // que quepa tras el bit 272), posicion y dimensiones de la ayuda.
+        if (r.size() < 272)
+            return false;
+        m.supported = true;
+        m.atonType = int(r.u(38, 5));
+        m.name = r.text(43, 20);
+        m.accuracy = r.u(163, 1) != 0;
+        m.lon = fromAisCoord(r.s(164, 28), kLonNoDisponible, 180.0);
+        m.lat = fromAisCoord(r.s(192, 27), kLatNoDisponible, 90.0);
+        m.toBowM = int(r.u(219, 9));
+        m.toSternM = int(r.u(228, 9));
+        m.toPortM = int(r.u(237, 6));
+        m.toStarboardM = int(r.u(243, 6));
+        m.epfsType = int(r.u(249, 4));
+        m.second = int(r.u(253, 6));
+        m.offPosition = r.u(259, 1) != 0;
+        m.virtualAton = r.u(269, 1) != 0;
+        m.assigned = r.u(270, 1) != 0;
+        if (r.size() > 272)
+            m.name += r.text(272, (r.size() - 272) / 6);
+        break;
+    }
+    case 22: {
+        // Gestion de canales: dos canales y o dos MMSI de destino o un area
+        // (esquinas en 1/10 de minuto), segun el indicador de direccionado.
+        if (r.size() < 168)
+            return false;
+        m.supported = true;
+        m.channelA = int(r.u(40, 12));
+        m.channelB = int(r.u(52, 12));
+        m.txRxMode = int(r.u(64, 4));
+        m.lowPower = r.u(68, 1) != 0;
+        m.addressed = r.u(139, 1) != 0;
+        if (m.addressed) {
+            m.destMmsi = r.u(69, 30);
+            m.destMmsi2 = r.u(104, 30);
+        } else {
+            m.neLon = fromAisCoordC(r.s(69, 18), kLonNoDisponibleC, 180.0);
+            m.neLat = fromAisCoordC(r.s(87, 17), kLatNoDisponibleC, 90.0);
+            m.swLon = fromAisCoordC(r.s(104, 18), kLonNoDisponibleC, 180.0);
+            m.swLat = fromAisCoordC(r.s(122, 17), kLatNoDisponibleC, 90.0);
+        }
+        m.bandChannelA = r.u(140, 1) != 0;
+        m.bandChannelB = r.u(141, 1) != 0;
+        m.zoneSize = int(r.u(142, 3));
+        break;
+    }
+    case 23: {
+        // Asignacion a un grupo: area (en 1/10 de minuto), tipo de estacion y
+        // de barco a los que se aplica, modo Tx/Rx, intervalo y silencio.
+        if (r.size() < 160)
+            return false;
+        m.supported = true;
+        m.neLon = fromAisCoordC(r.s(40, 18), kLonNoDisponibleC, 180.0);
+        m.neLat = fromAisCoordC(r.s(58, 17), kLatNoDisponibleC, 90.0);
+        m.swLon = fromAisCoordC(r.s(75, 18), kLonNoDisponibleC, 180.0);
+        m.swLat = fromAisCoordC(r.s(93, 17), kLatNoDisponibleC, 90.0);
+        m.stationType = int(r.u(110, 4));
+        m.shipType = int(r.u(114, 8));
+        m.txRxMode = int(r.u(144, 2));
+        m.reportInterval = int(r.u(146, 4));
+        m.quietTime = int(r.u(150, 4));
         break;
     }
     case 24: {
@@ -249,6 +534,51 @@ bool decodeAis(const QByteArray &payload, int fillBits, AisMessage *out)
         } else {
             m.supported = false;
         }
+        break;
+    }
+    case 25: case 26: {
+        // Binario de un intervalo (25) o de varios (26): direccionado y/o con
+        // DAC/FID opcionales; el 26 reserva los ultimos 20 bits para el estado
+        // de comunicaciones, que no forma parte de la carga.
+        if (r.size() < (m.type == 25 ? 40 : 60))
+            return false;
+        m.supported = true;
+        m.addressed = r.u(38, 1) != 0;
+        m.structured = r.u(39, 1) != 0;
+        int pos = 40;
+        if (m.addressed) {
+            if (r.size() < 70)
+                return false;
+            m.destMmsi = r.u(40, 30);
+            pos = 70;
+        }
+        if (m.structured) {
+            if (r.size() < pos + 16)
+                return false;
+            m.dac = int(r.u(pos, 10));
+            m.fid = int(r.u(pos + 10, 6));
+            pos += 16;
+        }
+        const int fin = m.type == 26 ? r.size() - 20 : r.size();
+        m.binaryBits = std::max(0, fin - pos);
+        m.binaryData = r.bytes(pos, m.binaryBits);
+        break;
+    }
+    case 27: {
+        // Largo alcance: posicion basto (1/10 de minuto), velocidad en nudos
+        // enteros (63 = no disponible) y rumbo en grados enteros (511 = no).
+        if (r.size() < 96)
+            return false;
+        m.supported = true;
+        m.accuracy = r.u(38, 1) != 0;
+        m.navStatus = int(r.u(40, 4));
+        m.lon = fromAisCoordC(r.s(44, 18), kLonNoDisponibleC, 180.0);
+        m.lat = fromAisCoordC(r.s(62, 17), kLatNoDisponibleC, 90.0);
+        const quint32 sog = r.u(79, 6);
+        m.sogKn = sog >= 63 ? notAvailable() : double(sog);
+        const quint32 cog = r.u(85, 9);
+        m.cogDeg = cog >= 511 ? notAvailable() : double(cog);
+        m.gnss = r.u(94, 1) != 0;
         break;
     }
     default:
@@ -321,7 +651,10 @@ QList<QByteArray> encodeAis(const AisMessage &m, char channel, int sequenceId, b
             w.u(quint32(m.toSternM), 9);
             w.u(quint32(m.toPortM), 6);
             w.u(quint32(m.toStarboardM), 6);
-            w.u(0, 4 + 1 + 1 + 1 + 4);                   // receptor, RAIM, DTE, asignado y reservado
+            w.u(quint32(m.epfsType) & 0xFu, 4);          // fijador de posicion (EPFS)
+            w.u(0, 1 + 1);                               // RAIM y DTE
+            w.u(m.assigned ? 1u : 0u, 1);
+            w.u(0, 4);                                   // reservado
         }
         break;
     case 24:
@@ -342,6 +675,196 @@ QList<QByteArray> encodeAis(const AisMessage &m, char channel, int sequenceId, b
         } else {
             return {};
         }
+        break;
+    case 4: case 11:
+        w.u(quint32(m.utcYear), 14);
+        w.u(quint32(m.utcMonth), 4);
+        w.u(quint32(m.utcDay), 5);
+        w.u(quint32(m.utcHour), 5);
+        w.u(quint32(m.utcMinute), 6);
+        w.u(quint32(m.utcSecond), 6);
+        w.u(m.accuracy ? 1u : 0u, 1);
+        w.s(toAisCoord(m.lon, kLonNoDisponible), 28);
+        w.s(toAisCoord(m.lat, kLatNoDisponible), 27);
+        w.u(quint32(m.epfsType), 4);
+        w.u(0, 10 + 1 + 19);                             // repuesto, RAIM y radio
+        break;
+    case 6:
+        w.u(quint32(m.sequence), 2);
+        w.u(m.destMmsi, 30);
+        w.u(m.retransmit ? 1u : 0u, 1);
+        w.u(0, 1);                                       // repuesto
+        w.u(quint32(m.dac < 0 ? 0 : m.dac), 10);
+        w.u(quint32(m.fid < 0 ? 0 : m.fid), 6);
+        w.raw(m.binaryData, m.binaryBits);
+        break;
+    case 7: case 13:
+        w.u(0, 2);                                       // repuesto
+        for (int i = 0; i < m.ackMmsi.size() && i < 4; ++i) {
+            w.u(m.ackMmsi.at(i), 30);
+            w.u(quint32(i < m.ackSequence.size() ? m.ackSequence.at(i) : 0), 2);
+        }
+        break;
+    case 8:
+        w.u(0, 2);                                       // repuesto
+        w.u(quint32(m.dac < 0 ? 0 : m.dac), 10);
+        w.u(quint32(m.fid < 0 ? 0 : m.fid), 6);
+        w.raw(m.binaryData, m.binaryBits);
+        break;
+    case 9:
+        w.u(std::isfinite(m.altitudeM) ? quint32(std::lround(m.altitudeM)) : 4095u, 12);
+        w.u(std::isfinite(m.sogKn) ? quint32(std::lround(m.sogKn)) : 1023u, 10);   // nudos enteros
+        w.u(m.accuracy ? 1u : 0u, 1);
+        w.s(toAisCoord(m.lon, kLonNoDisponible), 28);
+        w.s(toAisCoord(m.lat, kLatNoDisponible), 27);
+        w.u(std::min(cog(), 3600u), 12);
+        w.u(quint32(m.second), 6);
+        w.u(0, 8 + 1 + 3);                               // regional, DTE y repuesto
+        w.u(m.assigned ? 1u : 0u, 1);
+        w.u(0, 1 + 20);                                  // RAIM y radio
+        break;
+    case 10:
+        w.u(0, 2);                                       // repuesto
+        w.u(m.destMmsi, 30);
+        w.u(0, 2);                                       // repuesto
+        break;
+    case 12:
+        w.u(quint32(m.sequence), 2);
+        w.u(m.destMmsi, 30);
+        w.u(m.retransmit ? 1u : 0u, 1);
+        w.u(0, 1);                                       // repuesto
+        w.text(m.text, int(m.text.size()));
+        break;
+    case 14:
+        w.u(0, 2);                                       // repuesto
+        w.text(m.text, int(m.text.size()));
+        break;
+    case 15: {
+        w.u(0, 2);                                       // repuesto
+        const bool dos = m.interrogations.size() > 1;
+        for (int i = 0; i < m.interrogations.size() && i < 2; ++i) {
+            const AisMessage::Interrogation &q = m.interrogations.at(i);
+            w.u(q.mmsi, 30);
+            w.u(quint32(q.type1), 6);
+            w.u(quint32(q.offset1), 12);
+            w.u(0, 2);                                   // repuesto
+            if (i == 0 && (q.type2 >= 0 || dos)) {
+                w.u(quint32(q.type2 >= 0 ? q.type2 : 0), 6);
+                w.u(quint32(q.type2 >= 0 ? q.offset2 : 0), 12);
+                w.u(0, 2);                               // repuesto
+            }
+        }
+        break;
+    }
+    case 16:
+        w.u(0, 2);                                       // repuesto
+        for (int i = 0; i < m.assignments.size() && i < 2; ++i) {
+            const AisMessage::Assignment &a = m.assignments.at(i);
+            w.u(a.mmsi, 30);
+            w.u(quint32(a.offset), 12);
+            w.u(quint32(a.increment), 10);
+        }
+        w.u(0, 4);                                       // repuesto final
+        break;
+    case 17:
+        w.u(0, 2);                                       // repuesto
+        w.s(toAisCoordC(m.dgnssLon, kLonNoDisponibleC), 18);
+        w.s(toAisCoordC(m.dgnssLat, kLatNoDisponibleC), 17);
+        w.u(0, 5);                                       // repuesto
+        w.raw(m.binaryData, m.binaryBits);
+        break;
+    case 20:
+        w.u(0, 2);                                       // repuesto
+        for (int i = 0; i < m.reservations.size() && i < 4; ++i) {
+            const AisMessage::Reservation &v = m.reservations.at(i);
+            w.u(quint32(v.offset), 12);
+            w.u(quint32(v.slotCount), 4);
+            w.u(quint32(v.timeout), 3);
+            w.u(quint32(v.increment), 11);
+        }
+        w.u(0, 2);                                       // repuesto: el mensaje minimo son 72 bits
+        break;
+    case 21:
+        w.u(quint32(m.atonType), 5);
+        w.text(m.name.left(20), 20);
+        w.u(m.accuracy ? 1u : 0u, 1);
+        w.s(toAisCoord(m.lon, kLonNoDisponible), 28);
+        w.s(toAisCoord(m.lat, kLatNoDisponible), 27);
+        w.u(quint32(m.toBowM), 9);
+        w.u(quint32(m.toSternM), 9);
+        w.u(quint32(m.toPortM), 6);
+        w.u(quint32(m.toStarboardM), 6);
+        w.u(quint32(m.epfsType), 4);
+        w.u(quint32(m.second), 6);
+        w.u(m.offPosition ? 1u : 0u, 1);
+        w.u(0, 8);                                       // regional
+        w.u(0, 1);                                       // RAIM
+        w.u(m.virtualAton ? 1u : 0u, 1);
+        w.u(m.assigned ? 1u : 0u, 1);
+        w.u(0, 1);                                       // repuesto
+        if (m.name.size() > 20)
+            w.text(m.name.mid(20), int(m.name.size()) - 20);
+        break;
+    case 22:
+        w.u(0, 2);                                       // repuesto
+        w.u(quint32(m.channelA), 12);
+        w.u(quint32(m.channelB), 12);
+        w.u(quint32(m.txRxMode), 4);
+        w.u(m.lowPower ? 1u : 0u, 1);
+        if (m.addressed) {
+            w.u(m.destMmsi, 30);
+            w.u(0, 5);                                   // repuesto
+            w.u(m.destMmsi2, 30);
+            w.u(0, 5);                                   // repuesto
+        } else {
+            w.s(toAisCoordC(m.neLon, kLonNoDisponibleC), 18);
+            w.s(toAisCoordC(m.neLat, kLatNoDisponibleC), 17);
+            w.s(toAisCoordC(m.swLon, kLonNoDisponibleC), 18);
+            w.s(toAisCoordC(m.swLat, kLatNoDisponibleC), 17);
+        }
+        w.u(m.addressed ? 1u : 0u, 1);
+        w.u(m.bandChannelA ? 1u : 0u, 1);
+        w.u(m.bandChannelB ? 1u : 0u, 1);
+        w.u(quint32(m.zoneSize), 3);
+        w.u(0, 23);                                      // repuesto
+        break;
+    case 23:
+        w.u(0, 2);                                       // repuesto
+        w.s(toAisCoordC(m.neLon, kLonNoDisponibleC), 18);
+        w.s(toAisCoordC(m.neLat, kLatNoDisponibleC), 17);
+        w.s(toAisCoordC(m.swLon, kLonNoDisponibleC), 18);
+        w.s(toAisCoordC(m.swLat, kLatNoDisponibleC), 17);
+        w.u(quint32(m.stationType), 4);
+        w.u(quint32(m.shipType), 8);
+        w.u(0, 22);                                      // repuesto
+        w.u(quint32(m.txRxMode), 2);
+        w.u(quint32(m.reportInterval), 4);
+        w.u(quint32(m.quietTime), 4);
+        w.u(0, 6);                                       // repuesto
+        break;
+    case 25: case 26:
+        w.u(m.addressed ? 1u : 0u, 1);
+        w.u(m.structured ? 1u : 0u, 1);
+        if (m.addressed)
+            w.u(m.destMmsi, 30);
+        if (m.structured) {
+            w.u(quint32(m.dac < 0 ? 0 : m.dac), 10);
+            w.u(quint32(m.fid < 0 ? 0 : m.fid), 6);
+        }
+        w.raw(m.binaryData, m.binaryBits);
+        if (type == 26)
+            w.u(0, 20);                                  // estado de comunicaciones (no se guarda)
+        break;
+    case 27:
+        w.u(m.accuracy ? 1u : 0u, 1);
+        w.u(0, 1);                                       // RAIM
+        w.u(quint32(m.navStatus >= 0 ? m.navStatus : 15), 4);
+        w.s(toAisCoordC(m.lon, kLonNoDisponibleC), 18);
+        w.s(toAisCoordC(m.lat, kLatNoDisponibleC), 17);
+        w.u(std::isfinite(m.sogKn) ? quint32(std::lround(m.sogKn)) : 63u, 6);      // nudos enteros
+        w.u(std::isfinite(m.cogDeg) ? quint32(std::lround(m.cogDeg)) : 511u, 9);   // grados enteros
+        w.u(m.gnss ? 1u : 0u, 1);
+        w.u(0, 1);                                       // repuesto
         break;
     default:
         return {};
@@ -446,6 +969,64 @@ QString aisShipTypeText(int t)
     case 8: return QStringLiteral("Petrolero");
     case 9: return QStringLiteral("Otro");
     default: return QStringLiteral("Otro (%1)").arg(t);
+    }
+}
+
+// Tipo de ayuda a la navegacion del mensaje 21 (tabla de ITU-R M.1371).
+QString aisAtonTypeText(int t)
+{
+    switch (t) {
+    case 0: return QStringLiteral("No especificado");
+    case 1: return QStringLiteral("Punto de referencia");
+    case 2: return QStringLiteral("RACON");
+    case 3: return QStringLiteral("Estructura fija costa afuera");
+    case 4: return QStringLiteral("Boya de naufragio de emergencia");
+    case 5: return QStringLiteral("Luz sin sector");
+    case 6: return QStringLiteral("Luz con sector");
+    case 7: return QStringLiteral("Luz de enfilacion anterior");
+    case 8: return QStringLiteral("Luz de enfilacion posterior");
+    case 9: return QStringLiteral("Baliza cardinal N");
+    case 10: return QStringLiteral("Baliza cardinal E");
+    case 11: return QStringLiteral("Baliza cardinal S");
+    case 12: return QStringLiteral("Baliza cardinal O");
+    case 13: return QStringLiteral("Baliza de babor");
+    case 14: return QStringLiteral("Baliza de estribor");
+    case 15: return QStringLiteral("Baliza de canal preferido a babor");
+    case 16: return QStringLiteral("Baliza de canal preferido a estribor");
+    case 17: return QStringLiteral("Baliza de peligro aislado");
+    case 18: return QStringLiteral("Baliza de aguas seguras");
+    case 19: return QStringLiteral("Baliza de marca especial");
+    case 20: return QStringLiteral("Flotante cardinal N");
+    case 21: return QStringLiteral("Flotante cardinal E");
+    case 22: return QStringLiteral("Flotante cardinal S");
+    case 23: return QStringLiteral("Flotante cardinal O");
+    case 24: return QStringLiteral("Flotante de babor");
+    case 25: return QStringLiteral("Flotante de estribor");
+    case 26: return QStringLiteral("Flotante de canal preferido a babor");
+    case 27: return QStringLiteral("Flotante de canal preferido a estribor");
+    case 28: return QStringLiteral("Flotante de peligro aislado");
+    case 29: return QStringLiteral("Flotante de aguas seguras");
+    case 30: return QStringLiteral("Flotante de marca especial");
+    case 31: return QStringLiteral("Buque faro");
+    default: return QStringLiteral("Desconocido");
+    }
+}
+
+// Fijador de posicion electronico (EPFS) de los tipos 4, 11, 19 y 21.
+QString aisEpfsTypeText(int t)
+{
+    switch (t) {
+    case 0: return QStringLiteral("No definido");
+    case 1: return QStringLiteral("GPS");
+    case 2: return QStringLiteral("GLONASS");
+    case 3: return QStringLiteral("GPS y GLONASS");
+    case 4: return QStringLiteral("Loran-C");
+    case 5: return QStringLiteral("Chayka");
+    case 6: return QStringLiteral("Navegacion integrada");
+    case 7: return QStringLiteral("Topografiado");
+    case 8: return QStringLiteral("Galileo");
+    case 15: return QStringLiteral("No usado");
+    default: return QStringLiteral("Interno");
     }
 }
 
