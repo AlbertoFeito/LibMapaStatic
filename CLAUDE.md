@@ -55,7 +55,8 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/stoic-clarke-rn7r7f` (y otra más, desde `main`) | #35 | Sacar los POI de una zona como entidades: `MapWidget::importPointsOfInterest` y «Sitios de la zona…» en la demo |
 | `claude/buscar-calles` | #36 | Búsqueda de calles sin conexión: `MapWidget::searchStreets`, resaltado en la demo |
 | `claude/rutas-sin-conexion` | #37 | Rutas en coche sin conexión por la red vial de las teselas: `MapWidget::findRoute`, «Ruta (coche)» en la demo y `vector_tile --route` |
-| `claude/app-rutas-tierra` | (borrador) | Ejemplo `rutas_tierra` (rutas por tierra con caminos de tierra y red de demostración) y `RouteResult::legs` |
+| `claude/app-rutas-tierra` | #38 | Ejemplo `rutas_tierra` (rutas por tierra con caminos de tierra y red de demostración) y `RouteResult::legs` |
+| `claude/inspiring-wright-u0smtv` | #41 | Los 27 tipos AIS en `libtelemetria` (aportación del fork `randoloc`), catálogo de tipos en `emisor_nmea` y estaciones fijas en `cliente_telemetria` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).

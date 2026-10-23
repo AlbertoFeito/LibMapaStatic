@@ -651,7 +651,10 @@ QList<QByteArray> encodeAis(const AisMessage &m, char channel, int sequenceId, b
             w.u(quint32(m.toSternM), 9);
             w.u(quint32(m.toPortM), 6);
             w.u(quint32(m.toStarboardM), 6);
-            w.u(0, 4 + 1 + 1 + 1 + 4);                   // receptor, RAIM, DTE, asignado y reservado
+            w.u(quint32(m.epfsType) & 0xFu, 4);          // fijador de posicion (EPFS)
+            w.u(0, 1 + 1);                               // RAIM y DTE
+            w.u(m.assigned ? 1u : 0u, 1);
+            w.u(0, 4);                                   // reservado
         }
         break;
     case 24:

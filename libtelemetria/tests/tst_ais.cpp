@@ -197,6 +197,8 @@ void TstAis::roundTripClassB()
     m.toSternM = 4;
     m.toPortM = 2;
     m.toStarboardM = 2;
+    m.epfsType = 1;
+    m.assigned = true;
     const QList<QByteArray> frases = encodeAis(m);
     AisAssembler a;
     QByteArray carga;
@@ -211,6 +213,8 @@ void TstAis::roundTripClassB()
     QCOMPARE(d.shipType, 36);
     QCOMPARE(d.lengthM(), 12);
     QCOMPARE(d.beamM(), 4);
+    QCOMPARE(d.epfsType, 1);
+    QVERIFY(d.assigned);
     QVERIFY(qAbs(d.lat - 25.7617) < 1.0 / 600000.0);
 }
 

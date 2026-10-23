@@ -149,3 +149,16 @@ con sus secuencias. El primer acuse coincide en ambos vectores.
 - Los dos fallos detectados en el decodificador de Sas-3 (minuto/segundo de
   5 bits y tabla de textos AtoN) quedan **anotados aquí, sin corregir**:
   ese código no era parte de este encargo.
+
+## Después del port
+
+- **Tipo 19, `epfsType` y `assigned` al codificar.** El decodificador los leía (bits 301 y 307)
+  pero `encodeAis` escribía a cero ese bloque, así que se perdían en la ida y vuelta. Lo vio el
+  catálogo de `emisor_nmea` (un tipo 19 con GPS que llegaba sin fijador). Ahora se escriben, y
+  `roundTripClassB` lo comprueba.
+- **Nivel del API 3** (`TELEMETRIA_API_LEVEL`): los ejemplos exigen este nivel para no compilar
+  contra cabeceras antiguas sin los campos nuevos.
+- **Los 27 tipos en un solo emisor.** `examples/emisor_nmea` emite un ejemplo de cada tipo y
+  variante (direccionado y difundido, con y sin DAC/FID...) y su `--comprobar` lo decodifica y lo
+  compara campo a campo; `cliente_telemetria` los recibe. Sigue siendo ida y vuelta con la propia
+  biblioteca: la verificación independiente son los vectores de `tst_ais` de arriba.

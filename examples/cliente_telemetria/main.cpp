@@ -37,7 +37,7 @@
 #include <libmapa/Proximity.h>
 #include <telemetria/Decoder.h>
 
-#if !defined(TELEMETRIA_API_LEVEL) || TELEMETRIA_API_LEVEL < 2
+#if !defined(TELEMETRIA_API_LEVEL) || TELEMETRIA_API_LEVEL < 3
 #  error "La libtelemetria instalada es anterior a este ejemplo: reinstalala (qmake/libmapa/libmapa.pro o qmake/libtelemetria/telemetria.pro y make install; con CMake, cmake --install)."
 #endif
 
@@ -102,6 +102,9 @@ const double kNM = 1852.0;
 // movimiento informa cada 2-10 s y uno fondeado cada 3 min: 60 s es prudente para el tráfico en marcha.
 const double kPerdidoSeg = 60.0;
 const double kBorrarSeg = 300.0;
+// Una ayuda a la navegación informa cada 3 min (y no se mueve): se da por perdida a los 10 min y se borra a la media hora.
+const double kPerdidoAyudaSeg = 600.0;
+const double kBorrarAyudaSeg = 1800.0;
 // Puerto UDP habitual de NMEA 0183 sobre red.
 const int kPuertoPorOmision = 10110;
 // Segundos entre intentos de reconexión de una conexión TCP o de un puerto serie que se ha caído.
@@ -124,9 +127,28 @@ struct Propio {
     qint64 id = -1;
 };
 
+// Qué es una estación AIS: un barco (clase A o B), una ayuda a la navegación (tipo 21), una estación base (tipo 4)
+// o una aeronave de búsqueda y rescate (tipo 9).
+enum class Estacion { Barco, Ayuda, Base, Aeronave };
+
+// ¿Describe este mensaje AIS a una estación que merece un contacto (posición o datos propios) y no a una orden, un
+// acuse o un binario de aplicación? Los tipos 6, 7, 8, 10, 12 a 17, 20, 22, 23, 25 y 26 no crean contactos.
+static bool esInformeDeContacto(int tipo)
+{
+    switch (tipo) {
+    case 1: case 2: case 3: case 4: case 5: case 9: case 11: case 18: case 19: case 21: case 24: case 27:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Un contacto AIS: lo que se sabe de un MMSI, fusionando los mensajes de posición y los estáticos.
 struct Contacto {
     quint32 mmsi = 0;
+    Estacion estacion = Estacion::Barco;
+    int tipoAyuda = 0;                              // tipo 21: el código de la ayuda (aisAtonTypeText)
+    bool virtualAyuda = false;                      // tipo 21: ayuda virtual (no existe físicamente)
     qint64 id = -1;                                 // el objetivo del mapa (-1 hasta que haya posición)
     QString nombre;
     QString indicativo;
@@ -231,7 +253,9 @@ static QVector<Termino> glosario()
           QObject::tr("La categoría que declara el barco: carguero, petrolero, pesquero, pasaje, remolcador, recreo...") },
         { QObject::tr("Clase A / Clase B"),
           QObject::tr("Clase A: buques obligados a llevar AIS (informan cada 2-10 s en movimiento). Clase B: "
-                      "embarcaciones menores y de recreo (cada 30 s o más, con menos potencia).") },
+                      "embarcaciones menores y de recreo (cada 30 s o más, con menos potencia). Ayuda: baliza, boya o faro "
+                      "con AIS (tipo 21; informa cada 3 min y no se mueve; puede ser virtual). Base: estación base "
+                      "de tierra (tipo 4, da la hora UTC). SAR: aeronave de búsqueda y rescate (tipo 9).") },
         { QObject::tr("SOG"),
           QObject::tr("Velocidad sobre el fondo (Speed Over Ground), en nudos: la que lleva realmente el barco "
                       "respecto a la tierra, con corriente y viento incluidos.") },
@@ -359,6 +383,83 @@ static QList<QByteArray> escenarioDemostracion(const QDateTime &hora)
             l << telemetria::encodeAis(a, 'B') << telemetria::encodeAis(b, 'B');
         }
     }
+    return l;
+}
+
+// Las estaciones que no son barcos, para la demostración y las pruebas: dos ayudas a la navegación (una física y una
+// virtual, tipo 21), la estación base del puerto (tipo 4) con un aviso difundido (tipo 14) y otro dirigido a un barco
+// (tipo 12), una aeronave de búsqueda y rescate (tipo 9), y un binario dirigido (tipo 6) que NO debe crear contacto.
+static QList<QByteArray> escenarioEstaciones(const QDateTime &hora)
+{
+    QList<QByteArray> l;
+    AisMessage faro;
+    faro.type = 21;
+    faro.mmsi = 993230001;
+    faro.name = QStringLiteral("FARO MORRO");
+    faro.atonType = 6;
+    faro.lat = 23.1667;
+    faro.lon = -82.3567;
+    faro.accuracy = true;
+    faro.epfsType = 1;
+    faro.second = hora.time().second();
+    l << telemetria::encodeAis(faro, 'A');
+    AisMessage boya = faro;
+    boya.mmsi = 993230002;
+    boya.name = QStringLiteral("BOYA VIRTUAL CANAL NORTE");     // más de 20 caracteres: va con extensión
+    boya.atonType = 19;
+    boya.lat = 23.18;
+    boya.lon = -82.33;
+    boya.virtualAton = true;
+    l << telemetria::encodeAis(boya, 'A');
+
+    AisMessage base;
+    base.type = 4;
+    base.mmsi = 3230001;
+    base.lat = 23.145;
+    base.lon = -82.35;
+    base.accuracy = true;
+    base.epfsType = 1;
+    base.utcYear = hora.date().year();
+    base.utcMonth = hora.date().month();
+    base.utcDay = hora.date().day();
+    base.utcHour = hora.time().hour();
+    base.utcMinute = hora.time().minute();
+    base.utcSecond = hora.time().second();
+    l << telemetria::encodeAis(base, 'A');
+    AisMessage aviso;
+    aviso.type = 14;
+    aviso.mmsi = base.mmsi;
+    aviso.text = QStringLiteral("TRAFICO PESADO EN LA ENTRADA DEL PUERTO");
+    l << telemetria::encodeAis(aviso, 'A', 1);
+    AisMessage dirigido;
+    dirigido.type = 12;
+    dirigido.mmsi = base.mmsi;
+    dirigido.destMmsi = 323000101;
+    dirigido.sequence = 2;
+    dirigido.text = QStringLiteral("ENTRE POR EL CANAL NORTE");
+    l << telemetria::encodeAis(dirigido, 'A', 2);
+
+    AisMessage sar;
+    sar.type = 9;
+    sar.mmsi = 111323001;
+    sar.lat = 23.10;
+    sar.lon = -82.45;
+    sar.altitudeM = 1500.0;
+    sar.sogKn = 120.0;
+    sar.cogDeg = 271.0;
+    sar.second = hora.time().second();
+    sar.accuracy = true;
+    l << telemetria::encodeAis(sar, 'A');
+
+    AisMessage binario;
+    binario.type = 6;
+    binario.mmsi = 970000099;
+    binario.destMmsi = 323000101;
+    binario.dac = 200;
+    binario.fid = 10;
+    binario.binaryData = QByteArray::fromHex("deadbeef");
+    binario.binaryBits = 32;
+    l << telemetria::encodeAis(binario, 'A');
     return l;
 }
 
@@ -576,10 +677,13 @@ public:
     // ¿Sigue reproduciendo una captura?
     bool reproduciendo() const { return m_reproductor.isActive(); }
 
-    // Carga el escenario de demostración: el barco propio y tres contactos, como si llegaran por UDP.
+    // Carga el escenario de demostración: el barco propio, tres contactos y las estaciones fijas (dos ayudas a la
+    // navegación, la estación base y una aeronave SAR), como si llegaran por UDP.
     void cargarDemostracion()
     {
         for (const QByteArray &l : escenarioDemostracion(ahora()))
+            recibirDatagrama(l + "\r\n");
+        for (const QByteArray &l : escenarioEstaciones(ahora()))
             recibirDatagrama(l + "\r\n");
         tic();
     }
@@ -643,7 +747,8 @@ public:
         actualizarEnlace();
     }
 
-    // Marca como perdidos los contactos sin datos desde hace kPerdidoSeg y borra los que llevan kBorrarSeg.
+    // Marca como perdidos los contactos sin datos desde hace kPerdidoSeg y borra los que llevan kBorrarSeg (las ayudas
+    // a la navegación, que informan muy de tarde en tarde, esperan kPerdidoAyudaSeg y kBorrarAyudaSeg).
     void revisar()
     {
         bool cambio = false;
@@ -651,9 +756,10 @@ public:
         for (auto it = m_contactos.begin(); it != m_contactos.end(); ++it) {
             Contacto &c = it.value();
             const double edad = double(c.ultima.secsTo(ahora()));
-            if (edad > kBorrarSeg) {
+            const bool ayuda = c.estacion == Estacion::Ayuda;
+            if (edad > (ayuda ? kBorrarAyudaSeg : kBorrarSeg)) {
                 aBorrar << c.mmsi;
-            } else if (edad > kPerdidoSeg && !c.perdido) {
+            } else if (edad > (ayuda ? kPerdidoAyudaSeg : kPerdidoSeg) && !c.perdido) {
                 c.perdido = true;
                 if (c.id >= 0)
                     m_mapa->setTargetAttribute(c.id, QStringLiteral("estado"), QStringLiteral("Perdido"));
@@ -665,7 +771,9 @@ public:
             const Contacto c = m_contactos.take(mmsi);
             if (c.id >= 0)
                 m_mapa->removeTarget(c.id);
-            registrar(tr("%1: borrado tras %2 min sin datos").arg(rotulo(c)).arg(qRound(kBorrarSeg / 60.0)));
+            registrar(tr("%1: borrado tras %2 min sin datos")
+                          .arg(rotulo(c))
+                          .arg(qRound((c.estacion == Estacion::Ayuda ? kBorrarAyudaSeg : kBorrarSeg) / 60.0)));
             cambio = true;
         }
         if (cambio)
@@ -708,8 +816,8 @@ public:
             const QStringList celdas = {
                 QString::number(c.mmsi),
                 c.nombre.isEmpty() ? QStringLiteral("—") : c.nombre,
-                c.tipoBarco > 0 ? telemetria::aisShipTypeText(c.tipoBarco) : QStringLiteral("—"),
-                c.claseB ? QStringLiteral("B") : QStringLiteral("A"),
+                tipoDe(c),
+                claseDe(c),
                 sino(c.sogKn, 1),
                 sino(c.cogDeg, 0),
                 f.distanciaNM >= 0.0 ? QString::number(f.distanciaNM, 'f', 2) : QStringLiteral("—"),
@@ -899,12 +1007,59 @@ private:
         return c.nombre.isEmpty() ? QString::number(c.mmsi) : c.nombre;
     }
 
-    // Color del símbolo y la traza: verde el propio, naranja la clase A y turquesa la clase B.
-    static QColor colorDe(bool propio, bool claseB)
+    // Lo que se muestra en la columna «Tipo»: el tipo de barco, el de la ayuda a la navegación (con «virtual» si lo es)
+    // o el nombre de la estación si es una base o una aeronave.
+    static QString tipoDe(const Contacto &c)
+    {
+        switch (c.estacion) {
+        case Estacion::Ayuda: {
+            const QString t = telemetria::aisAtonTypeText(c.tipoAyuda);
+            return c.virtualAyuda ? tr("%1 (virtual)").arg(t) : t;
+        }
+        case Estacion::Base: return tr("Estación base");
+        case Estacion::Aeronave: return tr("Aeronave SAR");
+        case Estacion::Barco: break;
+        }
+        return c.tipoBarco > 0 ? telemetria::aisShipTypeText(c.tipoBarco) : QStringLiteral("—");
+    }
+
+    // Lo que se muestra en la columna «Clase»: A o B para un barco, y «Ayuda», «Base» o «SAR» para las demás estaciones.
+    static QString claseDe(const Contacto &c)
+    {
+        switch (c.estacion) {
+        case Estacion::Ayuda: return tr("Ayuda");
+        case Estacion::Base: return tr("Base");
+        case Estacion::Aeronave: return tr("SAR");
+        case Estacion::Barco: break;
+        }
+        return c.claseB ? QStringLiteral("B") : QStringLiteral("A");
+    }
+
+    // El «kind» del objetivo en el mapa: claseA, claseB, ayuda, base o aeronave.
+    static QString tipoObjetivo(const Contacto &c)
+    {
+        switch (c.estacion) {
+        case Estacion::Ayuda: return QStringLiteral("ayuda");
+        case Estacion::Base: return QStringLiteral("base");
+        case Estacion::Aeronave: return QStringLiteral("aeronave");
+        case Estacion::Barco: break;
+        }
+        return c.claseB ? QStringLiteral("claseB") : QStringLiteral("claseA");
+    }
+
+    // Color del símbolo y la traza: verde el propio, naranja la clase A, turquesa la clase B, morado las ayudas a la
+    // navegación, gris azulado las estaciones base y rojo las aeronaves SAR.
+    static QColor colorDe(bool propio, const Contacto *c)
     {
         if (propio)
             return QColor(0x2e, 0x7d, 0x32);
-        return claseB ? QColor(0x00, 0x83, 0x8f) : QColor(0xff, 0x8f, 0x00);
+        switch (c->estacion) {
+        case Estacion::Ayuda: return QColor(0x7b, 0x1f, 0xa2);
+        case Estacion::Base: return QColor(0x54, 0x6e, 0x7a);
+        case Estacion::Aeronave: return QColor(0xc6, 0x28, 0x28);
+        case Estacion::Barco: break;
+        }
+        return c->claseB ? QColor(0x00, 0x83, 0x8f) : QColor(0xff, 0x8f, 0x00);
     }
 
     // Una RMC: mueve el barco propio si el receptor tiene fijado; si no, solo lo anota.
@@ -942,6 +1097,16 @@ private:
     // su objetivo en el mapa. Los mensajes estáticos (nombre, tipo, tamaño) pueden llegar antes o después.
     void alAjeno(const AisMessage &m)
     {
+        // Los avisos de seguridad (12 direccionado, 14 difundido) se anotan en el registro. Los demás tipos que no
+        // describen a una estación (binarios, acuses, peticiones, gestión de canales...) se cuentan en las estadísticas
+        // del decodificador y no crean un contacto sin posición ni nombre.
+        if (m.type == 12 || m.type == 14) {
+            registrar(m.type == 12 ? tr("Aviso de seguridad de %1 para %2: %3").arg(m.mmsi).arg(m.destMmsi).arg(m.text)
+                                   : tr("Aviso de seguridad de %1: %2").arg(m.mmsi).arg(m.text));
+            return;
+        }
+        if (!esInformeDeContacto(m.type))
+            return;
         Contacto &c = m_contactos[m.mmsi];
         c.mmsi = m.mmsi;
         c.ultima = ahora();
@@ -956,6 +1121,16 @@ private:
             c.claseB = true;
         else if (m.type >= 1 && m.type <= 5)
             c.claseB = false;
+        // Las ayudas a la navegación (21), las estaciones base (4) y las aeronaves SAR (9) no son barcos.
+        if (m.type == 21) {
+            c.estacion = Estacion::Ayuda;
+            c.tipoAyuda = m.atonType;
+            c.virtualAyuda = m.virtualAton;
+        } else if (m.type == 4) {
+            c.estacion = Estacion::Base;
+        } else if (m.type == 9) {
+            c.estacion = Estacion::Aeronave;
+        }
         // Los datos estáticos (los que no vienen vacíos) se funden con lo que ya se sabía.
         const QString nombreAntes = c.nombre;
         if (!m.name.isEmpty())
@@ -988,10 +1163,10 @@ private:
         if (c->id < 0) {
             MapTarget t;
             t.label = rotulo(*c);
-            t.kind = c->claseB ? QStringLiteral("claseB") : QStringLiteral("claseA");
+            t.kind = tipoObjetivo(*c);
             t.position = c->posicion;
             t.headingDeg = rumbo;
-            t.color = colorDe(false, c->claseB);
+            t.color = colorDe(false, c);
             t.attributes.insert(QStringLiteral("mmsi"), c->mmsi);
             t.attributes.insert(QStringLiteral("estado"), QStringLiteral("Activo"));
             c->id = m_mapa->addTarget(t, ahora());
@@ -1016,7 +1191,7 @@ private:
             t.kind = QStringLiteral("propio");
             t.position = m_propio.posicion;
             t.headingDeg = rumbo;
-            t.color = colorDe(true, false);
+            t.color = colorDe(true, nullptr);
             t.attributes.insert(QStringLiteral("estado"), QStringLiteral("Activo"));
             m_propio.id = m_mapa->addTarget(t, ahora());
             aplicarFiltro();
@@ -1768,6 +1943,52 @@ static int comprobar(Ventana &v)
     verificar(QStringLiteral("la captura se anota en el registro"),
               v.registro().join(QLatin1Char('\n')).contains(QStringLiteral("captura.nmea")));
     verificar(QStringLiteral("un fichero que no existe no se reproduce"), !v.reproducir(dir.filePath(QStringLiteral("no_existe.nmea"))));
+
+    // --- Estaciones que no son barcos: ayudas a la navegación, estación base, aeronave SAR y avisos ---
+    for (const QByteArray &l : escenarioEstaciones(t0.addSecs(330)))
+        v.recibirDatagrama(l + "\r\n");
+    v.tic();
+    const Contacto faro = v.contactos().value(993230001);
+    const Contacto boya = v.contactos().value(993230002);
+    const Contacto base = v.contactos().value(3230001);
+    const Contacto sar = v.contactos().value(111323001);
+    verificar(QStringLiteral("las ayudas a la navegación (tipo 21) son contactos con nombre y tipo de ayuda; la virtual lo dice y su nombre largo va entero"),
+              faro.estacion == Estacion::Ayuda && faro.nombre == QStringLiteral("FARO MORRO") && faro.tipoAyuda == 6 && !faro.virtualAyuda
+              && boya.estacion == Estacion::Ayuda && boya.nombre == QStringLiteral("BOYA VIRTUAL CANAL NORTE") && boya.virtualAyuda);
+    verificar(QStringLiteral("la estación base (tipo 4) y la aeronave SAR (tipo 9) también, cada una con su clase de estación"),
+              base.estacion == Estacion::Base && base.id >= 0 && sar.estacion == Estacion::Aeronave && sar.id >= 0
+              && sar.sogKn == 120.0 && sar.cogDeg == 271.0);
+    verificar(QStringLiteral("en el mapa son objetivos aparte: 2 ayudas, 1 base y 1 aeronave"),
+              objetivosDe(v.mapa(), QStringLiteral("ayuda")) == 2 && objetivosDe(v.mapa(), QStringLiteral("base")) == 1
+              && objetivosDe(v.mapa(), QStringLiteral("aeronave")) == 1);
+    verificar(QStringLiteral("un binario dirigido (tipo 6) NO crea un contacto"), !v.contactos().contains(970000099));
+    const auto filaDe = [&](quint32 mmsi) {
+        for (int i = 0; i < v.tabla()->rowCount(); ++i)
+            if (celda(v.tabla(), i, 0) == QString::number(mmsi))
+                return i;
+        return -1;
+    };
+    const int fFaro = filaDe(993230001), fBoya = filaDe(993230002), fBase = filaDe(3230001), fSar = filaDe(111323001);
+    verificar(QStringLiteral("la tabla los muestra con su tipo y su clase en español"),
+              fFaro >= 0 && fBoya >= 0 && fBase >= 0 && fSar >= 0
+              && celda(v.tabla(), fFaro, 2) == QStringLiteral("Luz con sector") && celda(v.tabla(), fFaro, 3) == QStringLiteral("Ayuda")
+              && celda(v.tabla(), fBoya, 2) == QStringLiteral("Baliza de marca especial (virtual)")
+              && celda(v.tabla(), fBase, 2) == QStringLiteral("Estación base") && celda(v.tabla(), fBase, 3) == QStringLiteral("Base")
+              && celda(v.tabla(), fSar, 2) == QStringLiteral("Aeronave SAR") && celda(v.tabla(), fSar, 3) == QStringLiteral("SAR")
+              && celda(v.tabla(), fSar, 4) == QStringLiteral("120.0"));
+    const QString registroEstaciones = v.registro().join(QLatin1Char('\n'));
+    verificar(QStringLiteral("los avisos de seguridad (tipos 14 y 12) se anotan en el registro, con el texto entero y a quién van"),
+              registroEstaciones.contains(QStringLiteral("TRAFICO PESADO EN LA ENTRADA DEL PUERTO"))
+              && registroEstaciones.contains(QStringLiteral("para 323000101: ENTRE POR EL CANAL NORTE")));
+    // Las ayudas informan cada 3 min: a los 2 min la base (cada 10 s) ya se da por perdida y el faro no; a los 11 min, sí.
+    v.fijarReloj(t0.addSecs(330 + 120));
+    v.tic();
+    verificar(QStringLiteral("a los 2 min sin datos la estación base está perdida y el faro (ayuda) sigue activo"),
+              v.contactos().value(3230001).perdido && !v.contactos().value(993230001).perdido);
+    v.fijarReloj(t0.addSecs(330 + 660));
+    v.tic();
+    verificar(QStringLiteral("a los 11 min sin datos el faro también se da por perdido, pero aún no se borra"),
+              v.contactos().contains(993230001) && v.contactos().value(993230001).perdido);
 
     // --- Parar la escucha ---
     v.parar();

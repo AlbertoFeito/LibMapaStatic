@@ -31,9 +31,12 @@ una **captura** (`.nmea`) y trae un escenario de demostración.
 - **Barco propio**: posición, SOG, COG, rumbo de la proa (HDT), calidad del fijado, satélites y HDOP. *Centrar el mapa en mi barco*
   (**desmarcado por omisión**, como en la demo, donde el mapa está quieto y los barcos se mueven sobre él) lo mantiene a la vista:
   recentra solo cuando el barco sale de la zona central de la ventana, no a cada dato, y si arrastras el mapa se desmarca solo.
-- **Contactos AIS** (abajo): MMSI, nombre, tipo, clase A/B, SOG, COG, distancia y marcación desde el propio, estado de navegación, edad y
+- **Contactos AIS** (abajo): MMSI, nombre, tipo, clase (A/B, o Ayuda, Base y SAR para las estaciones que no son barcos), SOG, COG, distancia y marcación desde el propio, estado de navegación, edad y
   estado (Activo/Perdido), ordenados por distancia. Al pasar el ratón por cada cabecera sale su definición del glosario.
-- **Registro**: sumas malas y frases descartadas, contactos perdidos y borrados, cambios de escucha. *Anotar todas las frases* lo
+  Las **ayudas a la navegación** (tipo 21, en morado; «virtual» si no existen físicamente), las **estaciones base** (tipo 4, gris azulado) y las
+  **aeronaves SAR** (tipo 9, en rojo) son objetivos aparte en el mapa. Una ayuda informa cada ~3 min, así que se da por perdida a los 10 min (y
+  se borra a los 30), no a los 60 s como un barco.
+- **Registro**: sumas malas y frases descartadas, **avisos de seguridad** (tipos 12 y 14, con el texto), contactos perdidos y borrados, cambios de escucha. *Anotar todas las frases* lo
   vuelca todo.
 - **Glosario** (*Ayuda → Glosario*, F1): 26 términos, buscable. `--comprobar` verifica que todo lo que la ventana muestra está definido.
 
@@ -86,8 +89,10 @@ fichero y el glosario (lo usa `herramientas/probar_instalacion.sh`). `--captura=
   control de flujo del puerto serie (solo lectura, 8N1: lo habitual en NMEA; otros formatos como 7E1 no se pueden elegir).
 - **El puerto serie y el TCP contra aparatos reales NO están probados:** el serie, con un pseudoterminal de Linux; el TCP, contra el emisor y
   contra un servidor de prueba, no contra AIS-catcher, gpsd ni un conversor serie-red. En Windows el serie no se ha ejecutado nunca.
-- Solo los tipos AIS que entiende la biblioteca (1, 2, 3, 5, 18, 19, 24). Los demás (estaciones base, ayudas a la navegación...) se
-  cuentan como «ignoradas».
+- Del AIS, el cliente **usa** los informes que describen a una estación (tipos 1, 2, 3, 4, 5, 9, 11, 18, 19, 21, 24 y 27: barcos, estaciones
+  base, aeronaves SAR y ayudas a la navegación) y **anota** los avisos de seguridad (12 y 14). Los demás tipos de los 27 (binarios, acuses,
+  peticiones, gestión de canales y de enlace...) se decodifican y se cuentan, pero no crean contacto ni se interpretan: lo que significa
+  un binario de aplicación (DAC/FID) lo decide una aplicación, no este ejemplo.
 - **Probado con el emisor y con un mensaje publicado, no con un receptor ni una captura reales.**
 - Las alertas de proximidad, las zonas y el CPA están en `monitor_trafico`; aquí no se repiten para no ocultar lo que enseña este ejemplo.
 - La tabla se reconstruye cada segundo: con cientos de contactos conviene cambiarla por un modelo.
