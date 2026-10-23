@@ -13,7 +13,7 @@ consola o en un test. Quien lee la red es la aplicación (ver [`examples/cliente
 | Protocolo | Qué |
 |---|---|
 | NMEA 0183 | `RMC` (hora, posición, velocidad, rumbo, fecha), `GGA` (calidad del fijado, satélites, HDOP, altitud), `VTG` (rumbo y velocidad), `HDT` (rumbo de la proa). Cualquier otra frase correcta se entrega como «ignorada» con su dirección. |
-| AIS (`!AIVDM`, `!AIVDO`) | Tipos **1, 2, 3** (posición clase A), **5** (datos estáticos y del viaje, clase A, en dos frases), **18** y **19** (posición clase B, la 19 con nombre y tamaño) y **24** (estáticos clase B, partes A y B). Los demás tipos se entregan con su tipo y su MMSI, marcados como no soportados. |
+| AIS (`!AIVDM`, `!AIVDO`) | Los **27 tipos** de ITU-R M.1371: **1, 2, 3** (posición clase A), **4 y 11** (estación base / fecha y hora UTC), **5** (datos estáticos y del viaje, clase A, en dos frases), **6 y 8** (binario direccionado / difundido, con la carga de aplicación sin decodificar), **7 y 13** (acuses), **9** (aeronave SAR), **10** (petición UTC), **12 y 14** (texto de seguridad), **15** (interrogación), **16** (modo asignado), **17** (correcciones DGNSS), **18** y **19** (posición clase B, la 19 con nombre y tamaño), **20** (enlace de datos), **21** (ayuda a la navegación), **22** (canales), **23** (asignación a grupo), **24** (estáticos clase B, partes A y B), **25 y 26** (binario de uno / varios intervalos) y **27** (largo alcance). Los tipos futuros o reservados se entregan con su tipo y su MMSI, marcados como no soportados. Detalle del port en [`PORT_AIS.md`](PORT_AIS.md). |
 
 ## Uso
 
@@ -66,9 +66,12 @@ const DecoderStats &s = decodificador.stats();   // líneas, suma mala, ignorada
 - Reensamblado fuera de orden, entrelazado por canal y con memoria acotada; cargas malas; el decodificador de flujo con líneas
   partidas, datagramas, ruido y contadores.
 
-**Sin probar:** con un receptor AIS real ni con una captura real de más de unos cientos de mensajes. Los tipos que no se
-decodifican (4, 9, 21...) quedan como «no soportados»; la codificación que sale de `encodeAis` es la de un receptor, no
-una verificación independiente del decodificador (por eso el mensaje publicado de referencia).
+**Sin probar:** con un receptor AIS real ni con una captura real de más de unos cientos de mensajes. Los tipos
+portados después (4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 25, 26 y 27) se verificaron con
+vectores generados por un codificador independiente y contrastados campo a campo con otro decodificador AIS
+(el de Sas-3, que cubre los 27 tipos): 160 campos coincidentes y 5 diferencias, todas ellas fallos del otro
+decodificador, documentados en [`PORT_AIS.md`](PORT_AIS.md). La codificación que sale de `encodeAis` es la de
+un receptor, no una verificación independiente del decodificador (por eso el mensaje publicado de referencia).
 
 ## Compilar
 
