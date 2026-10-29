@@ -12,7 +12,7 @@
         "attribution": "© colaboradores de OpenStreetMap · Imágenes: Esri, Maxar, Earthstar Geographics · Elevación: SRTM (NASA)"
     },
 
-    "start": { "layer": "costas", "center": [21.5, -79.5], "zoom": 7 },
+    "start": { "layer": "osm", "center": [21.5, -79.5], "zoom": 7 },
 
     "datasets": [
         {
@@ -44,7 +44,7 @@
         },
         {
             "id": "costas",
-            "displayName": "Costas de Cuba (OSM)",
+            "displayName": "Costas de Cuba",
             "filePath": "Cuba_Vector.sqlitedb",
             "zFactor": 1, "zOffset": 0, "scheme": "XYZ",
             "minZoom": 4, "maxZoom": 15, "recommendedMaxZoom": 15, "baseZoom": 4,
