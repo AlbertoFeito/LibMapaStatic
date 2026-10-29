@@ -199,12 +199,20 @@ public:
                 [this](const QGeoCoordinate &p) { leeRaton(p); });
         connect(m_mapa, &MapWidget::pointPicked, this, [this](const QGeoCoordinate &p) {
             m_mapa->setActiveTool(MapTool::None);
+            if (m_colocando >= 0) {               // el clic coloca un punto de ejemplo
+                colocaPunto(m_colocando, p);
+                m_colocando = -1;
+                m_colocar->setText(tr("Colocar un punto de ejemplo (clic en el mapa)"));
+                return;
+            }
             m_elegir->setText(tr("Elegir centro (clic en el mapa)"));
             ponCentro(p);
             statusBar()->showMessage(tr("Centro de los anillos en %1")
                                          .arg(formatCoordinate(p, CoordinateFormat::DMS)), 6000);
         });
         connect(m_mapa, &MapWidget::pickCancelled, this, [this] {
+            m_colocando = -1;
+            m_colocar->setText(tr("Colocar un punto de ejemplo (clic en el mapa)"));
             m_elegir->setText(tr("Elegir centro (clic en el mapa)"));
             statusBar()->showMessage(tr("Elección del centro cancelada"), 4000);
         });
@@ -434,11 +442,37 @@ private:
             f.layerId = QStringLiteral("puntos");
             f.type = QStringLiteral("punto");
             f.name = QString::fromUtf8(a.nombre);
-            f.geometry = { QGeoCoordinate(a.lat, a.lon) };
+            f.geometry = { posicionEnTierra(a) };
             f.style.lineColor = QColor(0x15, 0x65, 0xc0);
             m_puntos.append(m_mapa->addFeature(f));
         }
     }
+
+    // Posicion de un punto de ejemplo: la del lugar del mismo nombre en el indice de lugares
+    // del paquete (que viene del propio mapa, asi que cae en tierra) si esta a menos de 60 km
+    // de La Habana; si no hay indice o no lo encuentra, las coordenadas fijas del ejemplo.
+    QGeoCoordinate posicionEnTierra(const Punto &a) const
+    {
+        if (m_mapa->hasPlaces())
+            for (const Place &l : m_mapa->searchPlaces(QString::fromUtf8(a.nombre), 5))
+                if (l.coordinate.isValid() && l.coordinate.distanceTo(kHabana) < 60000.0)
+                    return l.coordinate;
+        return QGeoCoordinate(a.lat, a.lon);
+    }
+
+public:
+    // Mueve el punto de ejemplo \a i a \a p (para dejarlo sobre tierra con el raton).
+    void colocaPunto(int i, const QGeoCoordinate &p)
+    {
+        auto f = m_mapa->feature(m_puntos.value(i, -1));
+        if (!f)
+            return;
+        f->geometry = { p };
+        m_mapa->updateFeature(*f);
+        statusBar()->showMessage(tr("%1 en %2").arg(f->name, formatCoordinate(p, CoordinateFormat::DMS)), 8000);
+    }
+
+private:
 
     // Los tres sitios como UNA entidad con tres partes (puntos), cada una con su nombre y color.
     void creaSitios()
@@ -557,6 +591,15 @@ private:
         f1->addRow(m_mostrar);
         f1->addRow(tr("Centro"), m_lblCentro);
         f1->addRow(m_elegir);
+        m_colocar = new QPushButton(tr("Colocar un punto de ejemplo (clic en el mapa)"), g1);
+        f1->addRow(m_colocar);
+        connect(m_colocar, &QPushButton::clicked, this, [this] {
+            m_ultimoColocado = (m_ultimoColocado + 1) % int(m_puntos.size());   // el siguiente cada vez
+            m_colocando = m_ultimoColocado;
+            m_mapa->setActiveTool(MapTool::PickPoint);
+            m_colocar->setText(tr("Clic para «%1»... (Esc cancela)")
+                                   .arg(m_mapa->feature(m_puntos.value(m_colocando))->name));
+        });
         f1->addRow(habana);
         f1->addRow(ir);
         f1->addRow(tr("Unidades"), m_unidades);
@@ -749,6 +792,9 @@ private:
     QCheckBox *m_cuadricula = nullptr;
     QLabel *m_lblCentro = nullptr;
     QPushButton *m_elegir = nullptr;
+    QPushButton *m_colocar = nullptr;
+    int m_colocando = -1;           // punto de ejemplo que recibira el proximo clic, o -1
+    int m_ultimoColocado = -1;
     QComboBox *m_unidades = nullptr;
     QDoubleSpinBox *m_separacion = nullptr;
     QSpinBox *m_numero = nullptr;

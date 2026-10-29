@@ -37,6 +37,11 @@ Los sectores siguen al centro: al elegir otro centro se vuelven a poner alrededo
 «Sectores, tipos y partes» del panel los activa, cuenta las entidades por tipo, oculta cada tipo y dice, al
 tocar una entidad, qué parte es («Sitios · parte 2 de 3 (Sitio Bravo)»).
 
+**Puntos de ejemplo.** Se colocan en el lugar del mismo nombre del índice de lugares del paquete
+(`searchPlaces`), que sale del propio mapa; sin índice, o si no lo encuentra, usan unas coordenadas fijas
+que pueden caer mal en un mapa distinto. El botón **«Colocar un punto de ejemplo»** deja cada punto,
+por turnos, donde hagas clic: así siempre se pueden dejar sobre tierra.
+
 Todo en un solo fichero, [`main.cpp`](main.cpp), pensado para leerse de arriba abajo.
 
 ## Probarlo
