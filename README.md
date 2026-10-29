@@ -196,7 +196,7 @@ o junto a la aplicación. Plantilla: [`mapa.example.json`](mapa.example.json).
   "package":  { "id": "cuba", "name": "Cuba", "dataVersion": "2026.10",
                 "bounds": { "north": 23.3, "west": -85.0, "south": 19.7, "east": -74.0 },
                 "attribution": "© colaboradores de OpenStreetMap · …" },
-  "start":    { "layer": "osm", "center": [21.5, -79.5], "zoom": 7 },
+  "start":    { "layer": "costas", "center": [21.5, -79.5], "zoom": 7 },
   "datasets": [ { "id": "osm", "filePath": "Cuba_OSM_CID3.sqlitedb", … }, … ],
   "elevation":{ "file": "cuba_dem.sqlitedb" },
   "places":   { "file": "lugares.sqlitedb" },

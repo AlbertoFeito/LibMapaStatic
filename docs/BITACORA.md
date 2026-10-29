@@ -7169,3 +7169,21 @@ que no describen a una estación (binarios, acuses, gestión de canales...) se c
 en pantalla (su prueba sin ventana, sí); los colores y el orden de la tabla son lo primero que hay que mirar.
 
 **Estado: 31 tests (28 sin QCustomPlot).** Verificado: los tres tests de `libtelemetria`, el contrato de instalación (`herramientas/probar_instalacion.sh`, con los diez ejemplos y sus `--comprobar`).
+
+## 174. Las plantillas arrancan con el mapa de costas
+
+El usuario pidió que la aplicación de ejemplo abra con la capa `costas` (`Cuba_Vector.sqlitedb`,
+«Costas de Cuba (OSM)»), solo ese mapa y **sin nada híbrido**.
+
+No hace falta tocar código: la capa de arranque la decide la configuración. En un paquete
+(`mapa.json`) manda `"start": { "layer": … }`; con un `datasets.json`, la primera capa de la lista.
+Por eso:
+- `mapa.example.json`: `"start"` pasa de `osm` a `costas`, y la capa se llama «Costas de Cuba (OSM)»,
+  porque la costa sale de OSM (`osm_costa_a_sqlitedb.py`).
+- `datasets.example.json`: `costas` pasa a ser la **primera** capa, con una línea en el comentario
+  que explica por qué va ahí.
+- El README muestra `"layer": "costas"` en el ejemplo de `mapa.json`.
+
+El mapa híbrido solo aparece si el `mapa.json` trae un bloque `"vectorOverlay"`, o si se pone a mano
+(Datos → Mapa híbrido…). Ninguna de las dos plantillas lo trae. Las demás capas siguen en el
+selector, igual que antes.

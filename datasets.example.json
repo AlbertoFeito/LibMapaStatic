@@ -10,12 +10,33 @@
         "La capa 'costas' es un vector .geo/.xyz rasterizado con geo_to_tiles:",
         "  geo_to_tiles --in Cuba.geo --out Cuba_Vector.sqlitedb \\",
         "               --id costas --name 'Costas de Cuba' --minzoom 4 --maxzoom 12",
+        "Va la PRIMERA: es el mapa con el que arranca la aplicacion (sin nada hibrido).",
         "Esa capa NO usa columna 's' (hasSColumn:false); no le pongas 'sValue'.",
         "Las rutas relativas se resuelven respecto a la ubicacion de este fichero.",
         "Un .mbtiles ráster vale con id y filePath: los zooms, el lado de tesela y el nombre se leen del propio fichero (lo que escribas aqui manda)."
     ],
     "version": 1,
     "datasets": [
+        {
+            "id": "costas",
+            "displayName": "Costas de Cuba (OSM)",
+            "filePath": "Cuba_Vector.sqlitedb",
+            "tableName": "tiles",
+            "zFactor": 1,
+            "zOffset": 0,
+            "minZoom": 4,
+            "maxZoom": 15,
+            "recommendedMaxZoom": 15,
+            "typicalFill": 1.0,
+            "scheme": "XYZ",
+            "hasSColumn": false,
+            "tileSize": 256,
+            "colZ": "z",
+            "colX": "x",
+            "colY": "y",
+            "colImage": "image",
+            "baseZoom": 4
+        },
         {
             "id": "osm",
             "displayName": "Open Street Map",
@@ -59,26 +80,6 @@
             "colS": "s",
             "colImage": "image",
             "baseZoom": 1
-        },
-        {
-            "id": "costas",
-            "displayName": "Costas de Cuba",
-            "filePath": "Cuba_Vector.sqlitedb",
-            "tableName": "tiles",
-            "zFactor": 1,
-            "zOffset": 0,
-            "minZoom": 4,
-            "maxZoom": 15,
-            "recommendedMaxZoom": 15,
-            "typicalFill": 1.0,
-            "scheme": "XYZ",
-            "hasSColumn": false,
-            "tileSize": 256,
-            "colZ": "z",
-            "colX": "x",
-            "colY": "y",
-            "colImage": "image",
-            "baseZoom": 4
         }
     ]
 }
