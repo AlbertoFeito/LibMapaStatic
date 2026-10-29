@@ -164,6 +164,13 @@ private slots:
     //! El rotulo de una marcacion se puede localizar, desplazar (con linea guia) y
     //! arrastrar con el raton.
     void bearingLabelMovesWithMouse();
+    //! Entidad multi-parte con nombre/color por parte: featureAt dice QUE parte
+    //! hay bajo el pixel y cada parte con nombre tiene su propia caja de rotulo.
+    void multiPartEntityReportsSubIndexAndLabels();
+    //! Medicion: 5.000 puntos como UNA entidad con partes frente a 5.000 entidades
+    //! (memoria, alta, dibujo y borrado). Imprime las cifras y exige solo que la
+    //! entidad unica no sea peor en memoria.
+    void measuresFiveThousandPointsAsPartsOrFeatures();
     //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
     //! del PRIMER vértice, no del centro.
     void areaLabelHangsFromFirstVertex();
@@ -6079,6 +6086,133 @@ void TstMapWidget::findsARoute()
     QVERIFY(!r.ok());
     QVERIFY2(r.error.contains(QStringLiteral("demasiado larga")), qPrintable(r.error));
     QVERIFY(r.tiles > MapWidget::kMaxRouteTiles);
+}
+
+// Tres puntos como UNA entidad: subIndex del acierto y rotulos por parte.
+void TstMapWidget::multiPartEntityReportsSubIndexAndLabels()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.show();
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -80.0);
+    w.setCenter(centro);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.layerId = w.activeFeatureLayer();
+    f.name = QStringLiteral("Sitios");
+    for (int i = 0; i < 3; ++i)
+        f.parts.append({ QGeoCoordinate(22.0 + (i - 1) * 0.15, -80.0 + (i - 1) * 0.15) });
+    f.geometry = f.parts.first();
+    PartInfo a; a.name = QStringLiteral("Alfa"); a.colorOverride = QColor(Qt::red);
+    PartInfo b;                                      // sin rotulo propio
+    PartInfo c; c.name = QStringLiteral("Gamma");
+    f.partsInfo = { a, b, c };
+    const qint64 id = w.addFeature(f);
+    QVERIFY(id > 0);
+
+    // Cada punto devuelve la misma entidad y su propia parte.
+    for (int i = 0; i < 3; ++i) {
+        int sub = -2;
+        QCOMPARE(w.featureAt(pixel(f.parts.at(i).first()), 8.0, &sub), id);
+        QCOMPARE(sub, i);
+    }
+    // Un pixel lejos de todo no acierta y deja subIndex en -1.
+    int sub = -2;
+    QCOMPARE(w.featureAt(QPoint(5, 5), 4.0, &sub), qint64(-1));
+    QCOMPARE(sub, -1);
+
+    // Rotulos por parte: solo las que tienen nombre.
+    QVERIFY(w.featurePartLabelRect(id, 0).isValid());
+    QVERIFY(!w.featurePartLabelRect(id, 1).isValid());
+    QVERIFY(w.featurePartLabelRect(id, 2).isValid());
+    QVERIFY(!w.featurePartLabelRect(id, 9).isValid());
+}
+
+// Lee la memoria residente del proceso en KiB (0 si /proc no existe).
+static qint64 residentKiB()
+{
+    QFile f(QStringLiteral("/proc/self/statm"));
+    if (!f.open(QIODevice::ReadOnly))
+        return 0;
+    const QList<QByteArray> c = f.readAll().split(' ');
+    return c.size() > 1 ? c.at(1).toLongLong() * 4 : 0;
+}
+
+void TstMapWidget::measuresFiveThousandPointsAsPartsOrFeatures()
+{
+    const int N = 5000;
+    const auto coord = [](int i) {
+        return QGeoCoordinate(21.0 + (i % 100) * 0.02, -80.0 + (i / 100) * 0.02);
+    };
+    struct Medida { qint64 kib = 0; qint64 altaMs = 0; qint64 dibujoMs = 0; qint64 borradoMs = 0; };
+    const auto medir = [&](bool partes) {
+        Medida r;
+        MapWidget w(baseConfig(m_jsonPath));
+        w.resize(800, 600);
+        w.show();
+        w.setCenter(QGeoCoordinate(22.0, -79.0));
+        w.setZoom(8);
+        w.grab();                                    // calienta
+        const qint64 antes = residentKiB();
+        QElapsedTimer t;
+        t.start();
+        QVector<MapFeature> lote;
+        if (partes) {
+            MapFeature f;
+            f.kind = GeometryKind::Point;
+            f.layerId = w.activeFeatureLayer();
+            f.name = QStringLiteral("Sitios");
+            for (int i = 0; i < N; ++i) {
+                f.parts.append({ coord(i) });
+                PartInfo pi;
+                pi.name = QStringLiteral("S%1").arg(i);
+                if (i % 2) pi.colorOverride = QColor(Qt::red);
+                f.partsInfo.append(pi);
+            }
+            f.geometry = f.parts.first();
+            lote.append(f);
+        } else {
+            for (int i = 0; i < N; ++i) {
+                MapFeature f;
+                f.kind = GeometryKind::Point;
+                f.layerId = w.activeFeatureLayer();
+                f.name = QStringLiteral("S%1").arg(i);
+                f.geometry = { coord(i) };
+                if (i % 2) f.style.lineColor = QColor(Qt::red);
+                lote.append(f);
+            }
+        }
+        w.addFeatures(lote);
+        r.altaMs = t.elapsed();
+        t.restart();
+        w.grab();
+        r.dibujoMs = t.elapsed();
+        r.kib = residentKiB() - antes;
+        t.restart();
+        w.clearFeatures();
+        r.borradoMs = t.elapsed();
+        return r;
+    };
+    const Medida uno = medir(true);
+    const Medida muchas = medir(false);
+    qInfo().noquote() << QStringLiteral(
+        "5000 puntos | UNA entidad con partes: %1 KiB, alta %2 ms, dibujo %3 ms, borrado %4 ms"
+        " | 5000 entidades: %5 KiB, alta %6 ms, dibujo %7 ms, borrado %8 ms")
+        .arg(uno.kib).arg(uno.altaMs).arg(uno.dibujoMs).arg(uno.borradoMs)
+        .arg(muchas.kib).arg(muchas.altaMs).arg(muchas.dibujoMs).arg(muchas.borradoMs);
+    qInfo() << "sizeof(MapFeature)" << sizeof(MapFeature) << "sizeof(PartInfo)" << sizeof(PartInfo);
+    QVERIFY(uno.kib <= muchas.kib + 2048);           // margen por el ruido del asignador
 }
 
 QTEST_MAIN(TstMapWidget)

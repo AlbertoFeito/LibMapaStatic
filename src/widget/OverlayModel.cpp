@@ -671,19 +671,48 @@ QVector<MapFeature> OverlayModel::featuresOfType(const QString &type) const
 
 // ------------------------------------------------------------- geometria --
 
+// Lista de vertices que edita una operacion de vertice: 'part' < 0 o una entidad de una
+// sola parte con 'part' 0 son 'geometry'; en una multi-parte con 'part' valido, esa
+// parte. Null si el indice de parte no existe.
+const QVector<QGeoCoordinate> *OverlayModel::vertexList(const MapFeature &f, int part)
+{
+    if (part < 0)
+        return &f.geometry;
+    if (f.isMultiPart())
+        return part < f.parts.size() ? &f.parts.at(part) : nullptr;
+    return part == 0 ? &f.geometry : nullptr;
+}
+
+// Lo mismo, para escribir (la entidad ya esta separada de la copia de deshacer).
+QVector<QGeoCoordinate> *OverlayModel::vertexListMutable(MapFeature &f, int part)
+{
+    return const_cast<QVector<QGeoCoordinate> *>(vertexList(f, part));
+}
+
+// En una entidad multi-parte 'geometry' es siempre una copia de la PRIMERA parte: tras
+// editar la parte 0 se vuelve a copiar para que no se separen.
+void OverlayModel::syncFirstPart(MapFeature &f, int part)
+{
+    if (part == 0 && f.isMultiPart())
+        f.geometry = f.parts.first();
+}
+
 // Mueve un vertice suelto de una entidad a una nueva coordenada. Solo geometrias
 // de una parte (en una multi-parte no se sabria a que parte pertenece el indice).
 // false si el id/indice no es valido, la entidad es multi-parte o la coord no vale.
-bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
+bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to, int part)
 {
     auto it = m_features.find(id);
     if (it == m_features.end() || !to.isValid())
         return false;
-    // La edicion de vertices sueltos es de una sola parte: en una entidad
+    // Sin \a part la edicion de vertices sueltos es de una sola parte: en una entidad
     // multi-parte (un .geo entero) no se sabria que parte tocar.
-    if (it->isMultiPart())
+    if (part < 0 && it->isMultiPart())
         return false;
-    if (index < 0 || index >= it->geometry.size())
+    if (it->isRound() && part >= 0)
+        return false;
+    const QVector<QGeoCoordinate> *destino = vertexList(*it, part);
+    if (!destino || index < 0 || index >= destino->size())
         return false;
 
     pushUndo();
@@ -691,7 +720,8 @@ bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
     // los datos: escribir con el iterador de antes alteraria tambien la
     // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
     it = m_features.find(id);
-    it->geometry[index] = to;
+    vertexListMutable(*it, part)->replace(index, to);
+    syncFirstPart(*it, part);
     emit featureUpdated(id);
     emit changed();
     return true;
@@ -718,21 +748,22 @@ bool OverlayModel::setLabelOffset(qint64 id, const QPointF &offsetPx)
 // Inserta un vertice nuevo en la posicion 'index' de una entidad (para prolongar
 // o subdividir una linea/poligono). No aplica a puntos ni a multi-parte. false si
 // algo no cuadra.
-bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
+bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at, int part)
 {
     auto it = m_features.find(id);
     if (it == m_features.end() || !at.isValid())
         return false;
-    if (it->isMultiPart())
+    if (part < 0 && it->isMultiPart())
         return false;
     if (it->kind == GeometryKind::Point || it->isRound())
         return false;                       // un punto, un circulo o un arco: un solo vertice
-    if (index < 0 || index > it->geometry.size())
+    const QVector<QGeoCoordinate> *destino = vertexList(*it, part);
+    if (!destino || index < 0 || index > destino->size())
         return false;
     // Tope opcional de vertices (p. ej. un «area objetivo» de ≤10 puntos): si la
     // entidad lo declara en sus atributos, no se inserta por encima del limite.
     const int cap = it->attributes.value(QStringLiteral("max_vertices")).toInt();
-    if (cap > 0 && it->geometry.size() >= cap)
+    if (cap > 0 && destino->size() >= cap)
         return false;
 
     pushUndo();
@@ -740,7 +771,8 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
     // los datos: escribir con el iterador de antes alteraria tambien la
     // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
     it = m_features.find(id);
-    it->geometry.insert(index, at);
+    vertexListMutable(*it, part)->insert(index, at);
+    syncFirstPart(*it, part);
     emit featureUpdated(id);
     emit changed();
     return true;
@@ -749,19 +781,20 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
 // Elimina un vertice de una entidad, pero NUNCA hasta degenerarla (un poligono no
 // puede quedar con menos de 3 vertices, etc.): para eso esta removeFeature. No
 // aplica a multi-parte. false si el borrado no es valido.
-bool OverlayModel::removeVertex(qint64 id, int index)
+bool OverlayModel::removeVertex(qint64 id, int index, int part)
 {
     auto it = m_features.find(id);
     if (it == m_features.end())
         return false;
-    if (it->isMultiPart())
+    if (part < 0 && it->isMultiPart())
         return false;
-    if (index < 0 || index >= it->geometry.size())
+    const QVector<QGeoCoordinate> *destino = vertexList(*it, part);
+    if (!destino || index < 0 || index >= destino->size())
         return false;
 
     // No se deja degenerar la geometria: un poligono de dos vertices no es un
     // poligono. Quien quiera eliminarlo del todo tiene removeFeature.
-    if (it->geometry.size() <= it->minimumVertices())
+    if (destino->size() <= it->minimumVertices())
         return false;
 
     pushUndo();
@@ -769,7 +802,8 @@ bool OverlayModel::removeVertex(qint64 id, int index)
     // los datos: escribir con el iterador de antes alteraria tambien la
     // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
     it = m_features.find(id);
-    it->geometry.remove(index);
+    vertexListMutable(*it, part)->remove(index);
+    syncFirstPart(*it, part);
     emit featureUpdated(id);
     emit changed();
     return true;

@@ -106,6 +106,23 @@ QStringList migrations(int from)
             "ALTER TABLE entidad ADD COLUMN arco_fin REAL NOT NULL DEFAULT 0");
     }
 
+    if (from < 6) {
+        // v6: datos propios de cada PARTE de una entidad multi-parte (MapFeature::partsInfo):
+        // nombre, color (ARGB; NULL = el del estilo) y lado del rotulo. Una fila por parte
+        // con algun dato; las entidades sin partsInfo no tienen filas. Se borran con su
+        // entidad, como sus vertices.
+        sql << QStringLiteral(
+            "CREATE TABLE entidad_parte ("
+            "  entidad_id INTEGER NOT NULL"
+            "             REFERENCES entidad(id) ON DELETE CASCADE,"
+            "  parte      INTEGER NOT NULL,"
+            "  nombre     TEXT    NOT NULL DEFAULT '',"
+            "  color      INTEGER,"
+            "  label_pos  INTEGER NOT NULL DEFAULT 0,"
+            "  PRIMARY KEY (entidad_id, parte)"
+            ") WITHOUT ROWID");
+    }
+
     return sql;
 }
 

@@ -33,6 +33,8 @@ private slots:
     void removesAndClearsFeatures();
     void filtersFeaturesByLayer();
     void savesMultiPartFeature();
+    //! Nombre, color (incluido el nulo) y anclaje de cada parte (v6) sobreviven.
+    void savesAndLoadsPartsInfo();
     //! El desplazamiento de la etiqueta (v3) sobrevive guardar/cargar.
     void savesAndLoadsLabelOffset();
     //! El lado del anclaje y el tamano de fuente del rotulo (v4) sobreviven
@@ -367,6 +369,35 @@ void TstVectorRepository::savesMultiPartFeature()
     QCOMPARE(cargadas.first().parts.size(), 2);
     QCOMPARE(cargadas.first().parts.at(0).size(), 2);
     QCOMPARE(cargadas.first().parts.at(1).size(), 3);
+}
+
+void TstVectorRepository::savesAndLoadsPartsInfo()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("partsinfo.db"))));
+
+    MapFeature f;
+    f.layerId = QStringLiteral("sitios");
+    f.kind = GeometryKind::Point;
+    f.name = QStringLiteral("Sitios");
+    for (int i = 0; i < 3; ++i)
+        f.parts.append({ QGeoCoordinate(23.0 + i * 0.1, -82.0) });
+    f.geometry = f.parts.first();
+    PartInfo a; a.name = QStringLiteral("Uno 'quote'"); a.colorOverride = QColor(10, 20, 30);
+    PartInfo b;                                         // sin nada propio
+    PartInfo c; c.name = QStringLiteral("Tres"); c.labelAnchor = LabelAnchor::Top;
+    f.partsInfo = { a, b, c };
+    QVERIFY(repo.saveFeature(f).has_value());
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 1);
+    const MapFeature &g = cargadas.first();
+    QCOMPARE(g.partsInfo.size(), 3);
+    QCOMPARE(g.partsInfo.at(0).name, a.name);
+    QCOMPARE(g.partsInfo.at(0).colorOverride, QColor(10, 20, 30));
+    QVERIFY(!g.partsInfo.at(1).colorOverride.isValid());
+    QCOMPARE(g.partsInfo.at(2).labelAnchor, LabelAnchor::Top);
+    QVERIFY(g.isValid());
 }
 
 void TstVectorRepository::handlesQuotesAndInjectionInNames()

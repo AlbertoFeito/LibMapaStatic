@@ -101,9 +101,11 @@ public:
     int count() const { return static_cast<int>(m_features.size()); }
 
     // --- Geometria, para editar ------------------------------------------
-    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to);
-    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at);
-    bool removeVertex(qint64 id, int index);
+    //! Con \a part (>= 0) el indice es de ESA parte de una entidad multi-parte (o la
+    //! 0 de una de una sola parte); con -1, solo geometrias de una parte, como siempre.
+    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to, int part = -1);
+    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at, int part = -1);
+    bool removeVertex(qint64 id, int index, int part = -1);
     bool moveFeature(qint64 id, double deltaLat, double deltaLon);
     //! Fija el desplazamiento de la ETIQUETA (px) de una entidad. false si no
     //! existe. Lo usa el arrastre del rotulo; persiste como cualquier cambio.
@@ -180,6 +182,10 @@ private:
     mutable QHash<QString, QVector<qint64>> m_idxCapa;
     mutable bool m_idxSucio = true;
     void reconstruirIndice() const;
+    // Apoyo de las operaciones de vertice por parte (ver moveVertex).
+    static const QVector<QGeoCoordinate> *vertexList(const MapFeature &f, int part);
+    static QVector<QGeoCoordinate> *vertexListMutable(MapFeature &f, int part);
+    static void syncFirstPart(MapFeature &f, int part);
     qint64 m_nextId = 1;
     qint64 m_selected = -1;
 

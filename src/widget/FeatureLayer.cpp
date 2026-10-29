@@ -268,11 +268,13 @@ void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
         drawAlert(painter, f);           // por debajo: la entidad queda encima
     const auto partes = f.outlines();
 
+    int indice = 0;
     for (const QVector<QGeoCoordinate> &parte : partes) {
         if (f.kind == GeometryKind::Point)
-            drawPointPart(painter, f, parte, selected);
+            drawPointPart(painter, f, indice, parte, selected);
         else
-            drawPathPart(painter, f, parte, selected);
+            drawPathPart(painter, f, indice, parte, selected);
+        ++indice;
     }
 
     // Los tiradores de edicion solo tienen sentido en una sola parte.
@@ -291,7 +293,7 @@ void FeatureLayer::drawFeature(QPainter *painter, const MapFeature &f,
 // Dibuja una entidad de tipo PUNTO: su icono si lo tiene, o un circulo con el
 // estilo. Si esta seleccionada anade un resalte en PIXELES (no en grados, para no
 // deformarse con el zoom ni la latitud).
-void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f,
+void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f, int partIndex,
                                  const QVector<QGeoCoordinate> &part,
                                  bool selected) const
 {
@@ -323,8 +325,9 @@ void FeatureLayer::drawPointPart(QPainter *painter, const MapFeature &f,
         return;
     }
 
-    painter->setPen(QPen(f.style.lineColor, f.style.lineWidth));
-    painter->setBrush(QBrush(f.style.fillColor));
+    // Cada parte puede tener su propio color (PartInfo::colorOverride).
+    painter->setPen(QPen(f.partLineColor(partIndex), f.style.lineWidth));
+    painter->setBrush(QBrush(f.partFillColor(partIndex)));
     painter->drawEllipse(pos, r, r);
 
     if (selected) {
@@ -500,28 +503,31 @@ void FeatureLayer::drawEndpoints(QPainter *painter, const MapFeature &f, bool se
 // polilinea para lineas. Si esta seleccionada, primero traza un halo blanco mas
 // grueso y luego la linea normal encima. Tiradores y etiqueta los pone
 // drawFeature una sola vez (no por parte).
-void FeatureLayer::drawPathPart(QPainter *painter, const MapFeature &f,
+void FeatureLayer::drawPathPart(QPainter *painter, const MapFeature &f, int partIndex,
                                 const QVector<QGeoCoordinate> &part,
                                 bool selected) const
 {
     const QPolygonF poly = screenPolygonOf(part);
     if (poly.size() < 2)
         return;
+    // Cada parte puede tener su propio color (PartInfo::colorOverride).
+    const QColor colorLinea = f.partLineColor(partIndex);
+    const QColor colorRelleno = f.partFillColor(partIndex);
 
     if (f.isArea()) {
         QPainterPath camino;
         camino.addPolygon(poly);
         camino.closeSubpath();
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QBrush(f.style.fillColor));
+        painter->setBrush(QBrush(colorRelleno));
         painter->drawPath(camino);
 
-        painter->setPen(QPen(f.style.lineColor, f.style.lineWidth,
+        painter->setPen(QPen(colorLinea, f.style.lineWidth,
                              f.style.lineStyle));
         painter->setBrush(Qt::NoBrush);
         painter->drawPath(camino);
     } else {
-        painter->setPen(QPen(f.style.lineColor, f.style.lineWidth,
+        painter->setPen(QPen(colorLinea, f.style.lineWidth,
                              f.style.lineStyle));
         painter->setBrush(Qt::NoBrush);
         painter->drawPolyline(poly);
@@ -537,7 +543,7 @@ void FeatureLayer::drawPathPart(QPainter *painter, const MapFeature &f,
         else
             painter->drawPolyline(poly);
 
-        painter->setPen(QPen(f.style.lineColor, f.style.lineWidth));
+        painter->setPen(QPen(colorLinea, f.style.lineWidth));
         if (f.isArea())
             painter->drawPolygon(poly);
         else
@@ -676,31 +682,83 @@ QFont FeatureLayer::labelFontFor(const MapFeature &f, const QFont &base)
 QRectF FeatureLayer::labelBoxFor(const MapFeature &f, const QPointF &base,
                                  const QFontMetricsF &fm) const
 {
-    const QStringList lineas = f.name.split(QLatin1Char('\n'));
+    // Junto a un punto/vertice el rotulo va arriba-derecha; en el centro de una
+    // geometria arranca en el propio centro (como venia saliendo).
+    const bool junar = (f.kind == GeometryKind::Point && !f.isMultiPart())
+                       || f.style.labelAnchorVertex >= 0;
+    return labelBoxForText(f.name, f.style.labelAnchor, junar, f.style.pointRadiusPx,
+                           f.style.labelOffsetPx, base, fm);
+}
+
+// Caja de un rotulo de texto 'texto' colgado de 'base': la parte comun al rotulo de la
+// entidad y al de cada una de sus partes. 'junar' dice si el anclaje es un punto
+// (y el rotulo se separa de el); 'offset' es el desplazamiento libre.
+QRectF FeatureLayer::labelBoxForText(const QString &texto, LabelAnchor ancla, bool junar,
+                                     double radioPx, const QPointF &offset,
+                                     const QPointF &base, const QFontMetricsF &fm)
+{
+    const QStringList lineas = texto.split(QLatin1Char('\n'));
     double w = 0.0;
     for (const QString &l : lineas)
         w = std::max(w, fm.horizontalAdvance(l));
     const double h = fm.height() * std::max(1, int(lineas.size()));
 
-    // Junto a un punto/vertice el rotulo va arriba-derecha; en el centro de una
-    // geometria arranca en el propio centro (como venia saliendo).
-    const bool junar = (f.kind == GeometryKind::Point && !f.isMultiPart())
-                       || f.style.labelAnchorVertex >= 0;
-
-    if (f.style.labelAnchor != LabelAnchor::Auto) {
+    if (ancla != LabelAnchor::Auto) {
         // La caja incluye los margenes que se le anaden al dibujarla (3 y 2 px).
         const QSizeF caja(w + 6.0, h + 4.0);
-        const double gap = junar ? f.style.pointRadiusPx + 2.0 : 2.0;
-        const QPointF origen = labelBoxOrigin(f.style.labelAnchor, caja, gap);
-        return QRectF(base + origen + f.style.labelOffsetPx, caja);
+        const double gap = junar ? radioPx + 2.0 : 2.0;
+        const QPointF origen = labelBoxOrigin(ancla, caja, gap);
+        return QRectF(base + origen + offset, caja);
     }
 
     const QPointF hueco = junar
-        ? QPointF(f.style.pointRadiusPx + 4.0, -f.style.pointRadiusPx - 2.0)
+        ? QPointF(radioPx + 4.0, -radioPx - 2.0)
         : QPointF(0.0, 0.0);
 
-    const QPointF tl = base + hueco + f.style.labelOffsetPx;
+    const QPointF tl = base + hueco + offset;
     return QRectF(tl, QSizeF(w, h)).adjusted(-3, -2, 3, 2);
+}
+
+// Punto (px) del que cuelga el rotulo de la parte 'part': el punto si es una parte de
+// puntos y, si no, el centro de su caja envolvente en pantalla.
+QPointF FeatureLayer::partAnchorScreen(const MapFeature &f, int part) const
+{
+    const auto partes = f.outlines();
+    if (part < 0 || part >= partes.size() || partes.at(part).isEmpty())
+        return QPointF();
+    if (f.kind == GeometryKind::Point)
+        return screenPos(partes.at(part).first());
+    const QRectF caja = screenPolygonOf(partes.at(part)).boundingRect();
+    return caja.isNull() ? QPointF() : caja.center();
+}
+
+// Caja del rotulo PROPIO de la parte 'part' (PartInfo::name), sin desplazamiento libre.
+// Nula si la parte no tiene nombre. 'anchor' recibe el punto de anclaje.
+QRectF FeatureLayer::partLabelBox(const MapFeature &f, int part, const QFontMetricsF &fm,
+                                  QPointF *anchor) const
+{
+    const PartInfo *info = f.partInfo(part);
+    if (!info || info->name.isEmpty())
+        return QRectF();
+    const QPointF base = partAnchorScreen(f, part);
+    if (base.isNull())
+        return QRectF();
+    if (anchor)
+        *anchor = base;
+    return labelBoxForText(info->name, f.partLabelAnchor(part), f.kind == GeometryKind::Point,
+                           f.style.pointRadiusPx, QPointF(), base, fm);
+}
+
+// Caja en pixeles del rotulo de la parte 'part' de una entidad, tal como se ve ahora.
+QRectF FeatureLayer::partLabelRectOf(qint64 id, int part) const
+{
+    if (!m_model || !m_toAxis || !parentPlot())
+        return QRectF();
+    const std::optional<MapFeature> f = m_model->feature(id);
+    if (!f || !f->style.labelVisible || !m_model->isTypeVisible(f->type))
+        return QRectF();
+    const QFontMetricsF fm(labelFontFor(*f, parentPlot()->font()));
+    return partLabelBox(*f, part, fm);
 }
 
 // Caja en pixeles del rotulo de una entidad tal como se ve ahora, o un
@@ -745,12 +803,16 @@ void FeatureLayer::drawLabels(QPainter *painter) const
         if (zoomActual >= 0 && !capaVisibleAZoom(capa, zoomActual))
             continue;
         m_model->forEachInLayer(capa.id, [&](const MapFeature &f) {
-            if (!f.style.labelVisible || f.name.isEmpty() || !f.visible
+            if (!f.style.labelVisible || !f.visible
                 || !m_model->isTypeVisible(f.type) || !featureInView(f, visible))
                 return true;
-            const QPointF base = labelAnchorScreen(f);
-            if (!base.isNull())
-                drawLabel(painter, f, base);
+            if (!f.name.isEmpty()) {
+                const QPointF base = labelAnchorScreen(f);
+                if (!base.isNull())
+                    drawLabel(painter, f, base);
+            }
+            if (!f.partsInfo.isEmpty())
+                drawPartLabels(painter, f);
             return true;
         });
     }
@@ -796,6 +858,27 @@ void FeatureLayer::drawLabel(QPainter *painter, const MapFeature &f,
 
     painter->setPen(QPen(f.style.labelColor));
     painter->drawText(caja, Qt::AlignCenter, f.name);
+    painter->setFont(fuenteBase);
+}
+
+// Dibuja el rotulo propio de cada parte con nombre de una entidad multi-parte, con el
+// mismo fondo claro y el mismo color de texto que el de la entidad. No llevan linea
+// guia ni se pueden arrastrar (no tienen desplazamiento propio).
+void FeatureLayer::drawPartLabels(QPainter *painter, const MapFeature &f) const
+{
+    const QFont fuenteBase = painter->font();
+    painter->setFont(labelFontFor(f, fuenteBase));
+    const QFontMetricsF fm(painter->font());
+    for (int i = 0; i < f.partsInfo.size(); ++i) {
+        const QRectF caja = partLabelBox(f, i, fm);
+        if (caja.isNull())
+            continue;
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QBrush(QColor(255, 255, 255, 190)));
+        painter->drawRoundedRect(caja, 3, 3);
+        painter->setPen(QPen(f.style.labelColor));
+        painter->drawText(caja, Qt::AlignCenter, f.partsInfo.at(i).name);
+    }
     painter->setFont(fuenteBase);
 }
 
@@ -861,13 +944,16 @@ double FeatureLayer::distanceToSegment(const QPointF &p, const QPointF &a,
 // arriba gana) y prueba parte a parte; para poligonos, caer DENTRO del area es un
 // acierto directo. En cuanto una capa da un acierto, no baja mas.
 qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
-                               bool incluirNoSeleccionables) const
+                               bool incluirNoSeleccionables, int *subIndex) const
 {
+    if (subIndex)
+        *subIndex = -1;
     if (!m_model)
         return -1;
 
     const QPointF p(pixel);
     qint64 mejor = -1;
+    int mejorParte = -1;
     double mejorDist = tolerancePx;
 
     const MapView *vista = qobject_cast<MapView *>(parentPlot());
@@ -892,13 +978,14 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
                 return true;            // fuera de pantalla: no hace falta probar
 
             double d = std::numeric_limits<double>::max();
+            int parteMejor = -1;
 
             // Se prueba parte a parte: en una entidad multi-parte basta que el
-            // cursor caiga cerca de cualquiera de sus trazados.
-            for (const QVector<QGeoCoordinate> &parte : f.outlines()) {
+            // cursor caiga cerca de cualquiera de sus trazados, y se recuerda cual.
+            const auto distanciaAParte = [&](const QVector<QGeoCoordinate> &parte) {
                 if (f.kind == GeometryKind::Point) {
                     if (parte.isEmpty())
-                        continue;
+                        return std::numeric_limits<double>::max();
                     const QPointF c = screenPos(parte.first());
                     if (!f.style.icon.isNull()) {
                         // Con icono, el area sensible es TODO el pixmap (anclado),
@@ -911,29 +998,37 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
                                           QSizeF(w, h));
                         const double dx = qMax(qMax(caja.left() - p.x(), 0.0), p.x() - caja.right());
                         const double dy = qMax(qMax(caja.top() - p.y(), 0.0), p.y() - caja.bottom());
-                        d = qMin(d, std::hypot(dx, dy));
-                    } else {
-                        d = qMin(d, qMax(0.0, std::hypot(p.x() - c.x(),
-                                                         p.y() - c.y())
-                                              - f.style.pointRadiusPx));
+                        return std::hypot(dx, dy);
                     }
-                    continue;
+                    return qMax(0.0, std::hypot(p.x() - c.x(), p.y() - c.y())
+                                         - f.style.pointRadiusPx);
                 }
                 const QPolygonF poly = screenPolygonOf(parte);
-                if (f.isArea()
-                    && poly.containsPoint(p, Qt::OddEvenFill)) {
-                    d = 0.0;      // dentro del area cuenta como acierto
-                    break;
-                }
+                if (f.isArea() && poly.containsPoint(p, Qt::OddEvenFill))
+                    return 0.0;      // dentro del area cuenta como acierto
+                double dp = std::numeric_limits<double>::max();
                 for (int j = 0; j + 1 < static_cast<int>(poly.size()); ++j)
-                    d = qMin(d, distanceToSegment(p, poly[j], poly[j + 1]));
+                    dp = qMin(dp, distanceToSegment(p, poly[j], poly[j + 1]));
                 if (f.isArea() && poly.size() > 2)
-                    d = qMin(d, distanceToSegment(p, poly.last(), poly.first()));
+                    dp = qMin(dp, distanceToSegment(p, poly.last(), poly.first()));
+                return dp;
+            };
+            int indiceParte = 0;
+            for (const QVector<QGeoCoordinate> &parte : f.outlines()) {
+                const double dp = distanciaAParte(parte);
+                if (dp < d) {
+                    d = dp;
+                    parteMejor = indiceParte;
+                }
+                ++indiceParte;
+                if (d <= 0.0)
+                    break;                // un acierto directo no se mejora
             }
 
             if (d <= mejorDist) {
                 mejorDist = d;
                 mejor = f.id;
+                mejorParte = f.isMultiPart() ? parteMejor : -1;
             }
             return true;
         });
@@ -943,6 +1038,8 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
             break;
     }
 
+    if (subIndex)
+        *subIndex = mejorParte;
     return mejor;
 }
 

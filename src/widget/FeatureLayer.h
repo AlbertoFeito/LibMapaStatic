@@ -62,14 +62,19 @@ public:
     //! arrastrar y poner el cursor) se saltan las capas con \c LayerInfo::selectable
     //! falso (las fijas del paquete); con true se miran todas: es la consulta «que
     //! hay debajo», para un tooltip o una lectura de cota, sin elegir nada.
+    //! Con \a subIndex distinto de null recibe la PARTE de la entidad que cae bajo el
+    //! pixel si la entidad es multi-parte (-1 si no lo es o no hay entidad).
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0,
-                     bool incluirNoSeleccionables = false) const;
+                     bool incluirNoSeleccionables = false, int *subIndex = nullptr) const;
 
     //! Entidad cuya CAJA DE ETIQUETA cae bajo el pixel, o -1 (la de encima gana).
     //! Permite seleccionar/arrastrar el rotulo por separado de la geometria.
     qint64 labelAt(const QPoint &pixel) const;
     //! Caja (px) del rotulo de una entidad como se ve ahora; nula si no tiene.
     QRectF labelRectOf(qint64 id) const;
+    //! Caja (px) del rotulo PROPIO de la parte \a part de una entidad multi-parte
+    //! (su \a PartInfo::name); nula si no tiene.
+    QRectF partLabelRectOf(qint64 id, int part) const;
     //! Fuente del rotulo: la del mapa, con el tamano propio si el estilo lo fija.
     static QFont labelFontFor(const MapFeature &f, const QFont &base);
     //! Pinta las etiquetas de todas las entidades visibles sobre \a painter, en
@@ -122,10 +127,10 @@ private:
     void drawAlert(QPainter *painter, const MapFeature &f) const;
     void drawEndpoints(QPainter *painter, const MapFeature &f, bool selected) const;
     //! Dibuja UNA parte (un punto de ella) de una entidad Point.
-    void drawPointPart(QPainter *painter, const MapFeature &f,
+    void drawPointPart(QPainter *painter, const MapFeature &f, int partIndex,
                        const QVector<QGeoCoordinate> &part, bool selected) const;
     //! Dibuja UNA parte de una entidad Polyline/Polygon.
-    void drawPathPart(QPainter *painter, const MapFeature &f,
+    void drawPathPart(QPainter *painter, const MapFeature &f, int partIndex,
                       const QVector<QGeoCoordinate> &part, bool selected) const;
     void drawVertices(QPainter *painter, const MapFeature &f) const;
     void drawDraft(QPainter *painter) const;
@@ -139,6 +144,19 @@ private:
     //! hit-test para que coincidan exactamente.
     QRectF labelBoxFor(const MapFeature &f, const QPointF &base,
                        const QFontMetricsF &fm) const;
+    //! Caja de un rotulo de texto colgado de \a base: lo comun al rotulo de la entidad y
+    //! al de cada una de sus partes.
+    static QRectF labelBoxForText(const QString &texto, LabelAnchor ancla, bool junar,
+                                  double radioPx, const QPointF &offset,
+                                  const QPointF &base, const QFontMetricsF &fm);
+    //! Pinta los rotulos propios de las partes con nombre de una entidad multi-parte.
+    void drawPartLabels(QPainter *painter, const MapFeature &f) const;
+    //! Caja del rotulo de la parte \a part: su texto, colgado de su punto (el punto, o
+    //! el centro de la caja de la parte) por el lado que diga su PartInfo o el estilo.
+    QRectF partLabelBox(const MapFeature &f, int part, const QFontMetricsF &fm,
+                        QPointF *anchor = nullptr) const;
+    //! Punto (px) del que cuelga el rotulo de la parte \a part.
+    QPointF partAnchorScreen(const MapFeature &f, int part) const;
 
     QPointF screenPos(const QGeoCoordinate &c) const;
     QPolygonF screenPolygon(const MapFeature &f) const;

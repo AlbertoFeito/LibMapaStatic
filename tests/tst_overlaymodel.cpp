@@ -29,6 +29,9 @@ private slots:
     //! UNA senal de repintado y UN paso de deshacer, no una por entidad.
     void batchAddCountAndClearByType();
     void typeVisibilityIsAViewFilter();
+    //! Entidad multi-parte con PartInfo: validez, operaciones de vertice por
+    //! parte y primera parte sincronizada con geometry.
+    void partsInfoAndPerPartVertexOps();
     void keepsDomainTypeAndAttributes();
     void filtersByTypeAcrossLayers();
 
@@ -653,3 +656,43 @@ void TstOverlayModel::undoLeavesTransientLayersAlone()
 
 QTEST_MAIN(TstOverlayModel)
 #include "tst_overlaymodel.moc"
+
+// Tres puntos como UNA entidad multi-parte con nombre/color por parte.
+void TstOverlayModel::partsInfoAndPerPartVertexOps()
+{
+    OverlayModel m;
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.name = QStringLiteral("Aerodromos");
+    for (int i = 0; i < 3; ++i)
+        f.parts.append({ QGeoCoordinate(23.0 + i * 0.1, -82.0) });
+    f.geometry = f.parts.first();
+    PartInfo a; a.name = QStringLiteral("A"); a.colorOverride = QColor(Qt::red);
+    PartInfo b; b.name = QStringLiteral("B");
+    PartInfo c; c.name = QStringLiteral("C"); c.labelAnchor = LabelAnchor::Left;
+    f.partsInfo = { a, b, c };
+
+    // partsInfo debe ir paralelo a parts.
+    MapFeature mala = f;
+    mala.partsInfo.removeLast();
+    QCOMPARE(m.addFeature(mala), qint64(-1));
+
+    const qint64 id = m.addFeature(f);
+    QVERIFY(id > 0);
+    QCOMPARE(m.feature(id)->partInfo(1)->name, QStringLiteral("B"));
+    QCOMPARE(m.feature(id)->partLineColor(0), QColor(Qt::red));
+    QCOMPARE(m.feature(id)->partLabelAnchor(2), LabelAnchor::Left);
+    QVERIFY(m.feature(id)->partInfo(3) == nullptr);
+
+    // Mover un vertice de la parte 2 no toca las demas.
+    QVERIFY(m.moveVertex(id, 0, QGeoCoordinate(30.0, -80.0), 2));
+    QCOMPARE(m.feature(id)->parts.at(2).first().latitude(), 30.0);
+    QCOMPARE(m.feature(id)->parts.at(1).first().latitude(), 23.1);
+
+    // Mover la parte 0 mantiene geometry == parts.first().
+    QVERIFY(m.moveVertex(id, 0, QGeoCoordinate(25.0, -81.0), 0));
+    QCOMPARE(m.feature(id)->geometry.first().latitude(), 25.0);
+
+    // Parte inexistente: rechazado, sin tocar nada.
+    QVERIFY(!m.moveVertex(id, 0, QGeoCoordinate(1.0, 1.0), 7));
+}

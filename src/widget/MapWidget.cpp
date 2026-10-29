@@ -1616,21 +1616,21 @@ int MapWidget::featureCount() const
 }
 
 // Mueve un vertice de una entidad.
-bool MapWidget::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
+bool MapWidget::moveVertex(qint64 id, int index, const QGeoCoordinate &to, int part)
 {
-    return d->view ? d->view->overlayModel()->moveVertex(id, index, to) : false;
+    return d->view ? d->view->overlayModel()->moveVertex(id, index, to, part) : false;
 }
 
 // Inserta un vertice en una entidad.
-bool MapWidget::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
+bool MapWidget::insertVertex(qint64 id, int index, const QGeoCoordinate &at, int part)
 {
-    return d->view ? d->view->overlayModel()->insertVertex(id, index, at) : false;
+    return d->view ? d->view->overlayModel()->insertVertex(id, index, at, part) : false;
 }
 
 // Elimina un vertice de una entidad (sin degenerarla).
-bool MapWidget::removeVertex(qint64 id, int index)
+bool MapWidget::removeVertex(qint64 id, int index, int part)
 {
-    return d->view ? d->view->overlayModel()->removeVertex(id, index) : false;
+    return d->view ? d->view->overlayModel()->removeVertex(id, index, part) : false;
 }
 
 // Desplaza una entidad entera un delta de lat/lon.
@@ -2501,7 +2501,7 @@ MapHit MapWidget::hitTest(const QPoint &pixel) const
     h.clusterTargets = targetClusterAt(pixel);
     // Lo que se puede ELEGIR bajo el cursor (el menu contextual no ofrece acciones
     // sobre una provincia de fondo): sin las capas fijas no seleccionables.
-    h.featureId = d->view ? d->view->featureLayer()->featureAt(pixel) : -1;
+    h.featureId = d->view ? d->view->featureLayer()->featureAt(pixel, 8.0, false, &h.subIndex) : -1;
     if (d->view->rangeLayer())
         h.rangeMarkId = d->view->rangeLayer()->markAt(pixel);
     const qint64 sel = d->view->overlayModel()->selectedId();
@@ -2513,6 +2513,22 @@ MapHit MapWidget::hitTest(const QPoint &pixel) const
         }
     }
     return h;
+}
+
+// Como featureAt, y ademas dice que parte de la entidad esta bajo el pixel.
+qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx, int *subIndex) const
+{
+    d->syncGeometry();
+    return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx, true, subIndex) : -1;
+}
+
+// Caja del rotulo propio de una parte, en pixeles.
+QRect MapWidget::featurePartLabelRect(qint64 id, int part) const
+{
+    d->syncGeometry();
+    if (!d->view)
+        return QRect();
+    return d->view->featureLayer()->partLabelRectOf(id, part).toAlignedRect();
 }
 
 // Entidad cuyo rotulo cae bajo el pixel (hit-test de la caja de etiqueta).

@@ -336,6 +336,28 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
         }
     }
 
+    // Los datos propios de cada parte (nombre, color y lado del rotulo), si los hay.
+    if (!f.partsInfo.isEmpty()) {
+        q.prepare(QStringLiteral(
+            "INSERT INTO entidad_parte (entidad_id, parte, nombre, color, label_pos)"
+            " VALUES (:e,:p,:n,:c,:l)"));
+        for (int p = 0; p < f.partsInfo.size(); ++p) {
+            const PartInfo &info = f.partsInfo.at(p);
+            q.bindValue(QStringLiteral(":e"), id);
+            q.bindValue(QStringLiteral(":p"), p);
+            q.bindValue(QStringLiteral(":n"), text(info.name));
+            q.bindValue(QStringLiteral(":c"),
+                        info.colorOverride.isValid()
+                            ? QVariant(static_cast<qint64>(info.colorOverride.rgba()))
+                            : QVariant());
+            q.bindValue(QStringLiteral(":l"), static_cast<int>(info.labelAnchor));
+            if (!q.exec()) {
+                fail(QStringLiteral("writeFeature/parte"), q.lastError().text());
+                return std::nullopt;
+            }
+        }
+    }
+
     return id;
 }
 
@@ -465,6 +487,17 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         : QStringLiteral("SELECT 0 AS parte, latitud, longitud FROM entidad_vertice"
                          " WHERE entidad_id=:e ORDER BY orden"));
 
+    // Los datos de las partes, si la BD tiene la tabla (esquema v6).
+    bool conInfoPartes = false;
+    {
+        QSqlQuery prueba(db());
+        conInfoPartes = prueba.exec(QStringLiteral("SELECT parte FROM entidad_parte LIMIT 0"));
+    }
+    QSqlQuery qp(db());
+    if (conInfoPartes)
+        qp.prepare(QStringLiteral("SELECT parte, nombre, color, label_pos FROM entidad_parte"
+                                  " WHERE entidad_id=:e ORDER BY parte"));
+
     for (int i = 0; i < out.size(); ++i) {
         qv.bindValue(QStringLiteral(":e"), ids[i]);
         if (!qv.exec())
@@ -487,6 +520,28 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         out[i].geometry = partes.first();              // la primera parte
         if (partes.size() > 1)
             out[i].parts = partes;                     // multi-parte
+
+        // Datos propios de cada parte (esquema v6). En una BD anterior no hay tabla.
+        if (conInfoPartes && !out[i].parts.isEmpty()) {
+            qp.bindValue(QStringLiteral(":e"), ids[i]);
+            if (qp.exec()) {
+                QVector<PartInfo> info(out[i].parts.size());
+                bool alguna = false;
+                while (qp.next()) {
+                    const int parte = qp.value(0).toInt();
+                    if (parte < 0 || parte >= info.size())
+                        continue;
+                    info[parte].name = qp.value(1).toString();
+                    if (!qp.value(2).isNull())
+                        info[parte].colorOverride =
+                            QColor::fromRgba(static_cast<QRgb>(qp.value(2).toUInt()));
+                    info[parte].labelAnchor = static_cast<LabelAnchor>(qp.value(3).toInt());
+                    alguna = true;
+                }
+                if (alguna)
+                    out[i].partsInfo = info;
+            }
+        }
     }
     return out;
 }

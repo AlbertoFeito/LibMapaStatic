@@ -111,6 +111,29 @@ struct FeatureStyle
 };
 
 /*!
+ * \brief Lo que distingue a UNA parte de una entidad multi-parte del resto de la entidad.
+ *
+ * Una entidad con muchas partes (18 aerodromos como una sola entidad con 18 puntos)
+ * comparte \a style, \a type y \a attributes, y cada parte puede ademas tener su
+ * propio nombre, su color y el lado donde cuelga su rotulo. Va en
+ * MapFeature::partsInfo, paralelo a MapFeature::parts.
+ */
+struct PartInfo
+{
+    //! Nombre de la parte; se rotula junto a ella. Vacio = sin rotulo propio.
+    QString name;
+    //! Color de la parte (linea o simbolo); invalido = el de \a MapFeature::style.
+    QColor colorOverride;
+    //! Lado donde cuelga su rotulo; \a Auto = el de \a MapFeature::style.
+    LabelAnchor labelAnchor = LabelAnchor::Auto;
+
+    bool operator==(const PartInfo &o) const
+    {
+        return name == o.name && colorOverride == o.colorOverride && labelAnchor == o.labelAnchor;
+    }
+};
+
+/*!
  * \brief Una entidad dibujable sobre el mapa.
  *
  * La libreria dibuja la geometria y la deja editar. Lo que SIGNIFICA cada
@@ -151,6 +174,15 @@ struct MapFeature
      */
     QVector<QVector<QGeoCoordinate>> parts;
 
+    /*!
+     * \brief Datos propios de cada parte (nombre, color, lado del rotulo).
+     *
+     * Vacio = las partes no tienen nada propio (lo de siempre). Si tiene elementos,
+     * debe tener EXACTAMENTE uno por parte de \a parts, en el mismo orden
+     * (\ref isValid lo comprueba). No aplica a un Circle ni a un Arc.
+     */
+    QVector<PartInfo> partsInfo;
+
     FeatureStyle style;
 
     //! Cualquier dato del dominio. Permite anadir campos sin tocar la
@@ -177,6 +209,35 @@ struct MapFeature
     double arcEndDeg = 0.0;
 
     bool isMultiPart() const { return !parts.isEmpty(); }
+
+    //! Datos propios de la parte \a i, o null si no tiene (sin \a partsInfo o fuera de rango).
+    const PartInfo *partInfo(int i) const
+    {
+        return (i >= 0 && i < partsInfo.size()) ? &partsInfo.at(i) : nullptr;
+    }
+    //! Color de la parte \a i: el suyo si lo tiene y, si no, el de la linea del estilo.
+    QColor partLineColor(int i) const
+    {
+        const PartInfo *p = partInfo(i);
+        return (p && p->colorOverride.isValid()) ? p->colorOverride : style.lineColor;
+    }
+    //! Color de relleno de la parte \a i: el del estilo, o el de la parte con la
+    //! transparencia del relleno del estilo.
+    QColor partFillColor(int i) const
+    {
+        const PartInfo *p = partInfo(i);
+        if (!p || !p->colorOverride.isValid())
+            return style.fillColor;
+        QColor c = p->colorOverride;
+        c.setAlpha(style.fillColor.alpha());
+        return c;
+    }
+    //! Lado del rotulo de la parte \a i: el suyo si lo tiene y, si no, el del estilo.
+    LabelAnchor partLabelAnchor(int i) const
+    {
+        const PartInfo *p = partInfo(i);
+        return (p && p->labelAnchor != LabelAnchor::Auto) ? p->labelAnchor : style.labelAnchor;
+    }
 
     //! ¿Es un Circle o un Arc? Su geometria se genera a partir del centro y el radio.
     bool isRound() const { return kind == GeometryKind::Circle || kind == GeometryKind::Arc; }
@@ -314,14 +375,18 @@ struct MapFeature
     bool isValid() const
     {
         if (isRound()) {
-            // Un solo vertice (el centro), sin partes, radio finito y positivo y, en
+            // Un solo vertice (el centro), sin partes ni datos de partes, radio finito y positivo y, en
             // un arco, un barrido distinto de cero.
-            if (!parts.isEmpty() || geometry.size() != 1 || !geometry.first().isValid())
+            if (!parts.isEmpty() || !partsInfo.isEmpty() || geometry.size() != 1
+                || !geometry.first().isValid())
                 return false;
             if (!(radiusMeters > 0.0) || !std::isfinite(radiusMeters))
                 return false;
             return kind == GeometryKind::Circle || arcSweepDeg(arcStartDeg, arcEndDeg) > 0.0;
         }
+        // Los datos de las partes, si los hay, van uno por parte.
+        if (!partsInfo.isEmpty() && partsInfo.size() != parts.size())
+            return false;
         if (!parts.isEmpty()) {
             for (const QVector<QGeoCoordinate> &p : parts)
                 if (!partIsValid(p))

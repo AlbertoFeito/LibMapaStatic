@@ -394,9 +394,13 @@ public:
     int featureCount() const;
 
     // --- Edicion de geometria --------------------------------------------
-    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to);
-    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at);
-    bool removeVertex(qint64 id, int index);
+    //! Operaciones de vertice. Con \a part (>= 0) el \a index es de ESA parte de una
+    //! entidad multi-parte (\ref MapFeature::parts) o la 0 de una de una sola parte; con
+    //! -1, solo entidades de una sola parte, como siempre. Un circulo o un arco
+    //! solo admite mover su vertice (el centro).
+    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to, int part = -1);
+    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at, int part = -1);
+    bool removeVertex(qint64 id, int index, int part = -1);
     bool moveFeature(qint64 id, double deltaLat, double deltaLon);
 
     // --- Deshacer y rehacer ----------------------------------------------
@@ -777,6 +781,12 @@ public:
     //! seleccionables (provincias, curvas...) y no cambia la seleccion. Lo que se
     //! puede ELEGIR con el raton es lo que devuelve \ref hitTest.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+    //! Igual que \ref featureAt y, ademas, la PARTE de la entidad que cae bajo el pixel
+    //! en \a subIndex (-1 si es de una sola parte o no hay entidad).
+    qint64 featureAt(const QPoint &pixel, double tolerancePx, int *subIndex) const;
+    //! Caja, en pixeles, del rotulo propio de la parte \a part de una entidad
+    //! multi-parte (\ref PartInfo::name), o un rectangulo nulo si no lo tiene.
+    QRect featurePartLabelRect(qint64 id, int part) const;
     /*!
      * \brief Todo lo que hay bajo un pixel: objetivo suelto, grupo de
      *        objetivos, entidad, anillos o marcacion, y la coordenada.
