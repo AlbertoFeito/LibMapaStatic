@@ -15,6 +15,8 @@ private slots:
     void detectsFormatByExtension();
     void readsGeoJsonFeatureCollection();
     void geoJsonRoundTripKeepsEverything();
+    //! Nombre y color de cada parte (PartInfo) van y vuelven por GeoJSON.
+    void geoJsonRoundTripKeepsPartsInfo();
     void readsKmlWithSharedStyleAndFolders();
     void kmlRoundTrip();
     void readsGpxWaypointsRoutesAndTracks();
@@ -147,6 +149,30 @@ void TstVectorFormats::geoJsonRoundTripKeepsEverything()
     QCOMPARE(f[1].style.lineWidth, 3.5);
     QCOMPARE(f[2].style.fillColor.rgb(), orig[2].style.fillColor.rgb());
     QVERIFY(qAbs(f[2].style.fillColor.alpha() - 64) <= 1);
+}
+
+void TstVectorFormats::geoJsonRoundTripKeepsPartsInfo()
+{
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.name = QStringLiteral("Sitios");
+    for (int i = 0; i < 3; ++i)
+        f.parts.append({ QGeoCoordinate(23.0 + i * 0.1, -82.0) });
+    f.geometry = f.parts.first();
+    PartInfo a; a.name = QStringLiteral("Alfa"); a.colorOverride = QColor(200, 0, 0);
+    PartInfo b; b.name = QStringLiteral("Bravo");
+    PartInfo c;
+    f.partsInfo = { a, b, c };
+
+    const QVector<MapFeature> r = parseGeoJson(toGeoJson({ f }));
+    QCOMPARE(r.size(), 1);
+    QCOMPARE(r.first().partsInfo.size(), 3);
+    QCOMPARE(r.first().partsInfo.at(0).name, QStringLiteral("Alfa"));
+    QCOMPARE(r.first().partsInfo.at(0).colorOverride, QColor(200, 0, 0));
+    QVERIFY(!r.first().partsInfo.at(1).colorOverride.isValid());
+    QVERIFY(r.first().partsInfo.at(2).name.isEmpty());
+    // Las claves de las partes no se cuelan como atributos de dominio.
+    QVERIFY(!r.first().attributes.contains(QStringLiteral("part_names")));
 }
 
 // KML como lo escribe Google Earth: estilos compartidos por id, carpetas,

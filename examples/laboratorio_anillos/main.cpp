@@ -91,6 +91,19 @@ const Punto kPuntos[] = {
     {"Taoro", 23.0621, -82.5166},           {"Cubanacán", 23.0836, -82.4503},
 };
 
+// Tres sitios de ejemplo que forman UNA sola entidad con tres partes, cada una con su nombre y
+// color (la tercera sin color propio: usa el de la entidad). Todos sobre tierra.
+struct Sitio {
+    const char *nombre;
+    double lat;
+    double lon;
+    QRgb color;     // 0 = sin color propio
+};
+const Sitio kSitios[] = {
+    {"Sitio Alfa", 23.0379, -82.3923, 0xffc62828}, {"Sitio Bravo", 22.9592, -82.4092, 0xff2e7d32},
+    {"Sitio Charly", 23.0321, -82.5166, 0},
+};
+
 // Una linea del formulario de un objetivo con sus segmentos (texto y color).
 TargetLabelLine linea(std::initializer_list<TargetLabelSegment> segmentos)
 {
@@ -136,7 +149,12 @@ QString textoAyuda()
         "barra de estado dice dónde lo soltaste); soltarlo <i>fuera del mapa</i> cancela. "
         "Con «Colgado de la esquina» la caja cuelga del punto por la esquina cercana al "
         "objetivo; prueba también la fuente monoespaciada, el ancho, las columnas 8 + 8, el "
-        "offset por defecto y el color de selección.</li></ol>");
+        "offset por defecto y el color de selección.</li>"
+        "<li><b>Sectores:</b> el círculo de 50 km y los tres sectores (el de 330° a 30° cruza "
+        "el norte) se mueven con el centro. Oculta cada tipo, bórralos por tipo y mira cómo "
+        "cambia el recuento.</li>"
+        "<li><b>Partes:</b> toca un «Sitio»: el panel dice qué parte de la entidad es. Los "
+        "tres sitios son <i>una</i> entidad con nombre y color por parte.</li></ol>");
 }
 
 } // namespace
@@ -167,6 +185,7 @@ public:
         m_mapa->setZoom(9);
         m_centro = kHabana;
         creaPuntos();
+        creaSitios();
         creaObjetivos();
 
         auto *cuerpo = new QWidget(this);
@@ -195,8 +214,12 @@ public:
                         tr("Formulario del objetivo %1 soltado en offset (%2, %3)")
                             .arg(id).arg(offset.x()).arg(offset.y()), 8000);
                 });
+        // Tocar una entidad dice que parte de ella es (subIndex) y cuantas tiene.
+        connect(m_mapa, &MapWidget::elementClicked, this,
+                [this](const MapHit &hit, const QPoint &) { leeElemento(hit); });
         aplicaFormato();
         aplicaAnillos();
+        aplicaSectores();
         statusBar()->showMessage(tr("Capa base: %1").arg(m_mapa->baseLayerId()));
     }
 
@@ -207,6 +230,64 @@ public:
     QComboBox *unidades() const { return m_unidades; }
     qint64 primerPunto() const { return m_puntos.value(0, -1); }
     QVector<qint64> objetivos() const { return m_objetivos; }
+    qint64 sitios() const { return m_sitios; }
+    QCheckBox *casillaSectores() const { return m_sectores; }
+    QString lecturaElemento() const { return m_lblElemento ? m_lblElemento->text() : QString(); }
+
+    // Dice que hay bajo el clic: la entidad, y si tiene varias partes, CUAL (subIndex).
+    void leeElemento(const MapHit &hit)
+    {
+        QString txt = tr("nada");
+        if (hit.featureId >= 0) {
+            const auto f = m_mapa->feature(hit.featureId);
+            txt = f ? f->name : QString::number(hit.featureId);
+            if (f && hit.subIndex >= 0) {
+                const PartInfo *pi = f->partInfo(hit.subIndex);
+                txt += tr(" · parte %1 de %2").arg(hit.subIndex + 1).arg(f->parts.size());
+                if (pi && !pi->name.isEmpty())
+                    txt += QStringLiteral(" (%1)").arg(pi->name);
+            }
+        }
+        m_lblElemento->setText(txt);
+    }
+
+    // Pone los sectores y el circulo alrededor del centro (o los quita): un circulo de 50 km
+    // y tres arcos (de 0 a 90 grados, de 120 a 200 y uno que cruza el norte, de 330 a 30), en
+    // un solo lote (una sola senal de repintado y un solo paso de deshacer).
+    void aplicaSectores()
+    {
+        m_mapa->clearFeaturesOfType(QStringLiteral("sector"));
+        actualizaConteos();
+        if (!m_sectores->isChecked())
+            return;
+        const auto nuevo = [&](GeometryKind k, double radio, double ini, double fin,
+                               const QColor &c, const QString &nombre) {
+            MapFeature f;
+            f.kind = k;
+            f.layerId = QStringLiteral("sectores");
+            f.type = QStringLiteral("sector");
+            f.name = nombre;
+            f.geometry = { m_centro };
+            f.radiusMeters = radio;
+            f.arcStartDeg = ini;
+            f.arcEndDeg = fin;
+            f.style.lineColor = c;
+            f.style.lineWidth = 2.0;
+            f.style.fillColor = QColor(c.red(), c.green(), c.blue(), 40);
+            return f;
+        };
+        QVector<MapFeature> lote;
+        lote.append(nuevo(GeometryKind::Circle, 50000.0, 0, 0, QColor(0x15, 0x65, 0xc0),
+                          tr("Círculo 50 km")));
+        lote.append(nuevo(GeometryKind::Arc, 100000.0, 0, 90, QColor(0x2e, 0x7d, 0x32),
+                          tr("Sector 0–90")));
+        lote.append(nuevo(GeometryKind::Arc, 150000.0, 120, 200, QColor(0xef, 0x6c, 0x00),
+                          tr("Sector 120–200")));
+        lote.append(nuevo(GeometryKind::Arc, 200000.0, 330, 30, QColor(0x8e, 0x24, 0xaa),
+                          tr("Sector 330–30")));
+        m_mapa->addFeatures(lote);
+        actualizaConteos();
+    }
 
     // Cambia el lado del anclaje del rotulo de todos los puntos y repinta.
     void ponAncla(LabelAnchor ancla)
@@ -273,6 +354,7 @@ public:
         m_centro = p;
         m_lblCentro->setText(formatCoordinate(p, CoordinateFormat::DMS));
         aplicaAnillos();
+        aplicaSectores();
     }
 
     // Rellena la lectura del raton: coordenadas en tres formatos y distancia y
@@ -356,6 +438,39 @@ private:
             f.style.lineColor = QColor(0x15, 0x65, 0xc0);
             m_puntos.append(m_mapa->addFeature(f));
         }
+    }
+
+    // Los tres sitios como UNA entidad con tres partes (puntos), cada una con su nombre y color.
+    void creaSitios()
+    {
+        MapFeature f;
+        f.kind = GeometryKind::Point;
+        f.layerId = QStringLiteral("puntos");
+        f.type = QStringLiteral("sitio");
+        f.name = tr("Sitios");
+        f.style.lineColor = QColor(0x6a, 0x1b, 0x9a);
+        for (const Sitio &s : kSitios) {
+            f.parts.append({ QGeoCoordinate(s.lat, s.lon) });
+            PartInfo pi;
+            pi.name = QString::fromUtf8(s.nombre);
+            if (s.color)
+                pi.colorOverride = QColor::fromRgb(s.color);
+            f.partsInfo.append(pi);
+        }
+        f.geometry = f.parts.first();
+        m_sitios = m_mapa->addFeature(f);
+    }
+
+    // Escribe en el panel cuantas entidades hay de cada tipo (y cuales estan ocultas).
+    void actualizaConteos()
+    {
+        if (!m_lblConteos)
+            return;
+        QStringList l;
+        const QMap<QString, int> c = m_mapa->featureTypeCounts();
+        for (auto it = c.constBegin(); it != c.constEnd(); ++it)
+            l << QStringLiteral("%1: %2").arg(it.key()).arg(it.value());
+        m_lblConteos->setText(l.isEmpty() ? tr("(ninguna)") : l.join(QStringLiteral("  ·  ")));
     }
 
     // Tres objetivos con formulario de tres lineas: identificacion y estado (cada uno de su
@@ -489,6 +604,43 @@ private:
                 [this](int v) { ponTamano(v); });
         col->addWidget(gr);
 
+        // --- Circulos, sectores y entidades por tipo -------------------------------------
+        auto *gs = new QGroupBox(tr("Sectores, tipos y partes"), panel);
+        auto *fs = new QFormLayout(gs);
+        m_sectores = new QCheckBox(tr("Círculo y sectores alrededor del centro"), gs);
+        m_sectores->setChecked(true);
+        m_lblConteos = new QLabel(gs);
+        m_lblConteos->setWordWrap(true);
+        auto *tSector = new QCheckBox(tr("Ver sectores"), gs);
+        auto *tSitio = new QCheckBox(tr("Ver sitios (una entidad, tres partes)"), gs);
+        auto *tPunto = new QCheckBox(tr("Ver puntos de ejemplo"), gs);
+        for (QCheckBox *c : { tSector, tSitio, tPunto })
+            c->setChecked(true);
+        auto *borraSect = new QPushButton(tr("Borrar los sectores (por tipo)"), gs);
+        m_lblElemento = new QLabel(QStringLiteral("—"), gs);
+        m_lblElemento->setWordWrap(true);
+        fs->addRow(m_sectores);
+        fs->addRow(tr("Entidades por tipo"), m_lblConteos);
+        fs->addRow(tSector);
+        fs->addRow(tSitio);
+        fs->addRow(tPunto);
+        fs->addRow(borraSect);
+        fs->addRow(tr("Último clic en entidad"), m_lblElemento);
+        connect(m_sectores, &QCheckBox::toggled, this, [this] { aplicaSectores(); });
+        connect(tSector, &QCheckBox::toggled, this,
+                [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("sector"), v); });
+        connect(tSitio, &QCheckBox::toggled, this,
+                [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("sitio"), v); });
+        connect(tPunto, &QCheckBox::toggled, this,
+                [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("punto"), v); });
+        connect(borraSect, &QPushButton::clicked, this, [this] {
+            const QSignalBlocker b(m_sectores);
+            m_sectores->setChecked(false);
+            aplicaSectores();
+        });
+        col->addWidget(gs);
+        actualizaConteos();
+
         // --- Formulario de los objetivos -------------------------------------------------
         auto *gf = new QGroupBox(tr("Formulario de objetivos (arrastrable)"), panel);
         auto *ff = new QFormLayout(gf);
@@ -610,6 +762,10 @@ private:
     QSpinBox *m_cadaGrados = nullptr;
     QCheckBox *m_colorRadiales = nullptr;
     QVector<qint64> m_puntos;
+    qint64 m_sitios = -1;
+    QCheckBox *m_sectores = nullptr;
+    QLabel *m_lblConteos = nullptr;
+    QLabel *m_lblElemento = nullptr;
     QVector<qint64> m_objetivos;
     QCheckBox *m_colgado = nullptr;
     QCheckBox *m_mono = nullptr;
@@ -777,6 +933,47 @@ int comprobar(Ventana &v)
         if (rr.isValid())
             exige(qAbs(rr.width() - colgada.width()) <= 1,
                   "con 16 columnas fijas todos los formularios miden lo mismo", &fallos);
+    }
+
+    // 10. Circulo y sectores: un lote de cuatro entidades geodesicas alrededor del centro; se
+    //     quitan por tipo y vuelven al marcar la casilla.
+    const qint64 sitios = v.sitios();
+    exige(m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
+          "deberia haber cuatro sectores al arrancar", &fallos);
+    v.casillaSectores()->setChecked(false);
+    exige(m->featureTypeCounts().value(QStringLiteral("sector")) == 0,
+          "borrar por tipo no quito los sectores", &fallos);
+    v.casillaSectores()->setChecked(true);
+    exige(m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
+          "los sectores no volvieron", &fallos);
+    m->setFeatureTypeVisible(QStringLiteral("sector"), false);
+    exige(!m->isFeatureTypeVisible(QStringLiteral("sector")) &&
+              m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
+          "ocultar un tipo no debe borrarlo", &fallos);
+    m->setFeatureTypeVisible(QStringLiteral("sector"), true);
+
+    // 11. Una entidad con tres partes: cada punto devuelve la misma entidad y su parte.
+    const auto sitio = m->feature(sitios);
+    exige(sitio && sitio->parts.size() == 3 && sitio->partsInfo.size() == 3,
+          "los sitios deberian ser una entidad de tres partes", &fallos);
+    if (sitio && sitio->parts.size() == 3) {
+        // Sin los sectores (su relleno taparia el punto). Con el paquete minimo el zoom no pasa
+        // de 2 y el centro no se puede llevar al sitio, asi que se rastrea la vista con
+        // hitTest hasta dar con la entidad; la separacion exacta de partes la prueba tst_mapwidget.
+        v.casillaSectores()->setChecked(false);
+        m->setCenter(sitio->parts.at(1).first());
+        esperaRepintado(m);
+        MapHit hit;
+        for (int y = 0; y < m->height() && hit.featureId != sitios; y += 3)
+            for (int x = 0; x < m->width() && hit.featureId != sitios; x += 3)
+                hit = m->hitTest(QPoint(x, y));
+        exige(hit.featureId == sitios && hit.subIndex >= 0 && hit.subIndex < 3,
+              "el clic en un sitio deberia dar la entidad y una de sus tres partes", &fallos);
+        v.leeElemento(hit);
+        exige(v.lecturaElemento().contains(QStringLiteral("Sitio ")),
+              "la lectura no nombra la parte", &fallos);
+        exige(m->featurePartLabelRect(sitios, 0).isValid() || m->featurePartLabelRect(sitios, 1).isValid(),
+              "las partes con nombre deberian tener rotulo propio", &fallos);
     }
 
     if (fallos == 0)

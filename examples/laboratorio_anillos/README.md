@@ -27,6 +27,15 @@ arrastrable con colores por segmento.
 | Formulario colgado de la esquina más cercana, fuente monoespaciada, ancho y columnas 8 + 8 | `MapWidget::setTargetLabelFormat` (`TargetLabelFormat`, `TargetLabelPlacement`) |
 | Offset por defecto de los formularios y propio de cada objetivo; color de selección | `setDefaultTargetLabelOffset`, `setTargetLabelOffset`, `clearTargetLabelOffset`, `setTargetLabelSelectionColor` |
 | Aviso al soltar un formulario arrastrado (soltar fuera del mapa cancela) | señal `targetLabelMoved`, `targetLabelRect` |
+| Círculo de 50 km y tres sectores (uno cruza el norte, de 330° a 30°) alrededor del centro, geodésicos | `GeometryKind::Circle` y `Arc`, `MapFeature::radiusMeters`, `arcStartDeg`, `arcEndDeg` |
+| Alta de los cuatro en un lote (una señal de repintado, un paso de deshacer) y borrado por tipo | `addFeatures`, `clearFeaturesOfType` |
+| Recuento por tipo y ocultar/mostrar un tipo sin borrarlo | `featureTypeCounts`, `setFeatureTypeVisible`, `isFeatureTypeVisible` |
+| Una entidad de tres puntos con nombre y color cada uno (la tercera sin color propio) | `MapFeature::parts` + `partsInfo` (`PartInfo`) |
+| Qué parte hay bajo el clic y su rótulo propio | `MapHit::subIndex`, señal `elementClicked`, `featurePartLabelRect` |
+
+Los sectores siguen al centro: al elegir otro centro se vuelven a poner alrededor del nuevo. El grupo
+«Sectores, tipos y partes» del panel los activa, cuenta las entidades por tipo, oculta cada tipo y dice, al
+tocar una entidad, qué parte es («Sitios · parte 2 de 3 (Sitio Bravo)»).
 
 Todo en un solo fichero, [`main.cpp`](main.cpp), pensado para leerse de arriba abajo.
 

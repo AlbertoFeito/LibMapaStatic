@@ -180,6 +180,8 @@ MapFeature baseGeoJson(const QJsonObject &props)
             f.type = it.value().toString();
         else if (k == kStrokeWidth)
             f.style.lineWidth = it.value().toDouble(f.style.lineWidth);
+        else if (k == QLatin1String("part_names") || k == QLatin1String("part_colors"))
+            continue;       // se leen aparte, en parseGeoJson, como PartInfo
         else if (k != kStroke && k != kStrokeOpacity && k != kFill
                  && k != kFillOpacity && k != kMarkerColor)
             f.attributes.insert(k, it.value().toVariant());
@@ -737,8 +739,24 @@ QVector<MapFeature> parseGeoJson(const QByteArray &data, QString *error)
 
     for (const QJsonValue &v : feats) {
         const QJsonObject o = v.toObject();
-        geometriaGeoJson(o.value(QStringLiteral("geometry")).toObject(),
-                         baseGeoJson(o.value(QStringLiteral("properties")).toObject()), out);
+        const QJsonObject props = o.value(QStringLiteral("properties")).toObject();
+        const int antes = int(out.size());
+        geometriaGeoJson(o.value(QStringLiteral("geometry")).toObject(), baseGeoJson(props), out);
+        // Nombre y color por parte (los de PartInfo): solo si cuadran con las partes leidas.
+        const QJsonArray nombres = props.value(QStringLiteral("part_names")).toArray();
+        const QJsonArray colores = props.value(QStringLiteral("part_colors")).toArray();
+        for (int i = antes; i < int(out.size()) && !nombres.isEmpty(); ++i) {
+            if (int(out[i].parts.size()) != int(nombres.size()))
+                continue;
+            for (int j = 0; j < int(nombres.size()); ++j) {
+                PartInfo pi;
+                pi.name = nombres.at(j).toString();
+                const QColor c(colores.at(j).toString());
+                if (c.isValid())
+                    pi.colorOverride = c;
+                out[i].partsInfo.append(pi);
+            }
+        }
     }
     if (out.isEmpty() && error)
         *error = QStringLiteral("no hay geometrias validas");
@@ -817,6 +835,16 @@ QByteArray toGeoJson(const QVector<MapFeature> &features)
             props.insert(kDescription, f.description);
         if (!f.type.isEmpty())
             props.insert(kType, f.type);
+        if (!f.partsInfo.isEmpty()) {
+            QJsonArray nombres, colores;
+            for (const PartInfo &pi : f.partsInfo) {
+                nombres.append(pi.name);
+                colores.append(pi.colorOverride.isValid() ? pi.colorOverride.name(QColor::HexRgb)
+                                                          : QString());
+            }
+            props.insert(QStringLiteral("part_names"), nombres);
+            props.insert(QStringLiteral("part_colors"), colores);
+        }
         const bool punto = f.kind == GeometryKind::Point;
         props.insert(punto ? kMarkerColor : kStroke, f.style.lineColor.name(QColor::HexRgb));
         if (!punto) {

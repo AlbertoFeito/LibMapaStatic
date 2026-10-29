@@ -61,7 +61,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `ccr-1c6d88f3-of2nuy` (otra vez, desde `main`) | #44 | Segunda respuesta de la convergencia: `docs/Respuesta_convergencia_2.md` |
 | `ccr-1c6d88f3-of2nuy` (y otra vez, desde `main`) | #45 | Propuesta final de la convergencia: `docs/Propuesta_final_convergencia.md` |
 | `ccr-1c6d88f3-of2nuy` (y otra más, desde `main`) | #46 | Fase 1 de la convergencia con el fork extendido: `LabelAnchor` y `labelFontSize` por entidad, formulario de objetivo configurable (offset por defecto, `Hanging`, colores por segmento, `targetLabelMoved`), `RangeRings` hasta 100 con énfasis y el ejemplo `laboratorio_rotulos` |
-| `claude/sweet-cray-74nz88` (tercera vez, desde `main`) | #47 | Ejemplo `laboratorio_anillos`: mapa de costas sin híbrido, anillos y radiales con escala, centro con un clic y coordenadas del ratón; incluye la fase 1 de la convergencia (escala polar de 300/600 km con énfasis, rótulos de entidades y formulario de objetivos arrastrable) |
+| `claude/sweet-cray-74nz88` (tercera vez, desde `main`) | #47 | Ejemplo `laboratorio_anillos`: mapa de costas sin híbrido, anillos y radiales con escala, centro con un clic y coordenadas del ratón; incluye la fase 1 de la convergencia (escala polar de 300/600 km con énfasis, rótulos de entidades y formulario de objetivos arrastrable) y las fases 2 a 4 (círculos y arcos geodésicos, agrupar por capa y tipo, partes con nombre y color por entidad) con su medición de 5.000 puntos |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
@@ -130,7 +130,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
   (`tile.openstreetmap.org`): está prohibido.
 
 ## Verificación antes de commitear código
-- Compila y pasa **todos los tests** (32 ahora, 3 de ellos de libtelemetria; 29 sin QCustomPlot): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
+- Compila y pasa **todos los tests** (33 ahora, 3 de ellos de libtelemetria; 30 sin QCustomPlot): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
   en el contenedor). Un push verde vale más que tres especulativos.
 - Contenedor nuevo sin Qt: `sudo apt-get update && sudo apt-get install -y
   qt6-base-dev qt6-positioning-dev`, y recupera QCustomPlot (arriba).

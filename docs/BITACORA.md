@@ -7281,3 +7281,53 @@ ejemplo; se añadirán cuando se hagan. Lo del tamaño real de los 600 km no se 
 mirar. `laboratorio_rotulos` sigue existiendo y repite buena parte de esto; no se ha quitado.
 
 **Estado: 32 tests (29 sin QCustomPlot).**
+
+
+## 177. Fases 2 a 4 de la convergencia: círculos y arcos, agrupar por capa y tipo, partes con nombre y color
+
+**Origen.** Lo que quedaba de la propuesta final de la convergencia (§174; lo acordado fue hacerlo todo aquí, sin otro debate) y que §176 dejaba sin hacer. Las tres fases son aditivas: los valores por
+defecto reproducen lo de siempre y las bases de datos antiguas se abren y se migran solas.
+
+**Fase 2 — círculos y arcos.** `GeometryKind::Circle` y `Arc` (añadidos al final del enum, que se guarda como entero), con `MapFeature::radiusMeters`, `arcStartDeg` y `arcEndDeg`. Son
+**geodésicos**: el contorno se calcula con `atDistanceAndAzimuth` desde el centro, así que un círculo de 50 km mide 50 km en cualquier latitud y se estira en Mercator igual que los anillos. El
+barrido va en sentido horario desde el norte: `fmod(fin − ini + 360, 360)`, de modo que de 330° a 30° cruza el norte y mide 60°. `outlines()` da el contorno muestreado (para dibujar y consultar),
+`storedParts()` solo el centro (para persistir) y `toPlain()` el polígono o la polilínea que entienden los exportadores (GeoJSON, KML, GPX). Un círculo o un arco no tiene vértices que insertar o
+quitar, y mover su único vértice mueve el centro. Esquema SQLite **v5**: `radio_m`, `arco_ini`, `arco_fin`. Un círculo sin radio o un arco sin barrido no son válidos.
+
+**Fase 3 — agrupar por capa y tipo.** Capa = `layerId`, tipo = `type`. `featureTypeCounts(capa)`, `clearFeaturesOfType`, `addFeatures` (alta en lote: **una sola** señal `changed` y **un solo** paso de
+deshacer, no una por entidad; las capas que faltan se crean en silencio dentro del lote, porque `addLayer` emitía las suyas y salían tres) y `setFeatureTypeVisible`/`isFeatureTypeVisible`/
+`hiddenFeatureTypes`. La visibilidad por tipo es un filtro **de la vista**: ocultar no borra, no cambia el recuento y las entidades ocultas no se dibujan ni se pueden elegir.
+
+**Fase 4 — partes con nombre y color.** Una entidad con muchas partes (`parts`) puede llevar un `PartInfo` por parte (`partsInfo`, paralelo a `parts`): nombre (con su rótulo propio), color
+(inválido = el de la entidad) y lado del rótulo. Se eligió un vector paralelo y no una estructura `SubEntity` para no romper nada de lo que ya lee `parts`. Invariantes: `partsInfo` está vacío o mide
+lo mismo que `parts`, y `geometry == parts.first()` (el modelo lo mantiene al mover vértices de la parte 0). `MapHit::subIndex` y `featureAt(pixel, tol, &sub)` dicen **qué parte** hay bajo el
+pixel (la de menor distancia); `moveVertex`/`insertVertex`/`removeVertex` aceptan `part`; `featurePartLabelRect(id, parte)` da la caja del rótulo de una parte. Esquema **v6**: tabla
+`entidad_parte(entidad_id, parte, nombre, color NULL, label_pos)`. GeoJSON exporta y lee `part_names` y `part_colors` (color vacío = sin color propio) solo si cuadran con las partes leídas, y no los cuela
+como atributos de dominio.
+
+**Medición con 5.000 puntos** (`measuresFiveThousandPointsAsPartsOrFeatures`, en `tst_mapwidget`, Linux, `offscreen`): 5.000 puntos con nombre y la mitad en otro color, como **una** entidad con 5.000
+partes frente a **5.000** entidades:
+
+| | memoria residente | alta | borrado |
+|---|---|---|---|
+| una entidad con partes | 2,8–3,0 MiB | 0–1 ms | 0 ms |
+| 5.000 entidades | 5,9–6,8 MiB | 7–10 ms | 1 ms |
+
+`sizeof(MapFeature)` = 376 B y `sizeof(PartInfo)` = 48 B: cada entidad suelta paga sus 376 B más el índice y el rótulo; cada parte, solo los 48 B más su vector. **Decisión:** para miles de elementos
+iguales (aeródromos, balizas) una entidad con partes ocupa menos de la mitad y se da de alta antes; se mantienen entidades sueltas cuando cada una necesita su propio estilo, atributos o vida
+(borrarla, moverla). El tiempo de dibujo medido con `grab()` en `offscreen` (1–2 ms en ambos casos) **no es representativo**: con la ventana oculta y a poco zoom casi todo se descarta antes de pintar; hay
+que medirlo en una pantalla real con el mapa de costas.
+
+**En el ejemplo.** `laboratorio_anillos` (PR #47) suma el grupo «Sectores, tipos y partes»: un círculo de 50 km y tres sectores (uno de 330° a 30°) que siguen al centro, alta en lote y borrado por tipo, recuento
+y visibilidad por tipo, y los «Sitios», una entidad de tres partes con nombre y color cada una (la tercera sin color propio) cuyo clic dice la parte. `--comprobar` crece: cuatro sectores, borrarlos por
+tipo y volver a ponerlos, ocultar sin borrar, y el clic en un sitio (devuelve la entidad y una de sus tres partes; con el paquete mínimo el zoom solo llega a 2 y las partes se solapan, así que ahí no se
+distingue cuál: eso lo prueba `tst_mapwidget` con zoom 10).
+
+**Pruebas nuevas.** `tst_roundgeometry` (geometría geodésica, barrido, validez), `tst_labelplacement` (esquinas por azimut), y casos en `tst_overlaymodel` (lote, tipos, partes y vértices por parte),
+`tst_vectorrepository` (v5, v6 con color nulo y comillas), `tst_vectorformats` (círculos como polígono, `part_names`/`part_colors`) y `tst_mapwidget` (subIndex y rótulos por parte, medición).
+`QPixmap` dentro de `MapFeature` exige `QGuiApplication` en los tests (`QTEST_MAIN`), y con Qt 6.10 `QSqlDatabase` exige `QCoreApplication` (`QTEST_GUILESS_MAIN`).
+
+**Lo que no es.** KML y GPX no guardan `PartInfo` (solo GeoJSON y SQLite). Un círculo o un arco no se edita vértice a vértice (solo se mueve o se cambia su radio con `updateFeature`). El tiempo de dibujo con
+5.000 elementos en una pantalla real queda por medir.
+
+**Estado: 33 tests (30 sin QCustomPlot).**
