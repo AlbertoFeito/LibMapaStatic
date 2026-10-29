@@ -102,6 +102,18 @@ public:
     //! encima gana). Solo considera etiquetas realmente pintadas en el ultimo
     //! frame (respeta nivel de detalle y declutter).
     qint64 labelAt(const QPoint &pixel) const;
+    //! Caja (px) del rotulo de un objetivo en el ultimo frame, o nula si no se
+    //! dibujo (oculto, sin texto, fuera de pantalla o descartado por detalle).
+    QRectF labelRectOf(qint64 id) const;
+
+    //! Aspecto comun de los rotulos (colocacion, fuente, columnas). Por defecto
+    //! el de siempre.
+    void setLabelFormat(const TargetLabelFormat &format);
+    TargetLabelFormat labelFormat() const { return m_labelFormat; }
+    //! Color del texto del rotulo del objetivo seleccionado cuando el segmento no
+    //! trae color propio. Por defecto negro (como el resto del texto).
+    void setLabelSelectionColor(const QColor &color);
+    QColor labelSelectionColor() const { return m_labelSelectionColor; }
 
     //! Objetivos dibujados en el ultimo repintado (los que caian en pantalla).
     int lastDrawnCount() const { return m_lastDrawn; }
@@ -130,7 +142,13 @@ private:
     void drawProximity(QPainter *painter) const;
     void drawCluster(QPainter *painter, const QPointF &center, int count) const;
 
+    //! Lineas del rotulo de un objetivo: su \a labelContent, o su \a label plano
+    //! partido por '\n' (un solo segmento por linea, sin color propio).
+    static QVector<TargetLabelLine> labelLinesOf(const MapTarget &t);
+
     TargetModel *m_model = nullptr;
+    TargetLabelFormat m_labelFormat;
+    QColor m_labelSelectionColor = Qt::black;
     std::function<QPointF(const QGeoCoordinate &)> m_toAxis;
     TargetSymbolProvider m_symbolProvider;   //!< Lo pone la app; vacio = galon.
 

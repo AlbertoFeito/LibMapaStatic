@@ -8,4 +8,4 @@
 #-------------------------------------------------------------------
 
 TEMPLATE = subdirs
-SUBDIRS += app_minima app_seguimiento visor_gpx editor_rutas buscador_lugares medidor_campo monitor_trafico vigilancia_zonas analisis_terreno rutas_tierra laboratorio_anillos emisor_nmea cliente_telemetria
+SUBDIRS += app_minima app_seguimiento visor_gpx editor_rutas buscador_lugares medidor_campo monitor_trafico vigilancia_zonas analisis_terreno rutas_tierra laboratorio_rotulos laboratorio_anillos emisor_nmea cliente_telemetria

@@ -182,6 +182,8 @@ signals:
     //! empezar, en cada movimiento (con la coordenada bajo el cursor) y al soltar.
     void featureDragStarted(qint64 id);
     void featureDragMovedTo(qint64 id, const QGeoCoordinate &position);
+    //! Se solto el rotulo de un objetivo tras moverlo: offset final en pixeles.
+    void targetLabelMoved(qint64 id, const QPointF &offsetPx);
     void featureDragFinished(qint64 id);
     void drawingCancelled();
     void centerChanged(const QGeoCoordinate &center);
@@ -307,6 +309,10 @@ private:
     qint64 m_dragLabelBearing = -1;      //!< Marcacion cuyo rotulo se arrastra.
     QPoint m_dragLabelStartPx;
     QPointF m_dragLabelStartOffset;
+    //! Estado PROPIO del offset del objetivo al empezar el arrastre, para
+    //! restaurarlo exacto si se cancela (soltar fuera del mapa).
+    QPointF m_dragLabelStartRaw;
+    bool m_dragLabelStartSet = false;
 
     //! Entidad (punto) marcada draggable que se arrastra con la herramienta None.
     qint64 m_dragFeature = -1;

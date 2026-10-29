@@ -144,8 +144,42 @@ bool TargetModel::setLabelOffset(qint64 id, const QPointF &offsetPx)
     if (it == m_targets.end())
         return false;
     it->target.labelOffsetPx = offsetPx;
+    it->target.labelOffsetSet = true;
     emit changed();
     return true;
+}
+
+// Quita el desplazamiento propio de un objetivo: vuelve al por defecto.
+bool TargetModel::clearLabelOffset(qint64 id)
+{
+    auto it = m_targets.find(id);
+    if (it == m_targets.end())
+        return false;
+    it->target.labelOffsetPx = QPointF(0.0, 0.0);
+    it->target.labelOffsetSet = false;
+    emit changed();
+    return true;
+}
+
+// Deja el desplazamiento propio exactamente como estaba (valor y marca).
+bool TargetModel::restoreLabelOffset(qint64 id, const QPointF &offsetPx, bool set)
+{
+    auto it = m_targets.find(id);
+    if (it == m_targets.end())
+        return false;
+    it->target.labelOffsetPx = offsetPx;
+    it->target.labelOffsetSet = set;
+    emit changed();
+    return true;
+}
+
+// Cambia el desplazamiento por defecto de las etiquetas y repinta.
+void TargetModel::setDefaultLabelOffsetPx(const QPointF &offsetPx)
+{
+    if (m_defaultLabelOffset == offsetPx)
+        return;
+    m_defaultLabelOffset = offsetPx;
+    emit changed();
 }
 
 // Cambia el color de un objetivo. false si el id no existe.

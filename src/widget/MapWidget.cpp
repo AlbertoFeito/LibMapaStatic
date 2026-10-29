@@ -751,6 +751,7 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(d->view, &MapView::featureCreated, this, &MapWidget::featureCreated);
     connect(d->view, &MapView::featureDragStarted, this, &MapWidget::featureDragStarted);
     connect(d->view, &MapView::featureDragMovedTo, this, &MapWidget::featureDragMovedTo);
+    connect(d->view, &MapView::targetLabelMoved, this, &MapWidget::targetLabelMoved);
     connect(d->view, &MapView::featureDragFinished, this, &MapWidget::featureDragFinished);
     connect(d->view, &MapView::drawingCancelled, this, &MapWidget::drawingCancelled);
 
@@ -1910,6 +1911,57 @@ bool MapWidget::setTargetLabelOffset(qint64 id, const QPointF &offsetPx)
     return d->view && d->view->targetModel()->setLabelOffset(id, offsetPx);
 }
 
+// Quita el desplazamiento propio de la etiqueta de un objetivo.
+bool MapWidget::clearTargetLabelOffset(qint64 id)
+{
+    return d->view && d->view->targetModel()->clearLabelOffset(id);
+}
+
+// Desplazamiento por defecto de las etiquetas de los objetivos.
+QPointF MapWidget::defaultTargetLabelOffset() const
+{
+    return d->view ? d->view->targetModel()->defaultLabelOffsetPx() : QPointF();
+}
+
+void MapWidget::setDefaultTargetLabelOffset(const QPointF &offsetPx)
+{
+    if (d->view)
+        d->view->targetModel()->setDefaultLabelOffsetPx(offsetPx);
+}
+
+// Aspecto comun de los rotulos de los objetivos (colocacion, fuente, columnas).
+void MapWidget::setTargetLabelFormat(const TargetLabelFormat &format)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setLabelFormat(format);
+}
+
+TargetLabelFormat MapWidget::targetLabelFormat() const
+{
+    return d->view && d->view->targetLayer() ? d->view->targetLayer()->labelFormat()
+                                             : TargetLabelFormat();
+}
+
+// Color del texto del rotulo del objetivo seleccionado.
+void MapWidget::setTargetLabelSelectionColor(const QColor &color)
+{
+    if (d->view && d->view->targetLayer())
+        d->view->targetLayer()->setLabelSelectionColor(color);
+}
+
+QColor MapWidget::targetLabelSelectionColor() const
+{
+    return d->view && d->view->targetLayer() ? d->view->targetLayer()->labelSelectionColor()
+                                             : QColor(Qt::black);
+}
+
+// Caja del rotulo de un objetivo en el ultimo repintado.
+QRect MapWidget::targetLabelRect(qint64 id) const
+{
+    return d->view && d->view->targetLayer()
+        ? d->view->targetLayer()->labelRectOf(id).toAlignedRect() : QRect();
+}
+
 // Cuelga un dato de dominio (AIS, ADS-B, telemetria...) en un objetivo. La
 // libreria no lo interpreta; solo lo guarda y lo devuelve tal cual.
 bool MapWidget::setTargetAttribute(qint64 id, const QString &key, const QVariant &value)
@@ -2432,6 +2484,16 @@ qint64 MapWidget::featureLabelAt(const QPoint &pixel) const
 {
     d->syncGeometry();
     return d->view ? d->view->featureLayer()->labelAt(pixel) : -1;
+}
+
+// Caja del rotulo de una entidad en pixeles (la misma que usan el dibujo y el
+// hit-test). Sincroniza la geometria primero, como el resto de consultas.
+QRect MapWidget::featureLabelRect(qint64 id) const
+{
+    d->syncGeometry();
+    if (!d->view)
+        return QRect();
+    return d->view->featureLayer()->labelRectOf(id).toAlignedRect();
 }
 
 // Objetivo cuyo rotulo dibujado cae bajo el pixel.

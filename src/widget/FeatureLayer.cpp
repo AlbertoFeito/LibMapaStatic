@@ -1,13 +1,16 @@
 #include "widget/FeatureLayer.h"
+#include "widget/LabelPlacement.h"
 
 #include "core/Logging.h"
 #include "widget/MapView.h"
 
 #include <QDateTime>
+#include <QLineF>
 #include <QPainterPath>
 #include <QStringList>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace libmapa {
 
@@ -649,9 +652,21 @@ QPointF FeatureLayer::labelAnchorScreen(const MapFeature &f) const
     return caja.isNull() ? QPointF() : caja.center();
 }
 
+// Fuente del rotulo de una entidad: la del mapa o, si el estilo fija un tamano
+// (labelFontSize > 0), la misma familia con ese tamano en puntos.
+QFont FeatureLayer::labelFontFor(const MapFeature &f, const QFont &base)
+{
+    QFont fuente = base;
+    if (f.style.labelFontSize > 0)
+        fuente.setPointSize(f.style.labelFontSize);
+    return fuente;
+}
+
 // Caja de la etiqueta en pixeles. El rotulo se coloca en: anclaje + hueco por
 // defecto + desplazamiento del estilo. El hueco separa el texto del punto; el
 // desplazamiento es lo que cambia al arrastrar la etiqueta. Multilinea por '\n'.
+// Con un LabelAnchor distinto de Auto la caja entera se coloca al lado indicado
+// del anclaje y el desplazamiento se suma a esa posicion.
 QRectF FeatureLayer::labelBoxFor(const MapFeature &f, const QPointF &base,
                                  const QFontMetricsF &fm) const
 {
@@ -665,12 +680,38 @@ QRectF FeatureLayer::labelBoxFor(const MapFeature &f, const QPointF &base,
     // geometria arranca en el propio centro (como venia saliendo).
     const bool junar = (f.kind == GeometryKind::Point && !f.isMultiPart())
                        || f.style.labelAnchorVertex >= 0;
+
+    if (f.style.labelAnchor != LabelAnchor::Auto) {
+        // La caja incluye los margenes que se le anaden al dibujarla (3 y 2 px).
+        const QSizeF caja(w + 6.0, h + 4.0);
+        const double gap = junar ? f.style.pointRadiusPx + 2.0 : 2.0;
+        const QPointF origen = labelBoxOrigin(f.style.labelAnchor, caja, gap);
+        return QRectF(base + origen + f.style.labelOffsetPx, caja);
+    }
+
     const QPointF hueco = junar
         ? QPointF(f.style.pointRadiusPx + 4.0, -f.style.pointRadiusPx - 2.0)
         : QPointF(0.0, 0.0);
 
     const QPointF tl = base + hueco + f.style.labelOffsetPx;
     return QRectF(tl, QSizeF(w, h)).adjusted(-3, -2, 3, 2);
+}
+
+// Caja en pixeles del rotulo de una entidad tal como se ve ahora, o un
+// rectangulo nulo si no tiene rotulo visible. Usa la fuente del mapa y el tamano
+// propio de la entidad, igual que el dibujo y el hit-test.
+QRectF FeatureLayer::labelRectOf(qint64 id) const
+{
+    if (!m_model || !m_toAxis || !parentPlot())
+        return QRectF();
+    const std::optional<MapFeature> f = m_model->feature(id);
+    if (!f || !f->style.labelVisible || f->name.isEmpty())
+        return QRectF();
+    const QPointF base = labelAnchorScreen(*f);
+    if (base.isNull())
+        return QRectF();
+    const QFontMetricsF fm(labelFontFor(*f, parentPlot()->font()));
+    return labelBoxFor(*f, base, fm);
 }
 
 // Pinta las etiquetas de TODAS las entidades visibles, directamente sobre el
@@ -716,14 +757,30 @@ void FeatureLayer::drawLabels(QPainter *painter) const
 void FeatureLayer::drawLabel(QPainter *painter, const MapFeature &f,
                              const QPointF &base) const
 {
+    const QFont fuenteBase = painter->font();
+    painter->setFont(labelFontFor(f, fuenteBase));
     const QFontMetricsF fm(painter->font());
     const QRectF caja = labelBoxFor(f, base, fm);
 
-    // Linea guia solo cuando el rotulo esta separado del punto: une anclaje y caja.
+    // Linea guia solo cuando el rotulo esta separado del punto: une anclaje y
+    // caja. Con una posicion elegida (LabelAnchor) termina en la esquina mas
+    // cercana al punto; con Auto, en el centro, como siempre.
     if (f.style.labelOffsetPx.manhattanLength() > 1.0) {
         painter->setPen(QPen(f.style.labelColor, 1.0, Qt::SolidLine));
         painter->setBrush(Qt::NoBrush);
-        painter->drawLine(base, caja.center());
+        QPointF fin = caja.center();
+        if (f.style.labelAnchor != LabelAnchor::Auto) {
+            double mejor = std::numeric_limits<double>::max();
+            for (const QPointF &esquina : {caja.topLeft(), caja.topRight(),
+                                           caja.bottomLeft(), caja.bottomRight()}) {
+                const double d = QLineF(base, esquina).length();
+                if (d < mejor) {
+                    mejor = d;
+                    fin = esquina;
+                }
+            }
+        }
+        painter->drawLine(base, fin);
     }
 
     // Fondo semitransparente: sobre fotografia aerea el texto suelto no se lee.
@@ -733,6 +790,7 @@ void FeatureLayer::drawLabel(QPainter *painter, const MapFeature &f,
 
     painter->setPen(QPen(f.style.labelColor));
     painter->drawText(caja, Qt::AlignCenter, f.name);
+    painter->setFont(fuenteBase);
 }
 
 // Entidad cuyo rotulo cae bajo el pixel. Recorre de la capa mas alta a la mas
@@ -744,7 +802,7 @@ qint64 FeatureLayer::labelAt(const QPoint &pixel) const
 
     const MapView *vista = qobject_cast<MapView *>(parentPlot());
     const int zoomActual = vista ? vista->zoom() : -1;
-    const QFontMetricsF fm(parentPlot() ? parentPlot()->font() : QFont());
+    const QFont fuenteMapa = parentPlot() ? parentPlot()->font() : QFont();
 
     const auto capas = m_model->layers();
     for (int i = static_cast<int>(capas.size()) - 1; i >= 0; --i) {
@@ -761,6 +819,7 @@ qint64 FeatureLayer::labelAt(const QPoint &pixel) const
             const QPointF base = labelAnchorScreen(f);
             if (base.isNull())
                 return true;
+            const QFontMetricsF fm(labelFontFor(f, fuenteMapa));
             if (!labelBoxFor(f, base, fm).contains(QPointF(pixel)))
                 return true;
             acierto = f.id;
