@@ -488,7 +488,27 @@ public:
     //! Desplazamiento de la ETIQUETA del objetivo respecto a su simbolo, en
     //! pixeles. Relativo: al moverse el objetivo la etiqueta lo sigue. Cuando no
     //! es nulo se traza una linea guia. false si el id no existe.
+    //! Lo marca como PROPIO del objetivo (MapTarget::labelOffsetSet).
     bool setTargetLabelOffset(qint64 id, const QPointF &offsetPx);
+    //! Quita el desplazamiento propio: el objetivo vuelve al por defecto.
+    bool clearTargetLabelOffset(qint64 id);
+    //! Desplazamiento por defecto de la etiqueta de los objetivos que no fijaron el
+    //! suyo, en pixeles de pantalla (X a la derecha, Y hacia abajo). (0,0) al
+    //! principio: pegada al simbolo, como siempre.
+    QPointF defaultTargetLabelOffset() const;
+    void setDefaultTargetLabelOffset(const QPointF &offsetPx);
+    //! Aspecto comun de los rotulos de los objetivos: colocacion, fuente
+    //! monoespaciada, ancho en caracteres y columnas por segmento. Ver
+    //! \ref TargetLabelFormat; el valor por defecto es el rotulo de siempre.
+    void setTargetLabelFormat(const TargetLabelFormat &format);
+    TargetLabelFormat targetLabelFormat() const;
+    //! Color del texto del rotulo del objetivo SELECCIONADO (en los segmentos sin
+    //! color propio). Por defecto negro, como el resto del texto.
+    void setTargetLabelSelectionColor(const QColor &color);
+    QColor targetLabelSelectionColor() const;
+    //! Caja del rotulo de un objetivo en pixeles, tal como se pinto en el ultimo
+    //! repintado, o un rectangulo nulo si no se dibujo.
+    QRect targetLabelRect(qint64 id) const;
 
     //! Cuelga (o reemplaza) un dato de dominio en un objetivo: AIS (mmsi, imo),
     //! ADS-B (callsign, squawk), telemetria de un UAV... La libreria los guarda
@@ -733,6 +753,10 @@ public:
     //! Entidad cuyo ROTULO cae bajo el pixel, o -1. Permite seleccionar/arrastrar
     //! la etiqueta por separado de la geometria.
     qint64 featureLabelAt(const QPoint &pixel) const;
+    //! Caja del rotulo de una entidad, en pixeles del widget, tal como se ve ahora
+    //! (con su LabelAnchor, su desplazamiento y su tamano de fuente), o un
+    //! rectangulo nulo si la entidad no existe o no tiene rotulo visible.
+    QRect featureLabelRect(qint64 id) const;
     //! Objetivo cuyo ROTULO dibujado cae bajo el pixel, o -1.
     qint64 targetLabelAt(const QPoint &pixel) const;
     //! Marcacion (\ref addBearingLine) cuyo ROTULO dibujado cae bajo el pixel, o -1.
@@ -1153,6 +1177,10 @@ signals:
     //! marcadores que el operador reposiciona (p. ej. los puntos A/B).
     void featureDragStarted(qint64 id);
     void featureDragMovedTo(qint64 id, const QGeoCoordinate &position);
+    //! El operador soltó el rotulo de un objetivo tras arrastrarlo: \a offsetPx es
+    //! su desplazamiento final (ya aplicado y marcado como propio). No se emite si
+    //! se cancela soltando fuera del mapa ni si no llego a moverse.
+    void targetLabelMoved(qint64 id, const QPointF &offsetPx);
     void featureDragFinished(qint64 id);
     void drawingCancelled();
     void zoomChanged(int zoom);

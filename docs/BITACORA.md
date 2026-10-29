@@ -7169,3 +7169,43 @@ que no describen a una estación (binarios, acuses, gestión de canales...) se c
 en pantalla (su prueba sin ventana, sí); los colores y el orden de la tabla son lo primero que hay que mirar.
 
 **Estado: 31 tests (28 sin QCustomPlot).** Verificado: los tres tests de `libtelemetria`, el contrato de instalación (`herramientas/probar_instalacion.sh`, con los diez ejemplos y sus `--comprobar`).
+
+## 174. Rótulos: ancla y fuente por entidad, formulario de objetivo configurable y escala polar (fase 1 de la convergencia)
+
+**Origen.** Un equipo que usa libmapa mantiene una versión extendida y propuso converger (`docs/Respuesta_convergencia.md`, `Respuesta_convergencia_2.md` y `Propuesta_final_convergencia.md` recogen las
+tres rondas). Se acordó hacerlo por fases, solo añadiendo, y esta es la **fase 1**: lo que toca a los rótulos y a la escala polar. Las fases 2 (círculos y arcos), 3 (agrupar por capa y tipo) y 4 (partes con
+nombre y color propios, tras medirlo) siguen cada una en su rama. Al contrastar su propuesta con `main` resultó que parte de lo pedido ya existía (el arrastre del formulario, el offset por objetivo, las
+capas, `RangeRings`), así que no se rehízo.
+
+**Rótulos de entidades.** `FeatureStyle::labelAnchor` (`LabelAnchor`: `Auto` y nueve posiciones) coloca la caja entera al lado del anclaje y `labelFontSize` le da fuente propia (0 = la del mapa);
+`labelOffsetPx` se suma a la posición. **`Auto` es el valor por defecto y es el cálculo de siempre**: la propuesta original traía `Top` por defecto, que habría cambiado el aspecto de todo lo existente.
+Con un ancla elegida la línea guía termina en la esquina de la caja más cercana al punto; con `Auto` sigue yendo al centro. Se guardan en SQLite: **esquema v4** (`label_pos`, `label_fuente`, con `DEFAULT 0`,
+así una BD v3 se migra sola y sus entidades se ven igual). `MapWidget::featureLabelRect` da la caja en píxeles (la misma del dibujo y del hit-test), que es lo que prueban los tests.
+
+**Formulario de los objetivos.** Ya se arrastraba (MapView, con prioridad sobre el mapa). Se añade: un **desplazamiento por defecto** global (`setDefaultTargetLabelOffset`, `(0,0)` de partida) y
+`MapTarget::labelOffsetSet` (el offset propio manda; **un `labelOffsetPx` distinto de (0,0) sin la marca sigue contando como propio**, para no romper las apps que lo fijan a mano); la señal
+`targetLabelMoved` al soltar; **soltar fuera del mapa cancela** y restaura el estado exacto (valor y marca); el color de selección del rótulo (`setTargetLabelSelectionColor`, negro por defecto, y solo tiñe los
+segmentos sin color propio); y `MapTarget::labelContent` para dar **colores por segmento** (vacío = el `label` plano de siempre). Un `TargetLabelFormat` común fija la **colocación**, la fuente
+monoespaciada, el ancho en caracteres y las columnas por segmento. La colocación `Hanging` (el formulario de su aplicación) cuelga la caja de `posición + offset` por la esquina que dice el azimut del offset de
+pantalla (`labelCornerFor`, una función pura probada con una tabla); **es opcional** porque la colocación `Classic` de siempre arranca la caja a la derecha del símbolo y cambiarla habría movido los rótulos de
+las aplicaciones existentes. **Convención:** los offsets son píxeles de pantalla con Y hacia abajo; su anexo mezclaba dos convenciones (y tenía el azimut y la esquina cambiados en tres de los cuatro
+diagramas de A.3.2), se tomó la de la librería y la tabla corregida está en `tests/tst_labelplacement.cpp`.
+
+**Escala polar.** No hacía falta un tipo nuevo: `RangeRings` ya dibuja anillos y radiales. Lo que impedía una escala de 600 km (60 anillos de 10 km) era el tope de **50** anillos, que ahora es **100**.
+`count` solo cuenta anillos (los radiales salen de `spokeEveryDeg`), así que 30 + 36 no eran 66. Se añade el énfasis (`majorRingEvery`, `majorSpokeEveryDeg`, `majorColor`: uno de cada N en otro color y algo
+más grueso) y `spokeColor`. Esto sustituye a `colorOverride` por sub-entidad en el gráfico polar.
+
+**Ejemplo `laboratorio_rotulos`.** Un panel que cambia en vivo todo lo anterior sobre seis aeródromos, tres objetivos con formulario de tres líneas y la escala de 300/600 km; `--comprobar` (sin ventana) entra
+en `herramientas/probar_instalacion.sh` y `--captura=` guarda una imagen.
+
+**Pruebas.** `tst_labelplacement` (nuevo, funciones puras: tabla de esquinas con los límites 0/90/180/270/360 y los cuatro cuadrantes, y el origen de la caja de cada ancla), `featureLabelAnchorAndFontSize`,
+`targetLabelDefaultOffset`, `targetLabelDragSignalAndCancel` (arrastre con ratón, señal, clic sin mover y soltar fuera), `targetLabelHangingPlacement`, `targetLabelSelectionColor` (contando píxeles del color),
+`targetLabelContentAndFormat` y `rangeRingsSixtyRingsWithEmphasis` en `tst_mapwidget`; `labelOffsetDefaultOwnAndRestore` en `tst_targetmodel`; ida y vuelta y migración v3→v4 en `tst_vectorrepository`.
+Uno de mis propios tests era intermitente (dos objetivos en la misma celda de pantalla: el declutter solo dibuja un rótulo por celda y elige según el orden del hash); se separaron los objetivos.
+
+**Límites, sin rodeos.** Nada de esto se ha visto en una pantalla real: las pruebas son sin ventana (`offscreen`) y el ejemplo se ha ejecutado con `--comprobar`; lo primero que hay que mirar es el aspecto del
+formulario colgado, de la fuente monoespaciada y del énfasis. El color de selección no se ve en un segmento con color propio. Lo de los anexos B (arco) y C se aprovecha en la fase 2: el cálculo del barrido
+del anexo B tiene un error (el arco que da la vuelta, p. ej. de 315° a 45°, salía de 270° por el lado contrario; el barrido correcto es `fmod(fin − inicio + 360, 360)`) y para radios grandes conviene muestrear
+puntos geodésicos en vez de `drawArc`.
+
+**Estado: 32 tests (29 sin QCustomPlot).**

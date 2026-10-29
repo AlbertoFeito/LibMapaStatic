@@ -279,10 +279,11 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     q.prepare(QStringLiteral(
         "INSERT INTO entidad (capa, tipo, geometria, nombre, descripcion,"
         " color_linea, color_relleno, ancho_linea, estilo_linea, radio_px,"
-        " etiqueta_visible, label_dx, label_dy, label_anchor, visible, simbolo,"
+        " etiqueta_visible, label_dx, label_dy, label_anchor, label_pos, label_fuente,"
+        " visible, simbolo,"
         " atributos, creado_utc)"
         " VALUES (:capa,:tipo,:geo,:nom,:desc,:cl,:cr,:anc,:el,:rp,:ev,"
-        " :ldx,:ldy,:lan,:vi,:sim,:atr,:cu)"));
+        " :ldx,:ldy,:lan,:lpo,:lfu,:vi,:sim,:atr,:cu)"));
     q.bindValue(QStringLiteral(":capa"), text(f.layerId));
     q.bindValue(QStringLiteral(":tipo"), text(f.type));
     q.bindValue(QStringLiteral(":geo"), static_cast<int>(f.kind));
@@ -297,6 +298,8 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     q.bindValue(QStringLiteral(":ldx"), f.style.labelOffsetPx.x());
     q.bindValue(QStringLiteral(":ldy"), f.style.labelOffsetPx.y());
     q.bindValue(QStringLiteral(":lan"), f.style.labelAnchorVertex);
+    q.bindValue(QStringLiteral(":lpo"), static_cast<int>(f.style.labelAnchor));
+    q.bindValue(QStringLiteral(":lfu"), f.style.labelFontSize);
     q.bindValue(QStringLiteral(":vi"), f.visible ? 1 : 0);
     q.bindValue(QStringLiteral(":sim"), pixmapToPng(f.style.icon));
     q.bindValue(QStringLiteral(":atr"), atributos);
@@ -420,6 +423,12 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         const QVariant lan = field(q, "label_anchor");
         if (lan.isValid())
             f.style.labelAnchorVertex = lan.toInt();
+        // Lado del anclaje y tamano de fuente del rotulo (esquema v4). En una BD
+        // anterior las columnas no existen y se queda el valor por defecto.
+        const QVariant lpo = field(q, "label_pos");
+        if (lpo.isValid())
+            f.style.labelAnchor = static_cast<LabelAnchor>(lpo.toInt());
+        f.style.labelFontSize = field(q, "label_fuente").toInt();
         f.style.icon = pngToPixmap(field(q, "simbolo").toByteArray());
         f.visible = field(q, "visible").toInt() != 0;
 

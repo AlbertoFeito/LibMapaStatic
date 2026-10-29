@@ -9,12 +9,69 @@
 #include <QString>
 #include <QStringList>
 #include <QVariant>
+#include <QVector>
 
 #include <cmath>
 #include <functional>
 #include <limits>
 
 namespace libmapa {
+
+/*!
+ * \brief Un trozo de texto de una linea del formulario de un objetivo, con su color.
+ *
+ * Un \a color invalido se dibuja con el color por defecto del rotulo (negro).
+ */
+struct TargetLabelSegment
+{
+    QString text;
+    QColor color;
+};
+
+//! Una linea del formulario: uno o varios segmentos seguidos (cada uno con su color).
+struct TargetLabelLine
+{
+    QVector<TargetLabelSegment> segments;
+};
+
+/*!
+ * \brief Donde se coloca la caja del rotulo de un objetivo respecto a su desplazamiento.
+ *
+ * \a Classic es la de siempre y el valor por defecto: la caja arranca a la derecha
+ * del simbolo y el desplazamiento la mueve. \a Hanging cuelga la caja del punto
+ * \a posicion + desplazamiento por la esquina MAS CERCANA al objetivo (la que
+ * dice el azimut del desplazamiento): el rotulo queda entero del lado al que se
+ * arrastro y la linea guia termina en esa esquina.
+ */
+enum class TargetLabelPlacement {
+    Classic = 0,
+    Hanging
+};
+
+/*!
+ * \brief Aspecto comun de los rotulos de TODOS los objetivos (MapWidget::setTargetLabelFormat).
+ *
+ * Los valores por defecto reproducen el rotulo de siempre.
+ */
+struct TargetLabelFormat
+{
+    //! Como se coloca la caja respecto al desplazamiento.
+    TargetLabelPlacement placement = TargetLabelPlacement::Classic;
+
+    //! Fuente monoespaciada (las columnas quedan alineadas entre objetivos).
+    bool monospace = false;
+
+    //! Caracteres que se muestran como maximo por linea (el resto se corta);
+    //! 0 = sin limite. Con un valor > 0 y fuente monoespaciada, el ancho de la
+    //! caja es fijo: esa cantidad de columnas, haya el texto que haya.
+    int maxChars = 0;
+
+    //! Columnas reservadas para cada segmento de las lineas que tienen varios
+    //! (p. ej. {8, 8}: dos segmentos de 8 caracteres). El texto de un segmento se
+    //! corta a su ancho y el segmento siguiente empieza donde acaba la columna,
+    //! aunque el primero este vacio. Vacio = cada segmento ocupa lo que mide.
+    QVector<int> segmentChars;
+};
 
 /*!
  * \brief Un objetivo movil: posicion, rumbo y una etiqueta de texto.
@@ -57,6 +114,17 @@ struct MapTarget
     //! etiqueta solo cambia esto. (0,0) = pegada al simbolo. Cuando no es nula
     //! se traza una LINEA GUIA del objetivo a la caja de texto.
     QPointF labelOffsetPx = QPointF(0.0, 0.0);
+
+    //! true si el desplazamiento de ESTE objetivo es el suyo (lo fijo la app o el
+    //! operador al arrastrarlo); false = vale el desplazamiento por defecto de
+    //! MapWidget::setDefaultTargetLabelOffset. Por compatibilidad, un
+    //! \a labelOffsetPx distinto de (0,0) cuenta como fijado aunque este a false.
+    bool labelOffsetSet = false;
+
+    //! Rotulo con colores por segmento. Vacio = se dibuja \a label (texto plano, de
+    //! un solo color, una linea por '\n') como siempre. Si tiene lineas, manda
+    //! sobre \a label; el alto del rotulo es el numero de lineas.
+    QVector<TargetLabelLine> labelContent;
 
     bool isValid() const { return position.isValid(); }
 };

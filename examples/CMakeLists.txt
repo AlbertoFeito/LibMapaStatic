@@ -21,7 +21,7 @@ find_package(libmapa REQUIRED)
 # libtelemetria (decodificador NMEA/AIS) va instalada junto a libmapa: la usan emisor_nmea y cliente_telemetria.
 find_package(libtelemetria REQUIRED)
 
-foreach(_ejemplo app_minima app_seguimiento visor_gpx editor_rutas buscador_lugares medidor_campo monitor_trafico vigilancia_zonas analisis_terreno rutas_tierra
+foreach(_ejemplo app_minima app_seguimiento visor_gpx editor_rutas buscador_lugares medidor_campo monitor_trafico vigilancia_zonas analisis_terreno rutas_tierra laboratorio_rotulos
                  emisor_nmea cliente_telemetria)
     add_subdirectory(${_ejemplo})
 endforeach()

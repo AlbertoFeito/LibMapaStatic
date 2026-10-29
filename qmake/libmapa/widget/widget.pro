@@ -48,6 +48,7 @@ HEADERS += \
     $$ROOT/src/widget/TileLayer.h \
     $$ROOT/src/widget/OverlayModel.h \
     $$ROOT/src/widget/FeatureLayer.h \
+    $$ROOT/src/widget/LabelPlacement.h \
     $$ROOT/src/widget/TargetModel.h \
     $$ROOT/src/widget/TargetLayer.h \
     $$ROOT/src/widget/CoverageLayer.h \

@@ -1045,7 +1045,11 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 m_dragLabelTarget = tlab;
                 m_dragLabelStartPx = event->pos();
                 const auto t = m_targetModel->target(tlab);
-                m_dragLabelStartOffset = t ? t->labelOffsetPx : QPointF();
+                // Se arrastra a partir del offset que se VE (el propio o el de por
+                // defecto); el estado propio se guarda para poder cancelar.
+                m_dragLabelStartOffset = t ? m_targetModel->effectiveLabelOffset(*t) : QPointF();
+                m_dragLabelStartRaw = t ? t->labelOffsetPx : QPointF();
+                m_dragLabelStartSet = t ? t->labelOffsetSet : false;
                 setSelectedTarget(tlab);
                 setCursor(Qt::SizeAllCursor);
                 break;
@@ -1417,7 +1421,15 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
     if (izq && m_dragLabelTarget >= 0) {
+        const qint64 id = m_dragLabelTarget;
         m_dragLabelTarget = -1;
+        if (!rect().contains(event->pos())) {
+            // Soltado fuera del mapa: se cancela y el rotulo vuelve a como estaba.
+            m_targetModel->restoreLabelOffset(id, m_dragLabelStartRaw, m_dragLabelStartSet);
+        } else if (const auto t = m_targetModel->target(id);
+                   t && m_targetModel->effectiveLabelOffset(*t) != m_dragLabelStartOffset) {
+            emit targetLabelMoved(id, t->labelOffsetPx);
+        }
         unsetCursor();
         m_hoverSet = false;
         event->accept();

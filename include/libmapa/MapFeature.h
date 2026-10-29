@@ -32,6 +32,28 @@ enum class GeometryKind {
     Polygon     //!< Vertices en orden, cerrado.
 };
 
+/*!
+ * \brief Donde cuelga el rotulo de una entidad respecto a su punto de anclaje.
+ *
+ * \a Auto es el comportamiento de siempre (junto a un punto o vertice, arriba a
+ * la derecha; en el centro de una linea o un area, desde el propio centro) y es
+ * el valor por defecto, asi que nada existente cambia. Los demas valores colocan
+ * la caja entera al lado indicado del anclaje; el desplazamiento
+ * FeatureStyle::labelOffsetPx se SUMA a esa posicion.
+ */
+enum class LabelAnchor {
+    Auto = 0,    //!< Comportamiento clasico.
+    Top,         //!< Encima, centrado.
+    Bottom,      //!< Debajo, centrado.
+    Left,        //!< A la izquierda, centrado en vertical.
+    Right,       //!< A la derecha, centrado en vertical.
+    TopLeft,     //!< Arriba a la izquierda.
+    TopRight,    //!< Arriba a la derecha.
+    BottomLeft,  //!< Abajo a la izquierda.
+    BottomRight, //!< Abajo a la derecha.
+    Center       //!< Centrado sobre el anclaje.
+};
+
 //! Como se dibuja una entidad.
 struct FeatureStyle
 {
@@ -66,6 +88,15 @@ struct FeatureStyle
     //! centro de la geometria en lineas/poligonos); >=0 = ese vertice (p. ej. 0
     //! para colgar el rotulo del PRIMER punto de un area).
     int labelAnchorVertex = -1;
+
+    //! Lado del anclaje en el que cuelga la caja del rotulo. \a Auto = como
+    //! siempre. Se combina con \a labelOffsetPx (que se suma) y con
+    //! \a labelAnchorVertex (que decide A QUE PUNTO se ancla).
+    LabelAnchor labelAnchor = LabelAnchor::Auto;
+
+    //! Tamano de la fuente del rotulo, en puntos. 0 = la fuente del mapa. Cambia
+    //! el dibujo y la caja que usa el hit-test, que siguen coincidiendo.
+    int labelFontSize = 0;
 
     //! Se dibujan los vertices como tiradores. Lo activa el editor.
     bool verticesVisible = false;

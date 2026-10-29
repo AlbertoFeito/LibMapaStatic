@@ -8,6 +8,7 @@
 #include "db/VectorRepository.h"
 #include "widget/MapView.h"
 #include "widget/OverlayModel.h"
+#include "widget/TargetLayer.h"
 #include "geo/TileMatrix.h"
 
 #include <climits>
@@ -30,6 +31,8 @@ static QMouseEvent mouseEvent(QEvent::Type tipo, const QPoint &pos,
 #include <cmath>
 
 #include <QElapsedTimer>
+#include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -129,6 +132,25 @@ private slots:
     //! La etiqueta desplazada se puede localizar por su caja (featureLabelAt) y
     //! el offset se fija y persiste a traves de la fachada.
     void movableLabelHitTestAndOffset();
+    //! LabelAnchor coloca la caja del rotulo al lado indicado del anclaje (el
+    //! desplazamiento se suma) y labelFontSize cambia su tamano y su hit-test.
+    void featureLabelAnchorAndFontSize();
+    //! Offset por defecto de los rotulos de objetivos: lo usan los que no fijaron
+    //! el suyo; el propio manda; un offset suelto distinto de (0,0) cuenta como propio.
+    void targetLabelDefaultOffset();
+    //! Arrastrar el rotulo de un objetivo: la senal se emite al soltar dentro del
+    //! mapa y soltar fuera cancela y restaura el estado anterior.
+    void targetLabelDragSignalAndCancel();
+    //! Colocacion Hanging: la caja cuelga de posicion+offset por la esquina que
+    //! corresponde al azimut, y Classic no cambia.
+    void targetLabelHangingPlacement();
+    //! El color de seleccion tine el texto del objetivo seleccionado.
+    void targetLabelSelectionColor();
+    //! Rotulo por segmentos con colores, columnas, truncado y fuente monoespaciada.
+    void targetLabelContentAndFormat();
+    //! Escala de 600 km: 60 anillos cada 10 km y 36 radiales caben en UN RangeRings
+    //! (count solo cuenta anillos) y el enfasis colorea uno de cada N.
+    void rangeRingsSixtyRingsWithEmphasis();
     //! Los rotulos de entidades se pintan POR ENCIMA de las marcaciones: una linea
     //! de marcacion ya no tapa el nombre de una zona.
     void featureLabelsDrawAboveRangeMarks();
@@ -4067,6 +4089,503 @@ void TstMapWidget::movableLabelHitTestAndOffset()
     QCOMPARE(w.featureLabelAt(QPoint(465, 266)), id);
     // Sobre el propio punto ya no hay etiqueta (se movio).
     QCOMPARE(w.featureLabelAt(QPoint(400, 300)), qint64(-1));
+}
+
+void TstMapWidget::featureLabelAnchorAndFontSize()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    w.addFeatureLayer(QStringLiteral("obj"), QStringLiteral("Objetivos"), 60);
+    MapFeature p;
+    p.kind = GeometryKind::Point;
+    p.layerId = QStringLiteral("obj");
+    p.geometry = {centro};               // cae en el centro de la vista (400,300)
+    p.name = QStringLiteral("OBJETIVO");
+    const qint64 id = w.addFeature(p);
+    QVERIFY(id > 0);
+
+    // Por defecto (Auto) la caja arranca arriba a la derecha del punto, como siempre.
+    const QRect auto_ = w.featureLabelRect(id);
+    QVERIFY(auto_.isValid());
+    QVERIFY(auto_.left() > 400 && auto_.top() < 300);   // arranca arriba-derecha
+
+    // Con cada ancla la caja queda al lado pedido; el tamano no cambia.
+    const auto conAncla = [&](LabelAnchor a, const QPointF &offset = QPointF()) {
+        MapFeature f = *w.feature(id);
+        f.style.labelAnchor = a;
+        f.style.labelOffsetPx = offset;
+        w.updateFeature(f);
+        return w.featureLabelRect(id);
+    };
+    const QRect top = conAncla(LabelAnchor::Top);
+    // El tamano es el mismo salvo el redondeo a pixeles enteros de cada caja (en
+    // Qt5 sale 1 px de diferencia segun donde caiga la parte fraccionaria).
+    QVERIFY(qAbs(top.width() - auto_.width()) <= 1);
+    QVERIFY(qAbs(top.height() - auto_.height()) <= 1);
+    QVERIFY(top.bottom() < 300);                       // encima del punto
+    QVERIFY(qAbs(top.center().x() - 400) <= 1);        // centrada en horizontal
+
+    const QRect bottom = conAncla(LabelAnchor::Bottom);
+    QVERIFY(bottom.top() > 300);
+    QVERIFY(qAbs(bottom.center().x() - 400) <= 1);
+
+    const QRect left = conAncla(LabelAnchor::Left);
+    QVERIFY(left.right() < 400);
+    QVERIFY(qAbs(left.center().y() - 300) <= 2);
+
+    const QRect right = conAncla(LabelAnchor::Right);
+    QVERIFY(right.left() > 400);
+    QVERIFY(qAbs(right.center().y() - 300) <= 2);
+
+    const QRect topLeft = conAncla(LabelAnchor::TopLeft);
+    QVERIFY(topLeft.right() < 400 && topLeft.bottom() < 300);
+    const QRect bottomRight = conAncla(LabelAnchor::BottomRight);
+    QVERIFY(bottomRight.left() > 400 && bottomRight.top() > 300);
+
+    const QRect centrada = conAncla(LabelAnchor::Center);
+    QVERIFY(qAbs(centrada.center().x() - 400) <= 1);
+    QVERIFY(qAbs(centrada.center().y() - 300) <= 2);
+
+    // El desplazamiento se SUMA a la posicion del ancla.
+    const QRect movida = conAncla(LabelAnchor::Center, QPointF(30.0, -20.0));
+    QCOMPARE(movida.topLeft(), centrada.topLeft() + QPoint(30, -20));
+    QCOMPARE(w.featureLabelAt(movida.center()), id);   // y el hit-test la sigue
+    QCOMPARE(w.featureLabelAt(centrada.center() - QPoint(40, 40)), qint64(-1));
+
+    // Tamano de fuente propio: la caja crece y el hit-test cubre la nueva caja.
+    MapFeature f = *w.feature(id);
+    f.style.labelAnchor = LabelAnchor::Center;
+    f.style.labelOffsetPx = QPointF();
+    f.style.labelFontSize = 28;
+    w.updateFeature(f);
+    const QRect grande = w.featureLabelRect(id);
+    QVERIFY(grande.width() > centrada.width());
+    QVERIFY(grande.height() > centrada.height());
+    QCOMPARE(w.featureLabelAt(QPoint(grande.left() + 2, grande.top() + 2)), id);
+    QCOMPARE(w.feature(id)->style.labelFontSize, 28);
+
+    // Sin rotulo (id inexistente o sin nombre) la caja es nula.
+    QVERIFY(w.featureLabelRect(999999).isNull());
+}
+
+
+// Anade un objetivo con rotulo en el centro de la vista y fuerza un repintado de
+// su capa (buffered) para que existan las cajas que usa el hit-test.
+static qint64 objetivoConRotulo(MapWidget &w, const QGeoCoordinate &pos,
+                                const QString &texto)
+{
+    MapTarget t;
+    t.position = pos;
+    t.label = texto;
+    const qint64 id = w.addTarget(t);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    if (vista && vista->targetLayer())
+        vista->targetLayer()->layer()->replot();
+    return id;
+}
+
+static void repintaObjetivos(MapWidget &w)
+{
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    vista->targetLayer()->layer()->replot();
+}
+
+void TstMapWidget::targetLabelDefaultOffset()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    // Sin tocar nada el valor por defecto es (0,0): como siempre.
+    QCOMPARE(w.defaultTargetLabelOffset(), QPointF(0.0, 0.0));
+
+    const qint64 a = objetivoConRotulo(w, centro, QStringLiteral("AAA"));
+    const QRect pegada = w.targetLabelRect(a);
+    QVERIFY(pegada.isValid());
+
+    // Con un offset por defecto el rotulo se mueve, sin marcarse como propio.
+    w.setDefaultTargetLabelOffset(QPointF(-31.0, -31.0));
+    QCOMPARE(w.defaultTargetLabelOffset(), QPointF(-31.0, -31.0));
+    repintaObjetivos(w);
+    QCOMPARE(w.targetLabelRect(a).topLeft(), pegada.topLeft() + QPoint(-31, -31));
+    QVERIFY(!w.target(a)->labelOffsetSet);
+
+    // El offset propio manda sobre el de por defecto y queda marcado.
+    QVERIFY(w.setTargetLabelOffset(a, QPointF(40.0, 10.0)));
+    QVERIFY(w.target(a)->labelOffsetSet);
+    repintaObjetivos(w);
+    QCOMPARE(w.targetLabelRect(a).topLeft(), pegada.topLeft() + QPoint(40, 10));
+
+    // Quitarlo vuelve al de por defecto.
+    QVERIFY(w.clearTargetLabelOffset(a));
+    QVERIFY(!w.target(a)->labelOffsetSet);
+    QCOMPARE(w.target(a)->labelOffsetPx, QPointF(0.0, 0.0));
+    repintaObjetivos(w);
+    QCOMPARE(w.targetLabelRect(a).topLeft(), pegada.topLeft() + QPoint(-31, -31));
+
+    // Compatibilidad: una app que fija labelOffsetPx a mano (sin la marca) sigue
+    // viendo SU offset, no el de por defecto. Va en otro sitio (el declutter solo
+    // dibuja un rotulo por celda de pantalla) y se compara contra su propia caja
+    // sin offset.
+    MapTarget t;
+    t.position = QGeoCoordinate(21.55, -79.45);
+    t.label = QStringLiteral("BBB");
+    t.labelOffsetPx = QPointF(25.0, 5.0);
+    const qint64 b = w.addTarget(t);
+    repintaObjetivos(w);
+    const QRect viejo = w.targetLabelRect(b);
+    QVERIFY(viejo.isValid());
+    QVERIFY(!w.target(b)->labelOffsetSet);
+    w.setDefaultTargetLabelOffset(QPointF(0.0, 0.0));
+    QVERIFY(w.clearTargetLabelOffset(b));
+    repintaObjetivos(w);
+    QCOMPARE(viejo.topLeft(), w.targetLabelRect(b).topLeft() + QPoint(25, 5));
+
+    // Id inexistente.
+    QVERIFY(!w.clearTargetLabelOffset(99999));
+    QVERIFY(w.targetLabelRect(99999).isNull());
+}
+
+void TstMapWidget::targetLabelDragSignalAndCancel()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+
+    const qint64 id = objetivoConRotulo(w, centro, QStringLiteral("ARRASTRA"));
+    const QRect caja = w.targetLabelRect(id);
+    QVERIFY(caja.isValid());
+    QCOMPARE(w.targetLabelAt(caja.center()), id);
+
+    QSignalSpy movido(&w, &MapWidget::targetLabelMoved);
+
+    // Pulsar sobre el rotulo, mover y soltar DENTRO del mapa: se acepta.
+    const QPoint inicio = caja.center();
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, inicio,
+                                   Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(vista, &pulsa);
+    QMouseEvent mueve = mouseEvent(QEvent::MouseMove, inicio + QPoint(60, -20),
+                                   Qt::NoButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(vista, &mueve);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, inicio + QPoint(60, -20),
+                                    Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &suelta);
+
+    QCOMPARE(movido.size(), 1);
+    QCOMPARE(movido.first().at(0).toLongLong(), id);
+    QCOMPARE(movido.first().at(1).toPointF(), QPointF(60.0, -20.0));
+    QVERIFY(w.target(id)->labelOffsetSet);
+    QCOMPARE(w.target(id)->labelOffsetPx, QPointF(60.0, -20.0));
+    QCOMPARE(w.selectedTarget(), id);
+
+    // Un clic sin mover no emite nada.
+    repintaObjetivos(w);
+    const QPoint centroCaja = w.targetLabelRect(id).center();
+    QMouseEvent p2 = mouseEvent(QEvent::MouseButtonPress, centroCaja,
+                                Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(vista, &p2);
+    QMouseEvent s2 = mouseEvent(QEvent::MouseButtonRelease, centroCaja,
+                                Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &s2);
+    QCOMPARE(movido.size(), 1);
+
+    // Soltar FUERA del mapa cancela: vuelve el offset anterior y no hay senal.
+    repintaObjetivos(w);
+    const QPoint desde = w.targetLabelRect(id).center();
+    QMouseEvent p3 = mouseEvent(QEvent::MouseButtonPress, desde,
+                                Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(vista, &p3);
+    QMouseEvent m3 = mouseEvent(QEvent::MouseMove, QPoint(950, 700),
+                                Qt::NoButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(vista, &m3);
+    QMouseEvent s3 = mouseEvent(QEvent::MouseButtonRelease, QPoint(950, 700),
+                                Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &s3);
+    QCOMPARE(movido.size(), 1);
+    QCOMPARE(w.target(id)->labelOffsetPx, QPointF(60.0, -20.0));
+    QVERIFY(w.target(id)->labelOffsetSet);
+
+    // Cancelar sobre un objetivo que nunca fijo el suyo lo deja sin marcar.
+    const qint64 otro = objetivoConRotulo(w, QGeoCoordinate(21.55, -79.5),
+                                          QStringLiteral("OTRO"));
+    repintaObjetivos(w);
+    const QPoint desde2 = w.targetLabelRect(otro).center();
+    QMouseEvent p4 = mouseEvent(QEvent::MouseButtonPress, desde2,
+                                Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(vista, &p4);
+    QMouseEvent m4 = mouseEvent(QEvent::MouseMove, QPoint(-40, -40),
+                                Qt::NoButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(vista, &m4);
+    QMouseEvent s4 = mouseEvent(QEvent::MouseButtonRelease, QPoint(-40, -40),
+                                Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &s4);
+    QVERIFY(!w.target(otro)->labelOffsetSet);
+    QCOMPARE(w.target(otro)->labelOffsetPx, QPointF(0.0, 0.0));
+    QCOMPARE(movido.size(), 1);
+}
+
+void TstMapWidget::targetLabelHangingPlacement()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    const qint64 id = objetivoConRotulo(w, centro, QStringLiteral("COLGADO\nLINEA 2"));
+    const QSize tam = w.targetLabelRect(id).size();     // Classic: el tamano base
+
+    TargetLabelFormat fmt;
+    fmt.placement = TargetLabelPlacement::Hanging;
+    w.setTargetLabelFormat(fmt);
+    QCOMPARE(w.targetLabelFormat().placement, TargetLabelPlacement::Hanging);
+
+    // El objetivo esta en (400,300). Para cada offset de pantalla, la caja entera
+    // queda del lado al que se arrastro y la esquina elegida cae sobre
+    // posicion+offset (con 1 px de tolerancia por el redondeo a enteros).
+    struct Caso { QPointF off; bool izquierda; bool arriba; };
+    const Caso casos[] = {
+        {QPointF(-31, -31), true,  true},     // arriba-izquierda: esquina inferior derecha
+        {QPointF(31, -31),  false, true},     // arriba-derecha:   esquina inferior izquierda
+        {QPointF(-31, 31),  true,  false},    // abajo-izquierda:  esquina superior derecha
+        {QPointF(31, 31),   false, false},    // abajo-derecha:    esquina superior izquierda
+    };
+    for (const Caso &c : casos) {
+        QVERIFY(w.setTargetLabelOffset(id, c.off));
+        repintaObjetivos(w);
+        const QRect caja = w.targetLabelRect(id);
+        QVERIFY2(qAbs(caja.width() - tam.width()) <= 1 && qAbs(caja.height() - tam.height()) <= 1,
+                 "La caja cambio de tamano al colgarla");
+        const QPointF ancla = QPointF(400.0, 300.0) + c.off;
+        const QPointF esquina(c.izquierda ? caja.right() + 1 : caja.left(),
+                              c.arriba ? caja.bottom() + 1 : caja.top());
+        QVERIFY2(qAbs(esquina.x() - ancla.x()) <= 2 && qAbs(esquina.y() - ancla.y()) <= 2,
+                 qPrintable(QStringLiteral("offset (%1,%2): esquina en (%3,%4), ancla (%5,%6)")
+                                .arg(c.off.x()).arg(c.off.y()).arg(esquina.x()).arg(esquina.y())
+                                .arg(ancla.x()).arg(ancla.y())));
+    }
+
+    // Sin desplazamiento no hay donde colgar: queda como en Classic.
+    QVERIFY(w.clearTargetLabelOffset(id));
+    repintaObjetivos(w);
+    fmt.placement = TargetLabelPlacement::Classic;
+    w.setTargetLabelFormat(fmt);
+    repintaObjetivos(w);
+    const QRect classic0 = w.targetLabelRect(id);
+    fmt.placement = TargetLabelPlacement::Hanging;
+    w.setTargetLabelFormat(fmt);
+    repintaObjetivos(w);
+    QCOMPARE(w.targetLabelRect(id), classic0);
+}
+
+// Cuenta pixeles de un color (con tolerancia) dentro de un recuadro.
+static int pixelesDeColor(const QImage &img, const QRect &r, const QColor &c, int tol = 40)
+{
+    int n = 0;
+    const QRect dentro = r.intersected(img.rect());
+    for (int y = dentro.top(); y <= dentro.bottom(); ++y)
+        for (int x = dentro.left(); x <= dentro.right(); ++x) {
+            const QColor p = img.pixelColor(x, y);
+            if (qAbs(p.red() - c.red()) <= tol && qAbs(p.green() - c.green()) <= tol
+                && qAbs(p.blue() - c.blue()) <= tol)
+                ++n;
+        }
+    return n;
+}
+
+void TstMapWidget::targetLabelSelectionColor()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    // Por defecto negro, y asi sigue si no se toca.
+    QCOMPARE(w.targetLabelSelectionColor(), QColor(Qt::black));
+
+    const qint64 id = objetivoConRotulo(w, centro, QStringLiteral("SELECCION"));
+    w.setTargetLabelSelectionColor(QColor(255, 0, 255));
+    QCOMPARE(w.targetLabelSelectionColor(), QColor(255, 0, 255));
+
+    // Sin seleccionar el texto es negro: no hay magenta en la caja.
+    w.setSelectedTarget(-1);
+    repintaObjetivos(w);
+    QRect caja = w.targetLabelRect(id);
+    QVERIFY(caja.isValid());
+    QCOMPARE(pixelesDeColor(w.grab().toImage(), caja, QColor(255, 0, 255)), 0);
+
+    // Seleccionado, el texto se pinta con el color de seleccion.
+    w.setSelectedTarget(id);
+    repintaObjetivos(w);
+    caja = w.targetLabelRect(id);
+    QVERIFY2(pixelesDeColor(w.grab().toImage(), caja, QColor(255, 0, 255)) > 10,
+             "El texto seleccionado no usa el color de seleccion");
+}
+
+void TstMapWidget::targetLabelContentAndFormat()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+
+    // Tres lineas; la primera con dos segmentos de colores distintos.
+    MapTarget t;
+    t.position = centro;
+    t.label = QStringLiteral("NO SE USA");
+    TargetLabelLine l1;
+    l1.segments = {{QStringLiteral("E046"), QColor(255, 0, 0)},
+                   {QStringLiteral("M1M2"), QColor(0, 0, 255)}};
+    TargetLabelLine l2;
+    l2.segments = {{QStringLiteral("+42  I   01655"), QColor()}};
+    TargetLabelLine l3;
+    l3.segments = {{QStringLiteral("_S_A     1.2.3.4"), QColor()}};
+    t.labelContent = {l1, l2, l3};
+    const qint64 id = w.addTarget(t);
+    QVERIFY(id > 0);
+    repintaObjetivos(w);
+
+    // El contenido por segmentos manda sobre 'label': 3 lineas de alto.
+    const QRect base = w.targetLabelRect(id);
+    QVERIFY(base.isValid());
+    TargetLabelFormat fmt;
+    fmt.monospace = true;
+    w.setTargetLabelFormat(fmt);
+    repintaObjetivos(w);
+    const QRect mono = w.targetLabelRect(id);
+    const int alto1 = mono.height() / 3;
+    QVERIFY(alto1 > 5);
+
+    // Cada segmento con su color: los dos aparecen en la imagen.
+    const QImage img = w.grab().toImage();
+    QVERIFY(pixelesDeColor(img, mono, QColor(255, 0, 0)) > 5);
+    QVERIFY(pixelesDeColor(img, mono, QColor(0, 0, 255)) > 5);
+
+    // Ancho fijo de 16 caracteres con monoespaciada, aunque el texto sea corto...
+    fmt.maxChars = 16;
+    fmt.segmentChars = {8, 8};
+    w.setTargetLabelFormat(fmt);
+    repintaObjetivos(w);
+    const QRect fija = w.targetLabelRect(id);
+    QFont mf = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    mf.setPointSizeF(w.customPlot()->font().pointSizeF() > 0.0 ? w.customPlot()->font().pointSizeF()
+                                                              : mf.pointSizeF());
+    const double columna = QFontMetricsF(mf).horizontalAdvance(QLatin1Char('0'));
+    QVERIFY2(qAbs(fija.width() - 16 * columna) <= 2.0,
+             qPrintable(QStringLiteral("ancho %1, esperado %2").arg(fija.width()).arg(16 * columna)));
+    QCOMPARE(fija.height(), mono.height());
+
+    // ...y un texto largo no lo ensancha: se corta.
+    MapTarget largo = *w.target(id);
+    largo.labelContent[1].segments[0].text = QStringLiteral("ESTE TEXTO ES MUCHO MAS LARGO QUE DIECISEIS");
+    w.addTarget(largo);
+    repintaObjetivos(w);
+    QVERIFY(qAbs(w.targetLabelRect(id).width() - fija.width()) <= 1);
+
+    // Sin limite (0) la caja se ajusta al texto mas ancho.
+    fmt.maxChars = 0;
+    fmt.segmentChars.clear();
+    w.setTargetLabelFormat(fmt);
+    repintaObjetivos(w);
+    QVERIFY(w.targetLabelRect(id).width() > fija.width());
+
+    // Un rotulo plano de siempre sigue funcionando (sin contenido por segmentos).
+    MapTarget plano;
+    plano.position = QGeoCoordinate(21.55, -79.5);
+    plano.label = QStringLiteral("UNO\nDOS");
+    const qint64 idp = w.addTarget(plano);
+    TargetLabelFormat porDefecto;
+    w.setTargetLabelFormat(porDefecto);
+    repintaObjetivos(w);
+    QVERIFY(w.targetLabelRect(idp).isValid());
+    QVERIFY(w.targetLabelRect(idp).height() > 20);   // dos lineas
+}
+
+void TstMapWidget::rangeRingsSixtyRingsWithEmphasis()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(5);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+
+    // Colores saturados que no salen en el mapa de pruebas: rojo los anillos,
+    // verde los radiales y azul el enfasis.
+    RangeRings r;
+    r.center = centro;
+    r.spacingMeters = 10000.0;
+    r.count = 60;                         // 10..600 km: pasaba del tope anterior de 50
+    r.spokeEveryDeg = 10;                 // 36 radiales, que no cuentan en 'count'
+    r.color = QColor(255, 0, 0);
+    r.spokeColor = QColor(0, 255, 0);
+    r.majorColor = QColor(0, 0, 255);
+    r.majorRingEvery = 5;                 // 50, 100, 150... km
+    r.majorSpokeEveryDeg = 30;
+    r.labels = false;
+    const qint64 id = w.addRangeRings(r);
+    QVERIFY(id > 0);
+
+    // Se guarda tal cual: ni se recorta a 50 ni se pierden los radiales.
+    const auto guardado = w.rangeRings(id);
+    QVERIFY(guardado.has_value());
+    QCOMPARE(guardado->count, 60);
+    QCOMPARE(guardado->majorRingEvery, 5);
+    QCOMPARE(guardado->spokeColor, QColor(0, 255, 0));
+
+    // El anillo 60 (600 km) existe y se puede pinchar; mas alla no hay nada.
+    QCOMPARE(w.hitTest(pixel(centro.atDistanceAndAzimuth(600000.0, 90.0))).rangeMarkId, id);
+    QCOMPARE(w.hitTest(pixel(centro.atDistanceAndAzimuth(750000.0, 90.0))).rangeMarkId, qint64(-1));
+
+    // Se ven los tres colores: anillos normales, radiales y enfasis.
+    QCoreApplication::processEvents();
+    QTest::qWait(50);
+    QCoreApplication::processEvents();
+    const QImage img = w.grab().toImage();
+    QVERIFY(pixelesDeColor(img, img.rect(), QColor(255, 0, 0), 30) > 20);
+    QVERIFY(pixelesDeColor(img, img.rect(), QColor(0, 255, 0), 30) > 20);
+    QVERIFY(pixelesDeColor(img, img.rect(), QColor(0, 0, 255), 30) > 20);
+
+    // Sin enfasis (valores por defecto) no sale el color de enfasis.
+    r.majorRingEvery = 0;
+    r.majorSpokeEveryDeg = 0;
+    QVERIFY(w.updateRangeRings(id, r));
+    QCoreApplication::processEvents();
+    QTest::qWait(50);
+    QCoreApplication::processEvents();
+    const QImage sin = w.grab().toImage();
+    QCOMPARE(pixelesDeColor(sin, sin.rect(), QColor(0, 0, 255), 30), 0);
+
+    // Tope de seguridad: se sigue recortando a 100 anillos.
+    r.count = 500;
+    QVERIFY(w.updateRangeRings(id, r));
+    QCOMPARE(w.hitTest(pixel(centro.atDistanceAndAzimuth(600000.0, 90.0))).rangeMarkId, id);
 }
 
 // Cuenta los pixeles "azul de marcacion" (2962ff y sus cercanos) de un recuadro.
