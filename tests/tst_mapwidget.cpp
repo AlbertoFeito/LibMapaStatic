@@ -4123,7 +4123,10 @@ void TstMapWidget::featureLabelAnchorAndFontSize()
         return w.featureLabelRect(id);
     };
     const QRect top = conAncla(LabelAnchor::Top);
-    QCOMPARE(top.size(), auto_.size());
+    // El tamano es el mismo salvo el redondeo a pixeles enteros de cada caja (en
+    // Qt5 sale 1 px de diferencia segun donde caiga la parte fraccionaria).
+    QVERIFY(qAbs(top.width() - auto_.width()) <= 1);
+    QVERIFY(qAbs(top.height() - auto_.height()) <= 1);
     QVERIFY(top.bottom() < 300);                       // encima del punto
     QVERIFY(qAbs(top.center().x() - 400) <= 1);        // centrada en horizontal
 
