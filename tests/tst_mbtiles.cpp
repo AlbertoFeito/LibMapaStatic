@@ -422,5 +422,5 @@ void TstMBTiles::probeOutputLoadsUnchanged()
     QCOMPARE(c.hasSColumn, esperado.hasSColumn);
 }
 
-QTEST_APPLESS_MAIN(TstMBTiles)
+QTEST_GUILESS_MAIN(TstMBTiles)
 #include "tst_mbtiles.moc"

@@ -238,5 +238,5 @@ void TstPlaces::packageManifestDeclaresPlaces()
     QVERIFY(p->placesFile.isEmpty());                          // sin "places": nada
 }
 
-QTEST_APPLESS_MAIN(TstPlaces)
+QTEST_GUILESS_MAIN(TstPlaces)
 #include "tst_places.moc"
