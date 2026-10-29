@@ -15,7 +15,7 @@ namespace {
 
 // Topes de seguridad: un anillo de mas de media Tierra o cientos de anillos no
 // tienen sentido y harian el dibujo caro.
-constexpr int kMaxAnillos = 50;
+constexpr int kMaxAnillos = 100;
 constexpr double kMaxRadio = 10.0e6;
 
 // Puntos de un trazo geodesico entre dos coordenadas: lo bastante densos para
@@ -508,25 +508,34 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
     const QPointF pc = screenPos(c);
     const bool propio = r.targetId >= 0 || r.featureId >= 0;   // con dueño que lo marca
 
+    // Enfasis (opcional): un anillo de cada N y un radial de cada N grados con
+    // otro color y algo mas gruesos, para leer una escala de un vistazo.
+    const QColor colorEnfasis = r.majorColor.isValid() ? r.majorColor : r.color.darker(160);
     painter->setBrush(Qt::NoBrush);
     for (int i = 1; i <= n; ++i) {
         QPolygonF anillo;
         for (const QGeoCoordinate &p : MapDecor::geodesicCircle(c, paso * i, 96))
             anillo.append(screenPos(p));
+        const bool mayor = r.majorRingEvery > 0 && i % r.majorRingEvery == 0;
+        const QColor colorAnillo = mayor ? colorEnfasis : r.color;
         painter->setPen(QPen(QColor(255, 255, 255, 150), 3.0));
         painter->drawPolyline(anillo);
-        painter->setPen(QPen(r.color, 1.4, i == n ? Qt::SolidLine : Qt::DashLine));
+        painter->setPen(QPen(colorAnillo, mayor ? 2.0 : 1.4,
+                             i == n ? Qt::SolidLine : Qt::DashLine));
         painter->drawPolyline(anillo);
         if (r.labels)
             label(dentroDeVista(anillo.first(), anillo),
-                  MapDecor::formatDistance(paso * i, m_units), r.color);
+                  MapDecor::formatDistance(paso * i, m_units), colorAnillo);
     }
 
     if (r.spokeEveryDeg > 0) {
         const int salto = std::clamp(r.spokeEveryDeg, 5, 180);
+        const QColor colorRadial = r.spokeColor.isValid() ? r.spokeColor : r.color;
         for (int az = 0; az < 360; az += salto) {
+            const bool mayor = r.majorSpokeEveryDeg > 0 && az % r.majorSpokeEveryDeg == 0;
+            const QColor colorEste = mayor ? colorEnfasis : colorRadial;
             const QPointF fin = screenPos(c.atDistanceAndAzimuth(paso * n, az));
-            painter->setPen(QPen(r.color, 1.0, Qt::DotLine));
+            painter->setPen(QPen(colorEste, mayor ? 1.6 : 1.0, Qt::DotLine));
             // Con dueño (objetivo o entidad) el radial empieza fuera de su
             // simbolo, para no taparlo.
             const QLineF radial(pc, fin);
@@ -535,7 +544,7 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
                 painter->drawLine(radial.pointAt(hueco / radial.length()), fin);
             if (r.labels && az != 0) {       // el 000 lo tapa el rotulo del anillo
                 const QPointF fuera = screenPos(c.atDistanceAndAzimuth(paso * n * 1.08, az));
-                label(bordeDeVista(pc, fuera), MapDecor::formatBearing(az), r.color);
+                label(bordeDeVista(pc, fuera), MapDecor::formatBearing(az), colorEste);
             }
         }
     }

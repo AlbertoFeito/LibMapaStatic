@@ -555,7 +555,7 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
                     texto = texto.left(columnas);
                 if (restantes >= 0) {
                     texto = texto.left(restantes);
-                    restantes -= texto.size();
+                    restantes -= int(texto.size());
                 }
                 fila.append({texto, linea.segments.at(k).color, x});
                 // Con columna reservada el segmento ocupa SIEMPRE su ancho (aunque

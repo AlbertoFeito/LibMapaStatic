@@ -59,7 +59,8 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/inspiring-wright-u0smtv` | #41 | Los 27 tipos AIS en `libtelemetria` (aportación del fork `randoloc`), catálogo de tipos en `emisor_nmea` y estaciones fijas en `cliente_telemetria` |
 | `ccr-1c6d88f3-of2nuy` | #43 | Respuesta a la propuesta de convergencia del fork extendido: `docs/Respuesta_convergencia.md` |
 | `ccr-1c6d88f3-of2nuy` (otra vez, desde `main`) | #44 | Segunda respuesta de la convergencia: `docs/Respuesta_convergencia_2.md` |
-| `ccr-1c6d88f3-of2nuy` (y otra vez, desde `main`) | (borrador) | Propuesta final de la convergencia: `docs/Propuesta_final_convergencia.md` |
+| `ccr-1c6d88f3-of2nuy` (y otra vez, desde `main`) | #45 | Propuesta final de la convergencia: `docs/Propuesta_final_convergencia.md` |
+| `claude/rotulos-ajustes` | (borrador) | Fase 1 de la convergencia con el fork extendido: `LabelAnchor` y `labelFontSize` por entidad, formulario de objetivo configurable (offset por defecto, `Hanging`, colores por segmento, `targetLabelMoved`), `RangeRings` hasta 100 con énfasis y el ejemplo `laboratorio_rotulos` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
@@ -128,7 +129,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
   (`tile.openstreetmap.org`): está prohibido.
 
 ## Verificación antes de commitear código
-- Compila y pasa **todos los tests** (31 ahora, 3 de ellos de libtelemetria; 28 sin QCustomPlot): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
+- Compila y pasa **todos los tests** (32 ahora, 3 de ellos de libtelemetria; 29 sin QCustomPlot): `QT_QPA_PLATFORM=offscreen ctest` (sin pantalla
   en el contenedor). Un push verde vale más que tres especulativos.
 - Contenedor nuevo sin Qt: `sudo apt-get update && sudo apt-get install -y
   qt6-base-dev qt6-positioning-dev`, y recupera QCustomPlot (arriba).

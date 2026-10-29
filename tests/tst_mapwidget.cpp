@@ -148,6 +148,9 @@ private slots:
     void targetLabelSelectionColor();
     //! Rotulo por segmentos con colores, columnas, truncado y fuente monoespaciada.
     void targetLabelContentAndFormat();
+    //! Escala de 600 km: 60 anillos cada 10 km y 36 radiales caben en UN RangeRings
+    //! (count solo cuenta anillos) y el enfasis colorea uno de cada N.
+    void rangeRingsSixtyRingsWithEmphasis();
     //! Los rotulos de entidades se pintan POR ENCIMA de las marcaciones: una linea
     //! de marcacion ya no tapa el nombre de una zona.
     void featureLabelsDrawAboveRangeMarks();
@@ -4511,6 +4514,75 @@ void TstMapWidget::targetLabelContentAndFormat()
     repintaObjetivos(w);
     QVERIFY(w.targetLabelRect(idp).isValid());
     QVERIFY(w.targetLabelRect(idp).height() > 20);   // dos lineas
+}
+
+void TstMapWidget::rangeRingsSixtyRingsWithEmphasis()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(5);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+
+    // Colores saturados que no salen en el mapa de pruebas: rojo los anillos,
+    // verde los radiales y azul el enfasis.
+    RangeRings r;
+    r.center = centro;
+    r.spacingMeters = 10000.0;
+    r.count = 60;                         // 10..600 km: pasaba del tope anterior de 50
+    r.spokeEveryDeg = 10;                 // 36 radiales, que no cuentan en 'count'
+    r.color = QColor(255, 0, 0);
+    r.spokeColor = QColor(0, 255, 0);
+    r.majorColor = QColor(0, 0, 255);
+    r.majorRingEvery = 5;                 // 50, 100, 150... km
+    r.majorSpokeEveryDeg = 30;
+    r.labels = false;
+    const qint64 id = w.addRangeRings(r);
+    QVERIFY(id > 0);
+
+    // Se guarda tal cual: ni se recorta a 50 ni se pierden los radiales.
+    const auto guardado = w.rangeRings(id);
+    QVERIFY(guardado.has_value());
+    QCOMPARE(guardado->count, 60);
+    QCOMPARE(guardado->majorRingEvery, 5);
+    QCOMPARE(guardado->spokeColor, QColor(0, 255, 0));
+
+    // El anillo 60 (600 km) existe y se puede pinchar; mas alla no hay nada.
+    QCOMPARE(w.hitTest(pixel(centro.atDistanceAndAzimuth(600000.0, 90.0))).rangeMarkId, id);
+    QCOMPARE(w.hitTest(pixel(centro.atDistanceAndAzimuth(750000.0, 90.0))).rangeMarkId, qint64(-1));
+
+    // Se ven los tres colores: anillos normales, radiales y enfasis.
+    QCoreApplication::processEvents();
+    QTest::qWait(50);
+    QCoreApplication::processEvents();
+    const QImage img = w.grab().toImage();
+    QVERIFY(pixelesDeColor(img, img.rect(), QColor(255, 0, 0), 30) > 20);
+    QVERIFY(pixelesDeColor(img, img.rect(), QColor(0, 255, 0), 30) > 20);
+    QVERIFY(pixelesDeColor(img, img.rect(), QColor(0, 0, 255), 30) > 20);
+
+    // Sin enfasis (valores por defecto) no sale el color de enfasis.
+    r.majorRingEvery = 0;
+    r.majorSpokeEveryDeg = 0;
+    QVERIFY(w.updateRangeRings(id, r));
+    QCoreApplication::processEvents();
+    QTest::qWait(50);
+    QCoreApplication::processEvents();
+    const QImage sin = w.grab().toImage();
+    QCOMPARE(pixelesDeColor(sin, sin.rect(), QColor(0, 0, 255), 30), 0);
+
+    // Tope de seguridad: se sigue recortando a 100 anillos.
+    r.count = 500;
+    QVERIFY(w.updateRangeRings(id, r));
+    QCOMPARE(w.hitTest(pixel(centro.atDistanceAndAzimuth(600000.0, 90.0))).rangeMarkId, id);
 }
 
 // Cuenta los pixeles "azul de marcacion" (2962ff y sus cercanos) de un recuadro.

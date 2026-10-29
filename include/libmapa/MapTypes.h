@@ -128,9 +128,19 @@ struct RangeRings {
     qint64 targetId = -1;           //!< O centrado en este objetivo, y lo sigue.
     qint64 featureId = -1;          //!< O en esta entidad punto (si targetId < 0), y la sigue.
     double spacingMeters = 1852.0;  //!< Separacion entre anillos; 0 = automatica (segun el zoom).
-    int count = 5;                  //!< Numero de anillos (1..50).
-    int spokeEveryDeg = 0;          //!< Radiales cada N grados; 0 = sin radiales.
+    int count = 5;                  //!< Numero de anillos (1..100). Solo cuenta anillos, no radiales.
+    int spokeEveryDeg = 0;          //!< Radiales cada N grados (5..180); 0 = sin radiales.
     QColor color = QColor(0x00, 0x89, 0x7b);
+    //! Enfasis para leer de un vistazo una escala: uno de cada \a majorRingEvery
+    //! anillos (el 5.o, el 10.o... con 5) y uno de cada \a majorSpokeEveryDeg
+    //! grados de radial (0, 30, 60... con 30) se dibujan con \a majorColor y algo
+    //! mas gruesos. 0 = sin enfasis (como siempre).
+    int majorRingEvery = 0;
+    int majorSpokeEveryDeg = 0;
+    //! Color del enfasis; invalido = el de \a color mas oscuro.
+    QColor majorColor;
+    //! Color de los radiales (los anillos siguen con \a color); invalido = \a color.
+    QColor spokeColor;
     bool labels = true;             //!< Rotular distancias y marcaciones.
     QString name;                   //!< Rotulo junto al centro ("Radar Mariel"); vacio = ninguno.
 };
