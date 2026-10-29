@@ -14,7 +14,7 @@
 //   - ESCALA POLAR de 300 o 600 km en UN solo RangeRings (hasta 100 anillos; los radiales no
 //     cuentan), con enfasis en uno de cada N anillos y de cada N grados y otro color de radiales.
 //   - ROTULOS de entidades: el lado donde cuelga el nombre (LabelAnchor) y su fuente, sobre
-//     seis puntos de ejemplo.
+//     los puntos que agregues con el buscador de lugares.
 //   - FORMULARIO de objetivos arrastrable: tres objetivos con formulario de tres lineas y
 //     colores por segmento, colocacion colgada de la esquina, fuente monoespaciada, ancho y
 //     columnas, offset por defecto, color de seleccion y aviso al soltarlo (soltar fuera del
@@ -43,6 +43,8 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPushButton>
@@ -76,32 +78,6 @@ const Posicion kPosiciones[] = {
     {"Derecha", LabelAnchor::Right},            {"Arriba izquierda", LabelAnchor::TopLeft},
     {"Arriba derecha", LabelAnchor::TopRight},  {"Abajo izquierda", LabelAnchor::BottomLeft},
     {"Abajo derecha", LabelAnchor::BottomRight}, {"Centrado", LabelAnchor::Center},
-};
-
-// Seis puntos de ejemplo alrededor de La Habana, todos sobre tierra (nombre y posicion). Se
-// leyeron del propio mapa de costas; no son todos aerodromos, solo lugares con nombre.
-struct Punto {
-    const char *nombre;
-    double lat;
-    double lon;
-};
-const Punto kPuntos[] = {
-    {"Ciudad Libertad", 23.0953, -82.4383}, {"José Martí", 22.9892, -82.4092},
-    {"San Antonio", 22.8903, -82.5106},     {"Altahabana", 23.0679, -82.3923},
-    {"Taoro", 23.0621, -82.5166},           {"Cubanacán", 23.0836, -82.4503},
-};
-
-// Tres sitios de ejemplo que forman UNA sola entidad con tres partes, cada una con su nombre y
-// color (la tercera sin color propio: usa el de la entidad). Todos sobre tierra.
-struct Sitio {
-    const char *nombre;
-    double lat;
-    double lon;
-    QRgb color;     // 0 = sin color propio
-};
-const Sitio kSitios[] = {
-    {"Sitio Alfa", 23.0379, -82.3923, 0xffc62828}, {"Sitio Bravo", 22.9592, -82.4092, 0xff2e7d32},
-    {"Sitio Charly", 23.0321, -82.5166, 0},
 };
 
 // Una linea del formulario de un objetivo con sus segmentos (texto y color).
@@ -143,8 +119,8 @@ QString textoAyuda()
         "<li><b>Escala polar:</b> «Escala de 600 km» pone 60 anillos de 10 km y radiales cada "
         "10° en un solo objeto, con el gris oscuro de un anillo de cada cinco y un radial de "
         "cada tres. «Escala de 300 km» hace lo mismo con 30 anillos.</li>"
-        "<li><b>Rótulos de entidades:</b> cambia el lado del anclaje y la fuente: los nombres "
-        "de los seis puntos se recolocan y cambian de tamaño.</li>"
+        "<li><b>Rótulos de entidades:</b> agrega puntos con el buscador y cambia el lado del "
+        "anclaje y la fuente: los nombres se recolocan y cambian de tamaño.</li>"
         "<li><b>Formulario de objetivos:</b> arrastra uno con el ratón (queda fijado y la "
         "barra de estado dice dónde lo soltaste); soltarlo <i>fuera del mapa</i> cancela. "
         "Con «Colgado de la esquina» la caja cuelga del punto por la esquina cercana al "
@@ -153,8 +129,9 @@ QString textoAyuda()
         "<li><b>Sectores:</b> el círculo de 50 km y los tres sectores (el de 330° a 30° cruza "
         "el norte) se mueven con el centro. Oculta cada tipo, bórralos por tipo y mira cómo "
         "cambia el recuento.</li>"
-        "<li><b>Partes:</b> toca un «Sitio»: el panel dice qué parte de la entidad es. Los "
-        "tres sitios son <i>una</i> entidad con nombre y color por parte.</li></ol>");
+        "<li><b>Partes:</b> agrega varios lugares «como parte de Sitios» y toca uno: el panel "
+        "dice qué parte de la entidad es. Todos son <i>una</i> entidad con nombre y color por "
+        "parte.</li></ol>");
 }
 
 } // namespace
@@ -184,8 +161,7 @@ public:
         m_mapa->setCenter(kHabana);
         m_mapa->setZoom(9);
         m_centro = kHabana;
-        creaPuntos();
-        creaSitios();
+        m_mapa->addFeatureLayer(QStringLiteral("puntos"), tr("Puntos"), 50);
         creaObjetivos();
 
         auto *cuerpo = new QWidget(this);
@@ -199,10 +175,10 @@ public:
                 [this](const QGeoCoordinate &p) { leeRaton(p); });
         connect(m_mapa, &MapWidget::pointPicked, this, [this](const QGeoCoordinate &p) {
             m_mapa->setActiveTool(MapTool::None);
-            if (m_colocando >= 0) {               // el clic coloca un punto de ejemplo
-                colocaPunto(m_colocando, p);
-                m_colocando = -1;
-                m_colocar->setText(tr("Colocar un punto de ejemplo (clic en el mapa)"));
+            if (m_colocando) {                    // el clic agrega un punto
+                m_colocando = false;
+                m_colocar->setText(tr("Agregar un punto con un clic en el mapa"));
+                agrega(p, tr("Punto %1").arg(m_puntos.size() + 1), false);
                 return;
             }
             m_elegir->setText(tr("Elegir centro (clic en el mapa)"));
@@ -211,8 +187,8 @@ public:
                                          .arg(formatCoordinate(p, CoordinateFormat::DMS)), 6000);
         });
         connect(m_mapa, &MapWidget::pickCancelled, this, [this] {
-            m_colocando = -1;
-            m_colocar->setText(tr("Colocar un punto de ejemplo (clic en el mapa)"));
+            m_colocando = false;
+            m_colocar->setText(tr("Agregar un punto con un clic en el mapa"));
             m_elegir->setText(tr("Elegir centro (clic en el mapa)"));
             statusBar()->showMessage(tr("Elección del centro cancelada"), 4000);
         });
@@ -432,67 +408,70 @@ private:
         m_anillos = m_mapa->addRangeRings(r);
     }
 
-    // Seis puntos con nombre, en una capa propia, para probar el LabelAnchor.
-    void creaPuntos()
+    // Agrega un lugar al mapa: como punto suelto (una entidad por punto) o como una parte nueva
+    // de la entidad «Sitios» (una sola entidad con tantas partes como lugares, cada una con su
+    // nombre y un color propio de una paleta; se crea al agregar la primera).
+    void agregaImpl(const QGeoCoordinate &p, const QString &nombre, bool comoParte)
     {
-        m_mapa->addFeatureLayer(QStringLiteral("puntos"), tr("Puntos de ejemplo"), 50);
-        for (const Punto &a : kPuntos) {
+        if (!comoParte) {
             MapFeature f;
             f.kind = GeometryKind::Point;
             f.layerId = QStringLiteral("puntos");
             f.type = QStringLiteral("punto");
-            f.name = QString::fromUtf8(a.nombre);
-            f.geometry = { posicionEnTierra(a) };
+            f.name = nombre;
+            f.geometry = { p };
             f.style.lineColor = QColor(0x15, 0x65, 0xc0);
             m_puntos.append(m_mapa->addFeature(f));
+        } else {
+            static const QColor paleta[] = { QColor(0xc6, 0x28, 0x28), QColor(0x2e, 0x7d, 0x32),
+                                             QColor(), QColor(0xef, 0x6c, 0x00) };
+            auto f = m_mapa->feature(m_sitios);
+            const bool nuevo = !f;
+            if (nuevo) {
+                f = MapFeature();
+                f->kind = GeometryKind::Point;
+                f->layerId = QStringLiteral("puntos");
+                f->type = QStringLiteral("sitio");
+                f->name = tr("Sitios");
+                f->style.lineColor = QColor(0x6a, 0x1b, 0x9a);
+            }
+            PartInfo pi;
+            pi.name = nombre;
+            pi.colorOverride = paleta[f->parts.size() % 4];
+            f->parts.append({ p });
+            f->partsInfo.append(pi);
+            f->geometry = f->parts.first();
+            if (nuevo)
+                m_sitios = m_mapa->addFeature(*f);
+            else
+                m_mapa->updateFeature(*f);
         }
-    }
-
-    // Posicion de un punto de ejemplo: la del lugar del mismo nombre en el indice de lugares
-    // del paquete (que viene del propio mapa, asi que cae en tierra) si esta a menos de 60 km
-    // de La Habana; si no hay indice o no lo encuentra, las coordenadas fijas del ejemplo.
-    QGeoCoordinate posicionEnTierra(const Punto &a) const
-    {
-        if (m_mapa->hasPlaces())
-            for (const Place &l : m_mapa->searchPlaces(QString::fromUtf8(a.nombre), 5))
-                if (l.coordinate.isValid() && l.coordinate.distanceTo(kHabana) < 60000.0)
-                    return l.coordinate;
-        return QGeoCoordinate(a.lat, a.lon);
+        actualizaConteos();
+        statusBar()->showMessage(tr("«%1» agregado en %2").arg(nombre, formatCoordinate(p, CoordinateFormat::DMS)), 6000);
     }
 
 public:
-    // Mueve el punto de ejemplo \a i a \a p (para dejarlo sobre tierra con el raton).
-    void colocaPunto(int i, const QGeoCoordinate &p)
+    // Lo mismo que agregaImpl, para quien llama desde fuera de la ventana (--comprobar).
+    void agrega(const QGeoCoordinate &p, const QString &nombre, bool comoParte)
     {
-        auto f = m_mapa->feature(m_puntos.value(i, -1));
-        if (!f)
-            return;
-        f->geometry = { p };
-        m_mapa->updateFeature(*f);
-        statusBar()->showMessage(tr("%1 en %2").arg(f->name, formatCoordinate(p, CoordinateFormat::DMS)), 8000);
+        agregaImpl(p, nombre, comoParte);
     }
 
 private:
-
-    // Los tres sitios como UNA entidad con tres partes (puntos), cada una con su nombre y color.
-    void creaSitios()
+    // Busca \a texto en el indice de lugares del paquete y llena la lista de resultados.
+    void busca(const QString &texto)
     {
-        MapFeature f;
-        f.kind = GeometryKind::Point;
-        f.layerId = QStringLiteral("puntos");
-        f.type = QStringLiteral("sitio");
-        f.name = tr("Sitios");
-        f.style.lineColor = QColor(0x6a, 0x1b, 0x9a);
-        for (const Sitio &s : kSitios) {
-            f.parts.append({ QGeoCoordinate(s.lat, s.lon) });
-            PartInfo pi;
-            pi.name = QString::fromUtf8(s.nombre);
-            if (s.color)
-                pi.colorOverride = QColor::fromRgb(s.color);
-            f.partsInfo.append(pi);
+        m_resultados->clear();
+        if (!m_mapa->hasPlaces()) {
+            statusBar()->showMessage(tr("El paquete no trae índice de lugares: usa el clic en el mapa"), 8000);
+            return;
         }
-        f.geometry = f.parts.first();
-        m_sitios = m_mapa->addFeature(f);
+        m_lugares = m_mapa->searchPlaces(texto.trimmed(), 30);
+        for (const Place &l : m_lugares)
+            m_resultados->addItem(QStringLiteral("%1 · %2 · %3").arg(l.name, l.typeLabel(),
+                                      formatCoordinate(l.coordinate, CoordinateFormat::Decimal)));
+        if (m_lugares.isEmpty())
+            statusBar()->showMessage(tr("Sin resultados para «%1»").arg(texto), 5000);
     }
 
     // Escribe en el panel cuantas entidades hay de cada tipo (y cuales estan ocultas).
@@ -591,14 +570,12 @@ private:
         f1->addRow(m_mostrar);
         f1->addRow(tr("Centro"), m_lblCentro);
         f1->addRow(m_elegir);
-        m_colocar = new QPushButton(tr("Colocar un punto de ejemplo (clic en el mapa)"), g1);
+        m_colocar = new QPushButton(tr("Agregar un punto con un clic en el mapa"), g1);
         f1->addRow(m_colocar);
         connect(m_colocar, &QPushButton::clicked, this, [this] {
-            m_ultimoColocado = (m_ultimoColocado + 1) % int(m_puntos.size());   // el siguiente cada vez
-            m_colocando = m_ultimoColocado;
+            m_colocando = true;
             m_mapa->setActiveTool(MapTool::PickPoint);
-            m_colocar->setText(tr("Clic para «%1»... (Esc cancela)")
-                                   .arg(m_mapa->feature(m_puntos.value(m_colocando))->name));
+            m_colocar->setText(tr("Haz clic donde va el punto... (Esc cancela)"));
         });
         f1->addRow(habana);
         f1->addRow(ir);
@@ -631,7 +608,7 @@ private:
         col->addWidget(gp);
 
         // --- Rotulos de entidades ------------------------------------------------------
-        auto *gr = new QGroupBox(tr("Rótulos de entidades (puntos de ejemplo)"), panel);
+        auto *gr = new QGroupBox(tr("Rótulos de los puntos agregados"), panel);
         auto *fr = new QFormLayout(gr);
         auto *posicion = new QComboBox(gr);
         for (const Posicion &po : kPosiciones)
@@ -646,6 +623,40 @@ private:
         connect(tamano, QOverload<int>::of(&QSpinBox::valueChanged), this,
                 [this](int v) { ponTamano(v); });
         col->addWidget(gr);
+
+        // --- Buscador de lugares: los puntos los agrega el usuario -------------------------
+        auto *gb = new QGroupBox(tr("Agregar puntos (buscador de lugares)"), panel);
+        auto *vb = new QVBoxLayout(gb);
+        auto *caja = new QLineEdit(gb);
+        caja->setPlaceholderText(tr("Nombre de un lugar y Enter"));
+        m_resultados = new QListWidget(gb);
+        m_resultados->setMaximumHeight(150);
+        auto *aPunto = new QPushButton(tr("Agregar como punto"), gb);
+        auto *aParte = new QPushButton(tr("Agregar como parte de «Sitios» (una entidad)"), gb);
+        auto *quitaTodo = new QPushButton(tr("Quitar todos los puntos y sitios"), gb);
+        vb->addWidget(caja);
+        vb->addWidget(m_resultados);
+        vb->addWidget(aPunto);
+        vb->addWidget(aParte);
+        vb->addWidget(quitaTodo);
+        connect(caja, &QLineEdit::returnPressed, this, [this, caja] { busca(caja->text()); });
+        const auto agregaElegido = [this](bool comoParte) {
+            const int i = m_resultados->currentRow();
+            if (i >= 0 && i < m_lugares.size())
+                agregaImpl(m_lugares.at(i).coordinate, m_lugares.at(i).name, comoParte);
+        };
+        connect(aPunto, &QPushButton::clicked, this, [agregaElegido] { agregaElegido(false); });
+        connect(aParte, &QPushButton::clicked, this, [agregaElegido] { agregaElegido(true); });
+        connect(m_resultados, &QListWidget::itemDoubleClicked, this,
+                [agregaElegido](QListWidgetItem *) { agregaElegido(false); });
+        connect(quitaTodo, &QPushButton::clicked, this, [this] {
+            m_mapa->clearFeaturesOfType(QStringLiteral("punto"));
+            m_mapa->clearFeaturesOfType(QStringLiteral("sitio"));
+            m_puntos.clear();
+            m_sitios = -1;
+            actualizaConteos();
+        });
+        col->addWidget(gb);
 
         // --- Circulos, sectores y entidades por tipo -------------------------------------
         auto *gs = new QGroupBox(tr("Sectores, tipos y partes"), panel);
@@ -793,8 +804,9 @@ private:
     QLabel *m_lblCentro = nullptr;
     QPushButton *m_elegir = nullptr;
     QPushButton *m_colocar = nullptr;
-    int m_colocando = -1;           // punto de ejemplo que recibira el proximo clic, o -1
-    int m_ultimoColocado = -1;
+    bool m_colocando = false;       // el proximo clic agrega un punto
+    QListWidget *m_resultados = nullptr;
+    QVector<Place> m_lugares;       // lo que muestra la lista de resultados
     QComboBox *m_unidades = nullptr;
     QDoubleSpinBox *m_separacion = nullptr;
     QSpinBox *m_numero = nullptr;
@@ -922,6 +934,7 @@ int comprobar(Ventana &v)
     exige(r && r->count == 30, "la escala de 300 km deberia ser 30 anillos", &fallos);
 
     // 8. Rotulos de entidades: el lado del anclaje y la fuente cambian la caja en pixeles.
+    v.agrega(kHabana, QStringLiteral("Punto de prueba"), false);
     const qint64 id = v.primerPunto();
     const QRect clasico = m->featureLabelRect(id);
     exige(clasico.isValid(), "el punto de ejemplo no tiene rotulo", &fallos);
@@ -983,6 +996,9 @@ int comprobar(Ventana &v)
 
     // 10. Circulo y sectores: un lote de cuatro entidades geodesicas alrededor del centro; se
     //     quitan por tipo y vuelven al marcar la casilla.
+    v.agrega(QGeoCoordinate(23.0379, -82.3923), QStringLiteral("Sitio Alfa"), true);
+    v.agrega(QGeoCoordinate(22.9592, -82.4092), QStringLiteral("Sitio Bravo"), true);
+    v.agrega(QGeoCoordinate(23.0321, -82.5166), QStringLiteral("Sitio Charly"), true);
     const qint64 sitios = v.sitios();
     exige(m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
           "deberia haber cuatro sectores al arrancar", &fallos);

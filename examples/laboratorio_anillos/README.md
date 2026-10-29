@@ -37,10 +37,10 @@ Los sectores siguen al centro: al elegir otro centro se vuelven a poner alrededo
 «Sectores, tipos y partes» del panel los activa, cuenta las entidades por tipo, oculta cada tipo y dice, al
 tocar una entidad, qué parte es («Sitios · parte 2 de 3 (Sitio Bravo)»).
 
-**Puntos de ejemplo.** Se colocan en el lugar del mismo nombre del índice de lugares del paquete
-(`searchPlaces`), que sale del propio mapa; sin índice, o si no lo encuentra, usan unas coordenadas fijas
-que pueden caer mal en un mapa distinto. El botón **«Colocar un punto de ejemplo»** deja cada punto,
-por turnos, donde hagas clic: así siempre se pueden dejar sobre tierra.
+**Puntos.** No hay puntos fijos: los agregas tú. El grupo «Agregar puntos» busca en el índice de lugares
+del paquete (`searchPlaces`, que sale del propio mapa) y agrega el elegido como punto suelto o como una **parte nueva
+de la entidad «Sitios»** (una sola entidad con nombre y color por parte); también se puede agregar uno con un clic en
+el mapa, y «Quitar todos» los borra por tipo.
 
 Todo en un solo fichero, [`main.cpp`](main.cpp), pensado para leerse de arriba abajo.
 
@@ -69,7 +69,7 @@ El panel de la derecha trae la misma lista de lo que hay que ver y probar:
 8. **Escala polar**: «Escala de 600 km» pone 60 anillos de 10 km y radiales cada 10° en un solo objeto, con
    el rojo oscuro de un anillo de cada cinco y un radial de cada tres («Escala de 300 km»: 30 anillos). Los
    controles de énfasis y el de «radiales de otro color» se pueden tocar en vivo.
-9. **Rótulos de entidades**: cambia el lado del anclaje y la fuente de los seis puntos de ejemplo; los nombres se
+9. **Rótulos de entidades**: agrega puntos y cambia el lado del anclaje y la fuente; los nombres se
    recolocan y cambian de tamaño.
 10. **Formulario de objetivos**: arrastra uno con el ratón (la barra de estado dice dónde lo soltaste) y
     suéltalo **fuera del mapa**: se cancela. Marca «Colgado de la esquina más cercana», la fuente
