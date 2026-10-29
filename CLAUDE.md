@@ -61,7 +61,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `ccr-1c6d88f3-of2nuy` (otra vez, desde `main`) | #44 | Segunda respuesta de la convergencia: `docs/Respuesta_convergencia_2.md` |
 | `ccr-1c6d88f3-of2nuy` (y otra vez, desde `main`) | #45 | Propuesta final de la convergencia: `docs/Propuesta_final_convergencia.md` |
 | `ccr-1c6d88f3-of2nuy` (y otra más, desde `main`) | #46 | Fase 1 de la convergencia con el fork extendido: `LabelAnchor` y `labelFontSize` por entidad, formulario de objetivo configurable (offset por defecto, `Hanging`, colores por segmento, `targetLabelMoved`), `RangeRings` hasta 100 con énfasis y el ejemplo `laboratorio_rotulos` |
-| `claude/sweet-cray-74nz88` (tercera vez, desde `main`) | #47 | Ejemplo `laboratorio_anillos`: mapa de costas sin híbrido, anillos y radiales con escala, centro con un clic y coordenadas del ratón |
+| `claude/sweet-cray-74nz88` (tercera vez, desde `main`) | #47 | Ejemplo `laboratorio_anillos`: mapa de costas sin híbrido, anillos y radiales con escala, centro con un clic y coordenadas del ratón; incluye la fase 1 de la convergencia (escala polar de 300/600 km con énfasis, rótulos de entidades y formulario de objetivos arrastrable) |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).

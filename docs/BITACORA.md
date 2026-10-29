@@ -7258,3 +7258,26 @@ así lo explica el panel. No hay un medidor libre entre dos puntos cualesquiera 
 
 **Estado: 32 tests (29 sin QCustomPlot), contrato de instalación en verde con el ejemplo nuevo.**
 
+
+## 176. `laboratorio_anillos` reúne lo de la fase 1 de la convergencia
+
+**Origen.** La conversación de la convergencia con el fork extendido (§174) se tuvo por error en la sesión que no era: el ejemplo donde debía vivir es `laboratorio_anillos` (§175, PR #47). La
+fase 1 ya está en `main` (PR #46) con su propio banco de pruebas, `laboratorio_rotulos`; aquí se lleva todo al ejemplo de los anillos, que es el que se va a usar.
+
+**Qué se añade al ejemplo.** (1) La **escala polar**: los botones «Escala de 300 km» y «Escala de 600 km» ponen 30 o 60 anillos de 10 km y radiales cada 10° en **un solo** `RangeRings` (el tope de
+anillos es 100 y `count` no cuenta los radiales), con el **énfasis** de uno de cada N anillos y cada N grados en rojo oscuro y, si se quiere, radiales de otro color (`majorRingEvery`,
+`majorSpokeEveryDeg`, `majorColor`, `spokeColor`); el selector de anillos pasa de 50 a 100. La escala fija la separación en kilómetros aunque se estuviera en millas. (2) Seis **aeródromos** con su
+rótulo, para cambiar en vivo el lado del anclaje (`LabelAnchor`) y la fuente (`labelFontSize`). (3) Tres **objetivos** con formulario de tres líneas y colores por segmento
+(`MapTarget::labelContent`), con la colocación `Hanging`, la fuente monoespaciada, el ancho y las columnas 8 + 8, el offset por defecto, el color de selección, «quitar offsets propios» y el aviso
+`targetLabelMoved` en la barra de estado (soltar fuera del mapa cancela).
+
+**Pruebas.** `--comprobar` crece: la escala de 600 y de 300 km (cuenta, separación, radiales y énfasis), el lado y la fuente de un rótulo de entidad en píxeles, y el formulario (tres líneas, offset por
+defecto frente a propio, colgado y ancho fijo de 16 columnas). Con la ventana oculta la capa de objetivos no llega a pintarse, así que `--comprobar` la muestra (con `offscreen` no abre nada de verdad)
+y selecciona el objetivo que mira: el seleccionado salta el declutter, que a poco zoom dibuja un solo rótulo por celda de pantalla; el paquete mínimo de `probar_instalacion.sh` solo llega a zoom 2.
+Pasa tres veces seguidas. Una captura (`--captura=`) se ha mirado: el formulario sale con sus tres líneas, las columnas y los colores por segmento.
+
+**Lo que no es.** Los círculos y los arcos, agrupar por capa y tipo y las partes con nombre y color propios son las fases 2 a 4 y **no existen aún en la librería**, así que no pueden estar en el
+ejemplo; se añadirán cuando se hagan. Lo del tamaño real de los 600 km no se ha visto en una pantalla con el mapa de costas (el paquete mínimo no tiene zoom suficiente): es lo primero que hay que
+mirar. `laboratorio_rotulos` sigue existiendo y repite buena parte de esto; no se ha quitado.
+
+**Estado: 32 tests (29 sin QCustomPlot).**
