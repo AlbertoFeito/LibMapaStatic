@@ -60,7 +60,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `ccr-1c6d88f3-of2nuy` | #43 | Respuesta a la propuesta de convergencia del fork extendido: `docs/Respuesta_convergencia.md` |
 | `ccr-1c6d88f3-of2nuy` (otra vez, desde `main`) | #44 | Segunda respuesta de la convergencia: `docs/Respuesta_convergencia_2.md` |
 | `ccr-1c6d88f3-of2nuy` (y otra vez, desde `main`) | #45 | Propuesta final de la convergencia: `docs/Propuesta_final_convergencia.md` |
-| `claude/rotulos-ajustes` | (borrador) | Fase 1 de la convergencia con el fork extendido: `LabelAnchor` y `labelFontSize` por entidad, formulario de objetivo configurable (offset por defecto, `Hanging`, colores por segmento, `targetLabelMoved`), `RangeRings` hasta 100 con énfasis y el ejemplo `laboratorio_rotulos` |
+| `ccr-1c6d88f3-of2nuy` (y otra más, desde `main`) | (borrador) | Fase 1 de la convergencia con el fork extendido: `LabelAnchor` y `labelFontSize` por entidad, formulario de objetivo configurable (offset por defecto, `Hanging`, colores por segmento, `targetLabelMoved`), `RangeRings` hasta 100 con énfasis y el ejemplo `laboratorio_rotulos` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
