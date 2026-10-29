@@ -57,6 +57,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/rutas-sin-conexion` | #37 | Rutas en coche sin conexión por la red vial de las teselas: `MapWidget::findRoute`, «Ruta (coche)» en la demo y `vector_tile --route` |
 | `claude/app-rutas-tierra` | #38 | Ejemplo `rutas_tierra` (rutas por tierra con caminos de tierra y red de demostración) y `RouteResult::legs` |
 | `claude/inspiring-wright-u0smtv` | #41 | Los 27 tipos AIS en `libtelemetria` (aportación del fork `randoloc`), catálogo de tipos en `emisor_nmea` y estaciones fijas en `cliente_telemetria` |
+| `ccr-1c6d88f3-of2nuy` | (borrador) | Respuesta a la propuesta de convergencia del fork extendido: `docs/Respuesta_convergencia.md` |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
