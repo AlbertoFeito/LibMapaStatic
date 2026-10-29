@@ -161,6 +161,9 @@ public:
         m_mapa->setCenter(kHabana);
         m_mapa->setZoom(9);
         m_centro = kHabana;
+        // El mapa recarga lo que se dejo guardado en otras sesiones (y en otros ejemplos, como los
+        // «aerodromo» de laboratorio_rotulos): se parte limpio, los puntos los agrega el usuario.
+        quitaPuntos();
         m_mapa->addFeatureLayer(QStringLiteral("puntos"), tr("Puntos"), 50);
         creaObjetivos();
 
@@ -408,6 +411,16 @@ private:
         m_anillos = m_mapa->addRangeRings(r);
     }
 
+    // Quita todos los puntos con nombre que haya: los que agrega este ejemplo («punto», «sitio»)
+    // y los «aerodromo» que dejo guardados otro ejemplo.
+    void quitaPuntos()
+    {
+        for (const char *t : { "punto", "sitio", "aerodromo" })
+            m_mapa->clearFeaturesOfType(QString::fromLatin1(t));
+        m_puntos.clear();
+        m_sitios = -1;
+    }
+
     // Agrega un lugar al mapa: como punto suelto (una entidad por punto) o como una parte nueva
     // de la entidad «Sitios» (una sola entidad con tantas partes como lugares, cada una con su
     // nombre y un color propio de una paleta; se crea al agregar la primera).
@@ -650,10 +663,7 @@ private:
         connect(m_resultados, &QListWidget::itemDoubleClicked, this,
                 [agregaElegido](QListWidgetItem *) { agregaElegido(false); });
         connect(quitaTodo, &QPushButton::clicked, this, [this] {
-            m_mapa->clearFeaturesOfType(QStringLiteral("punto"));
-            m_mapa->clearFeaturesOfType(QStringLiteral("sitio"));
-            m_puntos.clear();
-            m_sitios = -1;
+            quitaPuntos();
             actualizaConteos();
         });
         col->addWidget(gb);
@@ -667,7 +677,7 @@ private:
         m_lblConteos->setWordWrap(true);
         auto *tSector = new QCheckBox(tr("Ver sectores"), gs);
         auto *tSitio = new QCheckBox(tr("Ver sitios (una entidad, tres partes)"), gs);
-        auto *tPunto = new QCheckBox(tr("Ver puntos de ejemplo"), gs);
+        auto *tPunto = new QCheckBox(tr("Ver puntos agregados"), gs);
         for (QCheckBox *c : { tSector, tSitio, tPunto })
             c->setChecked(true);
         auto *borraSect = new QPushButton(tr("Borrar los sectores (por tipo)"), gs);
