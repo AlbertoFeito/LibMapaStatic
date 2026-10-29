@@ -454,7 +454,7 @@ public:
         if (!zones.hasZone(featureId) || !view)
             return;
         const std::optional<MapFeature> f = view->overlayModel()->feature(featureId);
-        if (!f || f->kind != GeometryKind::Polygon) {
+        if (!f || !f->isArea()) {
             dropZone(featureId);
             return;
         }
@@ -2157,7 +2157,7 @@ bool MapWidget::watchZone(qint64 featureId)
     if (!d->view)
         return false;
     const std::optional<MapFeature> f = d->view->overlayModel()->feature(featureId);
-    if (!f || f->kind != GeometryKind::Polygon || !f->isValid())
+    if (!f || !f->isArea() || !f->isValid())
         return false;
     if (d->zones.hasZone(featureId)) {
         d->syncZone(featureId);

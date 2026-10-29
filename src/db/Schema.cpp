@@ -93,6 +93,19 @@ QStringList migrations(int from)
             "ALTER TABLE entidad ADD COLUMN label_fuente INTEGER NOT NULL DEFAULT 0");
     }
 
+    if (from < 5) {
+        // v5: circulos y arcos geodesicos (GeometryKind::Circle y Arc). El vertice
+        // guardado es el centro; el radio va en metros y los azimuts del arco en
+        // grados. Con DEFAULT 0 una BD anterior se migra sola: sus entidades no son
+        // redondas y estas columnas no se leen.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN radio_m REAL NOT NULL DEFAULT 0");
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN arco_ini REAL NOT NULL DEFAULT 0");
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN arco_fin REAL NOT NULL DEFAULT 0");
+    }
+
     return sql;
 }
 

@@ -280,10 +280,10 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
         "INSERT INTO entidad (capa, tipo, geometria, nombre, descripcion,"
         " color_linea, color_relleno, ancho_linea, estilo_linea, radio_px,"
         " etiqueta_visible, label_dx, label_dy, label_anchor, label_pos, label_fuente,"
-        " visible, simbolo,"
+        " radio_m, arco_ini, arco_fin, visible, simbolo,"
         " atributos, creado_utc)"
         " VALUES (:capa,:tipo,:geo,:nom,:desc,:cl,:cr,:anc,:el,:rp,:ev,"
-        " :ldx,:ldy,:lan,:lpo,:lfu,:vi,:sim,:atr,:cu)"));
+        " :ldx,:ldy,:lan,:lpo,:lfu,:rad,:ai,:af,:vi,:sim,:atr,:cu)"));
     q.bindValue(QStringLiteral(":capa"), text(f.layerId));
     q.bindValue(QStringLiteral(":tipo"), text(f.type));
     q.bindValue(QStringLiteral(":geo"), static_cast<int>(f.kind));
@@ -300,6 +300,9 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     q.bindValue(QStringLiteral(":lan"), f.style.labelAnchorVertex);
     q.bindValue(QStringLiteral(":lpo"), static_cast<int>(f.style.labelAnchor));
     q.bindValue(QStringLiteral(":lfu"), f.style.labelFontSize);
+    q.bindValue(QStringLiteral(":rad"), f.radiusMeters);
+    q.bindValue(QStringLiteral(":ai"), f.arcStartDeg);
+    q.bindValue(QStringLiteral(":af"), f.arcEndDeg);
     q.bindValue(QStringLiteral(":vi"), f.visible ? 1 : 0);
     q.bindValue(QStringLiteral(":sim"), pixmapToPng(f.style.icon));
     q.bindValue(QStringLiteral(":atr"), atributos);
@@ -317,7 +320,7 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
         " VALUES (:e,:p,:o,:la,:lo)"));
     // Una fila por vertice, agrupadas por parte. Las entidades de una sola
     // parte se guardan como parte 0.
-    const auto partes = f.outlines();
+    const auto partes = f.storedParts();     // en un circulo o un arco, solo el centro
     for (int p = 0; p < partes.size(); ++p) {
         const QVector<QGeoCoordinate> &parte = partes[p];
         for (int i = 0; i < parte.size(); ++i) {
@@ -429,6 +432,10 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         if (lpo.isValid())
             f.style.labelAnchor = static_cast<LabelAnchor>(lpo.toInt());
         f.style.labelFontSize = field(q, "label_fuente").toInt();
+        // Radio y azimuts de un circulo o un arco (esquema v5); 0 si la BD es anterior.
+        f.radiusMeters = field(q, "radio_m").toDouble();
+        f.arcStartDeg = field(q, "arco_ini").toDouble();
+        f.arcEndDeg = field(q, "arco_fin").toDouble();
         f.style.icon = pngToPixmap(field(q, "simbolo").toByteArray());
         f.visible = field(q, "visible").toInt() != 0;
 

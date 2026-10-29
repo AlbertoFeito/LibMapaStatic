@@ -14,7 +14,7 @@
 //   - ESCALA POLAR de 300 o 600 km en UN solo RangeRings (hasta 100 anillos; los radiales no
 //     cuentan), con enfasis en uno de cada N anillos y de cada N grados y otro color de radiales.
 //   - ROTULOS de entidades: el lado donde cuelga el nombre (LabelAnchor) y su fuente, sobre
-//     seis aerodromos de ejemplo.
+//     seis puntos de ejemplo.
 //   - FORMULARIO de objetivos arrastrable: tres objetivos con formulario de tres lineas y
 //     colores por segmento, colocacion colgada de la esquina, fuente monoespaciada, ancho y
 //     columnas, offset por defecto, color de seleccion y aviso al soltarlo (soltar fuera del
@@ -78,15 +78,17 @@ const Posicion kPosiciones[] = {
     {"Abajo derecha", LabelAnchor::BottomRight}, {"Centrado", LabelAnchor::Center},
 };
 
-// Seis aerodromos de ejemplo alrededor de La Habana (nombre y posicion aproximada).
-struct Aerodromo {
+// Seis puntos de ejemplo alrededor de La Habana, todos sobre tierra (nombre y posicion). Se
+// leyeron del propio mapa de costas; no son todos aerodromos, solo lugares con nombre.
+struct Punto {
     const char *nombre;
     double lat;
     double lon;
 };
-const Aerodromo kAerodromos[] = {
-    {"San Antonio", 22.87, -82.51}, {"Baracoa", 23.07, -82.58}, {"Playa", 23.10, -82.42},
-    {"Santa Fe", 23.08, -82.52},    {"Jaimanitas", 23.08, -82.50}, {"Bejucal", 22.95, -82.35},
+const Punto kPuntos[] = {
+    {"Ciudad Libertad", 23.0953, -82.4383}, {"José Martí", 22.9892, -82.4092},
+    {"San Antonio", 22.8903, -82.5106},     {"Altahabana", 23.0679, -82.3923},
+    {"Taoro", 23.0621, -82.5166},           {"Cubanacán", 23.0836, -82.4503},
 };
 
 // Una linea del formulario de un objetivo con sus segmentos (texto y color).
@@ -129,7 +131,7 @@ QString textoAyuda()
         "10° en un solo objeto, con el gris oscuro de un anillo de cada cinco y un radial de "
         "cada tres. «Escala de 300 km» hace lo mismo con 30 anillos.</li>"
         "<li><b>Rótulos de entidades:</b> cambia el lado del anclaje y la fuente: los nombres "
-        "de los seis aeródromos se recolocan y cambian de tamaño.</li>"
+        "de los seis puntos se recolocan y cambian de tamaño.</li>"
         "<li><b>Formulario de objetivos:</b> arrastra uno con el ratón (queda fijado y la "
         "barra de estado dice dónde lo soltaste); soltarlo <i>fuera del mapa</i> cancela. "
         "Con «Colgado de la esquina» la caja cuelga del punto por la esquina cercana al "
@@ -164,7 +166,7 @@ public:
         m_mapa->setCenter(kHabana);
         m_mapa->setZoom(9);
         m_centro = kHabana;
-        creaAerodromos();
+        creaPuntos();
         creaObjetivos();
 
         auto *cuerpo = new QWidget(this);
@@ -203,13 +205,13 @@ public:
     QString lecturaRaton() const { return m_desdeCentro ? m_desdeCentro->text() : QString(); }
     QCheckBox *casillaMostrar() const { return m_mostrar; }
     QComboBox *unidades() const { return m_unidades; }
-    qint64 primerAerodromo() const { return m_aerodromos.value(0, -1); }
+    qint64 primerPunto() const { return m_puntos.value(0, -1); }
     QVector<qint64> objetivos() const { return m_objetivos; }
 
-    // Cambia el lado del anclaje del rotulo de todos los aerodromos y repinta.
+    // Cambia el lado del anclaje del rotulo de todos los puntos y repinta.
     void ponAncla(LabelAnchor ancla)
     {
-        for (qint64 id : m_aerodromos) {
+        for (qint64 id : m_puntos) {
             auto f = m_mapa->feature(id);
             if (!f)
                 continue;
@@ -218,10 +220,10 @@ public:
         }
     }
 
-    // Cambia el tamano de fuente del rotulo de todos los aerodromos (0 = el del mapa).
+    // Cambia el tamano de fuente del rotulo de todos los puntos (0 = el del mapa).
     void ponTamano(int puntos)
     {
-        for (qint64 id : m_aerodromos) {
+        for (qint64 id : m_puntos) {
             auto f = m_mapa->feature(id);
             if (!f)
                 continue;
@@ -340,19 +342,19 @@ private:
         m_anillos = m_mapa->addRangeRings(r);
     }
 
-    // Seis aerodromos con nombre, en una capa propia, para probar el LabelAnchor.
-    void creaAerodromos()
+    // Seis puntos con nombre, en una capa propia, para probar el LabelAnchor.
+    void creaPuntos()
     {
-        m_mapa->addFeatureLayer(QStringLiteral("aerodromos"), tr("Aeródromos"), 50);
-        for (const Aerodromo &a : kAerodromos) {
+        m_mapa->addFeatureLayer(QStringLiteral("puntos"), tr("Puntos de ejemplo"), 50);
+        for (const Punto &a : kPuntos) {
             MapFeature f;
             f.kind = GeometryKind::Point;
-            f.layerId = QStringLiteral("aerodromos");
-            f.type = QStringLiteral("aerodromo");
+            f.layerId = QStringLiteral("puntos");
+            f.type = QStringLiteral("punto");
             f.name = QString::fromUtf8(a.nombre);
             f.geometry = { QGeoCoordinate(a.lat, a.lon) };
             f.style.lineColor = QColor(0x15, 0x65, 0xc0);
-            m_aerodromos.append(m_mapa->addFeature(f));
+            m_puntos.append(m_mapa->addFeature(f));
         }
     }
 
@@ -471,7 +473,7 @@ private:
         col->addWidget(gp);
 
         // --- Rotulos de entidades ------------------------------------------------------
-        auto *gr = new QGroupBox(tr("Rótulos de entidades (aeródromos)"), panel);
+        auto *gr = new QGroupBox(tr("Rótulos de entidades (puntos de ejemplo)"), panel);
         auto *fr = new QFormLayout(gr);
         auto *posicion = new QComboBox(gr);
         for (const Posicion &po : kPosiciones)
@@ -607,7 +609,7 @@ private:
     QSpinBox *m_cadaAnillos = nullptr;
     QSpinBox *m_cadaGrados = nullptr;
     QCheckBox *m_colorRadiales = nullptr;
-    QVector<qint64> m_aerodromos;
+    QVector<qint64> m_puntos;
     QVector<qint64> m_objetivos;
     QCheckBox *m_colgado = nullptr;
     QCheckBox *m_mono = nullptr;
@@ -718,9 +720,9 @@ int comprobar(Ventana &v)
     exige(r && r->count == 30, "la escala de 300 km deberia ser 30 anillos", &fallos);
 
     // 8. Rotulos de entidades: el lado del anclaje y la fuente cambian la caja en pixeles.
-    const qint64 id = v.primerAerodromo();
+    const qint64 id = v.primerPunto();
     const QRect clasico = m->featureLabelRect(id);
-    exige(clasico.isValid(), "el aerodromo no tiene rotulo", &fallos);
+    exige(clasico.isValid(), "el punto de ejemplo no tiene rotulo", &fallos);
     v.ponAncla(LabelAnchor::Top);
     const QRect encima = m->featureLabelRect(id);
     exige(qAbs(encima.width() - clasico.width()) <= 1 && qAbs(encima.height() - clasico.height()) <= 1,

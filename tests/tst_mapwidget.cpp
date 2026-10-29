@@ -151,6 +151,10 @@ private slots:
     //! Escala de 600 km: 60 anillos cada 10 km y 36 radiales caben en UN RangeRings
     //! (count solo cuenta anillos) y el enfasis colorea uno de cada N.
     void rangeRingsSixtyRingsWithEmphasis();
+    //! Circulos y arcos geodesicos: se dibujan con su radio, se eligen con el raton
+    //! (dentro del circulo, sobre el arco), el arco rotula su mitad y un circulo
+    //! sirve de zona vigilada.
+    void roundFeaturesDrawHitTestAndWatchZones();
     //! Los rotulos de entidades se pintan POR ENCIMA de las marcaciones: una linea
     //! de marcacion ya no tapa el nombre de una zona.
     void featureLabelsDrawAboveRangeMarks();
@@ -4586,6 +4590,89 @@ void TstMapWidget::rangeRingsSixtyRingsWithEmphasis()
     r.count = 500;
     QVERIFY(w.updateRangeRings(id, r));
     QCOMPARE(w.hitTest(pixel(centro.atDistanceAndAzimuth(600000.0, 90.0))).rangeMarkId, id);
+}
+
+void TstMapWidget::roundFeaturesDrawHitTestAndWatchZones()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(10);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+
+    w.addFeatureLayer(QStringLiteral("redondas"), QStringLiteral("Redondas"), 60);
+    MapFeature c;
+    c.kind = GeometryKind::Circle;
+    c.layerId = QStringLiteral("redondas");
+    c.name = QStringLiteral("TMA");
+    c.geometry = { centro };
+    c.radiusMeters = 10000.0;
+    c.style.lineColor = QColor(255, 0, 255);
+    c.style.fillColor = QColor(255, 0, 255, 40);
+    c.style.lineWidth = 3.0;
+    const qint64 idc = w.addFeature(c);
+    QVERIFY(idc > 0);
+
+    // Sin radio no entra (la validez se comprueba al anadir).
+    MapFeature malo = c;
+    malo.radiusMeters = 0.0;
+    QCOMPARE(w.addFeature(malo), qint64(-1));
+
+    // Se ve: el color del trazo aparece alrededor del centro, a unos 10 km de el.
+    QCoreApplication::processEvents();
+    QTest::qWait(50);
+    QCoreApplication::processEvents();
+    const QImage img = w.grab().toImage();
+    const QPoint pc = pixel(centro);
+    const QPoint este = pixel(centro.atDistanceAndAzimuth(10000.0, 90.0));
+    QVERIFY(este.x() - pc.x() > 40);                       // el radio es de decenas de pixeles
+    QVERIFY(pixelesDeColor(img, QRect(este - QPoint(3, 3), QSize(7, 7)), QColor(255, 0, 255), 30) > 5);
+    QCOMPARE(pixelesDeColor(img, QRect(pc - QPoint(3, 3), QSize(7, 7)), QColor(255, 0, 255), 6), 0);
+
+    // Se elige dentro del circulo (es un area), sobre el borde, y no fuera.
+    QCOMPARE(w.featureAt(pc), idc);
+    QCOMPARE(w.featureAt(este), idc);
+    QCOMPARE(w.featureAt(pixel(centro.atDistanceAndAzimuth(25000.0, 90.0))), qint64(-1));
+
+    // Un arco de 0 a 90 grados (nordeste): se elige sobre el arco, no en el centro ni
+    // en el cuadrante opuesto, y su rotulo cuelga de la mitad del recorrido (45 grados).
+    MapFeature a = c;
+    a.kind = GeometryKind::Arc;
+    a.name = QStringLiteral("Sector");
+    a.geometry = { QGeoCoordinate(21.5, -79.0) };            // otro centro, aparte del circulo
+    a.arcStartDeg = 0.0;
+    a.arcEndDeg = 90.0;
+    a.style.lineColor = QColor(0, 160, 0);
+    const qint64 ida = w.addFeature(a);
+    QVERIFY(ida > 0);
+    const QGeoCoordinate ca = a.geometry.first();
+    QCOMPARE(w.featureAt(pixel(ca.atDistanceAndAzimuth(10000.0, 45.0))), ida);
+    QCOMPARE(w.featureAt(pixel(ca.atDistanceAndAzimuth(10000.0, 225.0))), qint64(-1));
+    QCOMPARE(w.featureAt(pixel(ca)), qint64(-1));
+    const QRect rotuloArco = w.featureLabelRect(ida);
+    QVERIFY(rotuloArco.isValid());
+    const QPoint medio = pixel(ca.atDistanceAndAzimuth(10000.0, 45.0));
+    QVERIFY(qAbs(rotuloArco.left() - medio.x()) < 40 && qAbs(rotuloArco.top() - medio.y()) < 40);
+
+    // Un circulo es una zona vigilada valida; un arco no (no es un area).
+    QVERIFY(!w.watchZone(ida));
+    QVERIFY(w.watchZone(idc));
+    MapTarget fuera;
+    fuera.position = centro.atDistanceAndAzimuth(30000.0, 0.0);
+    const qint64 idt = w.addTarget(fuera);
+    QSignalSpy entra(&w, &MapWidget::targetEnteredZone);
+    QVERIFY(w.updateTarget(idt, centro.atDistanceAndAzimuth(5000.0, 0.0)));
+    QCOMPARE(entra.count(), 1);
+    QCOMPARE(entra.at(0).at(1).toLongLong(), idc);
 }
 
 // Cuenta los pixeles "azul de marcacion" (2962ff y sus cercanos) de un recuadro.

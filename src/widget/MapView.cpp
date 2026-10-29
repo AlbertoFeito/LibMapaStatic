@@ -955,7 +955,7 @@ void MapView::mouseDoubleClickEvent(QMouseEvent *event)
         const qint64 id = m_featureLayer->featureAt(event->pos());
         if (id >= 0) {
             const auto f = m_model->feature(id);
-            if (f && f->kind != GeometryKind::Point) {
+            if (f && f->kind != GeometryKind::Point && !f->isRound()) {
                 const int tras = m_featureLayer->segmentAt(*f, event->pos());
                 if (tras >= 0) {
                     if (!capaEditable(f->layerId)) {

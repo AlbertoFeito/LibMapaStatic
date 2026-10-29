@@ -364,7 +364,7 @@ void FeatureLayer::drawAlert(QPainter *painter, const MapFeature &f) const
         QPen pen(borde, f.style.lineWidth + 6.0);
         pen.setJoinStyle(Qt::RoundJoin);
         painter->setPen(pen);
-        if (f.kind == GeometryKind::Polygon) {
+        if (f.isArea()) {
             painter->setBrush(velo);
             painter->drawPolygon(poly);
         } else {
@@ -507,7 +507,7 @@ void FeatureLayer::drawPathPart(QPainter *painter, const MapFeature &f,
     if (poly.size() < 2)
         return;
 
-    if (f.kind == GeometryKind::Polygon) {
+    if (f.isArea()) {
         QPainterPath camino;
         camino.addPolygon(poly);
         camino.closeSubpath();
@@ -531,13 +531,13 @@ void FeatureLayer::drawPathPart(QPainter *painter, const MapFeature &f,
         resalte.setJoinStyle(Qt::RoundJoin);
         painter->setPen(resalte);
         painter->setBrush(Qt::NoBrush);
-        if (f.kind == GeometryKind::Polygon)
+        if (f.isArea())
             painter->drawPolygon(poly);
         else
             painter->drawPolyline(poly);
 
         painter->setPen(QPen(f.style.lineColor, f.style.lineWidth));
-        if (f.kind == GeometryKind::Polygon)
+        if (f.isArea())
             painter->drawPolygon(poly);
         else
             painter->drawPolyline(poly);
@@ -635,6 +635,11 @@ void FeatureLayer::drawDraft(QPainter *painter) const
 // rectangulo que contiene toda la geometria (estable al desplazar el mapa).
 QPointF FeatureLayer::labelAnchorScreen(const MapFeature &f) const
 {
+    // Un circulo cuelga del centro y un arco de la mitad de su recorrido.
+    if (f.isRound()) {
+        const QGeoCoordinate c = f.roundLabelPoint();
+        return c.isValid() ? screenPos(c) : QPointF();
+    }
     if (f.style.labelAnchorVertex >= 0) {
         const QVector<QVector<QGeoCoordinate>> partes = f.outlines();
         if (!partes.isEmpty()) {
@@ -913,14 +918,14 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
                     continue;
                 }
                 const QPolygonF poly = screenPolygonOf(parte);
-                if (f.kind == GeometryKind::Polygon
+                if (f.isArea()
                     && poly.containsPoint(p, Qt::OddEvenFill)) {
                     d = 0.0;      // dentro del area cuenta como acierto
                     break;
                 }
                 for (int j = 0; j + 1 < static_cast<int>(poly.size()); ++j)
                     d = qMin(d, distanceToSegment(p, poly[j], poly[j + 1]));
-                if (f.kind == GeometryKind::Polygon && poly.size() > 2)
+                if (f.isArea() && poly.size() > 2)
                     d = qMin(d, distanceToSegment(p, poly.last(), poly.first()));
             }
 
@@ -962,7 +967,7 @@ int FeatureLayer::segmentAt(const MapFeature &feature, const QPoint &pixel,
     }
 
     // En un poligono, el lado de cierre tambien cuenta.
-    if (feature.kind == GeometryKind::Polygon && poly.size() > 2) {
+    if (feature.isArea() && poly.size() > 2) {
         const double d = distanceToSegment(p, poly.last(), poly.first());
         if (d <= mejorDist)
             mejor = static_cast<int>(poly.size()) - 1;

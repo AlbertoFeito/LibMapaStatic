@@ -465,6 +465,8 @@ if(LIBMAPA_BUILD_TESTS)
     target_include_directories(tst_labelplacement
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+    libmapa_add_test(tst_roundgeometry)
+
     libmapa_add_test(tst_geofile)
     target_compile_definitions(tst_geofile PRIVATE
         LIBMAPA_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")

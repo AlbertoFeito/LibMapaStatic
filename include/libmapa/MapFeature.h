@@ -10,6 +10,8 @@
 #include <QVariantMap>
 #include <QVector>
 
+#include <cmath>
+
 namespace libmapa {
 
 /*!
@@ -29,7 +31,13 @@ namespace libmapa {
 enum class GeometryKind {
     Point,      //!< Un solo vertice.
     Polyline,   //!< Vertices en orden, sin cerrar.
-    Polygon     //!< Vertices en orden, cerrado.
+    Polygon,    //!< Vertices en orden, cerrado.
+    //! Circunferencia GEODESICA: un vertice (el centro) y \a MapFeature::radiusMeters.
+    //! Se anaden al FINAL del enum porque el tipo se guarda como entero en SQLite.
+    Circle,
+    //! Arco geodesico: centro, radio y los azimuts de inicio y fin
+    //! (\a MapFeature::arcStartDeg y \a arcEndDeg), siempre en sentido horario.
+    Arc
 };
 
 /*!
@@ -159,16 +167,127 @@ struct MapFeature
     //! persiste: es una pista de interacción que la app vuelve a poner.
     bool draggable = false;
 
+    //! Radio en metros de un Circle o un Arc (0 en el resto).
+    double radiusMeters = 0.0;
+    //! Azimuts de inicio y fin de un Arc, en grados desde el norte y en sentido
+    //! horario: el arco va de \a arcStartDeg a \a arcEndDeg y da la vuelta si hace
+    //! falta (de 315 a 45 son 90 grados). Si son iguales (modulo 360) el arco no es
+    //! valido: para una circunferencia entera esta Circle.
+    double arcStartDeg = 0.0;
+    double arcEndDeg = 0.0;
+
     bool isMultiPart() const { return !parts.isEmpty(); }
 
-    //! Las partes a dibujar/consultar: \a parts si las hay, si no \a geometry.
+    //! ¿Es un Circle o un Arc? Su geometria se genera a partir del centro y el radio.
+    bool isRound() const { return kind == GeometryKind::Circle || kind == GeometryKind::Arc; }
+    //! ¿Se comporta como un area (relleno, cierre, «dentro»)? Poligonos y circulos.
+    bool isArea() const { return kind == GeometryKind::Polygon || kind == GeometryKind::Circle; }
+    //! ¿Se comporta como una linea? Polilineas y arcos.
+    bool isLinear() const { return kind == GeometryKind::Polyline || kind == GeometryKind::Arc; }
+
+    //! Barrido en grados (de 0 a 360, sin llegar a 360) de un arco que va de \a startDeg
+    //! a \a endDeg en sentido horario; 0 si no son numeros finitos o si coinciden
+    //! (modulo 360). De 315 a 45 son 90; de 45 a 315, 270.
+    static double arcSweepDeg(double startDeg, double endDeg)
+    {
+        if (!std::isfinite(startDeg) || !std::isfinite(endDeg))
+            return 0.0;
+        double barrido = std::fmod(endDeg - startDeg, 360.0);
+        if (barrido < 0.0)
+            barrido += 360.0;
+        return barrido;
+    }
+
+    //! Puntos de un Circle o un Arc, calculados SOBRE EL ELIPSOIDE (una coordenada
+    //! cada 2 grados de azimut): en Mercator un circulo de 300 km no es un circulo
+    //! en pantalla, y asi sale bien a cualquier latitud y radio. Vacio si no es
+    //! redondo o no es valido. El Circle no repite el primer punto (es un area).
+    QVector<QGeoCoordinate> roundOutline() const
+    {
+        QVector<QGeoCoordinate> puntos;
+        if (!isRound() || geometry.size() != 1 || !geometry.first().isValid()
+            || !(radiusMeters > 0.0) || !std::isfinite(radiusMeters))
+            return puntos;
+        const bool arco = kind == GeometryKind::Arc;
+        const double barrido = arco ? arcSweepDeg(arcStartDeg, arcEndDeg) : 360.0;
+        if (!(barrido > 0.0))
+            return puntos;
+        constexpr double kPasoDeg = 2.0;
+        const int tramos = qMax(arco ? 2 : 3, int(std::ceil(barrido / kPasoDeg)));
+        const int n = arco ? tramos + 1 : tramos;     // el circulo no repite el primero
+        puntos.reserve(n);
+        const QGeoCoordinate centro = geometry.first();
+        const double inicio = arco ? arcStartDeg : 0.0;
+        for (int i = 0; i < n; ++i)
+            puntos.append(centro.atDistanceAndAzimuth(radiusMeters,
+                                                      inicio + barrido * i / tramos));
+        return puntos;
+    }
+
+    //! Punto donde se ancla el rotulo de un Arc: la mitad de su recorrido (en un
+    //! circulo es el centro). Invalido si no es redondo.
+    QGeoCoordinate roundLabelPoint() const
+    {
+        if (!isRound() || geometry.isEmpty())
+            return QGeoCoordinate();
+        if (kind == GeometryKind::Circle)
+            return geometry.first();
+        const double barrido = arcSweepDeg(arcStartDeg, arcEndDeg);
+        return geometry.first().atDistanceAndAzimuth(radiusMeters, arcStartDeg + barrido / 2.0);
+    }
+
+    //! Las partes a dibujar/consultar: \a parts si las hay, si no \a geometry. En un
+    //! Circle o un Arc, su contorno ya calculado (\ref roundOutline).
     QVector<QVector<QGeoCoordinate>> outlines() const
+    {
+        if (isRound()) {
+            const QVector<QGeoCoordinate> contorno = roundOutline();
+            return contorno.isEmpty() ? QVector<QVector<QGeoCoordinate>>()
+                                      : QVector<QVector<QGeoCoordinate>>{ contorno };
+        }
+        if (!parts.isEmpty())
+            return parts;
+        if (geometry.isEmpty())
+            return {};
+        return { geometry };
+    }
+
+    //! Lo que se GUARDA de la geometria: las partes si las hay o \a geometry. A
+    //! diferencia de \ref outlines, en un Circle o un Arc es solo el centro (el
+    //! contorno se vuelve a calcular al leer).
+    QVector<QVector<QGeoCoordinate>> storedParts() const
     {
         if (!parts.isEmpty())
             return parts;
         if (geometry.isEmpty())
             return {};
         return { geometry };
+    }
+
+    //! Copia con la geometria de siempre (Polygon para un Circle, Polyline para un
+    //! Arc, con el contorno ya calculado), para los formatos que no conocen circulos
+    //! ni arcos. Guarda el centro, el radio y los azimuts como atributos
+    //! (\c radius_m, \c arc_start_deg, \c arc_end_deg, \c center_lat, \c center_lon).
+    MapFeature toPlain() const
+    {
+        if (!isRound())
+            return *this;
+        MapFeature plana = *this;
+        plana.attributes.insert(QStringLiteral("radius_m"), radiusMeters);
+        if (!geometry.isEmpty()) {
+            plana.attributes.insert(QStringLiteral("center_lat"), geometry.first().latitude());
+            plana.attributes.insert(QStringLiteral("center_lon"), geometry.first().longitude());
+        }
+        if (kind == GeometryKind::Arc) {
+            plana.attributes.insert(QStringLiteral("arc_start_deg"), arcStartDeg);
+            plana.attributes.insert(QStringLiteral("arc_end_deg"), arcEndDeg);
+        }
+        plana.geometry = roundOutline();
+        plana.kind = kind == GeometryKind::Circle ? GeometryKind::Polygon : GeometryKind::Polyline;
+        plana.radiusMeters = 0.0;
+        plana.arcStartDeg = 0.0;
+        plana.arcEndDeg = 0.0;
+        return plana;
     }
 
     QGeoCoordinate position() const
@@ -186,12 +305,23 @@ struct MapFeature
         case GeometryKind::Point:    return p.size() == 1;
         case GeometryKind::Polyline: return p.size() >= 2;
         case GeometryKind::Polygon:  return p.size() >= 3;
+        case GeometryKind::Circle:   return p.size() == 1;
+        case GeometryKind::Arc:      return p.size() == 1;
         }
         return false;
     }
 
     bool isValid() const
     {
+        if (isRound()) {
+            // Un solo vertice (el centro), sin partes, radio finito y positivo y, en
+            // un arco, un barrido distinto de cero.
+            if (!parts.isEmpty() || geometry.size() != 1 || !geometry.first().isValid())
+                return false;
+            if (!(radiusMeters > 0.0) || !std::isfinite(radiusMeters))
+                return false;
+            return kind == GeometryKind::Circle || arcSweepDeg(arcStartDeg, arcEndDeg) > 0.0;
+        }
         if (!parts.isEmpty()) {
             for (const QVector<QGeoCoordinate> &p : parts)
                 if (!partIsValid(p))
@@ -208,6 +338,8 @@ struct MapFeature
         case GeometryKind::Point:    return 1;
         case GeometryKind::Polyline: return 2;
         case GeometryKind::Polygon:  return 3;
+        case GeometryKind::Circle:   return 1;
+        case GeometryKind::Arc:      return 1;
         }
         return 1;
     }

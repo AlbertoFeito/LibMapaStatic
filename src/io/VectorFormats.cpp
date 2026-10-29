@@ -242,6 +242,9 @@ QJsonObject geometriaDe(const MapFeature &f)
         }
         g.insert(QStringLiteral("coordinates"), coords);
         return g;
+    case GeometryKind::Circle:
+    case GeometryKind::Arc:
+        break;               // las exportaciones los aplanan antes con toPlain()
     }
     return g;
 }
@@ -803,7 +806,8 @@ QVector<MapFeature> parseGpx(const QByteArray &data, QString *error)
 QByteArray toGeoJson(const QVector<MapFeature> &features)
 {
     QJsonArray feats;
-    for (const MapFeature &f : features) {
+    for (const MapFeature &original : features) {
+        const MapFeature f = original.toPlain();   // un circulo o un arco salen como poligono o linea
         if (!f.isValid())
             continue;
         QJsonObject props = QJsonObject::fromVariantMap(f.attributes);
@@ -846,7 +850,8 @@ QByteArray toKml(const QVector<MapFeature> &features)
     w.writeStartElement(QStringLiteral("kml"));
     w.writeDefaultNamespace(QStringLiteral("http://www.opengis.net/kml/2.2"));
     w.writeStartElement(QStringLiteral("Document"));
-    for (const MapFeature &f : features) {
+    for (const MapFeature &original : features) {
+        const MapFeature f = original.toPlain();   // un circulo o un arco salen como poligono o linea
         if (!f.isValid())
             continue;
         w.writeStartElement(QStringLiteral("Placemark"));
@@ -893,7 +898,8 @@ QByteArray toGpx(const QVector<MapFeature> &features)
     w.writeAttribute(QStringLiteral("version"), QStringLiteral("1.1"));
     w.writeAttribute(QStringLiteral("creator"), QStringLiteral("libmapa"));
 
-    for (const MapFeature &f : features) {
+    for (const MapFeature &original : features) {
+        const MapFeature f = original.toPlain();   // un circulo o un arco salen como poligono o linea
         if (!f.isValid() || f.kind != GeometryKind::Point)
             continue;
         for (const auto &p : f.outlines()) {
@@ -909,7 +915,8 @@ QByteArray toGpx(const QVector<MapFeature> &features)
             w.writeEndElement();
         }
     }
-    for (const MapFeature &f : features) {
+    for (const MapFeature &original : features) {
+        const MapFeature f = original.toPlain();   // un circulo o un arco salen como poligono o linea
         if (!f.isValid() || f.kind == GeometryKind::Point)
             continue;
         const bool poligono = f.kind == GeometryKind::Polygon;

@@ -38,6 +38,9 @@ private slots:
     //! El lado del anclaje y el tamano de fuente del rotulo (v4) sobreviven
     //! guardar/cargar.
     void savesAndLoadsLabelAnchorAndFontSize();
+    //! Un circulo y un arco (v5) guardan su centro, radio y azimuts, y al leer
+    //! vuelven iguales (el contorno se recalcula, no se guarda).
+    void savesAndLoadsCircleAndArc();
     //! Una BD v2 (sin las columnas label_dx/dy) se abre, se migra a v3 y sus
     //! entidades se leen con offset 0, sin romper.
     void migratesV2DatabaseToV3();
@@ -203,6 +206,48 @@ void TstVectorRepository::savesAndLoadsLabelAnchorAndFontSize()
     QCOMPARE(cargadas.at(1).style.labelFontSize, 0);
 }
 
+void TstVectorRepository::savesAndLoadsCircleAndArc()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("round.db"))));
+
+    MapFeature c;
+    c.layerId = QStringLiteral("tma");
+    c.kind = GeometryKind::Circle;
+    c.name = QStringLiteral("TMA Habana");
+    c.geometry = { QGeoCoordinate(23.1136, -82.3666) };
+    c.radiusMeters = 55000.0;
+    QVERIFY(repo.saveFeature(c).has_value());
+
+    MapFeature a = c;
+    a.kind = GeometryKind::Arc;
+    a.name = QStringLiteral("Sector norte");
+    a.radiusMeters = 90000.0;
+    a.arcStartDeg = 315.0;
+    a.arcEndDeg = 45.0;
+    QVERIFY(repo.saveFeature(a).has_value());
+
+    // Un circulo sin radio no es valido y no se guarda.
+    MapFeature malo = c;
+    malo.radiusMeters = 0.0;
+    QVERIFY(!repo.saveFeature(malo).has_value());
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 2);
+    const MapFeature &c2 = cargadas.at(0);
+    QCOMPARE(c2.kind, GeometryKind::Circle);
+    QCOMPARE(c2.geometry.size(), 1);                  // solo el centro, no el contorno
+    QVERIFY(qAbs(c2.radiusMeters - 55000.0) < 1e-9);
+    QVERIFY(c2.isValid());
+    QCOMPARE(c2.outlines().first().size(), 180);       // y el contorno se recalcula
+    const MapFeature &a2 = cargadas.at(1);
+    QCOMPARE(a2.kind, GeometryKind::Arc);
+    QCOMPARE(a2.geometry.size(), 1);
+    QVERIFY(qAbs(a2.radiusMeters - 90000.0) < 1e-9);
+    QVERIFY(qAbs(a2.arcStartDeg - 315.0) < 1e-9 && qAbs(a2.arcEndDeg - 45.0) < 1e-9);
+    QVERIFY(a2.isValid());
+}
+
 void TstVectorRepository::migratesV2DatabaseToV3()
 {
     const QString ruta = dbPath(QStringLiteral("legacy_v2.db"));
@@ -255,6 +300,9 @@ void TstVectorRepository::migratesV2DatabaseToV3()
     // v4: una BD anterior se abre con el rotulo de siempre.
     QCOMPARE(cargadas.first().style.labelAnchor, LabelAnchor::Auto);
     QCOMPARE(cargadas.first().style.labelFontSize, 0);
+    // v5: tampoco es redonda.
+    QCOMPARE(cargadas.first().radiusMeters, 0.0);
+    QCOMPARE(cargadas.first().kind, GeometryKind::Polygon);
 }
 
 void TstVectorRepository::removesAndClearsFeatures()

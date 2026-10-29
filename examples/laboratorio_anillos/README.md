@@ -55,7 +55,7 @@ El panel de la derecha trae la misma lista de lo que hay que ver y probar:
 8. **Escala polar**: «Escala de 600 km» pone 60 anillos de 10 km y radiales cada 10° en un solo objeto, con
    el rojo oscuro de un anillo de cada cinco y un radial de cada tres («Escala de 300 km»: 30 anillos). Los
    controles de énfasis y el de «radiales de otro color» se pueden tocar en vivo.
-9. **Rótulos de entidades**: cambia el lado del anclaje y la fuente de los seis aeródromos; los nombres se
+9. **Rótulos de entidades**: cambia el lado del anclaje y la fuente de los seis puntos de ejemplo; los nombres se
    recolocan y cambian de tamaño.
 10. **Formulario de objetivos**: arrastra uno con el ratón (la barra de estado dice dónde lo soltaste) y
     suéltalo **fuera del mapa**: se cancela. Marca «Colgado de la esquina más cercana», la fuente

@@ -22,6 +22,9 @@ private slots:
     // --- Entidades -------------------------------------------------------
     void assignsIdsAndStoresFeatures();
     void rejectsInvalidGeometry();
+    //! Circulos y arcos: validos con centro y radio, sin vertices que insertar o
+    //! quitar, y moverlos mueve el centro.
+    void roundFeaturesBehaveInTheModel();
     void keepsDomainTypeAndAttributes();
     void filtersByTypeAcrossLayers();
 
@@ -191,6 +194,48 @@ void TstOverlayModel::rejectsInvalidGeometry()
     QCOMPARE(m.addFeature(coordenadaMala), qint64(-1));
 
     QCOMPARE(m.count(), 0);
+}
+
+void TstOverlayModel::roundFeaturesBehaveInTheModel()
+{
+    OverlayModel m;
+
+    MapFeature c;
+    c.kind = GeometryKind::Circle;
+    c.name = QStringLiteral("Zona");
+    c.geometry = { QGeoCoordinate(23.0, -82.0) };
+    c.radiusMeters = 10000.0;
+
+    // Sin radio, o un arco sin barrido, no entran.
+    MapFeature sinRadio = c;
+    sinRadio.radiusMeters = 0.0;
+    QCOMPARE(m.addFeature(sinRadio), qint64(-1));
+    MapFeature arcoPlano = c;
+    arcoPlano.kind = GeometryKind::Arc;
+    arcoPlano.arcStartDeg = arcoPlano.arcEndDeg = 90.0;
+    QCOMPARE(m.addFeature(arcoPlano), qint64(-1));
+
+    const qint64 id = m.addFeature(c);
+    QVERIFY(id > 0);
+    MapFeature a = c;
+    a.kind = GeometryKind::Arc;
+    a.arcStartDeg = 0.0;
+    a.arcEndDeg = 90.0;
+    const qint64 ida = m.addFeature(a);
+    QVERIFY(ida > 0);
+
+    // Un circulo o un arco tiene un solo vertice: no se inserta ni se quita ninguno.
+    QVERIFY(!m.insertVertex(id, 1, QGeoCoordinate(23.1, -82.1)));
+    QVERIFY(!m.insertVertex(ida, 0, QGeoCoordinate(23.1, -82.1)));
+    QVERIFY(!m.removeVertex(id, 0));
+
+    // Mover el vertice o la entidad entera mueve el centro, y el radio se conserva.
+    QVERIFY(m.moveVertex(id, 0, QGeoCoordinate(23.5, -82.5)));
+    QCOMPARE(m.feature(id)->geometry.first(), QGeoCoordinate(23.5, -82.5));
+    QVERIFY(m.moveFeature(ida, 0.5, 0.25));
+    QVERIFY(qAbs(m.feature(ida)->geometry.first().latitude() - 23.5) < 1e-9);
+    QVERIFY(qAbs(m.feature(ida)->radiusMeters - 10000.0) < 1e-9);
+    QVERIFY(m.feature(ida)->isValid());
 }
 
 void TstOverlayModel::keepsDomainTypeAndAttributes()

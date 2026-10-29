@@ -618,8 +618,8 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
         return false;
     if (it->isMultiPart())
         return false;
-    if (it->kind == GeometryKind::Point)
-        return false;                       // un punto tiene un solo vertice
+    if (it->kind == GeometryKind::Point || it->isRound())
+        return false;                       // un punto, un circulo o un arco: un solo vertice
     if (index < 0 || index > it->geometry.size())
         return false;
     // Tope opcional de vertices (p. ej. un «area objetivo» de ≤10 puntos): si la

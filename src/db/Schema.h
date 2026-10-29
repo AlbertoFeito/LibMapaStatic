@@ -7,7 +7,7 @@ namespace libmapa {
 namespace schema {
 
 //! Version actual del esquema. Cada incremento anade un bloque a migrations().
-constexpr int kCurrentVersion = 4;
+constexpr int kCurrentVersion = 5;
 
 /*!
  * \brief Sentencias que llevan la BD de la version \a from a kCurrentVersion.

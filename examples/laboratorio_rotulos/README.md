@@ -2,7 +2,7 @@
 
 Banco de pruebas de los **rótulos** y de la **escala polar** de libmapa. Un panel a la derecha
 cambia en vivo lo que añadió la fase 1 de la convergencia con el fork extendido, sobre seis
-aeródromos, tres objetivos con formulario y una escala de anillos y radiales.
+puntos de ejemplo, tres objetivos con formulario y una escala de anillos y radiales.
 
 ## Qué enseña
 
@@ -28,7 +28,7 @@ Con libmapa instalada (ver [`docs/DESPLIEGUE.md`](../../docs/DESPLIEGUE.md)):
 laboratorio_rotulos D:\QtPro\Recursos
 ```
 
-1. **Rótulos de entidades**: cambia *Lado del anclaje* y *Fuente*: los nombres de los seis aeródromos
+1. **Rótulos de entidades**: cambia *Lado del anclaje* y *Fuente*: los nombres de los seis puntos de ejemplo
    se recolocan y cambian de tamaño. Con un lado elegido, el desplazamiento libre se suma encima.
 2. **Formulario de objetivos**: arrastra uno con el ratón (queda fijado como propio y la barra de estado
    dice dónde lo soltaste). Soltarlo **fuera del mapa** cancela el arrastre y vuelve a como estaba.
