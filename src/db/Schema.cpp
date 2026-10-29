@@ -82,6 +82,17 @@ QStringList migrations(int from)
             "ALTER TABLE entidad ADD COLUMN label_anchor INTEGER NOT NULL DEFAULT -1");
     }
 
+    if (from < 4) {
+        // v4: lado del anclaje en el que cuelga el rotulo (LabelAnchor; 0 = Auto,
+        // el comportamiento de siempre) y tamano propio de su fuente en puntos
+        // (0 = la fuente del mapa). Con DEFAULT 0 una BD v3 se migra sola y sus
+        // entidades se ven exactamente igual que antes.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN label_pos INTEGER NOT NULL DEFAULT 0");
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN label_fuente INTEGER NOT NULL DEFAULT 0");
+    }
+
     return sql;
 }
 

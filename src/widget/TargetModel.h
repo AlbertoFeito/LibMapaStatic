@@ -67,7 +67,25 @@ public:
 
     bool setLabel(qint64 id, const QString &text);
     //! Desplazamiento de la etiqueta respecto al simbolo (px). false si no existe.
+    //! Lo marca como PROPIO del objetivo (MapTarget::labelOffsetSet).
     bool setLabelOffset(qint64 id, const QPointF &offsetPx);
+    //! Quita el desplazamiento propio: el objetivo vuelve al por defecto. false si
+    //! no existe.
+    bool clearLabelOffset(qint64 id);
+    //! Restaura el estado EXACTO del desplazamiento propio (valor y marca de
+    //! fijado). Lo usa el arrastre al cancelarse. false si no existe.
+    bool restoreLabelOffset(qint64 id, const QPointF &offsetPx, bool set);
+    //! Desplazamiento por defecto de los objetivos que no fijaron el suyo; (0,0)
+    //! al principio (etiqueta pegada al simbolo).
+    QPointF defaultLabelOffsetPx() const { return m_defaultLabelOffset; }
+    void setDefaultLabelOffsetPx(const QPointF &offsetPx);
+    //! Desplazamiento que se dibuja de \a t: el suyo si lo fijo (o si es distinto
+    //! de (0,0), por compatibilidad) y, si no, el por defecto.
+    QPointF effectiveLabelOffset(const MapTarget &t) const
+    {
+        return (t.labelOffsetSet || !t.labelOffsetPx.isNull()) ? t.labelOffsetPx
+                                                              : m_defaultLabelOffset;
+    }
     bool setColor(qint64 id, const QColor &color);
 
     //! Fija (o reemplaza) un atributo libre del objetivo. Via para colgar datos
@@ -144,6 +162,7 @@ private:
     int m_trailMax = 300;
     int m_historyMax = 5000;
     double m_historyMinDist = 1.0;
+    QPointF m_defaultLabelOffset;   //!< Para los que no fijaron el suyo; (0,0).
 };
 
 } // namespace libmapa

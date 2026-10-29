@@ -26,6 +26,8 @@ private slots:
     //! Distancia minima, horas dadas por la app y borrado.
     void historyTimesMinDistanceAndRemoval();
     void estimatesVelocityFromTrack();
+    //! Offset de rotulo por defecto frente al propio: marca, quitar, restaurar.
+    void labelOffsetDefaultOwnAndRestore();
 };
 
 static MapTarget objetivo(double lat, double lon, const QString &etq = QString())
@@ -312,6 +314,55 @@ void TstTargetModel::estimatesVelocityFromTrack()
     QCOMPARE(v, 0.0);
 
     QVERIFY(!m.estimateVelocity(999, 30000, &v, &rumbo));
+}
+
+void TstTargetModel::labelOffsetDefaultOwnAndRestore()
+{
+    TargetModel m;
+    const qint64 id = m.upsert(objetivo(23.0, -82.0, QStringLiteral("A")));
+    QSignalSpy cambios(&m, &TargetModel::changed);
+
+    // Al principio no hay offset por defecto y el objetivo no tiene el suyo.
+    QCOMPARE(m.defaultLabelOffsetPx(), QPointF(0.0, 0.0));
+    QVERIFY(!m.target(id)->labelOffsetSet);
+    QCOMPARE(m.effectiveLabelOffset(*m.target(id)), QPointF(0.0, 0.0));
+
+    // Un offset por defecto lo ven los que no fijaron el suyo; avisa al repintar,
+    // pero repetir el mismo valor no repinta.
+    m.setDefaultLabelOffsetPx(QPointF(-31.0, -31.0));
+    QCOMPARE(cambios.size(), 1);
+    m.setDefaultLabelOffsetPx(QPointF(-31.0, -31.0));
+    QCOMPARE(cambios.size(), 1);
+    QCOMPARE(m.effectiveLabelOffset(*m.target(id)), QPointF(-31.0, -31.0));
+
+    // Fijar el propio lo marca y manda sobre el de por defecto, incluso un (0,0)
+    // fijado a proposito (pegar el rotulo al simbolo).
+    QVERIFY(m.setLabelOffset(id, QPointF(10.0, 20.0)));
+    QVERIFY(m.target(id)->labelOffsetSet);
+    QCOMPARE(m.effectiveLabelOffset(*m.target(id)), QPointF(10.0, 20.0));
+    QVERIFY(m.setLabelOffset(id, QPointF(0.0, 0.0)));
+    QCOMPARE(m.effectiveLabelOffset(*m.target(id)), QPointF(0.0, 0.0));
+
+    // Quitarlo vuelve al de por defecto.
+    QVERIFY(m.clearLabelOffset(id));
+    QVERIFY(!m.target(id)->labelOffsetSet);
+    QCOMPARE(m.effectiveLabelOffset(*m.target(id)), QPointF(-31.0, -31.0));
+
+    // Un offset suelto sin marca (como lo dejan las apps antiguas) cuenta como propio.
+    MapTarget viejo = objetivo(23.1, -82.1, QStringLiteral("B"));
+    viejo.labelOffsetPx = QPointF(5.0, 6.0);
+    const qint64 idViejo = m.upsert(viejo);
+    QVERIFY(!m.target(idViejo)->labelOffsetSet);
+    QCOMPARE(m.effectiveLabelOffset(*m.target(idViejo)), QPointF(5.0, 6.0));
+
+    // Restaurar deja valor y marca exactos, y los ids desconocidos fallan.
+    QVERIFY(m.setLabelOffset(idViejo, QPointF(50.0, 60.0)));
+    QVERIFY(m.restoreLabelOffset(idViejo, QPointF(5.0, 6.0), false));
+    QCOMPARE(m.target(idViejo)->labelOffsetPx, QPointF(5.0, 6.0));
+    QVERIFY(!m.target(idViejo)->labelOffsetSet);
+    QVERIFY(!m.setLabelOffset(999, QPointF()));
+    QVERIFY(!m.clearLabelOffset(999));
+    QVERIFY(!m.restoreLabelOffset(999, QPointF(), false));
 }
 
 QTEST_MAIN(TstTargetModel)

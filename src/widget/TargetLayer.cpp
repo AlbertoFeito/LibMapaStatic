@@ -1,9 +1,11 @@
 #include "widget/TargetLayer.h"
 
 #include "geo/MapDecor.h"
+#include "widget/LabelPlacement.h"
 #include "widget/MapView.h"
 
 #include <QDateTime>
+#include <QFontDatabase>
 #include <QFontMetrics>
 #include <QFontMetricsF>
 #include <QLineF>
@@ -505,7 +507,8 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
     // --- Etiqueta (multilinea: un parametro por linea) ---------------------
     // El objetivo seleccionado muestra SIEMPRE su etiqueta (salta el presupuesto
     // y el declutter), para poder leer sus datos aunque este en una zona densa.
-    if ((drawLabel || selected) && t.labelVisible && !t.label.isEmpty()) {
+    const QVector<TargetLabelLine> lineas = labelLinesOf(t);
+    if ((drawLabel || selected) && t.labelVisible && !lineas.isEmpty()) {
         if (!selected) {
             // Declutter: una sola etiqueta por celda de pantalla (~40 px). Si ya
             // hay una etiqueta en la celda de este objetivo, se omite la suya
@@ -519,45 +522,142 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
         }
         ++m_lastLabels;
 
-        const QStringList lineas =
-            t.label.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-        const QFontMetricsF fm(painter->font());
+        // Fuente del rotulo: la del mapa o, si se pidio, la monoespaciada del
+        // sistema con el mismo tamano (las columnas quedan alineadas).
+        const QFont fuenteBase = painter->font();
+        QFont fuente = fuenteBase;
+        if (m_labelFormat.monospace) {
+            fuente = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+            fuente.setPointSizeF(fuenteBase.pointSizeF() > 0.0 ? fuenteBase.pointSizeF()
+                                                               : fuente.pointSizeF());
+        }
+        painter->setFont(fuente);
+        const QFontMetricsF fm(fuente);
         const double h = fm.height();
-        // El desplazamiento de la etiqueta (relativo al simbolo) permite
-        // arrastrarla a voluntad; como es relativo, al mover el objetivo la
-        // etiqueta lo sigue.
-        const QPointF off = t.labelOffsetPx;
-        double y = pos.y() + r * 0.5 + fm.ascent() + off.y();
-        const double x = pos.x() + r + 3.0 + off.x();
+        const double ancho = fm.horizontalAdvance(QLatin1Char('0'));   // una columna
 
-        // Caja del bloque de texto (para la linea guia y el hit-test).
+        // Reparto del texto en columnas: cada segmento con su texto ya cortado y
+        // su posicion x dentro de la caja; el ancho de la linea es hasta donde
+        // llega el ultimo.
+        struct Trozo { QString texto; QColor color; double x; };
+        QVector<QVector<Trozo>> filas;
         double anchoMax = 0.0;
-        for (const QString &linea : lineas)
-            anchoMax = std::max(anchoMax, double(fm.horizontalAdvance(linea)));
-        const QRectF caja(QPointF(x, pos.y() + r * 0.5 + off.y()),
-                          QSizeF(anchoMax, h * std::max(1, int(lineas.size()))));
+        for (const TargetLabelLine &linea : lineas) {
+            QVector<Trozo> fila;
+            double x = 0.0;
+            int restantes = m_labelFormat.maxChars > 0 ? m_labelFormat.maxChars : -1;
+            for (int k = 0; k < linea.segments.size(); ++k) {
+                QString texto = linea.segments.at(k).text;
+                const int columnas = (linea.segments.size() > 1
+                                      && k < m_labelFormat.segmentChars.size())
+                                         ? m_labelFormat.segmentChars.at(k) : 0;
+                if (columnas > 0)
+                    texto = texto.left(columnas);
+                if (restantes >= 0) {
+                    texto = texto.left(restantes);
+                    restantes -= texto.size();
+                }
+                fila.append({texto, linea.segments.at(k).color, x});
+                // Con columna reservada el segmento ocupa SIEMPRE su ancho (aunque
+                // este vacio); si no, lo que mide su texto.
+                x += columnas > 0 ? columnas * ancho : fm.horizontalAdvance(texto);
+            }
+            anchoMax = std::max(anchoMax, x);
+            filas.append(fila);
+        }
+        if (m_labelFormat.maxChars > 0 && m_labelFormat.monospace)
+            anchoMax = m_labelFormat.maxChars * ancho;      // caja de ancho fijo
+
+        // Colocacion de la caja. Classic: arranca a la derecha del simbolo y el
+        // desplazamiento la mueve. Hanging: cuelga del punto (posicion + offset)
+        // por la esquina mas cercana al objetivo.
+        const QPointF off = m_model ? m_model->effectiveLabelOffset(t) : t.labelOffsetPx;
+        const QSizeF tam(anchoMax, h * std::max(1, int(filas.size())));
+        QRectF caja;
+        QPointF finGuia;
+        if (m_labelFormat.placement == TargetLabelPlacement::Hanging && !off.isNull()) {
+            const QPointF ancla = pos + off;
+            switch (labelCornerFor(off)) {
+            case LabelCorner::BottomRight:
+                caja = QRectF(ancla - QPointF(tam.width(), tam.height()), tam); break;
+            case LabelCorner::BottomLeft:
+                caja = QRectF(ancla - QPointF(0.0, tam.height()), tam); break;
+            case LabelCorner::TopLeft:
+                caja = QRectF(ancla, tam); break;
+            case LabelCorner::TopRight:
+                caja = QRectF(ancla - QPointF(tam.width(), 0.0), tam); break;
+            }
+            finGuia = ancla;
+        } else {
+            caja = QRectF(QPointF(pos.x() + r + 3.0 + off.x(), pos.y() + r * 0.5 + off.y()), tam);
+            finGuia = caja.center();
+        }
         m_labelBoxes.append({t.id, caja});
 
         // Linea guia del simbolo a la etiqueta cuando esta desplazada.
         if (off.manhattanLength() > 1.0) {
             painter->setPen(QPen(t.color, 1.0));
             painter->setBrush(Qt::NoBrush);
-            painter->drawLine(pos, caja.center());
+            painter->drawLine(pos, finGuia);
         }
 
-        for (const QString &linea : lineas) {
-            const QPointF a(x, y);
-            // Un halo claro detras del texto para que se lea sobre el mapa.
-            painter->setPen(QPen(QColor(255, 255, 255, 200)));
-            for (int dx = -1; dx <= 1; ++dx)
-                for (int dy = -1; dy <= 1; ++dy)
-                    if (dx || dy)
-                        painter->drawText(a + QPointF(dx, dy), linea);
-            painter->setPen(Qt::black);
-            painter->drawText(a, linea);
+        const QColor porDefecto = selected ? m_labelSelectionColor : QColor(Qt::black);
+        double y = caja.top() + fm.ascent();
+        for (const QVector<Trozo> &fila : filas) {
+            for (const Trozo &trozo : fila) {
+                const QPointF a(caja.left() + trozo.x, y);
+                // Un halo claro detras del texto para que se lea sobre el mapa.
+                painter->setPen(QPen(QColor(255, 255, 255, 200)));
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dy = -1; dy <= 1; ++dy)
+                        if (dx || dy)
+                            painter->drawText(a + QPointF(dx, dy), trozo.texto);
+                painter->setPen(trozo.color.isValid() ? trozo.color : porDefecto);
+                painter->drawText(a, trozo.texto);
+            }
             y += h;
         }
+        painter->setFont(fuenteBase);
     }
+}
+
+// Lineas del rotulo de un objetivo: su contenido por segmentos o, si no tiene, su
+// texto plano partido por '\n' (un segmento sin color propio por linea).
+QVector<TargetLabelLine> TargetLayer::labelLinesOf(const MapTarget &t)
+{
+    if (!t.labelContent.isEmpty())
+        return t.labelContent;
+    QVector<TargetLabelLine> lineas;
+    const QStringList partes = t.label.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const QString &texto : partes) {
+        TargetLabelLine l;
+        l.segments.append({texto, QColor()});
+        lineas.append(l);
+    }
+    return lineas;
+}
+
+// Caja del rotulo de un objetivo en el ultimo frame (nula si no se dibujo).
+QRectF TargetLayer::labelRectOf(qint64 id) const
+{
+    for (int i = int(m_labelBoxes.size()) - 1; i >= 0; --i)
+        if (m_labelBoxes[i].first == id)
+            return m_labelBoxes[i].second;
+    return QRectF();
+}
+
+// Cambia el aspecto comun de los rotulos y repinta.
+void TargetLayer::setLabelFormat(const TargetLabelFormat &format)
+{
+    m_labelFormat = format;
+    programarRepintado();
+}
+
+// Cambia el color del texto del rotulo del objetivo seleccionado y repinta.
+void TargetLayer::setLabelSelectionColor(const QColor &color)
+{
+    m_labelSelectionColor = color.isValid() ? color : QColor(Qt::black);
+    programarRepintado();
 }
 
 // Objetivo cuya etiqueta dibujada contiene el pixel. Se recorre al reves (la

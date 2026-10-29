@@ -35,6 +35,9 @@ private slots:
     void savesMultiPartFeature();
     //! El desplazamiento de la etiqueta (v3) sobrevive guardar/cargar.
     void savesAndLoadsLabelOffset();
+    //! El lado del anclaje y el tamano de fuente del rotulo (v4) sobreviven
+    //! guardar/cargar.
+    void savesAndLoadsLabelAnchorAndFontSize();
     //! Una BD v2 (sin las columnas label_dx/dy) se abre, se migra a v3 y sus
     //! entidades se leen con offset 0, sin romper.
     void migratesV2DatabaseToV3();
@@ -171,6 +174,35 @@ void TstVectorRepository::savesAndLoadsLabelOffset()
     QCOMPARE(cargadas.first().style.labelAnchorVertex, 0);
 }
 
+void TstVectorRepository::savesAndLoadsLabelAnchorAndFontSize()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("labelanchor.db"))));
+
+    MapFeature p;
+    p.layerId = QStringLiteral("obj");
+    p.kind = GeometryKind::Point;
+    p.name = QStringLiteral("Aerodromo");
+    p.geometry.append(QGeoCoordinate(23.1, -82.3));
+    p.style.labelAnchor = LabelAnchor::BottomLeft;
+    p.style.labelFontSize = 14;
+    QVERIFY(repo.saveFeature(p).has_value());
+
+    // Una entidad que no toca nada de esto conserva los valores por defecto.
+    MapFeature q = p;
+    q.name = QStringLiteral("Normal");
+    q.style.labelAnchor = LabelAnchor::Auto;
+    q.style.labelFontSize = 0;
+    QVERIFY(repo.saveFeature(q).has_value());
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 2);
+    QCOMPARE(cargadas.at(0).style.labelAnchor, LabelAnchor::BottomLeft);
+    QCOMPARE(cargadas.at(0).style.labelFontSize, 14);
+    QCOMPARE(cargadas.at(1).style.labelAnchor, LabelAnchor::Auto);
+    QCOMPARE(cargadas.at(1).style.labelFontSize, 0);
+}
+
 void TstVectorRepository::migratesV2DatabaseToV3()
 {
     const QString ruta = dbPath(QStringLiteral("legacy_v2.db"));
@@ -220,6 +252,9 @@ void TstVectorRepository::migratesV2DatabaseToV3()
     QCOMPARE(cargadas.first().name, QStringLiteral("Isla"));
     QCOMPARE(cargadas.first().style.labelOffsetPx, QPointF(0.0, 0.0));
     QCOMPARE(cargadas.first().style.labelAnchorVertex, -1);   // no 0 por defecto
+    // v4: una BD anterior se abre con el rotulo de siempre.
+    QCOMPARE(cargadas.first().style.labelAnchor, LabelAnchor::Auto);
+    QCOMPARE(cargadas.first().style.labelFontSize, 0);
 }
 
 void TstVectorRepository::removesAndClearsFeatures()

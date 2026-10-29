@@ -229,6 +229,7 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/OverlayModel.h
         src/widget/FeatureLayer.cpp
         src/widget/FeatureLayer.h
+        src/widget/LabelPlacement.h
         src/widget/TargetModel.cpp
         src/widget/TargetModel.h
         src/widget/TargetLayer.cpp
@@ -459,6 +460,10 @@ if(LIBMAPA_BUILD_TESTS)
         LIBMAPA_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
     libmapa_add_test(tst_datapackage)
     libmapa_add_test(tst_packagecheck)
+
+    libmapa_add_test(tst_labelplacement)
+    target_include_directories(tst_labelplacement
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
     libmapa_add_test(tst_geofile)
     target_compile_definitions(tst_geofile PRIVATE
