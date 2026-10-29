@@ -383,6 +383,57 @@ qint64 OverlayModel::addFeature(MapFeature feature)
     return feature.id;
 }
 
+// Anade varias entidades de una vez. Valida cada una (las invalidas llevan -1 y no
+// entran), asigna capa e id como addFeature, apila UN solo paso de deshacer si alguna
+// capa afectada se deshace, y emite una sola vez layersChanged y changed: con
+// miles de entidades la diferencia con N altas sueltas es el repintado de la vista.
+QVector<qint64> OverlayModel::addFeatures(const QVector<MapFeature> &features)
+{
+    QVector<qint64> ids(features.size(), -1);
+    QVector<MapFeature> validas;
+    QVector<int> posiciones;
+    validas.reserve(features.size());
+    bool algunaDeshacible = false;
+    for (int i = 0; i < features.size(); ++i) {
+        MapFeature f = features.at(i);
+        if (!f.isValid()) {
+            qCWarning(lcMapaRender)
+                << "Entidad descartada: geometria invalida para" << f.name;
+            continue;
+        }
+        if (f.layerId.isEmpty())
+            f.layerId = defaultLayerId();
+        algunaDeshacible = algunaDeshacible || isLayerUndoable(f.layerId);
+        validas.append(f);
+        posiciones.append(i);
+    }
+    if (validas.isEmpty())
+        return ids;
+
+    if (algunaDeshacible)
+        pushUndo();
+    for (int k = 0; k < validas.size(); ++k) {
+        MapFeature &f = validas[k];
+        if (!m_layers.contains(f.layerId)) {
+            // Una capa nueva se crea sin su propia senal: la de todo el lote basta.
+            LayerInfo capa;
+            capa.id = f.layerId;
+            capa.displayName = f.layerId;
+            m_layers.insert(capa.id, capa);
+        }
+        f.id = m_nextId++;
+        m_features.insert(f.id, f);
+        ids[posiciones.at(k)] = f.id;
+    }
+    m_idxSucio = true;
+
+    for (int k = 0; k < validas.size(); ++k)
+        emit featureAdded(validas.at(k).id);
+    emit layersChanged();
+    emit changed();
+    return ids;
+}
+
 // Reemplaza una entidad existente (por id) por una version nueva. Conserva la
 // capa anterior si la nueva no trae ninguna. false si el id no existe o la
 // geometria no es valida.
@@ -462,6 +513,62 @@ void OverlayModel::clearLayer(const QString &layerId)
         emit layersChanged();      // los contadores por capa cambiaron
         emit changed();
     }
+}
+
+// Borra todas las entidades de un tipo (de una capa o de todas). Como clearLayer: un
+// featureRemoved por entidad (barato) y una sola vez layersChanged y changed, y un
+// solo paso de deshacer si alguna de las capas afectadas se deshace.
+int OverlayModel::clearType(const QString &type, const QString &layerId)
+{
+    QVector<qint64> aBorrar;
+    bool algunaDeshacible = false;
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it) {
+        const MapFeature &f = it.value();
+        if (f.type != type || (!layerId.isEmpty() && f.layerId != layerId))
+            continue;
+        aBorrar.append(it.key());
+        algunaDeshacible = algunaDeshacible || isLayerUndoable(f.layerId);
+    }
+    if (aBorrar.isEmpty())
+        return 0;
+
+    if (algunaDeshacible)
+        pushUndo();
+    for (qint64 id : aBorrar)
+        m_features.remove(id);
+    m_idxSucio = true;
+    if (aBorrar.contains(m_selected)) {
+        m_selected = -1;
+        emit selectionChanged(-1);
+    }
+    for (qint64 id : aBorrar)
+        emit featureRemoved(id);
+    emit layersChanged();
+    emit changed();
+    return int(aBorrar.size());
+}
+
+// Cuantas entidades hay de cada tipo, en una capa o en todas.
+QMap<QString, int> OverlayModel::typeCounts(const QString &layerId) const
+{
+    QMap<QString, int> cuentas;
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it)
+        if (layerId.isEmpty() || it.value().layerId == layerId)
+            ++cuentas[it.value().type];
+    return cuentas;
+}
+
+// Oculta o muestra un tipo entero (filtro de vista) y repinta si cambia algo.
+void OverlayModel::setTypeVisible(const QString &type, bool visible)
+{
+    const bool estabaVisible = !m_tiposOcultos.contains(type);
+    if (visible == estabaVisible)
+        return;
+    if (visible)
+        m_tiposOcultos.remove(type);
+    else
+        m_tiposOcultos.insert(type);
+    emit changed();
 }
 
 // Borra TODAS las entidades de todas las capas (las capas se conservan). Como

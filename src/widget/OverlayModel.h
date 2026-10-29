@@ -4,6 +4,7 @@
 #include "libmapa/MapFeature.h"
 
 #include <QHash>
+#include <QMap>
 #include <QSet>
 #include <QObject>
 #include <functional>
@@ -58,7 +59,31 @@ public:
 
     bool updateFeature(const MapFeature &feature);
     bool removeFeature(qint64 id);
+    /*!
+     * \brief Anade varias entidades de una vez: UN paso de deshacer y UNA senal
+     *        \ref changed (y \ref layersChanged), en vez de una por entidad.
+     *
+     * Devuelve un id por entidad, en el mismo orden; las de geometria invalida no
+     * entran y llevan -1. Cada alta avisa ademas con \ref featureAdded, que es barato
+     * (lo escucha la persistencia); lo caro, el repintado, ocurre una sola vez.
+     */
+    QVector<qint64> addFeatures(const QVector<MapFeature> &features);
     void clearLayer(const QString &layerId);
+    /*!
+     * \brief Borra todas las entidades de un tipo (opcionalmente solo de una capa).
+     *
+     * Un solo paso de deshacer y una sola senal \ref changed. Devuelve cuantas se
+     * borraron. Con \a layerId vacio mira todas las capas.
+     */
+    int clearType(const QString &type, const QString &layerId = QString());
+    //! Cuantas entidades hay de cada tipo (de una capa o de todas). Las sin tipo
+    //! se cuentan bajo la clave vacia.
+    QMap<QString, int> typeCounts(const QString &layerId = QString()) const;
+    //! Oculta o muestra todas las entidades de un tipo, sin tocar su visibilidad
+    //! propia ni la de su capa. Es un FILTRO DE VISTA: no se guarda ni se deshace.
+    void setTypeVisible(const QString &type, bool visible);
+    bool isTypeVisible(const QString &type) const { return !m_tiposOcultos.contains(type); }
+    QStringList hiddenTypes() const { return QStringList(m_tiposOcultos.constBegin(), m_tiposOcultos.constEnd()); }
     void clear();
 
     std::optional<MapFeature> feature(qint64 id) const;
@@ -172,6 +197,7 @@ private:
     int m_groupDepth = 0;
     int m_maxUndo = 50;
     QSet<QString> m_sinDeshacer;   //!< Capas fuera de deshacer/rehacer.
+    QSet<QString> m_tiposOcultos;  //!< Tipos ocultos por el filtro de vista.
 };
 
 } // namespace libmapa

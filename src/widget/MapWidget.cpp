@@ -1520,6 +1520,42 @@ qint64 MapWidget::addFeature(const MapFeature &feature)
     return d->view ? d->view->overlayModel()->addFeature(feature) : -1;
 }
 
+// Anade varias entidades con un solo repintado.
+QVector<qint64> MapWidget::addFeatures(const QVector<MapFeature> &features)
+{
+    return d->view ? d->view->overlayModel()->addFeatures(features)
+                   : QVector<qint64>(features.size(), -1);
+}
+
+// Cuantas entidades hay de cada tipo.
+QMap<QString, int> MapWidget::featureTypeCounts(const QString &layerId) const
+{
+    return d->view ? d->view->overlayModel()->typeCounts(layerId) : QMap<QString, int>();
+}
+
+// Borra las entidades de un tipo con un solo repintado.
+int MapWidget::clearFeaturesOfType(const QString &type, const QString &layerId)
+{
+    return d->view ? d->view->overlayModel()->clearType(type, layerId) : 0;
+}
+
+// Filtro de vista: oculta o muestra un tipo entero.
+void MapWidget::setFeatureTypeVisible(const QString &type, bool visible)
+{
+    if (d->view)
+        d->view->overlayModel()->setTypeVisible(type, visible);
+}
+
+bool MapWidget::isFeatureTypeVisible(const QString &type) const
+{
+    return d->view ? d->view->overlayModel()->isTypeVisible(type) : true;
+}
+
+QStringList MapWidget::hiddenFeatureTypes() const
+{
+    return d->view ? d->view->overlayModel()->hiddenTypes() : QStringList();
+}
+
 // Reemplaza una entidad existente.
 bool MapWidget::updateFeature(const MapFeature &feature)
 {

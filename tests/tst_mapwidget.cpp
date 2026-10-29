@@ -155,6 +155,9 @@ private slots:
     //! (dentro del circulo, sobre el arco), el arco rotula su mitad y un circulo
     //! sirve de zona vigilada.
     void roundFeaturesDrawHitTestAndWatchZones();
+    //! Capa = categoria y tipo = entidad: alta en lote (con persistencia), conteo y
+    //! borrado por tipo, y ocultar un tipo lo quita de la vista y del raton.
+    void featuresGroupedByLayerAndType();
     //! Los rotulos de entidades se pintan POR ENCIMA de las marcaciones: una linea
     //! de marcacion ya no tapa el nombre de una zona.
     void featureLabelsDrawAboveRangeMarks();
@@ -4673,6 +4676,82 @@ void TstMapWidget::roundFeaturesDrawHitTestAndWatchZones()
     QVERIFY(w.updateTarget(idt, centro.atDistanceAndAzimuth(5000.0, 0.0)));
     QCOMPARE(entra.count(), 1);
     QCOMPARE(entra.at(0).at(1).toLongLong(), idc);
+}
+
+void TstMapWidget::featuresGroupedByLayerAndType()
+{
+    const QString bd = m_dir.filePath(QStringLiteral("grouped.db"));
+    QFile::remove(bd);
+    QVector<qint64> ids;
+    {
+        MapWidget w(baseConfig(m_jsonPath));
+        QVERIFY(w.isReady());
+        w.resize(800, 600);
+        const QGeoCoordinate centro(21.5, -79.5);
+        w.setCenter(centro);
+        w.setZoom(11);
+        auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+        QVERIFY(plot);
+        const auto pixel = [&](const QGeoCoordinate &c) {
+            plot->replot();
+            const QPointF eje = w.toAxisCoords(c);
+            return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                          qRound(plot->yAxis->coordToPixel(eje.y())));
+        };
+
+        // Seis puntos de dos tipos en una capa: «aerodromos» = categoria,
+        // «internos» y «externos» = entidades.
+        w.addFeatureLayer(QStringLiteral("aerodromos"), QStringLiteral("Aerodromos"), 50);
+        QVector<MapFeature> lote;
+        for (int i = 0; i < 6; ++i) {
+            MapFeature f;
+            f.kind = GeometryKind::Point;
+            f.layerId = QStringLiteral("aerodromos");
+            f.type = (i % 2 == 0) ? QStringLiteral("internos") : QStringLiteral("externos");
+            f.name = QStringLiteral("A%1").arg(i);
+            f.geometry = { centro.atDistanceAndAzimuth(3000.0 * (i + 1), 90.0) };
+            lote.append(f);
+        }
+        QSignalSpy altas(&w, &MapWidget::featureAdded);
+        ids = w.addFeatures(lote);
+        QCOMPARE(ids.size(), 6);
+        for (qint64 id : ids)
+            QVERIFY(id > 0);
+        QCOMPARE(altas.count(), 6);
+        QCOMPARE(w.featureCount(), 6);
+
+        const QMap<QString, int> cuentas = w.featureTypeCounts(QStringLiteral("aerodromos"));
+        QCOMPARE(cuentas.value(QStringLiteral("internos")), 3);
+        QCOMPARE(cuentas.value(QStringLiteral("externos")), 3);
+        QVERIFY(w.featureTypeCounts(QStringLiteral("otra")).isEmpty());
+
+        // Ocultar un tipo: ya no se ve ni se elige ni se rotula, pero sigue en el
+        // modelo; mostrarlo lo devuelve.
+        const QPoint interno = pixel(lote.at(0).geometry.first());
+        const QPoint externo = pixel(lote.at(1).geometry.first());
+        QCOMPARE(w.featureAt(interno), ids.at(0));
+        QVERIFY(w.featureLabelRect(ids.at(0)).isValid());
+        w.setFeatureTypeVisible(QStringLiteral("internos"), false);
+        QVERIFY(!w.isFeatureTypeVisible(QStringLiteral("internos")));
+        QCOMPARE(w.hiddenFeatureTypes(), QStringList({ QStringLiteral("internos") }));
+        QCOMPARE(w.featureAt(interno), qint64(-1));
+        QCOMPARE(w.featureAt(externo), ids.at(1));          // el otro tipo no se toca
+        QCOMPARE(w.featuresOfType(QStringLiteral("internos")).size(), 3);   // sigue en el modelo
+        w.setFeatureTypeVisible(QStringLiteral("internos"), true);
+        QCOMPARE(w.featureAt(interno), ids.at(0));
+
+        // Borrar un tipo: se van sus tres y no las demas; deshacer de una vez no hace
+        // falta aqui (lo prueba tst_overlaymodel). Se guarda lo que queda.
+        QCOMPARE(w.clearFeaturesOfType(QStringLiteral("externos"), QStringLiteral("aerodromos")), 3);
+        QCOMPARE(w.featureCount(), 3);
+        QCOMPARE(w.featureTypeCounts().value(QStringLiteral("externos")), 0);
+        QVERIFY(w.saveFeaturesTo(bd));
+    }
+    MapWidget w2(baseConfig(m_jsonPath));
+    QVERIFY(w2.isReady());
+    QVERIFY(w2.loadFeaturesFrom(bd));
+    QCOMPARE(w2.featureCount(), 3);
+    QCOMPARE(w2.featureTypeCounts().value(QStringLiteral("internos")), 3);
 }
 
 // Cuenta los pixeles "azul de marcacion" (2962ff y sus cercanos) de un recuadro.

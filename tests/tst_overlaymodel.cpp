@@ -25,6 +25,10 @@ private slots:
     //! Circulos y arcos: validos con centro y radio, sin vertices que insertar o
     //! quitar, y moverlos mueve el centro.
     void roundFeaturesBehaveInTheModel();
+    //! Alta en lote, conteo y borrado por tipo y filtro de visibilidad por tipo:
+    //! UNA senal de repintado y UN paso de deshacer, no una por entidad.
+    void batchAddCountAndClearByType();
+    void typeVisibilityIsAViewFilter();
     void keepsDomainTypeAndAttributes();
     void filtersByTypeAcrossLayers();
 
@@ -236,6 +240,89 @@ void TstOverlayModel::roundFeaturesBehaveInTheModel()
     QVERIFY(qAbs(m.feature(ida)->geometry.first().latitude() - 23.5) < 1e-9);
     QVERIFY(qAbs(m.feature(ida)->radiusMeters - 10000.0) < 1e-9);
     QVERIFY(m.feature(ida)->isValid());
+}
+
+void TstOverlayModel::batchAddCountAndClearByType()
+{
+    OverlayModel m;
+    QVector<MapFeature> lote;
+    for (int i = 0; i < 6; ++i) {
+        MapFeature f = punto(QStringLiteral("P%1").arg(i), 23.0 + 0.01 * i, -82.0,
+                             i < 4 ? QStringLiteral("aero") : QStringLiteral("zonas"));
+        f.type = (i % 2 == 0) ? QStringLiteral("internos") : QStringLiteral("externos");
+        lote.append(f);
+    }
+    MapFeature malo;                     // sin geometria: no entra
+    malo.kind = GeometryKind::Point;
+    lote.insert(2, malo);
+
+    QSignalSpy cambios(&m, &OverlayModel::changed);
+    QSignalSpy altas(&m, &OverlayModel::featureAdded);
+    const QVector<qint64> ids = m.addFeatures(lote);
+    QCOMPARE(ids.size(), lote.size());
+    QCOMPARE(ids.at(2), qint64(-1));                 // la invalida lleva -1, en su sitio
+    QCOMPARE(m.count(), 6);
+    QCOMPARE(cambios.count(), 1);                    // UN repintado, no seis
+    QCOMPARE(altas.count(), 6);                      // pero cada alta se anuncia (persistencia)
+    QCOMPARE(m.undoDepth(), 1);                      // y un solo paso de deshacer
+
+    // Conteo por tipo, en todo el modelo y por capa.
+    QMap<QString, int> todo = m.typeCounts();
+    QCOMPARE(todo.value(QStringLiteral("internos")), 3);
+    QCOMPARE(todo.value(QStringLiteral("externos")), 3);
+    QCOMPARE(m.typeCounts(QStringLiteral("aero")).value(QStringLiteral("internos")), 2);
+    QCOMPARE(m.typeCounts(QStringLiteral("zonas")).value(QStringLiteral("externos")), 1);
+    QVERIFY(m.typeCounts(QStringLiteral("no_existe")).isEmpty());
+
+    // Borrar un tipo de una capa: solo los de esa capa, con un repintado y un paso.
+    cambios.clear();
+    QSignalSpy bajas(&m, &OverlayModel::featureRemoved);
+    QCOMPARE(m.clearType(QStringLiteral("internos"), QStringLiteral("aero")), 2);
+    QCOMPARE(m.count(), 4);
+    QCOMPARE(cambios.count(), 1);
+    QCOMPARE(bajas.count(), 2);
+    QCOMPARE(m.undoDepth(), 2);
+    QCOMPARE(m.typeCounts().value(QStringLiteral("internos")), 1);   // queda el de «zonas»
+
+    // Deshacer devuelve las dos de golpe.
+    QVERIFY(m.undo());
+    QCOMPARE(m.count(), 6);
+
+    // Sin capa, borra el tipo en todas; un tipo que no existe no hace nada ni repinta.
+    cambios.clear();
+    QCOMPARE(m.clearType(QStringLiteral("externos")), 3);
+    QCOMPARE(m.count(), 3);
+    QCOMPARE(cambios.count(), 1);
+    cambios.clear();
+    QCOMPARE(m.clearType(QStringLiteral("inventado")), 0);
+    QCOMPARE(cambios.count(), 0);
+}
+
+void TstOverlayModel::typeVisibilityIsAViewFilter()
+{
+    OverlayModel m;
+    MapFeature f = punto(QStringLiteral("A"), 23.0, -82.0);
+    f.type = QStringLiteral("internos");
+    const qint64 id = m.addFeature(f);
+    QSignalSpy cambios(&m, &OverlayModel::changed);
+    const int pasos = m.undoDepth();
+
+    QVERIFY(m.isTypeVisible(QStringLiteral("internos")));
+    m.setTypeVisible(QStringLiteral("internos"), false);
+    QVERIFY(!m.isTypeVisible(QStringLiteral("internos")));
+    QCOMPARE(m.hiddenTypes(), QStringList({ QStringLiteral("internos") }));
+    QCOMPARE(cambios.count(), 1);
+    m.setTypeVisible(QStringLiteral("internos"), false);   // sin cambio: no repinta
+    QCOMPARE(cambios.count(), 1);
+
+    // Es solo un filtro: la entidad sigue ahi, visible por si misma y sin deshacer.
+    QVERIFY(m.feature(id)->visible);
+    QCOMPARE(m.featuresOfType(QStringLiteral("internos")).size(), 1);
+    QCOMPARE(m.undoDepth(), pasos);
+
+    m.setTypeVisible(QStringLiteral("internos"), true);
+    QVERIFY(m.hiddenTypes().isEmpty());
+    QCOMPARE(cambios.count(), 2);
 }
 
 void TstOverlayModel::keepsDomainTypeAndAttributes()

@@ -238,7 +238,8 @@ void FeatureLayer::draw(QCPPainter *painter)
         if (zoomActual >= 0 && !capaVisibleAZoom(capa, zoomActual))
             continue;               // capa de detalle fuera de su rango de zoom
         m_model->forEachInLayer(capa.id, [&](const MapFeature &f) {
-            if (!f.visible || !featureInView(f, visible))
+            if (!f.visible || !m_model->isTypeVisible(f.type)
+                || !featureInView(f, visible))
                 return true;        // oculta o fuera de pantalla: ni se proyecta
             drawFeature(&p, f, f.id == m_model->selectedId());
             ++m_lastDrawn;
@@ -745,7 +746,7 @@ void FeatureLayer::drawLabels(QPainter *painter) const
             continue;
         m_model->forEachInLayer(capa.id, [&](const MapFeature &f) {
             if (!f.style.labelVisible || f.name.isEmpty() || !f.visible
-                || !featureInView(f, visible))
+                || !m_model->isTypeVisible(f.type) || !featureInView(f, visible))
                 return true;
             const QPointF base = labelAnchorScreen(f);
             if (!base.isNull())
@@ -819,7 +820,8 @@ qint64 FeatureLayer::labelAt(const QPoint &pixel) const
             continue;               // capa fija del paquete: no se elige con el raton
         qint64 acierto = -1;
         m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
-            if (!f.visible || !f.selectable || !f.style.labelVisible || f.name.isEmpty())
+            if (!f.visible || !f.selectable || !f.style.labelVisible || f.name.isEmpty()
+                || !m_model->isTypeVisible(f.type))
                 return true;
             const QPointF base = labelAnchorScreen(f);
             if (base.isNull())
@@ -884,7 +886,7 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
             continue;               // capa fija del paquete: no se elige con el raton
 
         m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
-            if (!f.visible || !f.selectable)
+            if (!f.visible || !f.selectable || !m_model->isTypeVisible(f.type))
                 return true;
             if (!featureInView(f, vista_))
                 return true;            // fuera de pantalla: no hace falta probar

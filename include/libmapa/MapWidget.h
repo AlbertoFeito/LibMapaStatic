@@ -16,6 +16,7 @@
 
 #include <QGeoCoordinate>
 #include <QImage>
+#include <QMap>
 #include <QPointF>
 #include <QString>
 #include <QStringList>
@@ -347,6 +348,41 @@ public:
     qint64 addFeature(const MapFeature &feature);
     bool updateFeature(const MapFeature &feature);
     bool removeFeature(qint64 id);
+    /*!
+     * \brief Anade varias entidades de una vez, con UN solo repintado y UN solo
+     *        paso de deshacer.
+     *
+     * Devuelve un id por entidad en el mismo orden (-1 en las de geometria
+     * invalida, que no entran). Con miles de entidades es mucho mas rapido que
+     * llamar a \ref addFeature una a una.
+     */
+    QVector<qint64> addFeatures(const QVector<MapFeature> &features);
+    /*!
+     * \brief Cuantas entidades hay de cada tipo (\ref MapFeature::type), de una
+     *        capa o de todas. Las sin tipo cuentan bajo la clave vacia.
+     *
+     * Una capa hace de «categoria» y el tipo de «entidad»: filtrar, contar y borrar
+     * por las dos cubre «mostrar solo los aerodromos internos» sin campos nuevos.
+     */
+    QMap<QString, int> featureTypeCounts(const QString &layerId = QString()) const;
+    /*!
+     * \brief Borra todas las entidades de un tipo (de una capa o de todas).
+     *
+     * Un solo repintado y un solo paso de deshacer. Devuelve cuantas borro.
+     */
+    int clearFeaturesOfType(const QString &type, const QString &layerId = QString());
+    /*!
+     * \brief Oculta o muestra todas las entidades de un tipo, sin tocar su
+     *        visibilidad propia ni la de su capa.
+     *
+     * Es un filtro de vista: no se guarda, no se deshace y no afecta a las
+     * consultas (\ref features, \ref featuresOfType), solo a lo que se ve y se
+     * puede elegir con el raton.
+     */
+    void setFeatureTypeVisible(const QString &type, bool visible);
+    bool isFeatureTypeVisible(const QString &type) const;
+    //! Tipos ocultos ahora mismo por \ref setFeatureTypeVisible.
+    QStringList hiddenFeatureTypes() const;
     void clearFeatureLayer(const QString &layerId);
     void clearFeatures();
 
