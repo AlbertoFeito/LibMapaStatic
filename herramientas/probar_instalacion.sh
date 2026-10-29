@@ -11,7 +11,7 @@
 #       el indice de lugares de prueba; sin red);
 #    3. compila TODOS los ejemplos (examples/CMakeLists.txt) contra el prefijo;
 #    4. arranca app_minima, visor_gpx, editor_rutas, buscador_lugares, medidor_campo, monitor_trafico, vigilancia_zonas,
-#       analisis_terreno, rutas_tierra (con su propia red de demostracion), emisor_nmea y cliente_telemetria con
+#       analisis_terreno, rutas_tierra (con su propia red de demostracion), laboratorio_anillos, emisor_nmea y cliente_telemetria con
 #       --comprobar, y check_data, sobre ese paquete.
 #
 #  libtelemetria (decodificador NMEA/AIS) se instala en el mismo prefijo que libmapa: tambien se comprueba aqui.
@@ -157,6 +157,11 @@ TERRENO="$(find "$TRABAJO/ejemplos" -type f -name analisis_terreno -perm -u+x | 
 RUTAS="$(find "$TRABAJO/ejemplos" -type f -name rutas_tierra -perm -u+x | head -1)"
 [ -n "$RUTAS" ] || fallo "no se encuentra rutas_tierra compilado"
 "$RUTAS" --comprobar || fallo "rutas_tierra --comprobar no sale con 0"
+
+# laboratorio_anillos: sin hibrido, diez anillos de 10 km con radiales, cambio de centro, ocultar/mostrar, NM y lectura del raton.
+ANILLOS="$(find "$TRABAJO/ejemplos" -type f -name laboratorio_anillos -perm -u+x | head -1)"
+[ -n "$ANILLOS" ] || fallo "no se encuentra laboratorio_anillos compilado"
+"$ANILLOS" "$PAQ" --comprobar || fallo "laboratorio_anillos --comprobar no sale con 0"
 
 # emisor_nmea: simula 120 s de NMEA/AIS, lo decodifica con libtelemetria y manda un datagrama UDP por localhost.
 EMISOR="$(find "$TRABAJO/ejemplos" -type f -name emisor_nmea -perm -u+x | head -1)"

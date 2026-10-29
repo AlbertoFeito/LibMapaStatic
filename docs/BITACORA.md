@@ -7169,3 +7169,52 @@ que no describen a una estación (binarios, acuses, gestión de canales...) se c
 en pantalla (su prueba sin ventana, sí); los colores y el orden de la tabla son lo primero que hay que mirar.
 
 **Estado: 31 tests (28 sin QCustomPlot).** Verificado: los tres tests de `libtelemetria`, el contrato de instalación (`herramientas/probar_instalacion.sh`, con los diez ejemplos y sus `--comprobar`).
+
+## 174. Ejemplo `laboratorio_anillos`: comprobar la escala de los anillos
+
+El usuario quería una aplicación para **analizar y comprobar** los anillos de distancia:
+- que arranque con el mapa de costas (`costas`, `Cuba_Vector.sqlitedb`), solo, sin nada híbrido;
+- mostrar y ocultar los anillos, y llevarlos a otro punto;
+- ver las coordenadas del ratón;
+- ver la escala de los anillos y los radiales para comprobarlos;
+- tener a la derecha la lista de qué ver y qué probar.
+
+Empezó como un añadido al `laboratorio_rotulos` del PR #46. El usuario prefirió un ejemplo
+**aparte** con todo lo de esta sesión, para no mezclarlo con la fase 1 de la convergencia. Por
+eso este ejemplo sale de `main` y usa solo el API que ya está ahí: no depende del #46.
+
+**Cómo está hecho.** No toca la librería: todo lo que pedía ya existía.
+- **Mapa de arranque:** la app elige `costas` con `setBaseLayerId` si el paquete la trae (si no,
+  queda la de `start`) y llama a `clearVectorOverlay`, que quita el híbrido aunque lo pida el
+  `mapa.json`. El overlay del paquete se instala dentro del constructor de `MapWidget`, así que
+  quitarlo justo después es seguro.
+- **Mostrar, ocultar y ajustar:** los ajustes viven en el panel. Ocultar es `removeRangeMark`, y
+  cualquier cambio vuelve a poner un `RangeRings` nuevo con lo que diga el panel.
+- **Centro con un clic:** `MapTool::PickPoint` con `pointPicked`. Esc o el clic derecho cancelan
+  (`pickCancelled`).
+- **Unidades:** `setScaleBarUnits` cambia a la vez la barra y los rótulos de los anillos, que se
+  rotulan en las unidades de la escala.
+- **Lectura del ratón:** es la herramienta de comprobación. Da la distancia y la marcación desde
+  el centro (`distanceTo` / `azimuthTo`, geodésicas como los anillos) y el anillo más cercano; al
+  pasar por un anillo tiene que coincidir con su rótulo.
+
+**Comprobado.** Con una captura sobre el MBTiles de Cuba: el ratón en el tercer anillo al 060°
+da «30.0 km · 060°». `--comprobar` revisa, sin ventana:
+- la capa inicial y que no hay híbrido, sobre un paquete con `costas` y `vectorOverlay`;
+- los diez anillos de 10 km;
+- el cambio de centro, y el ocultar y mostrar;
+- las millas náuticas;
+- la lectura del ratón.
+
+Va en `herramientas/probar_instalacion.sh` (sobre su paquete mínimo, que no tiene `costas`) y en
+los dos proyectos de ejemplos (CMake y qmake).
+
+**Un detalle de los demás ejemplos.** Si el paquete no carga, con `--comprobar` no se abre el
+diálogo de error, porque sin nadie delante se quedaría esperando. El fallo sale por la consola.
+
+**Lo que no es.** Los anillos son círculos geodésicos: en Mercator se estiran hacia el norte, y
+así lo explica el panel. No hay un medidor libre entre dos puntos cualesquiera (para eso está
+«Medir» en la demo).
+
+**Estado: 31 tests (28 sin QCustomPlot), contrato de instalación en verde con el ejemplo nuevo.**
+
