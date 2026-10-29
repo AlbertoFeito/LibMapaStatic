@@ -57,7 +57,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/rutas-sin-conexion` | #37 | Rutas en coche sin conexión por la red vial de las teselas: `MapWidget::findRoute`, «Ruta (coche)» en la demo y `vector_tile --route` |
 | `claude/app-rutas-tierra` | #38 | Ejemplo `rutas_tierra` (rutas por tierra con caminos de tierra y red de demostración) y `RouteResult::legs` |
 | `claude/inspiring-wright-u0smtv` | #41 | Los 27 tipos AIS en `libtelemetria` (aportación del fork `randoloc`), catálogo de tipos en `emisor_nmea` y estaciones fijas en `cliente_telemetria` |
-| `claude/sweet-cray-74nz88` (tercera vez, desde `main`) | — | Las plantillas `mapa.example.json` y `datasets.example.json` arrancan con la capa `costas` (`Cuba_Vector.sqlitedb`), sin híbrido |
+| `claude/sweet-cray-74nz88` (tercera vez, desde `main`) | #47 | Las plantillas `mapa.example.json` y `datasets.example.json` arrancan con la capa `costas` (`Cuba_Vector.sqlitedb`), sin híbrido |
 | `ccr-1c6d88f3-of2nuy` | #43 | Respuesta a la propuesta de convergencia del fork extendido: `docs/Respuesta_convergencia.md` |
 | `ccr-1c6d88f3-of2nuy` (otra vez, desde `main`) | #44 | Segunda respuesta de la convergencia: `docs/Respuesta_convergencia_2.md` |
 | `ccr-1c6d88f3-of2nuy` (y otra vez, desde `main`) | (borrador) | Propuesta final de la convergencia: `docs/Propuesta_final_convergencia.md` |
