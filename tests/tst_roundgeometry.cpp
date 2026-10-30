@@ -25,6 +25,8 @@ private slots:
     void storedPartsKeepOnlyTheCenter();
     void plainCopyForExport();
     void labelPointOfAnArcIsItsMiddle();
+    //! Un arco con arcSector es una cuna cerrada hasta el centro: un area.
+    void sectorIsAWedgeArea();
 };
 
 // Una entidad redonda de ejemplo en La Habana; el llamador ajusta el tipo y los datos.
@@ -240,6 +242,38 @@ void TstRoundGeometry::plainCopyForExport()
     p.geometry = { QGeoCoordinate(23.0, -82.0) };
     QCOMPARE(p.toPlain().kind, GeometryKind::Point);
     QVERIFY(p.toPlain().attributes.isEmpty());
+}
+
+// Un sector: area (no linea), con el centro como primer vertice y el contorno como el del arco;
+// de plano sale como poligono, y un punto entre sus radios cae dentro y uno fuera, no.
+void TstRoundGeometry::sectorIsAWedgeArea()
+{
+    MapFeature s = redonda(GeometryKind::Arc, 10000.0, 330.0, 30.0);
+    s.arcSector = true;
+    QVERIFY(s.isValid() && s.isArea() && !s.isLinear());
+    const QVector<QGeoCoordinate> c = s.roundOutline();
+    QCOMPARE(c.size(), 32);                            // el centro + 30 tramos + 1
+    QCOMPARE(c.first(), s.geometry.first());
+    const MapFeature p = s.toPlain();
+    QCOMPARE(p.kind, GeometryKind::Polygon);
+    QVERIFY(p.isValid());
+    QVERIFY(p.attributes.value(QStringLiteral("arc_sector")).toBool());
+    // roundContains: dentro de la cuna que cruza el norte, no fuera de ella ni mas lejos del radio.
+    const QGeoCoordinate o = s.geometry.first();
+    QVERIFY(s.roundContains(o.atDistanceAndAzimuth(5000.0, 0.0)));
+    QVERIFY(s.roundContains(o.atDistanceAndAzimuth(5000.0, 350.0)));
+    QVERIFY(s.roundContains(o.atDistanceAndAzimuth(9000.0, 20.0)));
+    QVERIFY(!s.roundContains(o.atDistanceAndAzimuth(5000.0, 90.0)));
+    QVERIFY(!s.roundContains(o.atDistanceAndAzimuth(5000.0, 300.0)));
+    QVERIFY(!s.roundContains(o.atDistanceAndAzimuth(11000.0, 0.0)));
+    MapFeature circulo = redonda(GeometryKind::Circle, 10000.0);
+    QVERIFY(circulo.roundContains(circulo.geometry.first().atDistanceAndAzimuth(9000.0, 123.0)));
+    QVERIFY(!circulo.roundContains(circulo.geometry.first().atDistanceAndAzimuth(11000.0, 123.0)));
+    // Sin arcSector sigue siendo solo la linea.
+    s.arcSector = false;
+    QVERIFY(!s.roundContains(o.atDistanceAndAzimuth(5000.0, 0.0)));
+    QVERIFY(s.isLinear() && !s.isArea());
+    QCOMPARE(s.roundOutline().size(), 31);
 }
 
 // El rotulo de un arco cuelga de la mitad de su recorrido; el de un circulo, de su punto norte.

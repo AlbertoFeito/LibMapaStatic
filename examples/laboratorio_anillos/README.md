@@ -27,7 +27,7 @@ arrastrable con colores por segmento.
 | Formulario colgado de la esquina más cercana, fuente monoespaciada, ancho y columnas 8 + 8 | `MapWidget::setTargetLabelFormat` (`TargetLabelFormat`, `TargetLabelPlacement`) |
 | Offset por defecto de los formularios y propio de cada objetivo; color de selección | `setDefaultTargetLabelOffset`, `setTargetLabelOffset`, `clearTargetLabelOffset`, `setTargetLabelSelectionColor` |
 | Aviso al soltar un formulario arrastrado (soltar fuera del mapa cancela) | señal `targetLabelMoved`, `targetLabelRect` |
-| Círculo de 50 km y tres sectores (uno cruza el norte, de 330° a 30°) alrededor del centro, geodésicos | `GeometryKind::Circle` y `Arc`, `MapFeature::radiusMeters`, `arcStartDeg`, `arcEndDeg` |
+| Círculo de 50 km y tres **sectores** (cuñas rellenas, una cruza el norte, de 330° a 30°) alrededor del centro, geodésicos; cada uno se muestra, oculta, cambia, analiza (área y objetivos dentro) y elimina por separado | `GeometryKind::Circle` y `Arc` con `arcSector`, `radiusMeters`, `arcStartDeg`, `arcEndDeg`, `roundContains`, `visible` |
 | Alta de los cuatro en un lote (una señal de repintado, un paso de deshacer) y borrado por tipo | `addFeatures`, `clearFeaturesOfType` |
 | Recuento por tipo y ocultar/mostrar un tipo sin borrarlo | `featureTypeCounts`, `setFeatureTypeVisible`, `isFeatureTypeVisible` |
 | Una entidad de tres puntos con nombre y color cada uno (la tercera sin color propio) | `MapFeature::parts` + `partsInfo` (`PartInfo`) |

@@ -34,6 +34,7 @@
 #include <libmapa/MapWidget.h>
 
 #include <QApplication>
+#include <cmath>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -126,9 +127,11 @@ QString textoAyuda()
         "Con «Colgado de la esquina» la caja cuelga del punto por la esquina cercana al "
         "objetivo; prueba también la fuente monoespaciada, el ancho, las columnas 8 + 8, el "
         "offset por defecto y el color de selección.</li>"
-        "<li><b>Sectores:</b> el círculo de 50 km y los tres sectores (el de 330° a 30° cruza "
-        "el norte) se mueven con el centro. Oculta cada tipo, bórralos por tipo y mira cómo "
-        "cambia el recuento.</li>"
+        "<li><b>Sectores:</b> son áreas rellenas (cuña entre el centro, los dos radios y el arco) "
+        "para señalar dónde concentrarse; el de 330° a 30° cruza el norte. Cada uno va por "
+        "separado: la casilla lo muestra u oculta, «Cambiar» le pone otro radio o azimut, "
+        "«Eliminar» lo quita y «Agregar» crea otro. La lista dice su área y cuántos objetivos "
+        "caen dentro. Siguen al centro de los anillos.</li>"
         "<li><b>Partes:</b> agrega varios lugares «como parte de Sitios» y toca uno: el panel "
         "dice qué parte de la entidad es. Todos son <i>una</i> entidad con nombre y color por "
         "parte.</li></ol>");
@@ -206,7 +209,7 @@ public:
                 [this](const MapHit &hit, const QPoint &) { leeElemento(hit); });
         aplicaFormato();
         aplicaAnillos();
-        aplicaSectores();
+        restableceSectores();
         statusBar()->showMessage(tr("Capa base: %1").arg(m_mapa->baseLayerId()));
     }
 
@@ -218,7 +221,6 @@ public:
     qint64 primerPunto() const { return m_puntos.value(0, -1); }
     QVector<qint64> objetivos() const { return m_objetivos; }
     qint64 sitios() const { return m_sitios; }
-    QCheckBox *casillaSectores() const { return m_sectores; }
     QString lecturaElemento() const { return m_lblElemento ? m_lblElemento->text() : QString(); }
 
     // Dice que hay bajo el clic: la entidad, y si tiene varias partes, CUAL (subIndex).
@@ -238,43 +240,130 @@ public:
         m_lblElemento->setText(txt);
     }
 
-    // Pone los sectores y el circulo alrededor del centro (o los quita): un circulo de 50 km
-    // y tres arcos (de 0 a 90 grados, de 120 a 200 y uno que cruza el norte, de 330 a 30), en
-    // un solo lote (una sola senal de repintado y un solo paso de deshacer).
-    void aplicaSectores()
+public:
+    // Crea un circulo (\a sector falso y \a fin ignorado) o un sector alrededor del centro y lo
+    // anade a la lista; devuelve su id. Un sector es una cuna RELLENA (area a vigilar).
+    qint64 creaSector(bool circulo, double radioKm, double ini, double fin, const QColor &c,
+                      const QString &nombre)
+    {
+        MapFeature f;
+        f.kind = circulo ? GeometryKind::Circle : GeometryKind::Arc;
+        f.layerId = QStringLiteral("sectores");
+        f.type = QStringLiteral("sector");
+        f.name = nombre;
+        f.geometry = { m_centro };
+        f.radiusMeters = radioKm * 1000.0;
+        f.arcStartDeg = ini;
+        f.arcEndDeg = fin;
+        f.arcSector = !circulo;
+        f.style.lineColor = c;
+        f.style.lineWidth = 2.0;
+        f.style.fillColor = QColor(c.red(), c.green(), c.blue(), 70);
+        const qint64 id = m_mapa->addFeature(f);
+        m_sectoresIds.append(id);
+        return id;
+    }
+
+    // Deja los cuatro de ejemplo: un circulo de 50 km y tres sectores (de 0 a 90 grados, de 120
+    // a 200 y uno que cruza el norte, de 330 a 30). Borra antes los que hubiera.
+    void restableceSectores()
+    {
+        eliminaTodosSectores();
+        creaSector(true, 50, 0, 0, QColor(0x15, 0x65, 0xc0), tr("Círculo 50 km"));
+        creaSector(false, 100, 0, 90, QColor(0x2e, 0x7d, 0x32), tr("Sector 0–90"));
+        creaSector(false, 150, 120, 200, QColor(0xef, 0x6c, 0x00), tr("Sector 120–200"));
+        creaSector(false, 200, 330, 30, QColor(0x8e, 0x24, 0xaa), tr("Sector 330–30"));
+        actualizaSectores();
+    }
+
+    // Quita todos los sectores (por tipo, incluidos los que dejara guardados otra sesion).
+    void eliminaTodosSectores()
     {
         m_mapa->clearFeaturesOfType(QStringLiteral("sector"));
-        actualizaConteos();
-        if (!m_sectores->isChecked())
+        m_sectoresIds.clear();
+    }
+
+    // Objetivos que caen dentro del sector \a id (su nombre o id), para analizarlo por separado.
+    QStringList objetivosDentro(qint64 id) const
+    {
+        QStringList dentro;
+        const auto f = m_mapa->feature(id);
+        if (!f)
+            return dentro;
+        for (const MapTarget &t : m_mapa->targets())
+            if (f->roundContains(t.position))
+                dentro << (t.label.isEmpty() ? QString::number(t.id) : t.label);
+        return dentro;
+    }
+
+    // Vuelve a escribir la lista de sectores: nombre, tamano y objetivos dentro de cada uno, con
+    // su casilla de visible. Conserva el sector elegido.
+    void actualizaSectores()
+    {
+        if (!m_listaSectores)
             return;
-        const auto nuevo = [&](GeometryKind k, double radio, double ini, double fin,
-                               const QColor &c, const QString &nombre) {
-            MapFeature f;
-            f.kind = k;
-            f.layerId = QStringLiteral("sectores");
-            f.type = QStringLiteral("sector");
-            f.name = nombre;
-            f.geometry = { m_centro };
-            f.radiusMeters = radio;
-            f.arcStartDeg = ini;
-            f.arcEndDeg = fin;
-            f.style.lineColor = c;
-            f.style.lineWidth = 2.0;
-            f.style.fillColor = QColor(c.red(), c.green(), c.blue(), 40);
-            return f;
-        };
-        QVector<MapFeature> lote;
-        lote.append(nuevo(GeometryKind::Circle, 50000.0, 0, 0, QColor(0x15, 0x65, 0xc0),
-                          tr("Círculo 50 km")));
-        lote.append(nuevo(GeometryKind::Arc, 100000.0, 0, 90, QColor(0x2e, 0x7d, 0x32),
-                          tr("Sector 0–90")));
-        lote.append(nuevo(GeometryKind::Arc, 150000.0, 120, 200, QColor(0xef, 0x6c, 0x00),
-                          tr("Sector 120–200")));
-        lote.append(nuevo(GeometryKind::Arc, 200000.0, 330, 30, QColor(0x8e, 0x24, 0xaa),
-                          tr("Sector 330–30")));
-        m_mapa->addFeatures(lote);
+        const int fila = m_listaSectores->currentRow();
+        const QSignalBlocker b(m_listaSectores);
+        m_listaSectores->clear();
+        for (qint64 id : m_sectoresIds) {
+            const auto f = m_mapa->feature(id);
+            if (!f)
+                continue;
+            const double barrido = f->kind == GeometryKind::Circle
+                ? 360.0 : MapFeature::arcSweepDeg(f->arcStartDeg, f->arcEndDeg);
+            const double areaKm2 = M_PI * f->radiusMeters * f->radiusMeters * barrido / 360.0 / 1e6;
+            auto *it = new QListWidgetItem(
+                tr("%1 · %2 km · %3 km² · %4 objetivo(s)")
+                    .arg(f->name).arg(f->radiusMeters / 1000.0, 0, 'f', 0)
+                    .arg(areaKm2, 0, 'f', 0).arg(objetivosDentro(id).size()),
+                m_listaSectores);
+            it->setData(Qt::UserRole, id);
+            it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+            it->setCheckState(f->visible ? Qt::Checked : Qt::Unchecked);
+        }
+        m_listaSectores->setCurrentRow(qBound(-1, fila, m_listaSectores->count() - 1));
         actualizaConteos();
     }
+
+    // Id del sector elegido en la lista, o -1.
+    qint64 sectorElegido() const
+    {
+        const auto *it = m_listaSectores ? m_listaSectores->currentItem() : nullptr;
+        return it ? it->data(Qt::UserRole).toLongLong() : -1;
+    }
+
+public:
+    // Cuantos sectores hay, el id del i-esimo y operaciones por sector (las usa --comprobar y
+    // el panel): mostrar/ocultar, cambiar y eliminar uno sin tocar los demas.
+    int numSectores() const { return int(m_sectoresIds.size()); }
+    qint64 sector(int i) const { return m_sectoresIds.value(i, -1); }
+    void ponSectorVisible(qint64 id, bool visible)
+    {
+        auto f = m_mapa->feature(id);
+        if (!f)
+            return;
+        f->visible = visible;
+        m_mapa->updateFeature(*f);
+        actualizaSectores();
+    }
+    void cambiaSector(qint64 id, double radioKm, double ini, double fin)
+    {
+        auto f = m_mapa->feature(id);
+        if (!f)
+            return;
+        f->radiusMeters = radioKm * 1000.0;
+        f->arcStartDeg = ini;
+        f->arcEndDeg = fin;
+        m_mapa->updateFeature(*f);
+        actualizaSectores();
+    }
+    void eliminaSector(qint64 id)
+    {
+        m_mapa->removeFeature(id);
+        m_sectoresIds.removeAll(id);
+        actualizaSectores();
+    }
+    int dentroDe(qint64 id) const { return int(objetivosDentro(id).size()); }
 
     // Cambia el lado del anclaje del rotulo de todos los puntos y repinta.
     void ponAncla(LabelAnchor ancla)
@@ -341,7 +430,12 @@ public:
         m_centro = p;
         m_lblCentro->setText(formatCoordinate(p, CoordinateFormat::DMS));
         aplicaAnillos();
-        aplicaSectores();
+        for (qint64 id : m_sectoresIds)            // los sectores siguen al centro
+            if (auto f = m_mapa->feature(id)) {
+                f->geometry = { m_centro };
+                m_mapa->updateFeature(*f);
+            }
+        actualizaSectores();
     }
 
     // Rellena la lectura del raton: coordenadas en tres formatos y distancia y
@@ -531,6 +625,99 @@ private:
         }
     }
 
+    // Grupo del panel para los sectores: lista con casilla de visible, valores para agregar o
+    // cambiar uno, y botones para eliminar uno o todos. Cada sector va por separado.
+    void crearGrupoSectores(QWidget *panel, QVBoxLayout *col)
+    {
+        auto *gz = new QGroupBox(tr("Sectores (áreas a vigilar)"), panel);
+        auto *vz = new QVBoxLayout(gz);
+        m_listaSectores = new QListWidget(gz);
+        m_listaSectores->setMaximumHeight(130);
+        auto *fz = new QFormLayout;
+        auto *radio = new QDoubleSpinBox(gz);
+        radio->setRange(0.1, 2000.0);
+        radio->setValue(100.0);
+        radio->setSuffix(tr(" km"));
+        auto *ini = new QSpinBox(gz);
+        auto *fin = new QSpinBox(gz);
+        for (QSpinBox *sp : { ini, fin }) {
+            sp->setRange(0, 359);
+            sp->setSuffix(QStringLiteral("°"));
+        }
+        fin->setValue(90);
+        auto *esCirculo = new QCheckBox(tr("Círculo entero (sin inicio ni fin)"), gz);
+        fz->addRow(tr("Radio"), radio);
+        fz->addRow(tr("Desde (azimut)"), ini);
+        fz->addRow(tr("Hasta (azimut)"), fin);
+        fz->addRow(esCirculo);
+        auto *agregaSec = new QPushButton(tr("Agregar sector con estos valores"), gz);
+        auto *cambiaSec = new QPushButton(tr("Cambiar el sector elegido"), gz);
+        auto *quitaSec = new QPushButton(tr("Eliminar el sector elegido"), gz);
+        auto *restSec = new QPushButton(tr("Restablecer los sectores de ejemplo"), gz);
+        auto *borraSec = new QPushButton(tr("Eliminar todos los sectores"), gz);
+        vz->addWidget(new QLabel(tr("La casilla de cada uno lo muestra u oculta:"), gz));
+        vz->addWidget(m_listaSectores);
+        vz->addLayout(fz);
+        for (QPushButton *b : { agregaSec, cambiaSec, quitaSec, restSec, borraSec })
+            vz->addWidget(b);
+        col->addWidget(gz);
+        connect(m_listaSectores, &QListWidget::itemChanged, this, [this](QListWidgetItem *it) {
+            const qint64 id = it->data(Qt::UserRole).toLongLong();
+            auto f = m_mapa->feature(id);
+            const bool ver = it->checkState() == Qt::Checked;
+            if (f && f->visible != ver) {
+                f->visible = ver;
+                m_mapa->updateFeature(*f);
+            }
+        });
+        connect(m_listaSectores, &QListWidget::currentRowChanged, this,
+                [this, radio, ini, fin, esCirculo](int) {
+                    const qint64 id = sectorElegido();
+                    const auto f = m_mapa->feature(id);
+                    if (!f)
+                        return;
+                    radio->setValue(f->radiusMeters / 1000.0);
+                    ini->setValue(int(f->arcStartDeg));
+                    fin->setValue(int(f->arcEndDeg));
+                    esCirculo->setChecked(f->kind == GeometryKind::Circle);
+                    const QStringList dentro = objetivosDentro(id);
+                    statusBar()->showMessage(
+                        tr("Dentro de «%1»: %2").arg(f->name,
+                            dentro.isEmpty() ? tr("ningún objetivo")
+                                             : dentro.join(QStringLiteral(", "))), 8000);
+                });
+        connect(agregaSec, &QPushButton::clicked, this, [this, radio, ini, fin, esCirculo] {
+            static const QColor paleta[] = { QColor(0xc6, 0x28, 0x28), QColor(0x00, 0x83, 0x8f),
+                                             QColor(0x6a, 0x1b, 0x9a), QColor(0x55, 0x8b, 0x2f) };
+            const bool c = esCirculo->isChecked();
+            creaSector(c, radio->value(), ini->value(), fin->value(),
+                       paleta[m_sectoresIds.size() % 4],
+                       c ? tr("Círculo %1 km").arg(radio->value(), 0, 'f', 0)
+                         : tr("Sector %1–%2").arg(ini->value()).arg(fin->value()));
+            actualizaSectores();
+        });
+        connect(cambiaSec, &QPushButton::clicked, this, [this, radio, ini, fin] {
+            const qint64 id = sectorElegido();
+            auto f = m_mapa->feature(id);
+            if (!f)
+                return;
+            f->name = f->kind == GeometryKind::Arc
+                ? tr("Sector %1–%2").arg(ini->value()).arg(fin->value())
+                : tr("Círculo %1 km").arg(radio->value(), 0, 'f', 0);
+            m_mapa->updateFeature(*f);
+            cambiaSector(id, radio->value(), ini->value(), fin->value());
+        });
+        connect(quitaSec, &QPushButton::clicked, this, [this] {
+            if (sectorElegido() >= 0)
+                eliminaSector(sectorElegido());
+        });
+        connect(restSec, &QPushButton::clicked, this, [this] { restableceSectores(); });
+        connect(borraSec, &QPushButton::clicked, this, [this] {
+            eliminaTodosSectores();
+            actualizaSectores();
+        });
+    }
+
     // Construye el panel de la derecha: mapa, anillos, raton y la ayuda, con barra de
     // desplazamiento por si la ventana es baja.
     QWidget *creaPanel()
@@ -668,11 +855,12 @@ private:
         });
         col->addWidget(gb);
 
-        // --- Circulos, sectores y entidades por tipo -------------------------------------
+        // --- Sectores: cada uno se ve, se cambia, se analiza y se elimina por separado --------
+        crearGrupoSectores(panel, col);
+
+        // --- Entidades por tipo y partes -------------------------------------
         auto *gs = new QGroupBox(tr("Sectores, tipos y partes"), panel);
         auto *fs = new QFormLayout(gs);
-        m_sectores = new QCheckBox(tr("Círculo y sectores alrededor del centro"), gs);
-        m_sectores->setChecked(true);
         m_lblConteos = new QLabel(gs);
         m_lblConteos->setWordWrap(true);
         auto *tSector = new QCheckBox(tr("Ver sectores"), gs);
@@ -680,28 +868,19 @@ private:
         auto *tPunto = new QCheckBox(tr("Ver puntos agregados"), gs);
         for (QCheckBox *c : { tSector, tSitio, tPunto })
             c->setChecked(true);
-        auto *borraSect = new QPushButton(tr("Borrar los sectores (por tipo)"), gs);
         m_lblElemento = new QLabel(QStringLiteral("—"), gs);
         m_lblElemento->setWordWrap(true);
-        fs->addRow(m_sectores);
         fs->addRow(tr("Entidades por tipo"), m_lblConteos);
         fs->addRow(tSector);
         fs->addRow(tSitio);
         fs->addRow(tPunto);
-        fs->addRow(borraSect);
         fs->addRow(tr("Último clic en entidad"), m_lblElemento);
-        connect(m_sectores, &QCheckBox::toggled, this, [this] { aplicaSectores(); });
         connect(tSector, &QCheckBox::toggled, this,
                 [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("sector"), v); });
         connect(tSitio, &QCheckBox::toggled, this,
                 [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("sitio"), v); });
         connect(tPunto, &QCheckBox::toggled, this,
                 [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("punto"), v); });
-        connect(borraSect, &QPushButton::clicked, this, [this] {
-            const QSignalBlocker b(m_sectores);
-            m_sectores->setChecked(false);
-            aplicaSectores();
-        });
         col->addWidget(gs);
         actualizaConteos();
 
@@ -831,7 +1010,8 @@ private:
     QCheckBox *m_colorRadiales = nullptr;
     QVector<qint64> m_puntos;
     qint64 m_sitios = -1;
-    QCheckBox *m_sectores = nullptr;
+    QVector<qint64> m_sectoresIds;
+    QListWidget *m_listaSectores = nullptr;
     QLabel *m_lblConteos = nullptr;
     QLabel *m_lblElemento = nullptr;
     QVector<qint64> m_objetivos;
@@ -1010,14 +1190,28 @@ int comprobar(Ventana &v)
     v.agrega(QGeoCoordinate(22.9592, -82.4092), QStringLiteral("Sitio Bravo"), true);
     v.agrega(QGeoCoordinate(23.0321, -82.5166), QStringLiteral("Sitio Charly"), true);
     const qint64 sitios = v.sitios();
-    exige(m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
+    exige(v.numSectores() == 4 && m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
           "deberia haber cuatro sectores al arrancar", &fallos);
-    v.casillaSectores()->setChecked(false);
-    exige(m->featureTypeCounts().value(QStringLiteral("sector")) == 0,
-          "borrar por tipo no quito los sectores", &fallos);
-    v.casillaSectores()->setChecked(true);
-    exige(m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
-          "los sectores no volvieron", &fallos);
+    // Por separado: ocultar uno no toca los demas ni lo borra; cambiarlo cambia solo ese;
+    // eliminar uno deja los otros tres; restablecer vuelve a cuatro.
+    const qint64 s1 = v.sector(1), s2 = v.sector(2);
+    v.ponSectorVisible(s1, false);
+    exige(!m->feature(s1)->visible && m->feature(s2)->visible && v.numSectores() == 4,
+          "ocultar un sector no debe afectar a los demas ni borrarlo", &fallos);
+    v.ponSectorVisible(s1, true);
+    exige(m->feature(s1)->visible, "no se volvio a mostrar el sector", &fallos);
+    v.cambiaSector(s1, 120.0, 10.0, 80.0);
+    exige(qAbs(m->feature(s1)->radiusMeters - 120000.0) < 1.0 && m->feature(s1)->arcEndDeg == 80.0 &&
+              qAbs(m->feature(s2)->radiusMeters - 150000.0) < 1.0,
+          "cambiar un sector debe tocar solo ese", &fallos);
+    v.eliminaSector(s2);
+    exige(v.numSectores() == 3 && !m->feature(s2).has_value() &&
+              m->featureTypeCounts().value(QStringLiteral("sector")) == 3,
+          "eliminar un sector deja los otros", &fallos);
+    exige(v.dentroDe(v.sector(0)) >= 0, "no se pudo analizar el sector", &fallos);
+    v.restableceSectores();
+    exige(v.numSectores() == 4 && m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
+          "restablecer no dejo los cuatro", &fallos);
     m->setFeatureTypeVisible(QStringLiteral("sector"), false);
     exige(!m->isFeatureTypeVisible(QStringLiteral("sector")) &&
               m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
@@ -1032,7 +1226,7 @@ int comprobar(Ventana &v)
         // Sin los sectores (su relleno taparia el punto). Con el paquete minimo el zoom no pasa
         // de 2 y el centro no se puede llevar al sitio, asi que se rastrea la vista con
         // hitTest hasta dar con la entidad; la separacion exacta de partes la prueba tst_mapwidget.
-        v.casillaSectores()->setChecked(false);
+        v.eliminaTodosSectores();
         m->setCenter(sitio->parts.at(1).first());
         esperaRepintado(m);
         MapHit hit;

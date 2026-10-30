@@ -280,10 +280,10 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
         "INSERT INTO entidad (capa, tipo, geometria, nombre, descripcion,"
         " color_linea, color_relleno, ancho_linea, estilo_linea, radio_px,"
         " etiqueta_visible, label_dx, label_dy, label_anchor, label_pos, label_fuente,"
-        " radio_m, arco_ini, arco_fin, visible, simbolo,"
+        " radio_m, arco_ini, arco_fin, arco_sector, visible, simbolo,"
         " atributos, creado_utc)"
         " VALUES (:capa,:tipo,:geo,:nom,:desc,:cl,:cr,:anc,:el,:rp,:ev,"
-        " :ldx,:ldy,:lan,:lpo,:lfu,:rad,:ai,:af,:vi,:sim,:atr,:cu)"));
+        " :ldx,:ldy,:lan,:lpo,:lfu,:rad,:ai,:af,:asec,:vi,:sim,:atr,:cu)"));
     q.bindValue(QStringLiteral(":capa"), text(f.layerId));
     q.bindValue(QStringLiteral(":tipo"), text(f.type));
     q.bindValue(QStringLiteral(":geo"), static_cast<int>(f.kind));
@@ -303,6 +303,7 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     q.bindValue(QStringLiteral(":rad"), f.radiusMeters);
     q.bindValue(QStringLiteral(":ai"), f.arcStartDeg);
     q.bindValue(QStringLiteral(":af"), f.arcEndDeg);
+    q.bindValue(QStringLiteral(":asec"), f.arcSector ? 1 : 0);
     q.bindValue(QStringLiteral(":vi"), f.visible ? 1 : 0);
     q.bindValue(QStringLiteral(":sim"), pixmapToPng(f.style.icon));
     q.bindValue(QStringLiteral(":atr"), atributos);
@@ -458,6 +459,7 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         f.radiusMeters = field(q, "radio_m").toDouble();
         f.arcStartDeg = field(q, "arco_ini").toDouble();
         f.arcEndDeg = field(q, "arco_fin").toDouble();
+        f.arcSector = field(q, "arco_sector").toInt() != 0;      // esquema v7
         f.style.icon = pngToPixmap(field(q, "simbolo").toByteArray());
         f.visible = field(q, "visible").toInt() != 0;
 

@@ -7331,3 +7331,22 @@ distingue cuál: eso lo prueba `tst_mapwidget` con zoom 10).
 5.000 elementos en una pantalla real queda por medir.
 
 **Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 178. Los sectores son áreas: cuña rellena, uno por uno y con análisis
+
+**Origen.** Al probar `laboratorio_anillos` en pantalla los «sectores» salían como arcos sueltos (una línea), sin cerrar hasta el centro. Un sector sirve para **señalar un área** donde el operador debe
+concentrarse, y eso es una cuña: centro, dos radios y arco, rellena.
+
+**Qué cambia.** `MapFeature::arcSector`: con él, un `Arc` es un **sector** (área); sin él sigue siendo solo la línea del arco. `roundOutline()` antepone el centro al contorno del sector (un polígono),
+`isArea()`/`isLinear()` lo reflejan (así se rellena, se elige por dentro y puede servir de zona de alerta), `toPlain()` lo exporta como polígono y `roundContains(punto)` dice si un punto cae dentro de un
+círculo o un sector (distancia ≤ radio y azimut entre el inicio y el fin, con la vuelta por el norte). Esquema SQLite **v7**: `arco_sector`.
+
+**En el ejemplo.** La casilla única de sectores se sustituye por una lista donde cada sector se **muestra u oculta** con su casilla (`MapFeature::visible`), se **cambia** (radio y azimuts), se **elimina**,
+se **agrega** otro o se restablecen los de ejemplo; cada fila dice el área en km² y cuántos objetivos caen dentro, y al elegir uno la barra de estado nombra esos objetivos. `--comprobar` prueba ocultar uno sin
+tocar los demás, cambiar solo ese, eliminar uno, restablecer y el análisis.
+
+**Pruebas.** `tst_roundgeometry` (`sectorIsAWedgeArea`: área, contorno con el centro, polígono al exportar y `roundContains` dentro y fuera, incluida la cuña que cruza el norte) y `tst_vectorrepository`
+(el sector sobrevive guardar y cargar). **Lo que no es:** el relleno del sector depende del color de relleno de la entidad; el recuento de objetivos se calcula al cambiar un sector, no mientras se mueven.
+
+**Estado: 33 tests (30 sin QCustomPlot).**

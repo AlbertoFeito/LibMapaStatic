@@ -123,6 +123,13 @@ QStringList migrations(int from)
             ") WITHOUT ROWID");
     }
 
+    if (from < 7) {
+        // v7: un Arc puede ser un SECTOR (cuna cerrada hasta el centro, un area): MapFeature::
+        // arcSector. Con DEFAULT 0 los arcos ya guardados siguen siendo solo la linea.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN arco_sector INTEGER NOT NULL DEFAULT 0");
+    }
+
     return sql;
 }
 

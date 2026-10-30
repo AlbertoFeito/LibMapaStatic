@@ -207,6 +207,11 @@ struct MapFeature
     //! valido: para una circunferencia entera esta Circle.
     double arcStartDeg = 0.0;
     double arcEndDeg = 0.0;
+    //! Un Arc con \a arcSector es un SECTOR: la cuna entre el centro, los dos radios y el
+    //! arco, un AREA (se rellena, se puede elegir por dentro y sirve de zona), para senalar
+    //! al operador donde concentrarse. Sin el, es solo la linea del arco. En el resto no
+    //! se usa.
+    bool arcSector = false;
 
     bool isMultiPart() const { return !parts.isEmpty(); }
 
@@ -242,9 +247,16 @@ struct MapFeature
     //! ¿Es un Circle o un Arc? Su geometria se genera a partir del centro y el radio.
     bool isRound() const { return kind == GeometryKind::Circle || kind == GeometryKind::Arc; }
     //! ¿Se comporta como un area (relleno, cierre, «dentro»)? Poligonos y circulos.
-    bool isArea() const { return kind == GeometryKind::Polygon || kind == GeometryKind::Circle; }
+    bool isArea() const
+    {
+        return kind == GeometryKind::Polygon || kind == GeometryKind::Circle
+               || (kind == GeometryKind::Arc && arcSector);
+    }
     //! ¿Se comporta como una linea? Polilineas y arcos.
-    bool isLinear() const { return kind == GeometryKind::Polyline || kind == GeometryKind::Arc; }
+    bool isLinear() const
+    {
+        return kind == GeometryKind::Polyline || (kind == GeometryKind::Arc && !arcSector);
+    }
 
     //! Barrido en grados (de 0 a 360, sin llegar a 360) de un arco que va de \a startDeg
     //! a \a endDeg en sentido horario; 0 si no son numeros finitos o si coinciden
@@ -276,13 +288,33 @@ struct MapFeature
         constexpr double kPasoDeg = 2.0;
         const int tramos = qMax(arco ? 2 : 3, int(std::ceil(barrido / kPasoDeg)));
         const int n = arco ? tramos + 1 : tramos;     // el circulo no repite el primero
-        puntos.reserve(n);
+        puntos.reserve(n + 1);
         const QGeoCoordinate centro = geometry.first();
+        if (arco && arcSector)
+            puntos.append(centro);                    // la cuna sale del centro
         const double inicio = arco ? arcStartDeg : 0.0;
         for (int i = 0; i < n; ++i)
             puntos.append(centro.atDistanceAndAzimuth(radiusMeters,
                                                       inicio + barrido * i / tramos));
         return puntos;
+    }
+
+    //! ¿Cae \a p DENTRO de un Circle o de un sector (Arc con \a arcSector)? Distancia al centro
+    //! no mayor que el radio y, en el sector, azimut entre el inicio y el fin (con la vuelta
+    //! por el norte). Falso en cualquier otra entidad, incluido un arco que es solo linea.
+    bool roundContains(const QGeoCoordinate &p) const
+    {
+        if (!isRound() || !isArea() || !isValid() || !p.isValid())
+            return false;
+        const QGeoCoordinate centro = geometry.first();
+        if (centro.distanceTo(p) > radiusMeters)
+            return false;
+        if (kind == GeometryKind::Circle)
+            return true;
+        double desde = std::fmod(centro.azimuthTo(p) - arcStartDeg, 360.0);
+        if (desde < 0.0)
+            desde += 360.0;
+        return desde <= arcSweepDeg(arcStartDeg, arcEndDeg);
     }
 
     //! Punto donde se ancla el rotulo: la mitad del recorrido de un Arc y el punto norte del
@@ -342,12 +374,14 @@ struct MapFeature
         if (kind == GeometryKind::Arc) {
             plana.attributes.insert(QStringLiteral("arc_start_deg"), arcStartDeg);
             plana.attributes.insert(QStringLiteral("arc_end_deg"), arcEndDeg);
+            plana.attributes.insert(QStringLiteral("arc_sector"), arcSector);
         }
         plana.geometry = roundOutline();
-        plana.kind = kind == GeometryKind::Circle ? GeometryKind::Polygon : GeometryKind::Polyline;
+        plana.kind = isArea() ? GeometryKind::Polygon : GeometryKind::Polyline;
         plana.radiusMeters = 0.0;
         plana.arcStartDeg = 0.0;
         plana.arcEndDeg = 0.0;
+        plana.arcSector = false;
         return plana;
     }
 

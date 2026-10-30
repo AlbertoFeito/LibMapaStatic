@@ -227,6 +227,7 @@ void TstVectorRepository::savesAndLoadsCircleAndArc()
     a.radiusMeters = 90000.0;
     a.arcStartDeg = 315.0;
     a.arcEndDeg = 45.0;
+    a.arcSector = true;
     QVERIFY(repo.saveFeature(a).has_value());
 
     // Un circulo sin radio no es valido y no se guarda.
@@ -248,6 +249,7 @@ void TstVectorRepository::savesAndLoadsCircleAndArc()
     QVERIFY(qAbs(a2.radiusMeters - 90000.0) < 1e-9);
     QVERIFY(qAbs(a2.arcStartDeg - 315.0) < 1e-9 && qAbs(a2.arcEndDeg - 45.0) < 1e-9);
     QVERIFY(a2.isValid());
+    QVERIFY(a2.arcSector && a2.isArea());              // el sector (v7) sobrevive
 }
 
 void TstVectorRepository::migratesV2DatabaseToV3()
