@@ -51,6 +51,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QHash>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -103,6 +104,32 @@ QColor colorEstado(const QString &estado)
     return QColor(0x75, 0x75, 0x75);
 }
 
+// Ajustes de los anillos de UN origen (cada punto tiene los suyos).
+struct AjustesAnillos {
+    bool mostrar = true;
+    double separacion = 10.0;      // en las unidades elegidas (km o NM)
+    int anillos = 10;
+    int radiales = 30;             // grados entre radiales; 0 = sin radiales
+    bool rotulos = true;
+    bool enfasis = false;
+    int cadaAnillos = 5;
+    int cadaGrados = 30;
+    bool radialesAzules = false;
+    int paleta = 0;                // 0 = rojo, 1 = grises del Anexo C
+};
+
+// Un ORIGEN: un punto del mapa con sus anillos y sus sectores. Los anillos y los sectores se
+// miden siempre desde un punto; puede haber varios puntos y cada uno lleva los suyos.
+struct Origen {
+    qint64 punto = -1;             // la entidad punto
+    QString nombre;
+    QGeoCoordinate pos;
+    qint64 anillos = -1;           // el RangeRings dibujado, o -1
+    AjustesAnillos aj;
+    QVector<qint64> sectores;      // entidades Circle / Arc con arcSector
+    QSet<qint64> ocultos;          // sectores que el usuario oculto
+};
+
 // Una linea del formulario de un objetivo con sus segmentos (texto y color).
 TargetLabelLine linea(std::initializer_list<TargetLabelSegment> segmentos)
 {
@@ -116,6 +143,10 @@ TargetLabelLine linea(std::initializer_list<TargetLabelSegment> segmentos)
 QString textoAyuda()
 {
     return QObject::tr(
+        "<b>Punto de origen</b> · los anillos y los sectores se miden siempre desde un punto"
+        "<ul><li>Elige el punto arriba (o tócalo en el mapa). Cada punto tiene <i>sus</i> anillos y "
+        "<i>sus</i> sectores; los de los demás se ocultan mientras esté marcado «solo el elegido».</li>"
+        "<li>Agrega más puntos en la pestaña Puntos y ponles anillos o sectores propios.</li></ul>"
         "<b>Anillos</b> · medir distancia y marcación desde un punto"
         "<ul><li>Pasa el ratón por un anillo: «Desde el centro» debe dar su rótulo (10 km, "
         "20 km...); compáralo con la barra de escala.</li>"
@@ -176,6 +207,8 @@ public:
         m_mapa->setCenter(kHabana);
         m_mapa->setZoom(9);
         m_centro = kHabana;
+        m_soloElegido = new QCheckBox(tr("Mostrar solo los anillos y sectores del punto elegido"), this);
+        m_soloElegido->setChecked(true);
         // El mapa recarga lo que se dejo guardado en otras sesiones (y en otros ejemplos, como los
         // «aerodromo» de laboratorio_rotulos): se parte limpio, los puntos los agrega el usuario.
         quitaPuntos();
@@ -207,17 +240,17 @@ public:
                 agregaObjetivo(p, QString(), 90.0, QStringLiteral("DET"));
                 return;
             }
-            m_elegir->setText(tr("Elegir centro (clic en el mapa)"));
+            m_elegir->setText(tr("Mover el origen elegido (clic en el mapa)"));
             ponCentro(p);
-            statusBar()->showMessage(tr("Centro de los anillos en %1")
+            statusBar()->showMessage(tr("Origen movido a %1")
                                          .arg(formatCoordinate(p, CoordinateFormat::DMS)), 6000);
         });
         connect(m_mapa, &MapWidget::pickCancelled, this, [this] {
             m_modoClic = 0;
             m_colocar->setText(tr("Agregar un punto con un clic en el mapa"));
             m_agregaObjetivo->setText(tr("Agregar un objetivo con un clic en el mapa"));
-            m_elegir->setText(tr("Elegir centro (clic en el mapa)"));
-            statusBar()->showMessage(tr("Elección del centro cancelada"), 4000);
+            m_elegir->setText(tr("Mover el origen elegido (clic en el mapa)"));
+            statusBar()->showMessage(tr("Acción cancelada"), 4000);
         });
         connect(m_mapa, &MapWidget::targetLabelMoved, this,
                 [this](qint64 id, const QPointF &offset) {
@@ -231,14 +264,20 @@ public:
         connect(m_mapa, &MapWidget::targetClicked, this, [this](qint64 id, const QGeoCoordinate &) {
             seleccionaObjetivo(id);
         });
+        connect(m_soloElegido, &QCheckBox::toggled, this, [this] { aplicaVisibilidad(); });
         aplicaFormato();
+        // El primer origen: La Habana, con anillos y los cuatro sectores de ejemplo.
+        agregaOrigen(kHabana, tr("Centro"));
         aplicaAnillos();
         restableceSectores();
         statusBar()->showMessage(tr("Capa base: %1").arg(m_mapa->baseLayerId()));
     }
 
     MapWidget *mapa() const { return m_mapa; }
-    qint64 anillos() const { return m_anillos; }
+    qint64 anillos() const { return m_cur >= 0 ? m_origenes[m_cur].anillos : -1; }
+    int numOrigenes() const { return int(m_origenes.size()); }
+    int origenActual() const { return m_cur; }
+    qint64 puntoDeOrigen(int i) const { return m_origenes.value(i).punto; }
     QString lecturaRaton() const { return m_desdeCentro ? m_desdeCentro->text() : QString(); }
     QCheckBox *casillaMostrar() const { return m_mostrar; }
     QComboBox *unidades() const { return m_unidades; }
@@ -265,6 +304,11 @@ public:
         }
         m_lblElemento->setText(txt);
         seleccionaElemento(hit.featureId, hit.subIndex);
+        for (int i = 0; i < m_origenes.size(); ++i)       // tocar un punto (o un sector suyo) lo elige
+            if (m_origenes[i].punto == hit.featureId || m_origenes[i].sectores.contains(hit.featureId)) {
+                seleccionaOrigen(i);
+                break;
+            }
     }
 
 public:
@@ -286,8 +330,9 @@ public:
         f.style.lineColor = c;
         f.style.lineWidth = 2.0;
         f.style.fillColor = QColor(c.red(), c.green(), c.blue(), 70);
+        f.visible = !m_soloElegido->isChecked() || m_cur >= 0;
         const qint64 id = m_mapa->addFeature(f);
-        m_sectoresIds.append(id);
+        sectoresActuales().append(id);
         return id;
     }
 
@@ -296,18 +341,21 @@ public:
     void restableceSectores()
     {
         eliminaTodosSectores();
-        creaSector(true, 50, 0, 0, QColor(0x15, 0x65, 0xc0), tr("Círculo 50 km"));
-        creaSector(false, 100, 0, 90, QColor(0x2e, 0x7d, 0x32), tr("Sector 0–90"));
-        creaSector(false, 150, 120, 200, QColor(0xef, 0x6c, 0x00), tr("Sector 120–200"));
-        creaSector(false, 200, 330, 30, QColor(0x8e, 0x24, 0xaa), tr("Sector 330–30"));
+        creaSector(true, 50, 0, 0, QColor(0x15, 0x65, 0xc0), nombreEn(tr("Círculo 50 km")));
+        creaSector(false, 100, 0, 90, QColor(0x2e, 0x7d, 0x32), nombreEn(tr("Sector 0–90")));
+        creaSector(false, 150, 120, 200, QColor(0xef, 0x6c, 0x00), nombreEn(tr("Sector 120–200")));
+        creaSector(false, 200, 330, 30, QColor(0x8e, 0x24, 0xaa), nombreEn(tr("Sector 330–30")));
         actualizaSectores();
     }
 
     // Quita todos los sectores (por tipo, incluidos los que dejara guardados otra sesion).
     void eliminaTodosSectores()
     {
-        m_mapa->clearFeaturesOfType(QStringLiteral("sector"));
-        m_sectoresIds.clear();
+        for (qint64 id : sectoresActuales())
+            m_mapa->removeFeature(id);
+        sectoresActuales().clear();
+        if (m_cur >= 0)
+            m_origenes[m_cur].ocultos.clear();
     }
 
     // Objetivos que caen dentro del sector \a id (su nombre o id), para analizarlo por separado.
@@ -332,7 +380,7 @@ public:
         const int fila = m_listaSectores->currentRow();
         const QSignalBlocker b(m_listaSectores);
         m_listaSectores->clear();
-        for (qint64 id : m_sectoresIds) {
+        for (qint64 id : sectoresActuales()) {
             const auto f = m_mapa->feature(id);
             if (!f)
                 continue;
@@ -346,8 +394,12 @@ public:
                 m_listaSectores);
             it->setData(Qt::UserRole, id);
             it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
-            it->setCheckState(f->visible ? Qt::Checked : Qt::Unchecked);
+            it->setCheckState(m_cur >= 0 && m_origenes[m_cur].ocultos.contains(id) ? Qt::Unchecked
+                                                                                    : Qt::Checked);
         }
+        if (m_grupoSectores)
+            m_grupoSectores->setTitle(m_cur >= 0 ? tr("Sectores de «%1»").arg(m_origenes[m_cur].nombre)
+                                                 : tr("Sectores (elige o agrega un punto)"));
         m_listaSectores->setCurrentRow(qBound(-1, fila, m_listaSectores->count() - 1));
         actualizaConteos();
     }
@@ -362,14 +414,20 @@ public:
 public:
     // Cuantos sectores hay, el id del i-esimo y operaciones por sector (las usa --comprobar y
     // el panel): mostrar/ocultar, cambiar y eliminar uno sin tocar los demas.
-    int numSectores() const { return int(m_sectoresIds.size()); }
-    qint64 sector(int i) const { return m_sectoresIds.value(i, -1); }
+    int numSectores() const { return int(sectoresActuales().size()); }
+    qint64 sector(int i) const { return sectoresActuales().value(i, -1); }
     void ponSectorVisible(qint64 id, bool visible)
     {
         auto f = m_mapa->feature(id);
         if (!f)
             return;
-        f->visible = visible;
+        if (m_cur >= 0) {                      // lo que el usuario oculto se recuerda por origen
+            if (visible)
+                m_origenes[m_cur].ocultos.remove(id);
+            else
+                m_origenes[m_cur].ocultos.insert(id);
+        }
+        f->visible = visible && (!m_soloElegido->isChecked() || m_cur >= 0);
         m_mapa->updateFeature(*f);
         actualizaSectores();
     }
@@ -387,7 +445,9 @@ public:
     void eliminaSector(qint64 id)
     {
         m_mapa->removeFeature(id);
-        m_sectoresIds.removeAll(id);
+        sectoresActuales().removeAll(id);
+        if (m_cur >= 0)
+            m_origenes[m_cur].ocultos.remove(id);
         actualizaSectores();
     }
     int dentroDe(qint64 id) const { return int(objetivosDentro(id).size()); }
@@ -451,17 +511,26 @@ public:
         m_mapa->setZoom(km >= 600 ? 6 : 7);
     }
 
-    // Mueve el centro de los anillos a \a p (lo que hace el clic con «Elegir centro»).
+    // Mueve el origen elegido a \a p (lo que hace «Mover el origen» con un clic): su punto, sus
+    // anillos y sus sectores se van con el.
     void ponCentro(const QGeoCoordinate &p)
     {
+        if (m_cur < 0)
+            return;
+        Origen &o = m_origenes[m_cur];
+        o.pos = p;
         m_centro = p;
-        m_lblCentro->setText(formatCoordinate(p, CoordinateFormat::DMS));
-        aplicaAnillos();
-        for (qint64 id : m_sectoresIds)            // los sectores siguen al centro
+        m_lblCentro->setText(tr("%1 · %2").arg(o.nombre, formatCoordinate(p, CoordinateFormat::DMS)));
+        if (auto f = m_mapa->feature(o.punto)) {
+            f->geometry = { p };
+            m_mapa->updateFeature(*f);
+        }
+        for (qint64 id : o.sectores)               // los sectores siguen al origen
             if (auto f = m_mapa->feature(id)) {
-                f->geometry = { m_centro };
+                f->geometry = { p };
                 m_mapa->updateFeature(*f);
             }
+        dibujaAnillos(o, m_cur);
         actualizaSectores();
     }
 
@@ -502,46 +571,193 @@ private:
                           : tr("%1 km").arg(metros / 1000.0, 0, 'f', 1);
     }
 
-    // Vuelve a poner los anillos con los ajustes del panel, o los quita si estan
-    // ocultos. Los ajustes viven en el panel, asi que al mostrarlos de nuevo salen igual.
+    // Ajustes de anillos que dicen los controles del panel (los del punto elegido).
+    AjustesAnillos leeControles() const
+    {
+        AjustesAnillos a;
+        a.mostrar = m_mostrar->isChecked();
+        a.separacion = m_separacion->value();
+        a.anillos = m_numero->value();
+        a.radiales = m_radiales->currentData().toInt();
+        a.rotulos = m_rotulos->isChecked();
+        a.enfasis = m_enfasis->isChecked();
+        a.cadaAnillos = m_cadaAnillos->value();
+        a.cadaGrados = m_cadaGrados->value();
+        a.radialesAzules = m_colorRadiales->isChecked();
+        a.paleta = m_paleta->currentIndex();
+        return a;
+    }
+
+    // Pone en los controles del panel los ajustes de anillos de un origen, sin disparar nada.
+    void cargaControles(const AjustesAnillos &a)
+    {
+        const QSignalBlocker b1(m_mostrar), b2(m_separacion), b3(m_numero), b4(m_radiales),
+            b5(m_rotulos), b6(m_enfasis), b7(m_cadaAnillos), b8(m_cadaGrados),
+            b9(m_colorRadiales), b10(m_paleta);
+        m_mostrar->setChecked(a.mostrar);
+        m_separacion->setValue(a.separacion);
+        m_numero->setValue(a.anillos);
+        m_radiales->setCurrentIndex(qMax(0, m_radiales->findData(a.radiales)));
+        m_rotulos->setChecked(a.rotulos);
+        m_enfasis->setChecked(a.enfasis);
+        m_cadaAnillos->setValue(a.cadaAnillos);
+        m_cadaGrados->setValue(a.cadaGrados);
+        m_colorRadiales->setChecked(a.radialesAzules);
+        m_paleta->setCurrentIndex(a.paleta);
+    }
+
+    // Dibuja (o quita) los anillos de un origen con SUS ajustes. Con «solo el punto elegido» los
+    // de los demas puntos no se ven aunque tengan los suyos activados.
+    void dibujaAnillos(Origen &o, int indice)
+    {
+        if (o.anillos >= 0)
+            m_mapa->removeRangeMark(o.anillos);
+        o.anillos = -1;
+        if (!o.aj.mostrar || (m_soloElegido->isChecked() && indice != m_cur))
+            return;
+        RangeRings r;
+        r.center = o.pos;
+        r.spacingMeters = o.aj.separacion * (nauticas() ? kMetrosPorMilla : 1000.0);
+        r.count = o.aj.anillos;
+        r.spokeEveryDeg = o.aj.radiales;
+        r.labels = o.aj.rotulos;
+        const bool grises = o.aj.paleta == 1;
+        r.color = grises ? QColor(180, 180, 180)             // gris claro (Anexo C)
+                         : QColor(0xc6, 0x28, 0x28);         // rojo: se lee sobre la costa y el mar
+        if (o.aj.enfasis) {
+            r.majorRingEvery = o.aj.cadaAnillos;
+            r.majorSpokeEveryDeg = o.aj.cadaGrados;
+            r.majorColor = grises ? QColor(80, 80, 80) : QColor(0x5d, 0x0e, 0x0e);
+        }
+        if (o.aj.radialesAzules)
+            r.spokeColor = QColor(0x15, 0x65, 0xc0);         // radiales en azul
+        o.anillos = m_mapa->addRangeRings(r);
+    }
+
+    // Aplica los controles del panel al punto elegido y repinta los anillos de todos (las
+    // unidades son comunes). Ajustes de mapa: barra de escala y cuadricula.
     void aplicaAnillos()
     {
-        if (m_anillos >= 0)
-            m_mapa->removeRangeMark(m_anillos);
-        m_anillos = -1;
         m_mapa->setScaleBarUnits(nauticas() ? ScaleUnits::Nautical : ScaleUnits::Metric);
         m_mapa->setScaleBarVisible(m_barra->isChecked());
         m_mapa->setGraticuleVisible(m_cuadricula->isChecked());
-        if (!m_mostrar->isChecked())
-            return;
-        RangeRings r;
-        r.center = m_centro;
-        r.spacingMeters = separacionMetros();
-        r.count = m_numero->value();
-        r.spokeEveryDeg = m_radiales->currentData().toInt();
-        r.labels = m_rotulos->isChecked();
-        const bool grises = m_paleta && m_paleta->currentIndex() == 1;
-        r.color = grises ? QColor(180, 180, 180)             // gris claro (Anexo C)
-                         : QColor(0xc6, 0x28, 0x28);         // rojo: se lee sobre la costa y el mar
-        r.name = tr("Centro");
-        if (m_enfasis->isChecked()) {
-            r.majorRingEvery = m_cadaAnillos->value();
-            r.majorSpokeEveryDeg = m_cadaGrados->value();
-            r.majorColor = grises ? QColor(80, 80, 80) : QColor(0x5d, 0x0e, 0x0e);
+        if (m_cur >= 0)
+            m_origenes[m_cur].aj = leeControles();
+        for (int i = 0; i < m_origenes.size(); ++i)
+            dibujaAnillos(m_origenes[i], i);
+    }
+
+    // Muestra u oculta los anillos y los sectores de cada origen segun cual esta elegido (con
+    // «solo el elegido») y lo que el usuario oculto a mano.
+    void aplicaVisibilidad()
+    {
+        for (int i = 0; i < m_origenes.size(); ++i) {
+            Origen &o = m_origenes[i];
+            dibujaAnillos(o, i);
+            for (qint64 id : o.sectores)
+                if (auto f = m_mapa->feature(id)) {
+                    const bool ver = !o.ocultos.contains(id) && (!m_soloElegido->isChecked() || i == m_cur);
+                    if (f->visible != ver) {
+                        f->visible = ver;
+                        m_mapa->updateFeature(*f);
+                    }
+                }
         }
-        if (m_colorRadiales->isChecked())
-            r.spokeColor = QColor(0x15, 0x65, 0xc0);     // radiales en azul
-        m_anillos = m_mapa->addRangeRings(r);
+    }
+
+    // Agrega un origen (un punto con sus anillos y sectores) y lo elige. Devuelve su indice.
+    int agregaOrigen(const QGeoCoordinate &p, const QString &nombre)
+    {
+        MapFeature f;
+        f.kind = GeometryKind::Point;
+        f.layerId = QStringLiteral("puntos");
+        f.type = QStringLiteral("punto");
+        f.name = nombre;
+        f.geometry = { p };
+        f.style.lineColor = QColor(0x15, 0x65, 0xc0);
+        Origen o;
+        o.punto = m_mapa->addFeature(f);
+        o.nombre = nombre;
+        o.pos = p;
+        m_puntos.append(o.punto);
+        m_origenes.append(o);
+        actualizaOrigenes();
+        seleccionaOrigen(int(m_origenes.size()) - 1);
+        return int(m_origenes.size()) - 1;
+    }
+
+public:
+    // Elige el origen \a i: sus ajustes pasan a los controles y sus anillos y sectores a la vista.
+    void seleccionaOrigen(int i)
+    {
+        if (i < 0 || i >= m_origenes.size() || i == m_cur) {
+            if (i == m_cur)
+                return;
+            m_cur = -1;
+        } else {
+            m_cur = i;
+            m_centro = m_origenes[i].pos;
+            cargaControles(m_origenes[i].aj);
+            m_lblCentro->setText(tr("%1 · %2").arg(m_origenes[i].nombre,
+                                                    formatCoordinate(m_centro, CoordinateFormat::DMS)));
+            statusBar()->showMessage(tr("Punto elegido: «%1». Sus anillos y sus sectores son los de las pestañas Anillos y Sectores.")
+                                         .arg(m_origenes[i].nombre), 8000);
+        }
+        if (m_cmbOrigen) {
+            const QSignalBlocker b(m_cmbOrigen);
+            m_cmbOrigen->setCurrentIndex(m_cur);
+        }
+        aplicaVisibilidad();
+        actualizaSectores();
+    }
+
+private:
+    // Rellena la lista desplegable de origenes.
+    void actualizaOrigenes()
+    {
+        if (!m_cmbOrigen)
+            return;
+        const QSignalBlocker b(m_cmbOrigen);
+        m_cmbOrigen->clear();
+        for (const Origen &o : m_origenes)
+            m_cmbOrigen->addItem(o.nombre);
+        m_cmbOrigen->setCurrentIndex(m_cur);
+    }
+
+    // Nombre de un sector con el del punto al que pertenece («Centro · Sector 0–90»).
+    QString nombreEn(const QString &base) const
+    {
+        return m_cur >= 0 ? QStringLiteral("%1 · %2").arg(m_origenes[m_cur].nombre, base) : base;
+    }
+
+    // Sectores del origen elegido (una lista vacia si no hay ninguno).
+    QVector<qint64> &sectoresActuales()
+    {
+        static QVector<qint64> vacio;
+        vacio.clear();
+        return m_cur >= 0 ? m_origenes[m_cur].sectores : vacio;
+    }
+    const QVector<qint64> &sectoresActuales() const
+    {
+        static const QVector<qint64> vacio;
+        return m_cur >= 0 ? m_origenes[m_cur].sectores : vacio;
     }
 
     // Quita todos los puntos con nombre que haya: los que agrega este ejemplo («punto», «sitio»)
     // y los «aerodromo» que dejo guardados otro ejemplo.
     void quitaPuntos()
     {
-        for (const char *t : { "punto", "sitio", "aerodromo" })
+        for (const char *t : { "punto", "sitio", "aerodromo", "sector" })
             m_mapa->clearFeaturesOfType(QString::fromLatin1(t));
+        for (const Origen &o : m_origenes)
+            if (o.anillos >= 0)
+                m_mapa->removeRangeMark(o.anillos);
+        m_origenes.clear();
+        m_cur = -1;
         m_puntos.clear();
         m_sitios = -1;
+        actualizaOrigenes();
+        actualizaSectores();
     }
 
     // Agrega un lugar al mapa: como punto suelto (una entidad por punto) o como una parte nueva
@@ -550,14 +766,7 @@ private:
     void agregaImpl(const QGeoCoordinate &p, const QString &nombre, bool comoParte)
     {
         if (!comoParte) {
-            MapFeature f;
-            f.kind = GeometryKind::Point;
-            f.layerId = QStringLiteral("puntos");
-            f.type = QStringLiteral("punto");
-            f.name = nombre;
-            f.geometry = { p };
-            f.style.lineColor = QColor(0x15, 0x65, 0xc0);
-            m_puntos.append(m_mapa->addFeature(f));
+            agregaOrigen(p, nombre);         // un punto suelto es un origen: lleva anillos y sectores
         } else {
             static const QColor paleta[] = { QColor(0xc6, 0x28, 0x28), QColor(0x2e, 0x7d, 0x32),
                                              QColor(), QColor(0xef, 0x6c, 0x00) };
@@ -786,8 +995,20 @@ private:
                 m_mapa->updateFeature(*f);
             }
         } else {
+            for (int i = 0; i < m_origenes.size(); ++i)
+                if (m_origenes[i].punto == id) {          // con su punto se van sus anillos y sectores
+                    if (m_origenes[i].anillos >= 0)
+                        m_mapa->removeRangeMark(m_origenes[i].anillos);
+                    for (qint64 sid : m_origenes[i].sectores)
+                        m_mapa->removeFeature(sid);
+                    m_origenes.removeAt(i);
+                    m_cur = -1;
+                    break;
+                }
             m_mapa->removeFeature(id);
             m_puntos.removeAll(id);
+            actualizaOrigenes();
+            seleccionaOrigen(m_origenes.isEmpty() ? -1 : 0);
         }
         actualizaConteos();
     }
@@ -947,6 +1168,7 @@ private:
     QGroupBox *crearGrupoSectores()
     {
         auto *gz = new QGroupBox(tr("Sectores (áreas a vigilar)"));
+        m_grupoSectores = gz;
         auto *vz = new QVBoxLayout(gz);
         m_listaSectores = new QListWidget(gz);
         m_listaSectores->setMaximumHeight(130);
@@ -979,12 +1201,9 @@ private:
             vz->addWidget(b);
         connect(m_listaSectores, &QListWidget::itemChanged, this, [this](QListWidgetItem *it) {
             const qint64 id = it->data(Qt::UserRole).toLongLong();
-            auto f = m_mapa->feature(id);
             const bool ver = it->checkState() == Qt::Checked;
-            if (f && f->visible != ver) {
-                f->visible = ver;
-                m_mapa->updateFeature(*f);
-            }
+            if (m_cur >= 0 && m_origenes[m_cur].ocultos.contains(id) == ver)
+                ponSectorVisible(id, ver);
         });
         connect(m_listaSectores, &QListWidget::currentRowChanged, this,
                 [this, radio, ini, fin, esCirculo](int) {
@@ -1007,9 +1226,9 @@ private:
                                              QColor(0x6a, 0x1b, 0x9a), QColor(0x55, 0x8b, 0x2f) };
             const bool c = esCirculo->isChecked();
             creaSector(c, radio->value(), ini->value(), fin->value(),
-                       paleta[m_sectoresIds.size() % 4],
-                       c ? tr("Círculo %1 km").arg(radio->value(), 0, 'f', 0)
-                         : tr("Sector %1–%2").arg(ini->value()).arg(fin->value()));
+                       paleta[sectoresActuales().size() % 4],
+                       nombreEn(c ? tr("Círculo %1 km").arg(radio->value(), 0, 'f', 0)
+                                  : tr("Sector %1–%2").arg(ini->value()).arg(fin->value())));
             actualizaSectores();
         });
         connect(cambiaSec, &QPushButton::clicked, this, [this, radio, ini, fin] {
@@ -1017,9 +1236,9 @@ private:
             auto f = m_mapa->feature(id);
             if (!f)
                 return;
-            f->name = f->kind == GeometryKind::Arc
+            f->name = nombreEn(f->kind == GeometryKind::Arc
                 ? tr("Sector %1–%2").arg(ini->value()).arg(fin->value())
-                : tr("Círculo %1 km").arg(radio->value(), 0, 'f', 0);
+                : tr("Círculo %1 km").arg(radio->value(), 0, 'f', 0));
             m_mapa->updateFeature(*f);
             cambiaSector(id, radio->value(), ini->value(), fin->value());
         });
@@ -1074,15 +1293,15 @@ private:
         f0->addRow(m_barra);
         f0->addRow(m_cuadricula);
 
-        auto *g1 = new QGroupBox(tr("Centro y anillos"));
+        auto *g1 = new QGroupBox(tr("Anillos del punto elegido"));
         auto *f1 = new QFormLayout(g1);
-        m_mostrar = new QCheckBox(tr("Mostrar anillos"), g1);
+        m_mostrar = new QCheckBox(tr("Mostrar los anillos de este punto"), g1);
         m_mostrar->setChecked(true);
         m_lblCentro = new QLabel(formatCoordinate(kHabana, CoordinateFormat::DMS), g1);
         m_lblCentro->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        m_elegir = new QPushButton(tr("Elegir centro (clic en el mapa)"), g1);
-        auto *habana = new QPushButton(tr("Centro en La Habana"), g1);
-        auto *ir = new QPushButton(tr("Llevar el mapa al centro"), g1);
+        m_elegir = new QPushButton(tr("Mover el origen elegido (clic en el mapa)"), g1);
+        auto *habana = new QPushButton(tr("Origen elegido en La Habana"), g1);
+        auto *ir = new QPushButton(tr("Llevar el mapa al origen elegido"), g1);
         m_unidades = new QComboBox(g1);
         m_unidades->addItems({ tr("Kilómetros"), tr("Millas náuticas") });
         m_separacion = new QDoubleSpinBox(g1);
@@ -1099,7 +1318,7 @@ private:
         m_rotulos = new QCheckBox(tr("Rotular distancias y marcaciones"), g1);
         m_rotulos->setChecked(true);
         f1->addRow(m_mostrar);
-        f1->addRow(tr("Centro"), m_lblCentro);
+        f1->addRow(tr("Origen"), m_lblCentro);
         f1->addRow(m_elegir);
         f1->addRow(habana);
         f1->addRow(ir);
@@ -1435,12 +1654,26 @@ private:
         f2->addRow(tr("Decimal"), m_lblDecimal);
         f2->addRow(tr("GMS"), m_lblDms);
         f2->addRow(tr("UTM"), m_lblUtm);
-        f2->addRow(tr("Desde el centro"), m_desdeCentro);
+        f2->addRow(tr("Desde el origen"), m_desdeCentro);
         f2->addRow(tr("Entidad tocada"), m_lblElemento);
+
+        // Barra de origen: los anillos y los sectores se miden desde UN punto; aqui se elige cual.
+        auto *go = new QGroupBox(tr("Punto de origen (anillos y sectores)"));
+        auto *vo = new QVBoxLayout(go);
+        m_cmbOrigen = new QComboBox(go);
+        vo->addWidget(m_cmbOrigen);
+        vo->addWidget(m_soloElegido);
+        auto *tip = new QLabel(tr("Toca un punto en el mapa para elegirlo, o agrega puntos en la "
+                                  "pestaña Puntos. Cada punto tiene sus anillos y sus sectores."), go);
+        tip->setWordWrap(true);
+        vo->addWidget(tip);
+        connect(m_cmbOrigen, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int i) { seleccionaOrigen(i); });
 
         auto *panel = new QWidget(this);
         auto *col = new QVBoxLayout(panel);
         col->setContentsMargins(0, 0, 0, 0);
+        col->addWidget(go);
         col->addWidget(tabs, 1);
         col->addWidget(g2);
         panel->setFixedWidth(440);
@@ -1451,6 +1684,11 @@ private:
         QString ident, estado, l2, l3;
     };
     MapWidget *m_mapa = nullptr;
+    QVector<Origen> m_origenes;
+    int m_cur = -1;                 // origen elegido (indice en m_origenes), o -1
+    QComboBox *m_cmbOrigen = nullptr;
+    QCheckBox *m_soloElegido = nullptr;
+    QGroupBox *m_grupoSectores = nullptr;
     QHash<qint64, DatosObj> m_datosObj;
     QTimer m_timerSim;
     QTreeWidget *m_arbol = nullptr;
@@ -1468,7 +1706,6 @@ private:
     QPushButton *m_agregaObjetivo = nullptr;
     QComboBox *m_paleta = nullptr;
     int m_modoClic = 0;             // 0 = ninguno; 1 = agregar punto; 2 = agregar objetivo
-    qint64 m_anillos = -1;
     QGeoCoordinate m_centro;
     QCheckBox *m_mostrar = nullptr;
     QCheckBox *m_rotulos = nullptr;
@@ -1493,7 +1730,6 @@ private:
     QCheckBox *m_colorRadiales = nullptr;
     QVector<qint64> m_puntos;
     qint64 m_sitios = -1;
-    QVector<qint64> m_sectoresIds;
     QListWidget *m_listaSectores = nullptr;
     QLabel *m_lblElemento = nullptr;
     QVector<qint64> m_objetivos;
@@ -1606,7 +1842,6 @@ int comprobar(Ventana &v)
     exige(r && r->count == 30, "la escala de 300 km deberia ser 30 anillos", &fallos);
 
     // 8. Rotulos de entidades: el lado del anclaje y la fuente cambian la caja en pixeles.
-    v.agrega(kHabana, QStringLiteral("Punto de prueba"), false);
     const qint64 id = v.primerPunto();
     const QRect clasico = m->featureLabelRect(id);
     exige(clasico.isValid(), "el punto de ejemplo no tiene rotulo", &fallos);
@@ -1723,6 +1958,30 @@ int comprobar(Ventana &v)
         exige(m->featurePartLabelRect(sitios, 0).isValid() || m->featurePartLabelRect(sitios, 1).isValid(),
               "las partes con nombre deberian tener rotulo propio", &fallos);
     }
+
+    // 11b. Varios puntos, cada uno con SUS anillos y SUS sectores: un segundo origen no toca los del
+    //      primero; elegir uno u otro cambia lo que se ve y lo que se edita.
+    v.restableceSectores();                      // el paso 11 los quito para ver el sitio
+    const int origen0 = v.origenActual();
+    const QGeoCoordinate pos0 = m->feature(v.puntoDeOrigen(origen0))->geometry.first();
+    exige(v.numOrigenes() == 1 && v.anillos() >= 0, "al arrancar debe haber un origen con anillos", &fallos);
+    const qint64 anillos0 = v.anillos();
+    v.agrega(QGeoCoordinate(22.40, -83.70), QStringLiteral("Punto B"), false);
+    exige(v.numOrigenes() == 2 && v.origenActual() == 1, "agregar un punto debe crear y elegir su origen", &fallos);
+    exige(v.numSectores() == 0 && m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
+          "el origen nuevo no debe heredar los sectores del otro", &fallos);
+    const auto rb = m->rangeRings(v.anillos());
+    exige(rb && rb->center.distanceTo(QGeoCoordinate(22.40, -83.70)) < 1.0,
+          "los anillos del punto B deben estar en el punto B", &fallos);
+    exige(!m->rangeRings(anillos0).has_value(),
+          "con «solo el elegido» los anillos del otro punto no se ven", &fallos);
+    v.creaSector(false, 80, 10, 100, QColor(0xc6, 0x28, 0x28), QStringLiteral("B · Sector 10–100"));
+    exige(v.numSectores() == 1 && m->featureTypeCounts().value(QStringLiteral("sector")) == 5,
+          "el sector va al punto elegido", &fallos);
+    v.seleccionaOrigen(origen0);
+    exige(v.numSectores() == 4 && v.anillos() >= 0 &&
+              m->rangeRings(v.anillos())->center.distanceTo(pos0) < 1.0,
+          "al elegir el primer punto vuelven sus anillos y sus 4 sectores", &fallos);
 
     // 12. Objetivos: agregar uno, cambiar su estado (el color del segmento cambia, la traza no
     //     se pierde) y quitarlo.

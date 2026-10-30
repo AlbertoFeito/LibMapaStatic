@@ -7368,3 +7368,19 @@ también en su lista. `--comprobar` crece: agregar un objetivo, cambiar su estad
 **Pendiente de decidir** (no es código): la equivalencia de nombres de los parámetros de ancho del formulario y que el compañero sepa que los anillos son un solo objeto (§3 del análisis).
 
 **Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 180. Anillos y sectores pertenecen a un punto (origen)
+
+**Origen.** El usuario lo planteó así: el sector se define **desde un punto**; puede haber varios puntos y cada uno lleva sus sectores, y lo mismo los anillos. Click en un punto: se ven sus anillos o se le añade
+un sector. El ejemplo tenía un único centro global, con lo que no servía para eso.
+
+**Qué cambia en `laboratorio_anillos`.** Aparece el **origen**: un punto con sus ajustes de anillos (separación, número, radiales, énfasis, colores, unidades comunes), sus sectores y los que el usuario ocultó. Arriba del
+panel se elige el punto (lista o tocándolo en el mapa, o tocando uno de sus sectores); los controles de Anillos y de Sectores pasan a ser los de ese punto. Agregar un punto suelto crea su origen con anillos y sin
+sectores, y quitarlo se lleva sus anillos y sectores. «Mover el origen» lleva el punto, sus anillos y sus sectores. Con «solo el elegido» (por defecto) los anillos y los sectores de los demás puntos no se dibujan;
+sin él se ven todos. Es solo del ejemplo: la librería no cambia, un `RangeRings` o un sector ya eran de un centro propio.
+
+**Pruebas.** `--comprobar`: un segundo punto crea su origen y lo elige, no hereda los sectores del primero, tiene sus anillos en su sitio, el sector nuevo va a él, y al volver al primero vuelven sus anillos y sus cuatro
+sectores.
+
+**Estado: 33 tests (30 sin QCustomPlot).**

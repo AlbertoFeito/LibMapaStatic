@@ -51,6 +51,7 @@ de la última entidad tocada queda siempre debajo.
 
 | Pestaña | Para qué sirve |
 |---|---|
+| (arriba) Punto de origen | Los anillos y los sectores se miden desde **un punto**; puede haber varios y cada uno lleva los suyos. Se elige en la lista o tocándolo en el mapa; «solo el elegido» oculta los de los demás |
 | Anillos | Medir distancia y marcación desde un punto: escala de 300/600 km, énfasis, colores (rojo o los grises del Anexo C) |
 | Sectores | Señalar un área donde concentrarse; cada sector se muestra, cambia, analiza y elimina por separado |
 | Puntos | Buscar lugares, agregarlos sueltos o como partes de una entidad, y elegir por elemento el lado del rótulo, la fuente y el color (estado) |
