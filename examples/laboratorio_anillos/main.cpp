@@ -40,6 +40,8 @@
 #include <QComboBox>
 #include <QElapsedTimer>
 #include <QDoubleSpinBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -47,6 +49,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
@@ -130,6 +133,43 @@ struct Origen {
     QSet<qint64> ocultos;          // sectores que el usuario oculto
 };
 
+// Pide al usuario el radio y, si no es un circulo entero, los azimuts de un sector. Devuelve
+// false si cancela.
+bool pideSector(QWidget *padre, bool circulo, const QString &titulo, double *radioKm, int *ini,
+                int *fin)
+{
+    QDialog d(padre);
+    d.setWindowTitle(titulo);
+    auto *f = new QFormLayout(&d);
+    auto *radio = new QDoubleSpinBox(&d);
+    radio->setRange(0.1, 2000.0);
+    radio->setSuffix(QObject::tr(" km"));
+    radio->setValue(*radioKm);
+    auto *a = new QSpinBox(&d);
+    auto *b = new QSpinBox(&d);
+    for (QSpinBox *sp : { a, b }) {
+        sp->setRange(0, 359);
+        sp->setSuffix(QStringLiteral("°"));
+    }
+    a->setValue(*ini);
+    b->setValue(*fin);
+    f->addRow(QObject::tr("Radio"), radio);
+    if (!circulo) {
+        f->addRow(QObject::tr("Desde (azimut)"), a);
+        f->addRow(QObject::tr("Hasta (azimut)"), b);
+    }
+    auto *bt = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    f->addRow(bt);
+    QObject::connect(bt, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    QObject::connect(bt, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    if (d.exec() != QDialog::Accepted)
+        return false;
+    *radioKm = radio->value();
+    *ini = a->value();
+    *fin = b->value();
+    return true;
+}
+
 // Una linea del formulario de un objetivo con sus segmentos (texto y color).
 TargetLabelLine linea(std::initializer_list<TargetLabelSegment> segmentos)
 {
@@ -146,7 +186,10 @@ QString textoAyuda()
         "<b>Punto de origen</b> · los anillos y los sectores se miden siempre desde un punto"
         "<ul><li>Elige el punto arriba (o tócalo en el mapa). Cada punto tiene <i>sus</i> anillos y "
         "<i>sus</i> sectores; se ven todos a la vez; «solo el elegido» oculta los de los demás.</li>"
-        "<li>Agrega más puntos en la pestaña Puntos y ponles anillos o sectores propios.</li></ul>"
+        "<li>Agrega más puntos en la pestaña Puntos y ponles anillos o sectores propios.</li>"
+        "<li><b>Clic derecho:</b> sobre un punto, sus anillos y sus sectores; sobre un sector, "
+        "cambiarlo, ocultarlo o quitarlo; sobre un objetivo, su estado; sobre un lugar vacío, "
+        "agregar un punto o un objetivo allí.</li></ul>"
         "<b>Anillos</b> · medir distancia y marcación desde un punto"
         "<ul><li>Pasa el ratón por un anillo: «Desde el centro» debe dar su rótulo (10 km, "
         "20 km...); compáralo con la barra de escala.</li>"
@@ -261,6 +304,8 @@ public:
         // Tocar una entidad dice que parte de ella es (subIndex) y cuantas tiene.
         connect(m_mapa, &MapWidget::elementClicked, this,
                 [this](const MapHit &hit, const QPoint &) { leeElemento(hit); });
+        connect(m_mapa, &MapWidget::contextMenuRequested, this,
+                [this](const MapHit &hit, const QPoint &global) { menuContextual(hit, global); });
         connect(m_mapa, &MapWidget::targetClicked, this, [this](qint64 id, const QGeoCoordinate &) {
             seleccionaObjetivo(id);
         });
@@ -1255,6 +1300,208 @@ private:
             actualizaSectores();
         });
         return gz;
+    }
+
+    // Menu del clic derecho: segun lo que haya bajo el cursor ofrece lo de ese elemento. Un PUNTO
+    // ofrece sus anillos y sus sectores; un sector, cambiarlo, ocultarlo o quitarlo; un objetivo,
+    // su estado; un lugar vacio, agregar un punto o un objetivo alli.
+    void menuContextual(const MapHit &hit, const QPoint &global)
+    {
+        QMenu menu(this);
+        int origen = -1;
+        qint64 sector = -1;
+        for (int i = 0; i < m_origenes.size() && origen < 0; ++i) {
+            if (m_origenes[i].punto == hit.featureId)
+                origen = i;
+            else if (m_origenes[i].sectores.contains(hit.featureId)) {
+                origen = i;
+                sector = hit.featureId;
+            }
+        }
+        if (hit.targetId >= 0)
+            menuObjetivo(&menu, hit.targetId);
+        else if (sector >= 0)
+            menuSector(&menu, origen, sector);
+        else if (origen >= 0)
+            menuPunto(&menu, origen);
+        else
+            menuLugar(&menu, hit.coordinate);
+        menu.exec(global);
+    }
+
+    // Cabecera de un menu: una accion desactivada en negrita que dice sobre que se actua.
+    static void cabecera(QMenu *menu, const QString &texto)
+    {
+        QAction *a = menu->addAction(texto);
+        QFont f = a->font();
+        f.setBold(true);
+        a->setFont(f);
+        a->setEnabled(false);
+    }
+
+    // Menu de un punto (origen): elegirlo, sus anillos, sus sectores, moverlo y quitarlo.
+    void menuPunto(QMenu *menu, int origen)
+    {
+        const Origen &o = m_origenes[origen];
+        cabecera(menu, tr("Punto «%1»").arg(o.nombre));
+        connect(menu->addAction(tr("Elegir este punto (sus anillos y sectores en las pestañas)")),
+                &QAction::triggered, this, [this, origen] { seleccionaOrigen(origen); });
+        menu->addSeparator();
+
+        QMenu *ani = menu->addMenu(tr("Anillos de este punto"));
+        QAction *ver = ani->addAction(tr("Mostrar los anillos"));
+        ver->setCheckable(true);
+        ver->setChecked(o.aj.mostrar);
+        connect(ver, &QAction::toggled, this, [this, origen](bool on) {
+            seleccionaOrigen(origen);
+            m_mostrar->setChecked(on);
+        });
+        connect(ani->addAction(tr("Escala de 300 km (30 anillos)")), &QAction::triggered, this,
+                [this, origen] { seleccionaOrigen(origen); escala(300); });
+        connect(ani->addAction(tr("Escala de 600 km (60 anillos)")), &QAction::triggered, this,
+                [this, origen] { seleccionaOrigen(origen); escala(600); });
+        connect(ani->addAction(tr("Cambiar sus ajustes (pestaña Anillos)...")), &QAction::triggered,
+                this, [this, origen] {
+                    seleccionaOrigen(origen);
+                    m_pestanas->setCurrentIndex(0);
+                });
+
+        QMenu *sec = menu->addMenu(tr("Sectores de este punto (%1)").arg(o.sectores.size()));
+        connect(sec->addAction(tr("Agregar un sector...")), &QAction::triggered, this,
+                [this, origen] { agregaSectorPedido(origen, false); });
+        connect(sec->addAction(tr("Agregar un círculo...")), &QAction::triggered, this,
+                [this, origen] { agregaSectorPedido(origen, true); });
+        for (qint64 id : o.sectores)
+            if (const auto f = m_mapa->feature(id))
+                menuSector(sec->addMenu(f->name), origen, id, false);
+        if (!o.sectores.isEmpty()) {
+            sec->addSeparator();
+            connect(sec->addAction(tr("Quitar todos los sectores de este punto")),
+                    &QAction::triggered, this, [this, origen] {
+                        seleccionaOrigen(origen);
+                        eliminaTodosSectores();
+                        actualizaSectores();
+                    });
+        }
+        menu->addSeparator();
+        connect(menu->addAction(tr("Mover este punto (clic en el mapa)")), &QAction::triggered, this,
+                [this, origen] {
+                    seleccionaOrigen(origen);
+                    m_modoClic = 0;
+                    m_mapa->setActiveTool(MapTool::PickPoint);
+                    m_elegir->setText(tr("Haz clic en el mapa... (Esc cancela)"));
+                });
+        connect(menu->addAction(tr("Quitar el punto (con sus anillos y sectores)")),
+                &QAction::triggered, this, [this, origen] {
+                    seleccionaElemento(m_origenes[origen].punto, -1);
+                    quitaElementoElegido();
+                });
+    }
+
+    // Opciones de un sector de un punto: elegir su punto, mostrarlo u ocultarlo, cambiarlo,
+    // quitarlo y cuantos objetivos tiene dentro. Con \a cabeza se pone el titulo.
+    void menuSector(QMenu *menu, int origen, qint64 id, bool cabeza = true)
+    {
+        const auto f = m_mapa->feature(id);
+        if (!f)
+            return;
+        if (cabeza)
+            cabecera(menu, tr("Sector «%1»").arg(f->name));
+        const QStringList dentro = objetivosDentro(id);
+        menu->addAction(dentro.isEmpty() ? tr("Ningún objetivo dentro")
+                                         : tr("Dentro: %1").arg(dentro.join(QStringLiteral(", "))))
+            ->setEnabled(false);
+        if (cabeza)
+            connect(menu->addAction(tr("Elegir su punto «%1»").arg(m_origenes[origen].nombre)),
+                    &QAction::triggered, this, [this, origen] { seleccionaOrigen(origen); });
+        QAction *ver = menu->addAction(tr("Mostrar"));
+        ver->setCheckable(true);
+        ver->setChecked(!m_origenes[origen].ocultos.contains(id));
+        connect(ver, &QAction::toggled, this, [this, origen, id](bool on) {
+            seleccionaOrigen(origen);
+            ponSectorVisible(id, on);
+        });
+        connect(menu->addAction(tr("Cambiar...")), &QAction::triggered, this,
+                [this, origen, id] { cambiaSectorPedido(origen, id); });
+        connect(menu->addAction(tr("Eliminar")), &QAction::triggered, this, [this, origen, id] {
+            seleccionaOrigen(origen);
+            eliminaSector(id);
+        });
+    }
+
+    // Pide radio y azimuts y agrega un sector (o un circulo) al punto \a origen.
+    void agregaSectorPedido(int origen, bool circulo)
+    {
+        double radio = 100.0;
+        int ini = 0, fin = 90;
+        if (!pideSector(this, circulo, circulo ? tr("Nuevo círculo") : tr("Nuevo sector"), &radio,
+                        &ini, &fin))
+            return;
+        seleccionaOrigen(origen);
+        static const QColor paleta[] = { QColor(0xc6, 0x28, 0x28), QColor(0x00, 0x83, 0x8f),
+                                         QColor(0x6a, 0x1b, 0x9a), QColor(0x55, 0x8b, 0x2f) };
+        creaSector(circulo, radio, ini, fin, paleta[sectoresActuales().size() % 4],
+                   nombreEn(circulo ? tr("Círculo %1 km").arg(radio, 0, 'f', 0)
+                                    : tr("Sector %1–%2").arg(ini).arg(fin)));
+        actualizaSectores();
+    }
+
+    // Pide otro radio y otros azimuts para el sector \a id del punto \a origen y se los pone.
+    void cambiaSectorPedido(int origen, qint64 id)
+    {
+        const auto f = m_mapa->feature(id);
+        if (!f)
+            return;
+        const bool circulo = f->kind == GeometryKind::Circle;
+        double radio = f->radiusMeters / 1000.0;
+        int ini = int(f->arcStartDeg), fin = int(f->arcEndDeg);
+        if (!pideSector(this, circulo, tr("Cambiar «%1»").arg(f->name), &radio, &ini, &fin))
+            return;
+        seleccionaOrigen(origen);
+        auto g = *f;
+        g.name = nombreEn(circulo ? tr("Círculo %1 km").arg(radio, 0, 'f', 0)
+                                  : tr("Sector %1–%2").arg(ini).arg(fin));
+        m_mapa->updateFeature(g);
+        cambiaSector(id, radio, ini, fin);
+    }
+
+    // Menu de un objetivo: su estado (cambia el color del rotulo), elegirlo y quitarlo.
+    void menuObjetivo(QMenu *menu, qint64 id)
+    {
+        const DatosObj d = m_datosObj.value(id);
+        cabecera(menu, tr("Objetivo %1 (%2)").arg(d.ident, d.estado));
+        connect(menu->addAction(tr("Elegirlo en la pestaña Objetivos")), &QAction::triggered, this,
+                [this, id] {
+                    seleccionaObjetivo(id);
+                    m_pestanas->setCurrentIndex(3);
+                });
+        QMenu *est = menu->addMenu(tr("Estado"));
+        for (const Estado &e : kEstados) {
+            const QString nombre = QString::fromUtf8(e.nombre);
+            QAction *a = est->addAction(nombre);
+            a->setCheckable(true);
+            a->setChecked(nombre == d.estado);
+            connect(a, &QAction::triggered, this, [this, id, nombre] { cambiaEstadoObjetivo(id, nombre); });
+        }
+        connect(menu->addAction(tr("Quitar el objetivo")), &QAction::triggered, this, [this, id] {
+            seleccionaObjetivo(id);
+            quitaObjetivoElegido();
+        });
+    }
+
+    // Menu de un lugar vacio del mapa: agregar alli un punto (con anillos y sectores propios) o
+    // un objetivo, o llevar alli el origen elegido.
+    void menuLugar(QMenu *menu, const QGeoCoordinate &p)
+    {
+        cabecera(menu, formatCoordinate(p, CoordinateFormat::DMS));
+        connect(menu->addAction(tr("Agregar un punto aquí (con sus anillos y sectores)")),
+                &QAction::triggered, this,
+                [this, p] { agrega(p, tr("Punto %1").arg(m_puntos.size() + 1), false); });
+        connect(menu->addAction(tr("Agregar un objetivo aquí")), &QAction::triggered, this,
+                [this, p] { agregaObjetivo(p, QString(), 90.0, QStringLiteral("DET")); });
+        if (m_cur >= 0)
+            connect(menu->addAction(tr("Mover aquí el punto elegido «%1»").arg(m_origenes[m_cur].nombre)),
+                    &QAction::triggered, this, [this, p] { ponCentro(p); });
     }
 
     // Envuelve el contenido de una pestana en una zona con desplazamiento, con una linea al

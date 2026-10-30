@@ -599,6 +599,7 @@ void Ventana::quitarMarcasDe(qint64 targetId, qint64 featureId)
         m_mapa->removeRangeMark(anillos);
     for (const qint64 id : marcacionesDe(targetId, featureId))
         m_mapa->removeRangeMark(id);
+    quitarSectoresDe(targetId, featureId);       // sus sectores tambien se van con el
 }
 
 // Marcación desde un elemento (objetivo o punto: hace falta algo de lo que

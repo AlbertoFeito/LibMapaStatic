@@ -7383,3 +7383,22 @@ sectores, y quitarlo se lleva sus anillos y sectores. «Mover el origen» lleva 
 sectores.
 
 **Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 181. Menú del clic derecho: sectores y anillos por punto, en el ejemplo y en la demo
+
+**Origen.** El usuario pidió llevar esas funciones (anillos y sectores con origen en un punto) al **menú del clic del ratón** y a la **demo**.
+
+**Ejemplo `laboratorio_anillos`.** El clic derecho ofrece, según lo que haya debajo: sobre un **punto**, elegirlo, sus anillos (mostrar, escala de 300 o 600 km, ajustes), sus sectores (agregar sector o círculo con un diálogo de radio y azimuts,
+y por cada uno mostrarlo u ocultarlo, cambiarlo o eliminarlo, con los objetivos que tiene dentro), moverlo con un clic y quitarlo con lo suyo; sobre un **sector**, las mismas opciones y elegir su punto; sobre un **objetivo**, su estado
+(cambia el color del rótulo) y quitarlo; sobre un **lugar vacío**, agregar allí un punto o un objetivo o llevar allí el punto elegido.
+
+**Demo.** Nueva `demo/VentanaSectores.cpp`. Los sectores y círculos cuelgan de un **objetivo o de un punto del usuario**, como ya hacían los anillos: submenú «Sectores (N)» en el menú de cada uno (agregar sector, agregar círculo y,
+por cada uno, mostrarlo, cambiarlo con un diálogo, eliminarlo, ir a su origen y ver qué objetivos tiene dentro), y el clic derecho sobre un sector abre su propio menú. Puede haber varios en cada origen y varios orígenes a la vez. Un
+reloj de 0,5 s hace que sigan a su dueño si se mueve y los quita si desaparece; al borrar el punto u objetivo se van con él. El dueño de los sectores de un punto se guarda en sus atributos (`origen_punto`), así que sobreviven al guardado;
+los de un objetivo no (los objetivos no se guardan) y se quitan al abrir. Capa propia «sectores».
+
+**Lo que no es.** Esto vive en la aplicación, no en la librería: la librería no tiene el concepto de «dueño» de un sector como sí lo tiene `RangeRings` (`targetId`, `featureId`); si se quisiera que sector y anillos compartieran la
+misma regla de seguimiento, sería un campo nuevo de `MapFeature`. Lo de la demo está **compilado y arranca** con el paquete mínimo, pero no se ha ejercitado el menú con el ratón (no hay un `--comprobar` para la demo).
+
+**Estado: 33 tests (30 sin QCustomPlot).**
