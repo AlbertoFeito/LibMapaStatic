@@ -242,7 +242,7 @@ void TstRoundGeometry::plainCopyForExport()
     QVERIFY(p.toPlain().attributes.isEmpty());
 }
 
-// El rotulo de un arco cuelga de la mitad de su recorrido; el de un circulo, del centro.
+// El rotulo de un arco cuelga de la mitad de su recorrido; el de un circulo, de su punto norte.
 void TstRoundGeometry::labelPointOfAnArcIsItsMiddle()
 {
     const MapFeature a = redonda(GeometryKind::Arc, 10000.0, 315.0, 45.0);
@@ -252,7 +252,8 @@ void TstRoundGeometry::labelPointOfAnArcIsItsMiddle()
     QVERIFY(m.latitude() > a.geometry.first().latitude());     // al norte
 
     const MapFeature c = redonda(GeometryKind::Circle, 10000.0);
-    QCOMPARE(c.roundLabelPoint(), c.geometry.first());
+    QVERIFY(qAbs(c.geometry.first().distanceTo(c.roundLabelPoint()) - 10000.0) < 0.5);
+    QVERIFY(c.roundLabelPoint().latitude() > c.geometry.first().latitude());
 
     MapFeature p;
     p.kind = GeometryKind::Point;

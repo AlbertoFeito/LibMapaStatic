@@ -285,14 +285,14 @@ struct MapFeature
         return puntos;
     }
 
-    //! Punto donde se ancla el rotulo de un Arc: la mitad de su recorrido (en un
-    //! circulo es el centro). Invalido si no es redondo.
+    //! Punto donde se ancla el rotulo: la mitad del recorrido de un Arc y el punto norte del
+    //! borde de un Circle (en el centro tapaba lo que hubiera dentro). Invalido si no es redondo.
     QGeoCoordinate roundLabelPoint() const
     {
         if (!isRound() || geometry.isEmpty())
             return QGeoCoordinate();
         if (kind == GeometryKind::Circle)
-            return geometry.first();
+            return geometry.first().atDistanceAndAzimuth(radiusMeters, 0.0);
         const double barrido = arcSweepDeg(arcStartDeg, arcEndDeg);
         return geometry.first().atDistanceAndAzimuth(radiusMeters, arcStartDeg + barrido / 2.0);
     }
