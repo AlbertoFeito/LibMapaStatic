@@ -7402,3 +7402,19 @@ los de un objetivo no (los objetivos no se guardan) y se quitan al abrir. Capa p
 misma regla de seguimiento, sería un campo nuevo de `MapFeature`. Lo de la demo está **compilado y arranca** con el paquete mínimo, pero no se ha ejercitado el menú con el ratón (no hay un `--comprobar` para la demo).
 
 **Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 182. Rótulos de anillos y radiales: translúcidos, destacados con el ratón y ocultables
+
+**Origen.** En la demo y en el ejemplo los rótulos de distancia de los anillos y de marcación de los radiales ocupaban demasiado sitio y tapaban el mapa. Se pidió que fueran translúcidos, que resaltaran con el ratón y que se pudieran ocultar.
+
+**Qué cambia en la librería.** `RangeRings` gana `labelOpacity` (0,45 por defecto; 1 = opacos, como antes), `distanceLabels` y `bearingLabels` (las distancias y las marcaciones se ocultan por separado; `labels` sigue siendo el interruptor general).
+Los rótulos de anillos y de radiales se dibujan más pequeños, sin negrita y translúcidos; el que tiene el ratón encima (`RangeLayer::setHoverPixel`, llamado desde el movimiento del ratón y al salir del mapa) se pinta el último, opaco y en
+negrita, y la capa se repinta solo cuando cambia el rótulo destacado. Los rótulos de las marcaciones (`BearingLine`), que se arrastran, siguen opacos. Cambia el aspecto por defecto de los anillos ya existentes (ahora translúcidos); `labelOpacity = 1` lo devuelve a
+como era.
+
+**En el ejemplo y en la demo.** El ejemplo (pestaña Anillos) separa «Rotular las distancias» y «Rotular las marcaciones» y tiene la opacidad en %. El diálogo de anillos de la demo trae lo mismo.
+
+**Pruebas.** `rangeLabelsAreSoftHighlightOnHoverAndHideable` en `tst_mapwidget`: el rótulo bajo el ratón se ve distinto del suave y con `labels = false` desaparece. `--comprobar` comprueba la opacidad y los dos interruptores.
+
+**Estado: 33 tests (30 sin QCustomPlot).**

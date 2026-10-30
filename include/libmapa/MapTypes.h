@@ -142,6 +142,15 @@ struct RangeRings {
     //! Color de los radiales (los anillos siguen con \a color); invalido = \a color.
     QColor spokeColor;
     bool labels = true;             //!< Rotular distancias y marcaciones.
+    //! Rotular las distancias de los anillos y las marcaciones de los radiales (000°, 030°...)
+    //! por separado. Con \a labels en falso no se rotula nada; con \a labels, solo lo que
+    //! estos dos dejen.
+    bool distanceLabels = true;
+    bool bearingLabels = true;
+    //! Opacidad (0.1 a 1) de los rotulos de distancia y de radial cuando el raton NO esta sobre
+    //! ellos: translucidos para que no tapen el mapa. El que tiene el raton encima se pinta
+    //! opaco y destacado. 1 = opacos, como antes.
+    double labelOpacity = 0.45;
     QString name;                   //!< Rotulo junto al centro ("Radar Mariel"); vacio = ninguno.
 };
 

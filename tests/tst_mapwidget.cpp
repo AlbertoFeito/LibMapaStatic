@@ -171,6 +171,9 @@ private slots:
     //! (memoria, alta, dibujo y borrado). Imprime las cifras y exige solo que la
     //! entidad unica no sea peor en memoria.
     void measuresFiveThousandPointsAsPartsOrFeatures();
+    //! Los rotulos de distancia de los anillos son translucidos, se destacan bajo el raton
+    //! y se pueden ocultar (RangeRings::labels).
+    void rangeLabelsAreSoftHighlightOnHoverAndHideable();
     //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
     //! del PRIMER vértice, no del centro.
     void areaLabelHangsFromFirstVertex();
@@ -6213,6 +6216,63 @@ void TstMapWidget::measuresFiveThousandPointsAsPartsOrFeatures()
         .arg(muchas.kib).arg(muchas.altaMs).arg(muchas.dibujoMs).arg(muchas.borradoMs);
     qInfo() << "sizeof(MapFeature)" << sizeof(MapFeature) << "sizeof(PartInfo)" << sizeof(PartInfo);
     QVERIFY(uno.kib <= muchas.kib + 2048);           // margen por el ruido del asignador
+}
+
+// Anillos con rotulos: sin raton encima el rotulo es translucido; con el raton encima se destaca
+// (la region cambia y se oscurece el texto); con labels = false no hay rotulo.
+void TstMapWidget::rangeLabelsAreSoftHighlightOnHoverAndHideable()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.show();
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -80.0);
+    w.setCenter(centro);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+    RangeRings r;
+    r.center = centro;
+    r.spacingMeters = 20000.0;
+    r.count = 3;
+    r.labels = true;
+    const qint64 id = w.addRangeRings(r);
+    QVERIFY(id > 0);
+    const QPoint rotulo = pixel(centro.atDistanceAndAzimuth(40000.0, 0.0));
+    const QRect zona(rotulo.x() - 22, rotulo.y() - 8, 44, 16);
+    // Suma de la oscuridad del texto en la zona del rotulo (0 = blanco).
+    const auto oscuridad = [&] {
+        const QImage img = w.grab().toImage();
+        double suma = 0.0;
+        for (int y = zona.top(); y <= zona.bottom(); ++y)
+            for (int x = zona.left(); x <= zona.right(); ++x)
+                suma += 255 - qGray(img.pixel(x, y));
+        return suma;
+    };
+    QTest::mouseMove(plot, QPoint(5, 5));
+    QTest::qWait(60);
+    const double suave = oscuridad();
+
+    QTest::mouseMove(plot, rotulo);
+    QTest::qWait(80);
+    QTest::mouseMove(plot, rotulo + QPoint(1, 0));
+    QTest::qWait(80);
+    const double destacado = oscuridad();
+    QVERIFY2(destacado != suave, "el rotulo bajo el raton debe verse distinto (destacado)");
+
+    // Al ocultar los rotulos, la zona queda sin el texto.
+    r.labels = false;
+    QVERIFY(w.updateRangeRings(id, r));
+    QTest::mouseMove(plot, QPoint(5, 5));
+    QTest::qWait(60);
+    const double sinRotulo = oscuridad();
+    QVERIFY2(sinRotulo != suave, "labels = false debe quitar el rotulo");
 }
 
 QTEST_MAIN(TstMapWidget)

@@ -769,6 +769,21 @@ void Ventana::ponerAnillos(const RangeRings &propuesta, qint64 editar)
     });
     form->addRow(tr("Color:"), btnColor);
 
+    // Rotulos: las distancias y las marcaciones por separado, translucidos (se destacan al pasar
+    // el raton por encima) o menos translucidos.
+    auto *rotDist = new QCheckBox(tr("Rotular las distancias de los anillos"), &dlg);
+    rotDist->setChecked(base.labels && base.distanceLabels);
+    auto *rotRad = new QCheckBox(tr("Rotular las marcaciones de los radiales"), &dlg);
+    rotRad->setChecked(base.labels && base.bearingLabels);
+    auto *opac = new QSpinBox(&dlg);
+    opac->setRange(10, 100);
+    opac->setSuffix(QStringLiteral(" %"));
+    opac->setValue(int(base.labelOpacity * 100.0 + 0.5));
+    opac->setToolTip(tr("Con el raton encima, el rótulo se ve opaco y destacado."));
+    form->addRow(rotDist);
+    form->addRow(rotRad);
+    form->addRow(tr("Opacidad de los rótulos:"), opac);
+
     // Aceptar solo con unas coordenadas que se entiendan (si se eligieron).
     QGeoCoordinate fijo;
     auto *botones = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
@@ -796,6 +811,10 @@ void Ventana::ponerAnillos(const RangeRings &propuesta, qint64 editar)
     r.count = num->value();
     r.spokeEveryDeg = radiales->currentData().toInt();
     r.color = color;
+    r.labels = rotDist->isChecked() || rotRad->isChecked();
+    r.distanceLabels = rotDist->isChecked();
+    r.bearingLabels = rotRad->isChecked();
+    r.labelOpacity = opac->value() / 100.0;
     r.name.clear();                      // el rótulo lo pone el punto o el objetivo
     m_anillosUnidad = unidad->currentIndex();
     m_anillos.spacingMeters = r.spacingMeters;

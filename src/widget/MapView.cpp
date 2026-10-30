@@ -652,6 +652,8 @@ void MapView::actualizarCursorHover(const QPoint &pos)
     if (m_hoverClock.isValid() && m_hoverClock.elapsed() < 30)
         return;
     m_hoverClock.restart();
+    if (m_rangeLayer)
+        m_rangeLayer->setHoverPixel(QPointF(pos));      // destaca el rotulo de anillo bajo el raton
 
     Qt::CursorShape c = Qt::ArrowCursor;
     if (m_tool == MapTool::None) {
@@ -1255,6 +1257,14 @@ void MapView::mousePressEvent(QMouseEvent *event)
         }
     }
     event->accept();
+}
+
+// Al salir el raton del mapa ya no hay rotulo de anillo destacado.
+void MapView::leaveEvent(QEvent *event)
+{
+    if (m_rangeLayer)
+        m_rangeLayer->setHoverPixel(QPointF(-1.0, -1.0));
+    QCustomPlot::leaveEvent(event);
 }
 
 // Movimiento del raton: emite la coordenada bajo el cursor y, segun el estado,

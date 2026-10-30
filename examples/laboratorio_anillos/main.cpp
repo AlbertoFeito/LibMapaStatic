@@ -113,7 +113,9 @@ struct AjustesAnillos {
     double separacion = 10.0;      // en las unidades elegidas (km o NM)
     int anillos = 10;
     int radiales = 30;             // grados entre radiales; 0 = sin radiales
-    bool rotulos = true;
+    bool rotulos = true;          // rotular las distancias de los anillos
+    bool rotulosRadiales = true;  // rotular las marcaciones de los radiales
+    int opacidadRotulos = 45;     // % cuando el raton no esta encima
     bool enfasis = false;
     int cadaAnillos = 5;
     int cadaGrados = 30;
@@ -628,6 +630,8 @@ private:
         a.anillos = m_numero->value();
         a.radiales = m_radiales->currentData().toInt();
         a.rotulos = m_rotulos->isChecked();
+        a.rotulosRadiales = m_rotulosRadiales->isChecked();
+        a.opacidadRotulos = m_opacidad->value();
         a.enfasis = m_enfasis->isChecked();
         a.cadaAnillos = m_cadaAnillos->value();
         a.cadaGrados = m_cadaGrados->value();
@@ -640,12 +644,14 @@ private:
     void cargaControles(const AjustesAnillos &a)
     {
         const QSignalBlocker b1(m_mostrar), b2(m_separacion), b3(m_numero), b4(m_radiales),
-            b5(m_rotulos), b6(m_enfasis), b7(m_cadaAnillos), b8(m_cadaGrados),
+            b5(m_rotulos), b6(m_enfasis), b11(m_rotulosRadiales), b12(m_opacidad), b7(m_cadaAnillos), b8(m_cadaGrados),
             b9(m_colorRadiales), b10(m_paleta);
         m_mostrar->setChecked(a.mostrar);
         m_separacion->setValue(a.separacion);
         m_numero->setValue(a.anillos);
         m_radiales->setCurrentIndex(qMax(0, m_radiales->findData(a.radiales)));
+        m_rotulosRadiales->setChecked(a.rotulosRadiales);
+        m_opacidad->setValue(a.opacidadRotulos);
         m_rotulos->setChecked(a.rotulos);
         m_enfasis->setChecked(a.enfasis);
         m_cadaAnillos->setValue(a.cadaAnillos);
@@ -668,7 +674,10 @@ private:
         r.spacingMeters = o.aj.separacion * (nauticas() ? kMetrosPorMilla : 1000.0);
         r.count = o.aj.anillos;
         r.spokeEveryDeg = o.aj.radiales;
-        r.labels = o.aj.rotulos;
+        r.labels = o.aj.rotulos || o.aj.rotulosRadiales;
+        r.distanceLabels = o.aj.rotulos;
+        r.bearingLabels = o.aj.rotulosRadiales;
+        r.labelOpacity = o.aj.opacidadRotulos / 100.0;
         const bool grises = o.aj.paleta == 1;
         r.color = grises ? QColor(180, 180, 180)             // gris claro (Anexo C)
                          : QColor(0xc6, 0x28, 0x28);         // rojo: se lee sobre la costa y el mar
@@ -1565,8 +1574,15 @@ private:
         for (int g : kRadiales)
             m_radiales->addItem(g == 0 ? tr("Sin radiales") : tr("Cada %1°").arg(g), g);
         m_radiales->setCurrentIndex(m_radiales->findData(30));
-        m_rotulos = new QCheckBox(tr("Rotular distancias y marcaciones"), g1);
+        m_rotulos = new QCheckBox(tr("Rotular las distancias de los anillos"), g1);
         m_rotulos->setChecked(true);
+        m_rotulosRadiales = new QCheckBox(tr("Rotular las marcaciones de los radiales"), g1);
+        m_rotulosRadiales->setChecked(true);
+        m_opacidad = new QSpinBox(g1);
+        m_opacidad->setRange(10, 100);
+        m_opacidad->setSuffix(QStringLiteral(" %"));
+        m_opacidad->setValue(45);
+        m_opacidad->setToolTip(tr("Los rótulos son translucidos; el que tiene el ratón encima se ve opaco."));
         f1->addRow(m_mostrar);
         f1->addRow(tr("Origen"), m_lblCentro);
         f1->addRow(m_elegir);
@@ -1577,6 +1593,8 @@ private:
         f1->addRow(tr("Anillos"), m_numero);
         f1->addRow(tr("Radiales"), m_radiales);
         f1->addRow(m_rotulos);
+        f1->addRow(m_rotulosRadiales);
+        f1->addRow(tr("Opacidad de los rótulos"), m_opacidad);
 
         auto *gp = new QGroupBox(tr("Escala polar, énfasis y colores"));
         auto *fp = new QFormLayout(gp);
@@ -1610,10 +1628,10 @@ private:
         connect(habana, &QPushButton::clicked, this, [this] { ponCentro(kHabana); });
         connect(ir, &QPushButton::clicked, this, [this] { m_mapa->setCenter(m_centro); });
         // Las conexiones de los ajustes, al final: aplicaAnillos lee todos los controles.
-        for (QCheckBox *c : { m_mostrar, m_rotulos, m_barra, m_cuadricula, m_enfasis,
+        for (QCheckBox *c : { m_mostrar, m_rotulos, m_rotulosRadiales, m_barra, m_cuadricula, m_enfasis,
                               m_colorRadiales })
             connect(c, &QCheckBox::toggled, this, [this] { aplicaAnillos(); });
-        for (QSpinBox *sp : { m_cadaAnillos, m_cadaGrados })
+        for (QSpinBox *sp : { m_cadaAnillos, m_cadaGrados, m_opacidad })
             connect(sp, QOverload<int>::of(&QSpinBox::valueChanged), this,
                     [this] { aplicaAnillos(); });
         for (QComboBox *c : { m_unidades, m_radiales, m_paleta })
@@ -1959,6 +1977,8 @@ private:
     QGeoCoordinate m_centro;
     QCheckBox *m_mostrar = nullptr;
     QCheckBox *m_rotulos = nullptr;
+    QCheckBox *m_rotulosRadiales = nullptr;
+    QSpinBox *m_opacidad = nullptr;
     QCheckBox *m_barra = nullptr;
     QCheckBox *m_cuadricula = nullptr;
     QLabel *m_lblCentro = nullptr;
@@ -2040,6 +2060,8 @@ int comprobar(Ventana &v)
         exige(r->count == 10 && qAbs(r->spacingMeters - 10000.0) < 0.5,
               "deberian ser 10 anillos cada 10 km", &fallos);
         exige(r->spokeEveryDeg == 30 && r->labels, "faltan los radiales o los rotulos", &fallos);
+        exige(r->distanceLabels && r->bearingLabels && qAbs(r->labelOpacity - 0.45) < 1e-6,
+              "los rotulos deben ser suaves y rotular distancias y radiales", &fallos);
     }
 
     // 3. Otro centro (lo que hace el clic con «Elegir centro»).

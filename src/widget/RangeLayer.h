@@ -72,6 +72,9 @@ public:
      * el rotulo.
      */
     qint64 bearingLabelAt(const QPointF &pixel) const;
+    //! Pixel donde esta el raton, para destacar el rotulo de anillo o de radial que tiene debajo
+    //! (los demas son translucidos). Repinta solo si cambia el rotulo destacado. (-1,-1) = ninguno.
+    void setHoverPixel(const QPointF &pixel);
     //! Desplaza el rotulo de una marcacion (pixeles, relativo a su centro). false
     //! si no existe esa marcacion.
     bool setBearingLabelOffset(qint64 id, const QPointF &offsetPx);
@@ -111,7 +114,8 @@ private:
     void drawBearing(QCPPainter *painter, qint64 id, const BearingLine &l) const;
     //! Anota un rotulo para pintarlo despues, encima de todo (drawLabels).
     void label(const QPointF &anchor, const QString &txt, const QColor &color,
-               const QPointF &offset = QPointF(), qint64 bearingId = -1) const;
+               const QPointF &offset = QPointF(), qint64 bearingId = -1,
+               double opacity = 1.0) const;
     void repintar();
 
     TargetModel *m_targets = nullptr;
@@ -129,8 +133,13 @@ private:
         QColor color;
         QPointF offset;       //!< Desplazamiento en pixeles respecto a \a anchor.
         qint64 bearingId;     //!< Marcacion a la que pertenece, o -1 (anillos).
+        double opacity = 1.0; //!< < 1 = rotulo suave (anillo o radial): translucido y destaca bajo el raton.
     };
     mutable QVector<PendingLabel> m_pending;
+    //! Cajas de los rotulos suaves de la ultima pasada y la que tiene el raton encima.
+    mutable QVector<QRectF> m_softBoxes;
+    QRectF m_hoverBox;
+    QPointF m_hoverPx = QPointF(-1.0, -1.0);
     //! Cajas de los rotulos de marcacion de la ultima pasada, para bearingLabelAt.
     mutable QVector<std::pair<qint64, QRectF>> m_bearingLabelBoxes;
 };
