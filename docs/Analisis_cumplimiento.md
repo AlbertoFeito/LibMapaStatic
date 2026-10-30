@@ -36,7 +36,7 @@ El objetivo común de todo lo pedido es el mismo: que el operador **lea rápido 
 
 **Corrección posterior (el origen).** Los anillos y los sectores no eran del mapa sino de **un punto**: el ejemplo tenía
 un solo centro global. Ahora cada punto es un **origen** con sus anillos y sus sectores; se elige en la lista de arriba o
-tocándolo en el mapa, y con «solo el elegido» se ven solo los suyos. Un punto nuevo nace con sus anillos y sin sectores.
+tocándolo en el mapa, y por defecto se ven los de todos los puntos a la vez, y con «solo el elegido» solo los suyos. Un punto nuevo nace con sus anillos y sin sectores.
 
 ## 3. Lo que sigue sin cumplir o conviene decidir
 

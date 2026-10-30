@@ -145,7 +145,7 @@ QString textoAyuda()
     return QObject::tr(
         "<b>Punto de origen</b> · los anillos y los sectores se miden siempre desde un punto"
         "<ul><li>Elige el punto arriba (o tócalo en el mapa). Cada punto tiene <i>sus</i> anillos y "
-        "<i>sus</i> sectores; los de los demás se ocultan mientras esté marcado «solo el elegido».</li>"
+        "<i>sus</i> sectores; se ven todos a la vez; «solo el elegido» oculta los de los demás.</li>"
         "<li>Agrega más puntos en la pestaña Puntos y ponles anillos o sectores propios.</li></ul>"
         "<b>Anillos</b> · medir distancia y marcación desde un punto"
         "<ul><li>Pasa el ratón por un anillo: «Desde el centro» debe dar su rótulo (10 km, "
@@ -207,8 +207,8 @@ public:
         m_mapa->setCenter(kHabana);
         m_mapa->setZoom(9);
         m_centro = kHabana;
-        m_soloElegido = new QCheckBox(tr("Mostrar solo los anillos y sectores del punto elegido"), this);
-        m_soloElegido->setChecked(true);
+        m_soloElegido = new QCheckBox(tr("Ver solo el punto elegido (ocultar los anillos y sectores de los demás)"), this);
+        m_soloElegido->setChecked(false);       // por defecto se ven todos a la vez
         // El mapa recarga lo que se dejo guardado en otras sesiones (y en otros ejemplos, como los
         // «aerodromo» de laboratorio_rotulos): se parte limpio, los puntos los agrega el usuario.
         quitaPuntos();
@@ -277,9 +277,12 @@ public:
     qint64 anillos() const { return m_cur >= 0 ? m_origenes[m_cur].anillos : -1; }
     int numOrigenes() const { return int(m_origenes.size()); }
     int origenActual() const { return m_cur; }
+    qint64 anillosDeOrigen(int o) const { return m_origenes.value(o).anillos; }
+    qint64 sectorDeOrigen(int o, int i) const { return m_origenes.value(o).sectores.value(i, -1); }
     qint64 puntoDeOrigen(int i) const { return m_origenes.value(i).punto; }
     QString lecturaRaton() const { return m_desdeCentro ? m_desdeCentro->text() : QString(); }
     QCheckBox *casillaMostrar() const { return m_mostrar; }
+    QCheckBox *casillaSolo() const { return m_soloElegido; }
     QComboBox *unidades() const { return m_unidades; }
     qint64 primerPunto() const { return m_puntos.value(0, -1); }
     QVector<qint64> objetivos() const { return m_objetivos; }
@@ -1965,7 +1968,6 @@ int comprobar(Ventana &v)
     const int origen0 = v.origenActual();
     const QGeoCoordinate pos0 = m->feature(v.puntoDeOrigen(origen0))->geometry.first();
     exige(v.numOrigenes() == 1 && v.anillos() >= 0, "al arrancar debe haber un origen con anillos", &fallos);
-    const qint64 anillos0 = v.anillos();
     v.agrega(QGeoCoordinate(22.40, -83.70), QStringLiteral("Punto B"), false);
     exige(v.numOrigenes() == 2 && v.origenActual() == 1, "agregar un punto debe crear y elegir su origen", &fallos);
     exige(v.numSectores() == 0 && m->featureTypeCounts().value(QStringLiteral("sector")) == 4,
@@ -1973,11 +1975,18 @@ int comprobar(Ventana &v)
     const auto rb = m->rangeRings(v.anillos());
     exige(rb && rb->center.distanceTo(QGeoCoordinate(22.40, -83.70)) < 1.0,
           "los anillos del punto B deben estar en el punto B", &fallos);
-    exige(!m->rangeRings(anillos0).has_value(),
+    // Por defecto se ven los de todos los puntos A LA VEZ; con «solo el elegido», solo los suyos.
+    exige(m->rangeRings(v.anillosDeOrigen(origen0)).has_value() && m->rangeRings(v.anillos()).has_value(),
+          "por defecto deben verse los anillos de los dos puntos a la vez", &fallos);
+    v.casillaSolo()->setChecked(true);
+    exige(!m->rangeRings(v.anillosDeOrigen(origen0)).has_value() && v.anillos() >= 0,
           "con «solo el elegido» los anillos del otro punto no se ven", &fallos);
+    v.casillaSolo()->setChecked(false);
     v.creaSector(false, 80, 10, 100, QColor(0xc6, 0x28, 0x28), QStringLiteral("B · Sector 10–100"));
     exige(v.numSectores() == 1 && m->featureTypeCounts().value(QStringLiteral("sector")) == 5,
           "el sector va al punto elegido", &fallos);
+    exige(m->feature(v.sectorDeOrigen(origen0, 0))->visible && m->feature(v.sector(0))->visible,
+          "los sectores de los dos puntos deben verse a la vez", &fallos);
     v.seleccionaOrigen(origen0);
     exige(v.numSectores() == 4 && v.anillos() >= 0 &&
               m->rangeRings(v.anillos())->center.distanceTo(pos0) < 1.0,
