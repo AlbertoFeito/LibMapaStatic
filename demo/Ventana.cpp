@@ -95,11 +95,6 @@ Ventana::Ventana(const QString &origen, bool esPaquete,
 // Conecta las señales del mapa con el panel, la barra de estado y los indicadores.
 void Ventana::conectarSenales()
 {
-    // Los sectores siguen a su objetivo o punto y se quitan con él.
-    m_relojSectores = new QTimer(this);
-    m_relojSectores->setInterval(500);
-    connect(m_relojSectores, &QTimer::timeout, this, &Ventana::siguenAlDueno);
-    m_relojSectores->start();
     // Clic derecho: menú según lo que haya debajo (objetivo, entidad...).
     connect(m_mapa, &MapWidget::contextMenuRequested, this, &Ventana::menuContextual);
     // Clic izquierdo sobre un elemento: tarjeta con sus datos y acciones rápidas.

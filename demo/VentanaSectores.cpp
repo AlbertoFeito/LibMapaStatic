@@ -2,25 +2,20 @@
 // Parte de la clase Ventana de la demo (declarada en Ventana.h).
 //
 // Igual que los anillos, un sector NO es un elemento aparte: cuelga de un objetivo o de un punto
-// y se maneja desde su menu del clic derecho. Puede haber varios en el mismo origen, y varios
+// (MapFeature::originTargetId y originFeatureId, como RangeRings::targetId y featureId) y se
+// maneja desde su menu del clic derecho. Puede haber varios en el mismo origen, y varios
 // origenes a la vez. Un sector es una cuna rellena (area a vigilar); un circulo, una zona
-// redonda. Siguen a su dueno si se mueve y se van con el cuando desaparece. El dueno de un
-// sector de un punto se guarda en sus atributos, asi que sobrevive al guardado de las entidades;
-// el de un objetivo no (los objetivos no se guardan) y esos sectores se quitan al abrir.
+// redonda. La LIBRERIA los mantiene sobre su dueno y los quita con el.
 
 #include "Ventana.h"
 
 #include "libmapa/Coordinates.h"
-
-#include <QTimer>
 
 using namespace libmapa;
 
 namespace {
 
 const char *const kCapa = "sectores";
-const char *const kAtrPunto = "origen_punto";
-const char *const kAtrObjetivo = "origen_objetivo";
 
 // Pide radio y, si no es un circulo, los azimuts. false si se cancela.
 bool pedirSector(QWidget *padre, bool circulo, const QString &titulo, double *radioKm, int *ini,
@@ -68,14 +63,22 @@ static QString etiquetaSector(const QString &dueno, bool circulo, double radioKm
                          .arg(radioKm, 0, 'f', 0);
 }
 
+// ¿Es la entidad \a id un sector o circulo con dueno?
+bool Ventana::esSectorConDueno(qint64 id) const
+{
+    const auto f = id >= 0 ? m_mapa->feature(id) : std::nullopt;
+    return f && f->isRound() && (f->originTargetId >= 0 || f->originFeatureId >= 0);
+}
+
 // Ids de los sectores de un objetivo (\a targetId) o de un punto (\a featureId).
 QVector<qint64> Ventana::sectoresDe(qint64 targetId, qint64 featureId) const
 {
     QVector<qint64> ids;
-    for (auto it = m_sectoresDe.constBegin(); it != m_sectoresDe.constEnd(); ++it)
-        if ((targetId >= 0 && it->target == targetId)
-            || (targetId < 0 && featureId >= 0 && it->target < 0 && it->feature == featureId))
-            ids.append(it.key());
+    for (const MapFeature &f : m_mapa->featuresOfType(QStringLiteral("sector")))
+        if (f.isRound() && ((targetId >= 0 && f.originTargetId == targetId)
+                            || (targetId < 0 && featureId >= 0 && f.originTargetId < 0
+                                && f.originFeatureId == featureId)))
+            ids.append(f.id);
     std::sort(ids.begin(), ids.end());
     return ids;
 }
@@ -105,13 +108,11 @@ qint64 Ventana::ponerSector(qint64 targetId, qint64 featureId, bool circulo, dou
     f.style.lineColor = color;
     f.style.lineWidth = 2.0;
     f.style.fillColor = QColor(color.red(), color.green(), color.blue(), 60);
-    f.attributes.insert(QString::fromLatin1(targetId >= 0 ? kAtrObjetivo : kAtrPunto),
-                        targetId >= 0 ? targetId : featureId);
+    f.originTargetId = targetId;
+    f.originFeatureId = targetId >= 0 ? -1 : featureId;     // la libreria lo mantiene sobre su dueno
     const qint64 id = m_mapa->addFeature(f);
-    if (id >= 0) {
-        m_sectoresDe.insert(id, { targetId, targetId >= 0 ? -1 : featureId });
+    if (id >= 0)
         marcarSucio();
-    }
     return id;
 }
 
@@ -158,13 +159,12 @@ QStringList Ventana::objetivosDentroDe(qint64 sectorId) const
     return dentro;
 }
 
-// Quita los sectores que cuelgan de un objetivo o de un punto (cuando este desaparece).
+// Quita los sectores de un objetivo o de un punto (a mano: «Quitar todos»). Al desaparecer el
+// dueno, la libreria ya los quita sola.
 void Ventana::quitarSectoresDe(qint64 targetId, qint64 featureId)
 {
-    for (const qint64 id : sectoresDe(targetId, featureId)) {
-        m_sectoresDe.remove(id);
+    for (const qint64 id : sectoresDe(targetId, featureId))
         m_mapa->removeFeature(id);
-    }
 }
 
 // Opciones de un sector: lo que tiene dentro, ir a su dueno, mostrarlo u ocultarlo, cambiarlo y
@@ -185,9 +185,9 @@ void Ventana::menuSector(QMenu *menu, qint64 sectorId, bool cabeza)
     menu->addAction(dentro.isEmpty() ? tr("Ningún objetivo dentro")
                                      : tr("Dentro: %1").arg(dentro.join(QStringLiteral(", "))))
         ->setEnabled(false);
-    const DuenoSector dueno = m_sectoresDe.value(sectorId);
-    connect(menu->addAction(tr("Ir a su origen")), &QAction::triggered, this, [this, dueno] {
-        const QGeoCoordinate p = posicionDe(dueno.target, dueno.feature);
+    connect(menu->addAction(tr("Ir a su origen")), &QAction::triggered, this, [this, sectorId] {
+        const auto g = m_mapa->feature(sectorId);
+        const QGeoCoordinate p = g ? g->geometry.value(0) : QGeoCoordinate();
         if (p.isValid())
             m_mapa->setCenter(p);
     });
@@ -203,7 +203,6 @@ void Ventana::menuSector(QMenu *menu, qint64 sectorId, bool cabeza)
     connect(menu->addAction(tr("Cambiar radio y azimuts...")), &QAction::triggered, this,
             [this, sectorId] { cambiarSectorPedido(sectorId); });
     connect(menu->addAction(tr("Eliminar el sector")), &QAction::triggered, this, [this, sectorId] {
-        m_sectoresDe.remove(sectorId);
         m_mapa->removeFeature(sectorId);
         marcarSucio();
     });
@@ -229,47 +228,5 @@ void Ventana::submenuSectores(QMenu *menu, qint64 targetId, qint64 featureId)
                     quitarSectoresDe(targetId, featureId);
                     marcarSucio();
                 });
-    }
-}
-
-// Recompone quien es el dueno de cada sector tras abrir un fichero: los de un punto vuelven a
-// seguir a su punto; los de un objetivo (que ya no existe) se quitan.
-void Ventana::reconstruirSectores()
-{
-    for (const MapFeature &f : m_mapa->featuresOfType(QStringLiteral("sector"))) {
-        if (m_sectoresDe.contains(f.id))
-            continue;
-        if (f.attributes.contains(QString::fromLatin1(kAtrPunto)))
-            m_sectoresDe.insert(f.id, { -1, f.attributes.value(QString::fromLatin1(kAtrPunto)).toLongLong() });
-        else if (f.attributes.contains(QString::fromLatin1(kAtrObjetivo)))
-            m_mapa->removeFeature(f.id);
-    }
-}
-
-// Paso periodico: cada sector sigue a su dueno (si se movio) y se quita si el dueno ya no existe.
-void Ventana::siguenAlDueno()
-{
-    reconstruirSectores();
-    QVector<qint64> huerfanos;
-    for (auto it = m_sectoresDe.constBegin(); it != m_sectoresDe.constEnd(); ++it) {
-        const auto f = m_mapa->feature(it.key());
-        if (!f) {
-            huerfanos.append(it.key());
-            continue;
-        }
-        const QGeoCoordinate p = posicionDe(it->target, it->feature);
-        if (!p.isValid()) {
-            huerfanos.append(it.key());
-            continue;
-        }
-        if (!f->geometry.isEmpty() && f->geometry.first().distanceTo(p) > 1.0) {
-            MapFeature g = *f;
-            g.geometry = { p };
-            m_mapa->updateFeature(g);
-        }
-    }
-    for (const qint64 id : huerfanos) {
-        m_sectoresDe.remove(id);
-        m_mapa->removeFeature(id);
     }
 }

@@ -63,7 +63,7 @@ void Ventana::menuContextual(const MapHit &hit, const QPoint &global)
         menuGrupo(&menu, hit.clusterTargets);
     else if (hit.vertexFeature >= 0)
         menuEntidad(&menu, hit.vertexFeature, hit.vertexIndex);     // sobre un tirador de vértice
-    else if (hit.featureId >= 0 && m_sectoresDe.contains(hit.featureId))
+    else if (hit.featureId >= 0 && esSectorConDueno(hit.featureId))
         menuSector(&menu, hit.featureId);
     else if (hit.featureId >= 0)
         menuEntidad(&menu, hit.featureId);

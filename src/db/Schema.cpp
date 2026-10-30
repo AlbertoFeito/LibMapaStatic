@@ -130,6 +130,15 @@ QStringList migrations(int from)
             "ALTER TABLE entidad ADD COLUMN arco_sector INTEGER NOT NULL DEFAULT 0");
     }
 
+    if (from < 8) {
+        // v8: dueno de un circulo o sector (MapFeature::originTargetId y originFeatureId). -1 =
+        // sin dueno, asi que lo ya guardado sigue con su centro fijo.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN origen_objetivo INTEGER NOT NULL DEFAULT -1");
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN origen_entidad INTEGER NOT NULL DEFAULT -1");
+    }
+
     return sql;
 }
 

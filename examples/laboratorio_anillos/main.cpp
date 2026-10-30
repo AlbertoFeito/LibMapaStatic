@@ -373,6 +373,8 @@ public:
         f.type = QStringLiteral("sector");
         f.name = nombre;
         f.geometry = { m_centro };
+        if (m_cur >= 0)
+            f.originFeatureId = m_origenes[m_cur].punto;     // la libreria lo mantiene sobre su punto
         f.radiusMeters = radioKm * 1000.0;
         f.arcStartDeg = ini;
         f.arcEndDeg = fin;
@@ -575,11 +577,7 @@ public:
             f->geometry = { p };
             m_mapa->updateFeature(*f);
         }
-        for (qint64 id : o.sectores)               // los sectores siguen al origen
-            if (auto f = m_mapa->feature(id)) {
-                f->geometry = { p };
-                m_mapa->updateFeature(*f);
-            }
+        // Los sectores no se mueven a mano: llevan a su punto como dueno y la libreria los sigue.
         dibujaAnillos(o, m_cur);
         actualizaSectores();
     }
@@ -2069,6 +2067,12 @@ int comprobar(Ventana &v)
     v.ponCentro(otro);
     r = m->rangeRings(v.anillos());
     exige(r && r->center.distanceTo(otro) < 1.0, "los anillos no se movieron al nuevo centro", &fallos);
+    // Los sectores llevan a su punto como dueno (MapFeature::originFeatureId): la libreria los
+    // mueve con el, sin que la aplicacion lo haga.
+    const auto sec0 = m->feature(v.sector(0));
+    exige(sec0 && sec0->originFeatureId == v.puntoDeOrigen(v.origenActual()) &&
+              sec0->geometry.first().distanceTo(otro) < 1.0,
+          "el sector no siguio a su punto", &fallos);
 
     // 4. La lectura del raton: un punto a 25 km al 045 del centro, cerca del anillo 2 o 3.
     v.leeRaton(otro.atDistanceAndAzimuth(25000.0, 45.0));

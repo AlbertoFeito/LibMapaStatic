@@ -301,10 +301,7 @@ private:
     qint64 anillosDe(qint64 targetId, qint64 featureId) const;
 
     // Sectores y circulos con origen en un objetivo o en un punto (VentanaSectores.cpp).
-    struct DuenoSector {
-        qint64 target = -1;
-        qint64 feature = -1;
-    };
+    bool esSectorConDueno(qint64 id) const;
     QVector<qint64> sectoresDe(qint64 targetId, qint64 featureId) const;
     qint64 ponerSector(qint64 targetId, qint64 featureId, bool circulo, double radioKm, double ini,
                        double fin);
@@ -314,10 +311,6 @@ private:
     void quitarSectoresDe(qint64 targetId, qint64 featureId);
     void menuSector(QMenu *menu, qint64 sectorId, bool cabeza = true);
     void submenuSectores(QMenu *menu, qint64 targetId, qint64 featureId);
-    void reconstruirSectores();
-    void siguenAlDueno();
-    QHash<qint64, DuenoSector> m_sectoresDe;     //!< sector -> su objetivo o punto
-    QTimer *m_relojSectores = nullptr;           //!< hace que los sectores sigan a su dueno
     QString nombreObjetivo(qint64 id) const;
 
     void ponerMarcacion();

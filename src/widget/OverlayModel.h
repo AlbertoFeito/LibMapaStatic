@@ -163,6 +163,13 @@ public:
     //! Nombre de la capa a la que van las entidades sin capa indicada.
     static QString defaultLayerId() { return QStringLiteral("default"); }
 
+    //! Ids de los circulos y sectores que tienen dueno (MapFeature::originTargetId o
+    //! originFeatureId): los que hay que mantener sobre su dueno.
+    QVector<qint64> ownedFeatureIds() const;
+    //! Lleva el centro de un circulo o sector a \a center sin apilar un paso de deshacer (es
+    //! seguir a su dueno, no una edicion). false si no existe o no es redondo.
+    bool moveCenter(qint64 id, const QGeoCoordinate &center);
+
 signals:
     //! Algo cambio y hay que repintar. Una sola senal: al que dibuja no le
     //! importa si fue un alta, una edicion o un cambio de visibilidad.

@@ -280,10 +280,10 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
         "INSERT INTO entidad (capa, tipo, geometria, nombre, descripcion,"
         " color_linea, color_relleno, ancho_linea, estilo_linea, radio_px,"
         " etiqueta_visible, label_dx, label_dy, label_anchor, label_pos, label_fuente,"
-        " radio_m, arco_ini, arco_fin, arco_sector, visible, simbolo,"
+        " radio_m, arco_ini, arco_fin, arco_sector, origen_objetivo, origen_entidad, visible, simbolo,"
         " atributos, creado_utc)"
         " VALUES (:capa,:tipo,:geo,:nom,:desc,:cl,:cr,:anc,:el,:rp,:ev,"
-        " :ldx,:ldy,:lan,:lpo,:lfu,:rad,:ai,:af,:asec,:vi,:sim,:atr,:cu)"));
+        " :ldx,:ldy,:lan,:lpo,:lfu,:rad,:ai,:af,:asec,:oob,:oen,:vi,:sim,:atr,:cu)"));
     q.bindValue(QStringLiteral(":capa"), text(f.layerId));
     q.bindValue(QStringLiteral(":tipo"), text(f.type));
     q.bindValue(QStringLiteral(":geo"), static_cast<int>(f.kind));
@@ -304,6 +304,8 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     q.bindValue(QStringLiteral(":ai"), f.arcStartDeg);
     q.bindValue(QStringLiteral(":af"), f.arcEndDeg);
     q.bindValue(QStringLiteral(":asec"), f.arcSector ? 1 : 0);
+    q.bindValue(QStringLiteral(":oob"), f.originTargetId);
+    q.bindValue(QStringLiteral(":oen"), f.originFeatureId);
     q.bindValue(QStringLiteral(":vi"), f.visible ? 1 : 0);
     q.bindValue(QStringLiteral(":sim"), pixmapToPng(f.style.icon));
     q.bindValue(QStringLiteral(":atr"), atributos);
@@ -374,9 +376,26 @@ bool VectorRepository::saveFeatures(const QVector<MapFeature> &features)
     if (!tx.isActive())
         return fail(QStringLiteral("saveFeatures"), tr("Sin transaccion"));
 
+    // Al guardar, cada entidad recibe un id nuevo: el dueno de un circulo o sector (que es el id
+    // de OTRA entidad) se reescribe con el id nuevo de esa entidad, para que al abrir siga
+    // colgando de ella. Si el dueno no esta entre las guardadas, queda sin dueno.
+    QHash<qint64, qint64> idNuevo;
+    QVector<QPair<qint64, qint64>> conDueno;       // (id nuevo del sector, id viejo del dueno)
     for (const MapFeature &f : features) {
-        if (!writeFeature(database, f))
+        const auto id = writeFeature(database, f);
+        if (!id)
             return false;      // rollback al salir del scope
+        idNuevo.insert(f.id, *id);
+        if (f.isRound() && f.originTargetId < 0 && f.originFeatureId >= 0)
+            conDueno.append({ *id, f.originFeatureId });
+    }
+    for (const auto &par : conDueno) {
+        QSqlQuery q(database);
+        q.prepare(QStringLiteral("UPDATE entidad SET origen_entidad=:o WHERE id=:id"));
+        q.bindValue(QStringLiteral(":o"), idNuevo.value(par.second, -1));
+        q.bindValue(QStringLiteral(":id"), par.first);
+        if (!q.exec())
+            return fail(QStringLiteral("saveFeatures"), q.lastError().text());
     }
     return tx.commit();
 }
@@ -460,6 +479,10 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         f.arcStartDeg = field(q, "arco_ini").toDouble();
         f.arcEndDeg = field(q, "arco_fin").toDouble();
         f.arcSector = field(q, "arco_sector").toInt() != 0;      // esquema v7
+        const QVariant oob = field(q, "origen_objetivo");       // esquema v8; sin la columna, sin dueno
+        f.originTargetId = oob.isValid() ? oob.toLongLong() : -1;
+        const QVariant oen = field(q, "origen_entidad");
+        f.originFeatureId = oen.isValid() ? oen.toLongLong() : -1;
         f.style.icon = pngToPixmap(field(q, "simbolo").toByteArray());
         f.visible = field(q, "visible").toInt() != 0;
 

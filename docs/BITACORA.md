@@ -7418,3 +7418,24 @@ como era.
 **Pruebas.** `rangeLabelsAreSoftHighlightOnHoverAndHideable` en `tst_mapwidget`: el rótulo bajo el ratón se ve distinto del suave y con `labels = false` desaparece. `--comprobar` comprueba la opacidad y los dos interruptores.
 
 **Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 183. Dueño de un círculo o sector, en la librería (como `RangeRings`)
+
+**Origen.** En §181 el seguimiento y la baja de los sectores de un punto u objetivo quedaron en la aplicación (un temporizador en la demo). El usuario pidió hacerlo en la librería, «como los anillos».
+
+**Qué cambia.** `MapFeature::originTargetId` y `originFeatureId` (como `RangeRings::targetId` y `featureId`): el centro de un `Circle` o de un `Arc` es siempre la posición de su dueño y se va con él. (1) **Seguir:** `MapView::sincronizaDuenos`, enganchada a los
+cambios de `TargetModel` y de `OverlayModel`, lleva cada círculo o sector a la posición de su objetivo o entidad (`OverlayModel::moveCenter`, sin paso de deshacer: seguir no es una edición); un bucle de guarda evita que su propio ajuste la vuelva a disparar.
+(2) **Desaparecer con el dueño:** `OverlayModel::removeFeature` quita también lo que cuelga de la entidad, en **el mismo paso de deshacer** (un `undo` devuelve las dos cosas); un círculo de un objetivo que ya no existe se quita al sincronizar. Un dueño-entidad que
+todavía no está (se está cargando) no se toma por perdido. (3) **Guardado, esquema v8:** columnas `origen_objetivo` y `origen_entidad` (-1 = sin dueño: lo ya guardado sigue igual). Como al guardar cada entidad recibe un id nuevo, `saveFeatures` reescribe el dueño-entidad
+con el id nuevo de su entidad (si el dueño no se guarda, queda sin dueño); los de objetivo se guardan pero, al abrir, ya no hay objetivo y se quitan.
+
+**En la demo y el ejemplo.** Desaparece el código propio: la demo ya no lleva el reloj de 0,5 s, el mapa de dueños ni los atributos `origen_punto`/`origen_objetivo`; el menú pregunta a la librería (`featuresOfType("sector")` filtrando por dueño). El ejemplo pone `originFeatureId`
+a cada sector y `ponCentro` ya no los mueve a mano.
+
+**Pruebas.** `tst_overlaymodel` (`ownedSectorsGoWithTheirOwner`: dueños, `moveCenter` sin deshacer, baja con el dueño y un solo `undo`), `tst_vectorrepository` (`savesOwnerOfSectorWithNewIds`: el dueño sobrevive con ids distintos, el huérfano queda sin dueño y el de objetivo
+se conserva) y `tst_mapwidget` (`sectorFollowsItsOwner`: sigue al objetivo, se va con él, sigue a una entidad que se mueve y se va con ella). `--comprobar`: el sector sigue a su punto al moverlo.
+
+**Lo que no es.** El dueño debe existir al poner el sector. El dueño solo vale para círculos y sectores (para el resto de entidades no hace nada).
+
+**Estado: 33 tests (30 sin QCustomPlot).**

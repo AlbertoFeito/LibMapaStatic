@@ -463,16 +463,53 @@ bool OverlayModel::updateFeature(const MapFeature &feature)
     return true;
 }
 
-// Borra una entidad por id. Si estaba seleccionada, limpia la seleccion. false si
-// no existe.
+// Ids de los circulos y sectores con dueno.
+QVector<qint64> OverlayModel::ownedFeatureIds() const
+{
+    QVector<qint64> ids;
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it)
+        if (it->isRound() && (it->originTargetId >= 0 || it->originFeatureId >= 0))
+            ids.append(it.key());
+    return ids;
+}
+
+// Centro nuevo de un circulo o sector que sigue a su dueno: sin paso de deshacer.
+bool OverlayModel::moveCenter(qint64 id, const QGeoCoordinate &center)
+{
+    auto it = m_features.find(id);
+    if (it == m_features.end() || !it->isRound() || !center.isValid())
+        return false;
+    it->geometry = { center };
+    m_idxSucio = true;
+    emit featureUpdated(id);
+    emit changed();
+    return true;
+}
+
+// Borra una entidad por id (y los circulos y sectores que cuelgan de ella). Si estaba
+// seleccionada, limpia la seleccion. false si no existe.
 bool OverlayModel::removeFeature(qint64 id)
 {
     if (!m_features.contains(id))
         return false;
+    // Lo que cuelga de la entidad se va con ella, en el mismo paso de deshacer.
+    QVector<qint64> colgados;
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it)
+        if (it->isRound() && it->originTargetId < 0 && it->originFeatureId == id)
+            colgados.append(it.key());
     if (isLayerUndoable(m_features.value(id).layerId))
         pushUndo();
+    for (const qint64 c : colgados)
+        m_features.remove(c);
     m_features.remove(id);
     m_idxSucio = true;
+    for (const qint64 c : colgados) {
+        if (m_selected == c) {
+            m_selected = -1;
+            emit selectionChanged(-1);
+        }
+        emit featureRemoved(c);
+    }
     if (m_selected == id) {
         m_selected = -1;
         emit selectionChanged(-1);

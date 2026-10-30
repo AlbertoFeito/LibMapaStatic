@@ -35,6 +35,8 @@ private slots:
     void savesMultiPartFeature();
     //! Nombre, color (incluido el nulo) y anclaje de cada parte (v6) sobreviven.
     void savesAndLoadsPartsInfo();
+    //! El dueno de un sector (v8) sobrevive guardar/cargar aunque cambie el id del dueno.
+    void savesOwnerOfSectorWithNewIds();
     //! El desplazamiento de la etiqueta (v3) sobrevive guardar/cargar.
     void savesAndLoadsLabelOffset();
     //! El lado del anclaje y el tamano de fuente del rotulo (v4) sobreviven
@@ -400,6 +402,57 @@ void TstVectorRepository::savesAndLoadsPartsInfo()
     QVERIFY(!g.partsInfo.at(1).colorOverride.isValid());
     QCOMPARE(g.partsInfo.at(2).labelAnchor, LabelAnchor::Top);
     QVERIFY(g.isValid());
+}
+
+void TstVectorRepository::savesOwnerOfSectorWithNewIds()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("duenos.db"))));
+
+    // Ids del modelo que NO coinciden con los de la BD (el punto es el 40 y el sector el 7).
+    MapFeature sector;
+    sector.id = 7;
+    sector.kind = GeometryKind::Arc;
+    sector.type = QStringLiteral("sector");
+    sector.geometry = { QGeoCoordinate(23.0, -82.0) };
+    sector.radiusMeters = 50000.0;
+    sector.arcEndDeg = 90.0;
+    sector.arcSector = true;
+    sector.originFeatureId = 40;
+    MapFeature punto;
+    punto.id = 40;
+    punto.kind = GeometryKind::Point;
+    punto.geometry = { QGeoCoordinate(23.0, -82.0) };
+    MapFeature huerfano = sector;
+    huerfano.id = 8;
+    huerfano.originFeatureId = 999;          // dueno que no se guarda
+    MapFeature deObjetivo = sector;
+    deObjetivo.id = 9;
+    deObjetivo.originFeatureId = -1;
+    deObjetivo.originTargetId = 12;
+    QVERIFY(repo.saveFeatures({ sector, punto, huerfano, deObjetivo }));
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 4);
+    qint64 idPunto = -1;
+    for (const MapFeature &f : cargadas)
+        if (f.kind == GeometryKind::Point)
+            idPunto = f.id;
+    QVERIFY(idPunto > 0);
+    int conDueno = 0, sinDueno = 0, deObj = 0;
+    for (const MapFeature &f : cargadas) {
+        if (f.kind != GeometryKind::Arc)
+            continue;
+        if (f.originTargetId == 12)
+            ++deObj;
+        else if (f.originFeatureId == idPunto)
+            ++conDueno;
+        else if (f.originFeatureId == -1)
+            ++sinDueno;
+    }
+    QCOMPARE(conDueno, 1);          // sigue colgando del punto, con su id nuevo
+    QCOMPARE(sinDueno, 1);          // el dueno que no se guardo lo deja sin dueno
+    QCOMPARE(deObj, 1);
 }
 
 void TstVectorRepository::handlesQuotesAndInjectionInNames()

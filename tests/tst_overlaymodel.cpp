@@ -29,6 +29,8 @@ private slots:
     //! UNA senal de repintado y UN paso de deshacer, no una por entidad.
     void batchAddCountAndClearByType();
     void typeVisibilityIsAViewFilter();
+    //! Un sector con dueno (entidad) se va con el, en un solo paso de deshacer.
+    void ownedSectorsGoWithTheirOwner();
     //! Entidad multi-parte con PartInfo: validez, operaciones de vertice por
     //! parte y primera parte sincronizada con geometry.
     void partsInfoAndPerPartVertexOps();
@@ -656,6 +658,35 @@ void TstOverlayModel::undoLeavesTransientLayersAlone()
 
 QTEST_MAIN(TstOverlayModel)
 #include "tst_overlaymodel.moc"
+
+void TstOverlayModel::ownedSectorsGoWithTheirOwner()
+{
+    OverlayModel m;
+    MapFeature p = punto(QStringLiteral("Radar"), 23.0, -82.0);
+    const qint64 idP = m.addFeature(p);
+    MapFeature s;
+    s.kind = GeometryKind::Arc;
+    s.geometry = { QGeoCoordinate(23.0, -82.0) };
+    s.radiusMeters = 10000.0;
+    s.arcEndDeg = 90.0;
+    s.arcSector = true;
+    s.originFeatureId = idP;
+    const qint64 idS = m.addFeature(s);
+    const qint64 idLibre = m.addFeature([&] { MapFeature c = s; c.originFeatureId = -1; return c; }());
+    QCOMPARE(m.ownedFeatureIds(), QVector<qint64>{ idS });
+
+    // moveCenter no apila deshacer y mueve solo el centro de uno redondo.
+    QVERIFY(m.moveCenter(idS, QGeoCoordinate(24.0, -82.0)));
+    QCOMPARE(m.feature(idS)->geometry.first().latitude(), 24.0);
+    QVERIFY(!m.moveCenter(idP, QGeoCoordinate(24.0, -82.0)));       // un punto no es redondo
+
+    // Quitar el dueno quita lo que cuelga de el, pero no lo que no tiene dueno.
+    QVERIFY(m.removeFeature(idP));
+    QVERIFY(!m.feature(idS).has_value());
+    QVERIFY(m.feature(idLibre).has_value());
+    m.undo();
+    QVERIFY(m.feature(idP).has_value() && m.feature(idS).has_value());   // un solo paso lo devuelve
+}
 
 // Tres puntos como UNA entidad multi-parte con nombre/color por parte.
 void TstOverlayModel::partsInfoAndPerPartVertexOps()

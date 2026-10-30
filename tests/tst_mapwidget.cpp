@@ -174,6 +174,8 @@ private slots:
     //! Los rotulos de distancia de los anillos son translucidos, se destacan bajo el raton
     //! y se pueden ocultar (RangeRings::labels).
     void rangeLabelsAreSoftHighlightOnHoverAndHideable();
+    //! Un sector con dueno sigue a su objetivo, se va con el y sigue a una entidad que se mueve.
+    void sectorFollowsItsOwner();
     //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
     //! del PRIMER vértice, no del centro.
     void areaLabelHangsFromFirstVertex();
@@ -6273,6 +6275,54 @@ void TstMapWidget::rangeLabelsAreSoftHighlightOnHoverAndHideable()
     QTest::qWait(60);
     const double sinRotulo = oscuridad();
     QVERIFY2(sinRotulo != suave, "labels = false debe quitar el rotulo");
+}
+
+// Un sector de un objetivo lo sigue y desaparece con el; uno de una entidad la sigue al moverla.
+void TstMapWidget::sectorFollowsItsOwner()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    MapTarget t;
+    t.position = QGeoCoordinate(22.0, -80.0);
+    const qint64 idT = w.addTarget(t);
+    QVERIFY(idT > 0);
+
+    MapFeature s;
+    s.kind = GeometryKind::Arc;
+    s.geometry = { QGeoCoordinate(0.0, 0.0) };          // el centro lo pone el dueno
+    s.radiusMeters = 20000.0;
+    s.arcEndDeg = 90.0;
+    s.arcSector = true;
+    s.originTargetId = idT;
+    const qint64 idS = w.addFeature(s);
+    QVERIFY(idS > 0);
+    QVERIFY(w.feature(idS)->geometry.first().distanceTo(t.position) < 1.0);
+
+    // El objetivo se mueve: el sector va detras.
+    const QGeoCoordinate nueva(22.5, -80.5);
+    QVERIFY(w.updateTarget(idT, nueva));
+    QVERIFY(w.feature(idS)->geometry.first().distanceTo(nueva) < 1.0);
+
+    // Se quita el objetivo: el sector se va con el.
+    QVERIFY(w.removeTarget(idT));
+    QVERIFY(!w.feature(idS).has_value());
+
+    // Sector de una entidad punto: la sigue al moverla.
+    MapFeature p;
+    p.kind = GeometryKind::Point;
+    p.geometry = { QGeoCoordinate(21.0, -79.0) };
+    const qint64 idP = w.addFeature(p);
+    MapFeature c = s;
+    c.kind = GeometryKind::Circle;
+    c.arcSector = false;
+    c.originTargetId = -1;
+    c.originFeatureId = idP;
+    const qint64 idC = w.addFeature(c);
+    QVERIFY(w.moveVertex(idP, 0, QGeoCoordinate(21.5, -79.5)));
+    QVERIFY(w.feature(idC)->geometry.first().distanceTo(QGeoCoordinate(21.5, -79.5)) < 1.0);
+    QVERIFY(w.removeFeature(idP));
+    QVERIFY(!w.feature(idC).has_value());
 }
 
 QTEST_MAIN(TstMapWidget)

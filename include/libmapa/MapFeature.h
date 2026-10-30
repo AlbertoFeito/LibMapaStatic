@@ -212,6 +212,15 @@ struct MapFeature
     //! al operador donde concentrarse. Sin el, es solo la linea del arco. En el resto no
     //! se usa.
     bool arcSector = false;
+    //! DUENO de un Circle o un Arc, como \ref RangeRings::targetId y featureId: un objetivo
+    //! (\a originTargetId) o una entidad (\a originFeatureId, si no hay objetivo) a la que
+    //! sigue. El centro del circulo o del sector es siempre su posicion, aunque se mueva, y
+    //! desaparece con el: al quitar el objetivo o la entidad, y al quitarla un sector que
+    //! cuelga de ella. -1 = sin dueno (centro fijo, como siempre). El dueno debe existir al
+    //! poner el sector; sin el, se quita. Los sectores de un objetivo se guardan, pero al
+    //! abrir ya no hay objetivo y se quitan.
+    qint64 originTargetId = -1;
+    qint64 originFeatureId = -1;
 
     bool isMultiPart() const { return !parts.isEmpty(); }
 
