@@ -4,6 +4,8 @@
 // Modelo (ver también «Elementos, anillos y marcaciones» en VentanaObjetivos.cpp):
 //  - Elementos: objetivo móvil, punto del usuario (radar, observador…), zona o
 //    línea, y grupo de objetivos. Cada uno tiene SU menú.
+//  - Los sectores (cuñas y círculos) tampoco: cuelgan de un objetivo o de un punto, puede
+//    haber varios en cada uno y varios orígenes a la vez (VentanaSectores.cpp).
 //  - Anillos y marcaciones NO son elementos aparte: cuelgan de un objetivo o de
 //    un punto y se manejan desde él. Una marcación PARTE de un elemento y llega
 //    a otro elemento o a cualquier lugar del mapa; no se parte de un lugar
@@ -61,6 +63,8 @@ void Ventana::menuContextual(const MapHit &hit, const QPoint &global)
         menuGrupo(&menu, hit.clusterTargets);
     else if (hit.vertexFeature >= 0)
         menuEntidad(&menu, hit.vertexFeature, hit.vertexIndex);     // sobre un tirador de vértice
+    else if (hit.featureId >= 0 && esSectorConDueno(hit.featureId))
+        menuSector(&menu, hit.featureId);
     else if (hit.featureId >= 0)
         menuEntidad(&menu, hit.featureId);
     else if (hit.rangeMarkId >= 0)
@@ -288,6 +292,7 @@ void Ventana::menuObjetivo(QMenu *menu, qint64 id)
     });
     menu->addSeparator();
     submenuAnillos(menu, id, -1);
+    submenuSectores(menu, id, -1);
     submenuMarcacion(menu, id, -1);
 
     // CPA/TCPA con otro objetivo seleccionado.
@@ -510,6 +515,7 @@ void Ventana::menuEntidad(QMenu *menu, qint64 id, int vertice)
     if (f->kind == GeometryKind::Point) {
         menu->addSeparator();
         submenuAnillos(menu, -1, id);
+        submenuSectores(menu, -1, id);
         submenuMarcacion(menu, -1, id);
         submenuElevacion(menu, f->position(), false);
     } else {

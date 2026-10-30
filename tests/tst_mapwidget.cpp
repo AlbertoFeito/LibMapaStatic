@@ -151,12 +151,31 @@ private slots:
     //! Escala de 600 km: 60 anillos cada 10 km y 36 radiales caben en UN RangeRings
     //! (count solo cuenta anillos) y el enfasis colorea uno de cada N.
     void rangeRingsSixtyRingsWithEmphasis();
+    //! Circulos y arcos geodesicos: se dibujan con su radio, se eligen con el raton
+    //! (dentro del circulo, sobre el arco), el arco rotula su mitad y un circulo
+    //! sirve de zona vigilada.
+    void roundFeaturesDrawHitTestAndWatchZones();
+    //! Capa = categoria y tipo = entidad: alta en lote (con persistencia), conteo y
+    //! borrado por tipo, y ocultar un tipo lo quita de la vista y del raton.
+    void featuresGroupedByLayerAndType();
     //! Los rotulos de entidades se pintan POR ENCIMA de las marcaciones: una linea
     //! de marcacion ya no tapa el nombre de una zona.
     void featureLabelsDrawAboveRangeMarks();
     //! El rotulo de una marcacion se puede localizar, desplazar (con linea guia) y
     //! arrastrar con el raton.
     void bearingLabelMovesWithMouse();
+    //! Entidad multi-parte con nombre/color por parte: featureAt dice QUE parte
+    //! hay bajo el pixel y cada parte con nombre tiene su propia caja de rotulo.
+    void multiPartEntityReportsSubIndexAndLabels();
+    //! Medicion: 5.000 puntos como UNA entidad con partes frente a 5.000 entidades
+    //! (memoria, alta, dibujo y borrado). Imprime las cifras y exige solo que la
+    //! entidad unica no sea peor en memoria.
+    void measuresFiveThousandPointsAsPartsOrFeatures();
+    //! Los rotulos de distancia de los anillos son translucidos, se destacan bajo el raton
+    //! y se pueden ocultar (RangeRings::labels).
+    void rangeLabelsAreSoftHighlightOnHoverAndHideable();
+    //! Un sector con dueno sigue a su objetivo, se va con el y sigue a una entidad que se mueve.
+    void sectorFollowsItsOwner();
     //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
     //! del PRIMER vértice, no del centro.
     void areaLabelHangsFromFirstVertex();
@@ -4588,6 +4607,165 @@ void TstMapWidget::rangeRingsSixtyRingsWithEmphasis()
     QCOMPARE(w.hitTest(pixel(centro.atDistanceAndAzimuth(600000.0, 90.0))).rangeMarkId, id);
 }
 
+void TstMapWidget::roundFeaturesDrawHitTestAndWatchZones()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(10);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+
+    w.addFeatureLayer(QStringLiteral("redondas"), QStringLiteral("Redondas"), 60);
+    MapFeature c;
+    c.kind = GeometryKind::Circle;
+    c.layerId = QStringLiteral("redondas");
+    c.name = QStringLiteral("TMA");
+    c.geometry = { centro };
+    c.radiusMeters = 10000.0;
+    c.style.lineColor = QColor(255, 0, 255);
+    c.style.fillColor = QColor(255, 0, 255, 40);
+    c.style.lineWidth = 3.0;
+    const qint64 idc = w.addFeature(c);
+    QVERIFY(idc > 0);
+
+    // Sin radio no entra (la validez se comprueba al anadir).
+    MapFeature malo = c;
+    malo.radiusMeters = 0.0;
+    QCOMPARE(w.addFeature(malo), qint64(-1));
+
+    // Se ve: el color del trazo aparece alrededor del centro, a unos 10 km de el.
+    QCoreApplication::processEvents();
+    QTest::qWait(50);
+    QCoreApplication::processEvents();
+    const QImage img = w.grab().toImage();
+    const QPoint pc = pixel(centro);
+    const QPoint este = pixel(centro.atDistanceAndAzimuth(10000.0, 90.0));
+    QVERIFY(este.x() - pc.x() > 40);                       // el radio es de decenas de pixeles
+    QVERIFY(pixelesDeColor(img, QRect(este - QPoint(3, 3), QSize(7, 7)), QColor(255, 0, 255), 30) > 5);
+    QCOMPARE(pixelesDeColor(img, QRect(pc - QPoint(3, 3), QSize(7, 7)), QColor(255, 0, 255), 6), 0);
+
+    // Se elige dentro del circulo (es un area), sobre el borde, y no fuera.
+    QCOMPARE(w.featureAt(pc), idc);
+    QCOMPARE(w.featureAt(este), idc);
+    QCOMPARE(w.featureAt(pixel(centro.atDistanceAndAzimuth(25000.0, 90.0))), qint64(-1));
+
+    // Un arco de 0 a 90 grados (nordeste): se elige sobre el arco, no en el centro ni
+    // en el cuadrante opuesto, y su rotulo cuelga de la mitad del recorrido (45 grados).
+    MapFeature a = c;
+    a.kind = GeometryKind::Arc;
+    a.name = QStringLiteral("Sector");
+    a.geometry = { QGeoCoordinate(21.5, -79.0) };            // otro centro, aparte del circulo
+    a.arcStartDeg = 0.0;
+    a.arcEndDeg = 90.0;
+    a.style.lineColor = QColor(0, 160, 0);
+    const qint64 ida = w.addFeature(a);
+    QVERIFY(ida > 0);
+    const QGeoCoordinate ca = a.geometry.first();
+    QCOMPARE(w.featureAt(pixel(ca.atDistanceAndAzimuth(10000.0, 45.0))), ida);
+    QCOMPARE(w.featureAt(pixel(ca.atDistanceAndAzimuth(10000.0, 225.0))), qint64(-1));
+    QCOMPARE(w.featureAt(pixel(ca)), qint64(-1));
+    const QRect rotuloArco = w.featureLabelRect(ida);
+    QVERIFY(rotuloArco.isValid());
+    const QPoint medio = pixel(ca.atDistanceAndAzimuth(10000.0, 45.0));
+    QVERIFY(qAbs(rotuloArco.left() - medio.x()) < 40 && qAbs(rotuloArco.top() - medio.y()) < 40);
+
+    // Un circulo es una zona vigilada valida; un arco no (no es un area).
+    QVERIFY(!w.watchZone(ida));
+    QVERIFY(w.watchZone(idc));
+    MapTarget fuera;
+    fuera.position = centro.atDistanceAndAzimuth(30000.0, 0.0);
+    const qint64 idt = w.addTarget(fuera);
+    QSignalSpy entra(&w, &MapWidget::targetEnteredZone);
+    QVERIFY(w.updateTarget(idt, centro.atDistanceAndAzimuth(5000.0, 0.0)));
+    QCOMPARE(entra.count(), 1);
+    QCOMPARE(entra.at(0).at(1).toLongLong(), idc);
+}
+
+void TstMapWidget::featuresGroupedByLayerAndType()
+{
+    const QString bd = m_dir.filePath(QStringLiteral("grouped.db"));
+    QFile::remove(bd);
+    QVector<qint64> ids;
+    {
+        MapWidget w(baseConfig(m_jsonPath));
+        QVERIFY(w.isReady());
+        w.resize(800, 600);
+        const QGeoCoordinate centro(21.5, -79.5);
+        w.setCenter(centro);
+        w.setZoom(11);
+        auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+        QVERIFY(plot);
+        const auto pixel = [&](const QGeoCoordinate &c) {
+            plot->replot();
+            const QPointF eje = w.toAxisCoords(c);
+            return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                          qRound(plot->yAxis->coordToPixel(eje.y())));
+        };
+
+        // Seis puntos de dos tipos en una capa: «aerodromos» = categoria,
+        // «internos» y «externos» = entidades.
+        w.addFeatureLayer(QStringLiteral("aerodromos"), QStringLiteral("Aerodromos"), 50);
+        QVector<MapFeature> lote;
+        for (int i = 0; i < 6; ++i) {
+            MapFeature f;
+            f.kind = GeometryKind::Point;
+            f.layerId = QStringLiteral("aerodromos");
+            f.type = (i % 2 == 0) ? QStringLiteral("internos") : QStringLiteral("externos");
+            f.name = QStringLiteral("A%1").arg(i);
+            f.geometry = { centro.atDistanceAndAzimuth(3000.0 * (i + 1), 90.0) };
+            lote.append(f);
+        }
+        QSignalSpy altas(&w, &MapWidget::featureAdded);
+        ids = w.addFeatures(lote);
+        QCOMPARE(ids.size(), 6);
+        for (qint64 id : ids)
+            QVERIFY(id > 0);
+        QCOMPARE(altas.count(), 6);
+        QCOMPARE(w.featureCount(), 6);
+
+        const QMap<QString, int> cuentas = w.featureTypeCounts(QStringLiteral("aerodromos"));
+        QCOMPARE(cuentas.value(QStringLiteral("internos")), 3);
+        QCOMPARE(cuentas.value(QStringLiteral("externos")), 3);
+        QVERIFY(w.featureTypeCounts(QStringLiteral("otra")).isEmpty());
+
+        // Ocultar un tipo: ya no se ve ni se elige ni se rotula, pero sigue en el
+        // modelo; mostrarlo lo devuelve.
+        const QPoint interno = pixel(lote.at(0).geometry.first());
+        const QPoint externo = pixel(lote.at(1).geometry.first());
+        QCOMPARE(w.featureAt(interno), ids.at(0));
+        QVERIFY(w.featureLabelRect(ids.at(0)).isValid());
+        w.setFeatureTypeVisible(QStringLiteral("internos"), false);
+        QVERIFY(!w.isFeatureTypeVisible(QStringLiteral("internos")));
+        QCOMPARE(w.hiddenFeatureTypes(), QStringList({ QStringLiteral("internos") }));
+        QCOMPARE(w.featureAt(interno), qint64(-1));
+        QCOMPARE(w.featureAt(externo), ids.at(1));          // el otro tipo no se toca
+        QCOMPARE(w.featuresOfType(QStringLiteral("internos")).size(), 3);   // sigue en el modelo
+        w.setFeatureTypeVisible(QStringLiteral("internos"), true);
+        QCOMPARE(w.featureAt(interno), ids.at(0));
+
+        // Borrar un tipo: se van sus tres y no las demas; deshacer de una vez no hace
+        // falta aqui (lo prueba tst_overlaymodel). Se guarda lo que queda.
+        QCOMPARE(w.clearFeaturesOfType(QStringLiteral("externos"), QStringLiteral("aerodromos")), 3);
+        QCOMPARE(w.featureCount(), 3);
+        QCOMPARE(w.featureTypeCounts().value(QStringLiteral("externos")), 0);
+        QVERIFY(w.saveFeaturesTo(bd));
+    }
+    MapWidget w2(baseConfig(m_jsonPath));
+    QVERIFY(w2.isReady());
+    QVERIFY(w2.loadFeaturesFrom(bd));
+    QCOMPARE(w2.featureCount(), 3);
+    QCOMPARE(w2.featureTypeCounts().value(QStringLiteral("internos")), 3);
+}
+
 // Cuenta los pixeles "azul de marcacion" (2962ff y sus cercanos) de un recuadro.
 static int pixelesAzules(const QImage &img, const QRect &r)
 {
@@ -5913,6 +6091,238 @@ void TstMapWidget::findsARoute()
     QVERIFY(!r.ok());
     QVERIFY2(r.error.contains(QStringLiteral("demasiado larga")), qPrintable(r.error));
     QVERIFY(r.tiles > MapWidget::kMaxRouteTiles);
+}
+
+// Tres puntos como UNA entidad: subIndex del acierto y rotulos por parte.
+void TstMapWidget::multiPartEntityReportsSubIndexAndLabels()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.show();
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -80.0);
+    w.setCenter(centro);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.layerId = w.activeFeatureLayer();
+    f.name = QStringLiteral("Sitios");
+    for (int i = 0; i < 3; ++i)
+        f.parts.append({ QGeoCoordinate(22.0 + (i - 1) * 0.15, -80.0 + (i - 1) * 0.15) });
+    f.geometry = f.parts.first();
+    PartInfo a; a.name = QStringLiteral("Alfa"); a.colorOverride = QColor(Qt::red);
+    PartInfo b;                                      // sin rotulo propio
+    PartInfo c; c.name = QStringLiteral("Gamma");
+    f.partsInfo = { a, b, c };
+    const qint64 id = w.addFeature(f);
+    QVERIFY(id > 0);
+
+    // Cada punto devuelve la misma entidad y su propia parte.
+    for (int i = 0; i < 3; ++i) {
+        int sub = -2;
+        QCOMPARE(w.featureAt(pixel(f.parts.at(i).first()), 8.0, &sub), id);
+        QCOMPARE(sub, i);
+    }
+    // Un pixel lejos de todo no acierta y deja subIndex en -1.
+    int sub = -2;
+    QCOMPARE(w.featureAt(QPoint(5, 5), 4.0, &sub), qint64(-1));
+    QCOMPARE(sub, -1);
+
+    // Rotulos por parte: solo las que tienen nombre.
+    QVERIFY(w.featurePartLabelRect(id, 0).isValid());
+    QVERIFY(!w.featurePartLabelRect(id, 1).isValid());
+    QVERIFY(w.featurePartLabelRect(id, 2).isValid());
+    QVERIFY(!w.featurePartLabelRect(id, 9).isValid());
+}
+
+// Lee la memoria residente del proceso en KiB (0 si /proc no existe).
+static qint64 residentKiB()
+{
+    QFile f(QStringLiteral("/proc/self/statm"));
+    if (!f.open(QIODevice::ReadOnly))
+        return 0;
+    const QList<QByteArray> c = f.readAll().split(' ');
+    return c.size() > 1 ? c.at(1).toLongLong() * 4 : 0;
+}
+
+void TstMapWidget::measuresFiveThousandPointsAsPartsOrFeatures()
+{
+    const int N = 5000;
+    const auto coord = [](int i) {
+        return QGeoCoordinate(21.0 + (i % 100) * 0.02, -80.0 + (i / 100) * 0.02);
+    };
+    struct Medida { qint64 kib = 0; qint64 altaMs = 0; qint64 dibujoMs = 0; qint64 borradoMs = 0; };
+    const auto medir = [&](bool partes) {
+        Medida r;
+        MapWidget w(baseConfig(m_jsonPath));
+        w.resize(800, 600);
+        w.show();
+        w.setCenter(QGeoCoordinate(22.0, -79.0));
+        w.setZoom(8);
+        w.grab();                                    // calienta
+        const qint64 antes = residentKiB();
+        QElapsedTimer t;
+        t.start();
+        QVector<MapFeature> lote;
+        if (partes) {
+            MapFeature f;
+            f.kind = GeometryKind::Point;
+            f.layerId = w.activeFeatureLayer();
+            f.name = QStringLiteral("Sitios");
+            for (int i = 0; i < N; ++i) {
+                f.parts.append({ coord(i) });
+                PartInfo pi;
+                pi.name = QStringLiteral("S%1").arg(i);
+                if (i % 2) pi.colorOverride = QColor(Qt::red);
+                f.partsInfo.append(pi);
+            }
+            f.geometry = f.parts.first();
+            lote.append(f);
+        } else {
+            for (int i = 0; i < N; ++i) {
+                MapFeature f;
+                f.kind = GeometryKind::Point;
+                f.layerId = w.activeFeatureLayer();
+                f.name = QStringLiteral("S%1").arg(i);
+                f.geometry = { coord(i) };
+                if (i % 2) f.style.lineColor = QColor(Qt::red);
+                lote.append(f);
+            }
+        }
+        w.addFeatures(lote);
+        r.altaMs = t.elapsed();
+        t.restart();
+        w.grab();
+        r.dibujoMs = t.elapsed();
+        r.kib = residentKiB() - antes;
+        t.restart();
+        w.clearFeatures();
+        r.borradoMs = t.elapsed();
+        return r;
+    };
+    const Medida uno = medir(true);
+    const Medida muchas = medir(false);
+    qInfo().noquote() << QStringLiteral(
+        "5000 puntos | UNA entidad con partes: %1 KiB, alta %2 ms, dibujo %3 ms, borrado %4 ms"
+        " | 5000 entidades: %5 KiB, alta %6 ms, dibujo %7 ms, borrado %8 ms")
+        .arg(uno.kib).arg(uno.altaMs).arg(uno.dibujoMs).arg(uno.borradoMs)
+        .arg(muchas.kib).arg(muchas.altaMs).arg(muchas.dibujoMs).arg(muchas.borradoMs);
+    qInfo() << "sizeof(MapFeature)" << sizeof(MapFeature) << "sizeof(PartInfo)" << sizeof(PartInfo);
+    QVERIFY(uno.kib <= muchas.kib + 2048);           // margen por el ruido del asignador
+}
+
+// Anillos con rotulos: sin raton encima el rotulo es translucido; con el raton encima se destaca
+// (la region cambia y se oscurece el texto); con labels = false no hay rotulo.
+void TstMapWidget::rangeLabelsAreSoftHighlightOnHoverAndHideable()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.show();
+    w.setZoom(10);
+    const QGeoCoordinate centro(22.0, -80.0);
+    w.setCenter(centro);
+    auto *plot = qobject_cast<QCustomPlot *>(w.customPlot());
+    QVERIFY(plot);
+    const auto pixel = [&](const QGeoCoordinate &c) {
+        plot->replot();
+        const QPointF eje = w.toAxisCoords(c);
+        return QPoint(qRound(plot->xAxis->coordToPixel(eje.x())),
+                      qRound(plot->yAxis->coordToPixel(eje.y())));
+    };
+    RangeRings r;
+    r.center = centro;
+    r.spacingMeters = 20000.0;
+    r.count = 3;
+    r.labels = true;
+    const qint64 id = w.addRangeRings(r);
+    QVERIFY(id > 0);
+    const QPoint rotulo = pixel(centro.atDistanceAndAzimuth(40000.0, 0.0));
+    const QRect zona(rotulo.x() - 22, rotulo.y() - 8, 44, 16);
+    // Suma de la oscuridad del texto en la zona del rotulo (0 = blanco).
+    const auto oscuridad = [&] {
+        const QImage img = w.grab().toImage();
+        double suma = 0.0;
+        for (int y = zona.top(); y <= zona.bottom(); ++y)
+            for (int x = zona.left(); x <= zona.right(); ++x)
+                suma += 255 - qGray(img.pixel(x, y));
+        return suma;
+    };
+    QTest::mouseMove(plot, QPoint(5, 5));
+    QTest::qWait(60);
+    const double suave = oscuridad();
+
+    QTest::mouseMove(plot, rotulo);
+    QTest::qWait(80);
+    QTest::mouseMove(plot, rotulo + QPoint(1, 0));
+    QTest::qWait(80);
+    const double destacado = oscuridad();
+    QVERIFY2(destacado != suave, "el rotulo bajo el raton debe verse distinto (destacado)");
+
+    // Al ocultar los rotulos, la zona queda sin el texto.
+    r.labels = false;
+    QVERIFY(w.updateRangeRings(id, r));
+    QTest::mouseMove(plot, QPoint(5, 5));
+    QTest::qWait(60);
+    const double sinRotulo = oscuridad();
+    QVERIFY2(sinRotulo != suave, "labels = false debe quitar el rotulo");
+}
+
+// Un sector de un objetivo lo sigue y desaparece con el; uno de una entidad la sigue al moverla.
+void TstMapWidget::sectorFollowsItsOwner()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    MapTarget t;
+    t.position = QGeoCoordinate(22.0, -80.0);
+    const qint64 idT = w.addTarget(t);
+    QVERIFY(idT > 0);
+
+    MapFeature s;
+    s.kind = GeometryKind::Arc;
+    s.geometry = { QGeoCoordinate(0.0, 0.0) };          // el centro lo pone el dueno
+    s.radiusMeters = 20000.0;
+    s.arcEndDeg = 90.0;
+    s.arcSector = true;
+    s.originTargetId = idT;
+    const qint64 idS = w.addFeature(s);
+    QVERIFY(idS > 0);
+    QVERIFY(w.feature(idS)->geometry.first().distanceTo(t.position) < 1.0);
+
+    // El objetivo se mueve: el sector va detras.
+    const QGeoCoordinate nueva(22.5, -80.5);
+    QVERIFY(w.updateTarget(idT, nueva));
+    QVERIFY(w.feature(idS)->geometry.first().distanceTo(nueva) < 1.0);
+
+    // Se quita el objetivo: el sector se va con el.
+    QVERIFY(w.removeTarget(idT));
+    QVERIFY(!w.feature(idS).has_value());
+
+    // Sector de una entidad punto: la sigue al moverla.
+    MapFeature p;
+    p.kind = GeometryKind::Point;
+    p.geometry = { QGeoCoordinate(21.0, -79.0) };
+    const qint64 idP = w.addFeature(p);
+    MapFeature c = s;
+    c.kind = GeometryKind::Circle;
+    c.arcSector = false;
+    c.originTargetId = -1;
+    c.originFeatureId = idP;
+    const qint64 idC = w.addFeature(c);
+    QVERIFY(w.moveVertex(idP, 0, QGeoCoordinate(21.5, -79.5)));
+    QVERIFY(w.feature(idC)->geometry.first().distanceTo(QGeoCoordinate(21.5, -79.5)) < 1.0);
+    QVERIFY(w.removeFeature(idP));
+    QVERIFY(!w.feature(idC).has_value());
 }
 
 QTEST_MAIN(TstMapWidget)

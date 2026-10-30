@@ -137,6 +137,19 @@ bool TargetModel::setLabel(qint64 id, const QString &text)
     return true;
 }
 
+// Cambia el contenido por segmentos del rotulo de un objetivo (texto y color de cada
+// segmento) sin tocar su traza ni su historial. Vacio = vuelve al texto plano \a label.
+// false si el id no existe.
+bool TargetModel::setLabelContent(qint64 id, const QVector<TargetLabelLine> &content)
+{
+    auto it = m_targets.find(id);
+    if (it == m_targets.end())
+        return false;
+    it->target.labelContent = content;
+    emit changed();
+    return true;
+}
+
 // Cambia el desplazamiento de la etiqueta de un objetivo. false si el id no existe.
 bool TargetModel::setLabelOffset(qint64 id, const QPointF &offsetPx)
 {

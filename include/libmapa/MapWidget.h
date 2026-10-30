@@ -16,6 +16,7 @@
 
 #include <QGeoCoordinate>
 #include <QImage>
+#include <QMap>
 #include <QPointF>
 #include <QString>
 #include <QStringList>
@@ -347,6 +348,41 @@ public:
     qint64 addFeature(const MapFeature &feature);
     bool updateFeature(const MapFeature &feature);
     bool removeFeature(qint64 id);
+    /*!
+     * \brief Anade varias entidades de una vez, con UN solo repintado y UN solo
+     *        paso de deshacer.
+     *
+     * Devuelve un id por entidad en el mismo orden (-1 en las de geometria
+     * invalida, que no entran). Con miles de entidades es mucho mas rapido que
+     * llamar a \ref addFeature una a una.
+     */
+    QVector<qint64> addFeatures(const QVector<MapFeature> &features);
+    /*!
+     * \brief Cuantas entidades hay de cada tipo (\ref MapFeature::type), de una
+     *        capa o de todas. Las sin tipo cuentan bajo la clave vacia.
+     *
+     * Una capa hace de «categoria» y el tipo de «entidad»: filtrar, contar y borrar
+     * por las dos cubre «mostrar solo los aerodromos internos» sin campos nuevos.
+     */
+    QMap<QString, int> featureTypeCounts(const QString &layerId = QString()) const;
+    /*!
+     * \brief Borra todas las entidades de un tipo (de una capa o de todas).
+     *
+     * Un solo repintado y un solo paso de deshacer. Devuelve cuantas borro.
+     */
+    int clearFeaturesOfType(const QString &type, const QString &layerId = QString());
+    /*!
+     * \brief Oculta o muestra todas las entidades de un tipo, sin tocar su
+     *        visibilidad propia ni la de su capa.
+     *
+     * Es un filtro de vista: no se guarda, no se deshace y no afecta a las
+     * consultas (\ref features, \ref featuresOfType), solo a lo que se ve y se
+     * puede elegir con el raton.
+     */
+    void setFeatureTypeVisible(const QString &type, bool visible);
+    bool isFeatureTypeVisible(const QString &type) const;
+    //! Tipos ocultos ahora mismo por \ref setFeatureTypeVisible.
+    QStringList hiddenFeatureTypes() const;
     void clearFeatureLayer(const QString &layerId);
     void clearFeatures();
 
@@ -358,9 +394,13 @@ public:
     int featureCount() const;
 
     // --- Edicion de geometria --------------------------------------------
-    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to);
-    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at);
-    bool removeVertex(qint64 id, int index);
+    //! Operaciones de vertice. Con \a part (>= 0) el \a index es de ESA parte de una
+    //! entidad multi-parte (\ref MapFeature::parts) o la 0 de una de una sola parte; con
+    //! -1, solo entidades de una sola parte, como siempre. Un circulo o un arco
+    //! solo admite mover su vertice (el centro).
+    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to, int part = -1);
+    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at, int part = -1);
+    bool removeVertex(qint64 id, int index, int part = -1);
     bool moveFeature(qint64 id, double deltaLat, double deltaLon);
 
     // --- Deshacer y rehacer ----------------------------------------------
@@ -484,6 +524,11 @@ public:
                       const QDateTime &time = QDateTime());
 
     bool setTargetLabel(qint64 id, const QString &text);
+    //! Cambia el rotulo por segmentos de un objetivo ya existente (texto y color de cada
+    //! segmento: el estado que pasa de «detectado» a «emergencia», por ejemplo) sin perder
+    //! su traza ni su historial. Vacio = vuelve al texto plano de \ref setTargetLabel.
+    //! false si el id no existe.
+    bool setTargetLabelContent(qint64 id, const QVector<TargetLabelLine> &content);
 
     //! Desplazamiento de la ETIQUETA del objetivo respecto a su simbolo, en
     //! pixeles. Relativo: al moverse el objetivo la etiqueta lo sigue. Cuando no
@@ -741,6 +786,12 @@ public:
     //! seleccionables (provincias, curvas...) y no cambia la seleccion. Lo que se
     //! puede ELEGIR con el raton es lo que devuelve \ref hitTest.
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0) const;
+    //! Igual que \ref featureAt y, ademas, la PARTE de la entidad que cae bajo el pixel
+    //! en \a subIndex (-1 si es de una sola parte o no hay entidad).
+    qint64 featureAt(const QPoint &pixel, double tolerancePx, int *subIndex) const;
+    //! Caja, en pixeles, del rotulo propio de la parte \a part de una entidad
+    //! multi-parte (\ref PartInfo::name), o un rectangulo nulo si no lo tiene.
+    QRect featurePartLabelRect(qint64 id, int part) const;
     /*!
      * \brief Todo lo que hay bajo un pixel: objetivo suelto, grupo de
      *        objetivos, entidad, anillos o marcacion, y la coordenada.

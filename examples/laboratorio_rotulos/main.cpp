@@ -3,7 +3,7 @@
 // Sirve para ver y tocar, con el raton, lo que añade la fase 1 de la convergencia con el
 // fork extendido. Un panel a la derecha cambia en vivo:
 //   - Rotulos de ENTIDADES: el lado donde cuelga el nombre (LabelAnchor, 10 posiciones) y
-//     su tamano de fuente (FeatureStyle::labelFontSize), sobre seis aerodromos de ejemplo.
+//     su tamano de fuente (FeatureStyle::labelFontSize), sobre seis puntos de ejemplo.
 //   - FORMULARIO de objetivos: tres objetivos con su formulario de tres lineas y colores por
 //     segmento (MapTarget::labelContent), con la colocacion clasica o COLGADA de la esquina
 //     (TargetLabelPlacement), fuente monoespaciada, ancho en caracteres, columnas por
@@ -63,15 +63,17 @@ const Posicion kPosiciones[] = {
 
 const QGeoCoordinate kCentro(23.05, -82.35);   // La Habana y alrededores
 
-// Seis aerodromos de ejemplo (nombre y posicion aproximada).
-struct Aerodromo {
+// Seis puntos de ejemplo alrededor de La Habana, todos sobre tierra (nombre y posicion). Se
+// leyeron del propio mapa de costas; no son todos aerodromos, solo lugares con nombre.
+struct Punto {
     const char *nombre;
     double lat;
     double lon;
 };
-const Aerodromo kAerodromos[] = {
-    {"San Antonio", 22.87, -82.51}, {"Baracoa", 23.07, -82.58}, {"Playa", 23.10, -82.42},
-    {"Santa Fe", 23.08, -82.52},    {"Jaimanitas", 23.08, -82.50}, {"Bejucal", 22.95, -82.35},
+const Punto kPuntos[] = {
+    {"Ciudad Libertad", 23.0953, -82.4383}, {"José Martí", 22.9892, -82.4092},
+    {"San Antonio", 22.8903, -82.5106},     {"Altahabana", 23.0679, -82.3923},
+    {"Taoro", 23.0621, -82.5166},           {"Cubanacán", 23.0836, -82.4503},
 };
 
 // Una linea del formulario de un objetivo con sus segmentos (texto y color).
@@ -104,7 +106,7 @@ public:
         m_mapa->setCenter(kCentro);
         m_mapa->setZoom(11);
 
-        creaAerodromos();
+        creaPuntos();
         creaObjetivos();
         auto *cuerpo = new QWidget(this);
         auto *caja = new QHBoxLayout(cuerpo);
@@ -124,14 +126,14 @@ public:
     }
 
     MapWidget *mapa() const { return m_mapa; }
-    qint64 primerAerodromo() const { return m_aerodromos.value(0, -1); }
+    qint64 primerPunto() const { return m_puntos.value(0, -1); }
     QVector<qint64> objetivos() const { return m_objetivos; }
     qint64 anillos() const { return m_anillos; }
 
-    // Cambia la posicion del rotulo de todos los aerodromos y repinta.
+    // Cambia la posicion del rotulo de todos los puntos y repinta.
     void ponAncla(LabelAnchor ancla)
     {
-        for (qint64 id : m_aerodromos) {
+        for (qint64 id : m_puntos) {
             auto f = m_mapa->feature(id);
             if (!f)
                 continue;
@@ -140,10 +142,10 @@ public:
         }
     }
 
-    // Cambia el tamano de fuente del rotulo de todos los aerodromos (0 = el del mapa).
+    // Cambia el tamano de fuente del rotulo de todos los puntos (0 = el del mapa).
     void ponTamano(int puntos)
     {
-        for (qint64 id : m_aerodromos) {
+        for (qint64 id : m_puntos) {
             auto f = m_mapa->feature(id);
             if (!f)
                 continue;
@@ -191,19 +193,19 @@ public:
     }
 
 private:
-    // Seis aerodromos con nombre, en una capa propia, para probar el LabelAnchor.
-    void creaAerodromos()
+    // Seis puntos con nombre, en una capa propia, para probar el LabelAnchor.
+    void creaPuntos()
     {
-        m_mapa->addFeatureLayer(QStringLiteral("aerodromos"), tr("Aerodromos"), 50);
-        for (const Aerodromo &a : kAerodromos) {
+        m_mapa->addFeatureLayer(QStringLiteral("puntos"), tr("Puntos de ejemplo"), 50);
+        for (const Punto &a : kPuntos) {
             MapFeature f;
             f.kind = GeometryKind::Point;
-            f.layerId = QStringLiteral("aerodromos");
-            f.type = QStringLiteral("aerodromo");
+            f.layerId = QStringLiteral("puntos");
+            f.type = QStringLiteral("punto");
             f.name = QString::fromUtf8(a.nombre);
             f.geometry = {QGeoCoordinate(a.lat, a.lon)};
             f.style.lineColor = QColor(0x15, 0x65, 0xc0);
-            m_aerodromos.append(m_mapa->addFeature(f));
+            m_puntos.append(m_mapa->addFeature(f));
         }
     }
 
@@ -333,7 +335,7 @@ private:
     }
 
     MapWidget *m_mapa = nullptr;
-    QVector<qint64> m_aerodromos;
+    QVector<qint64> m_puntos;
     QVector<qint64> m_objetivos;
     qint64 m_anillos = -1;
     QCheckBox *m_colgado = nullptr;
@@ -392,9 +394,9 @@ int comprobar(Ventana &v)
     esperaRepintado(m);
 
     // 1. Entidades: Encima deja la caja sobre el punto; mas fuente la hace mas grande.
-    const qint64 id = v.primerAerodromo();
+    const qint64 id = v.primerPunto();
     const QRect clasico = m->featureLabelRect(id);
-    exige(clasico.isValid(), "el aerodromo no tiene rotulo", &fallos);
+    exige(clasico.isValid(), "el punto de ejemplo no tiene rotulo", &fallos);
     v.ponAncla(LabelAnchor::Top);
     const QRect encima = m->featureLabelRect(id);
     exige(qAbs(encima.width() - clasico.width()) <= 1 && qAbs(encima.height() - clasico.height()) <= 1,

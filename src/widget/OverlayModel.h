@@ -4,6 +4,7 @@
 #include "libmapa/MapFeature.h"
 
 #include <QHash>
+#include <QMap>
 #include <QSet>
 #include <QObject>
 #include <functional>
@@ -58,7 +59,31 @@ public:
 
     bool updateFeature(const MapFeature &feature);
     bool removeFeature(qint64 id);
+    /*!
+     * \brief Anade varias entidades de una vez: UN paso de deshacer y UNA senal
+     *        \ref changed (y \ref layersChanged), en vez de una por entidad.
+     *
+     * Devuelve un id por entidad, en el mismo orden; las de geometria invalida no
+     * entran y llevan -1. Cada alta avisa ademas con \ref featureAdded, que es barato
+     * (lo escucha la persistencia); lo caro, el repintado, ocurre una sola vez.
+     */
+    QVector<qint64> addFeatures(const QVector<MapFeature> &features);
     void clearLayer(const QString &layerId);
+    /*!
+     * \brief Borra todas las entidades de un tipo (opcionalmente solo de una capa).
+     *
+     * Un solo paso de deshacer y una sola senal \ref changed. Devuelve cuantas se
+     * borraron. Con \a layerId vacio mira todas las capas.
+     */
+    int clearType(const QString &type, const QString &layerId = QString());
+    //! Cuantas entidades hay de cada tipo (de una capa o de todas). Las sin tipo
+    //! se cuentan bajo la clave vacia.
+    QMap<QString, int> typeCounts(const QString &layerId = QString()) const;
+    //! Oculta o muestra todas las entidades de un tipo, sin tocar su visibilidad
+    //! propia ni la de su capa. Es un FILTRO DE VISTA: no se guarda ni se deshace.
+    void setTypeVisible(const QString &type, bool visible);
+    bool isTypeVisible(const QString &type) const { return !m_tiposOcultos.contains(type); }
+    QStringList hiddenTypes() const { return QStringList(m_tiposOcultos.constBegin(), m_tiposOcultos.constEnd()); }
     void clear();
 
     std::optional<MapFeature> feature(qint64 id) const;
@@ -76,9 +101,11 @@ public:
     int count() const { return static_cast<int>(m_features.size()); }
 
     // --- Geometria, para editar ------------------------------------------
-    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to);
-    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at);
-    bool removeVertex(qint64 id, int index);
+    //! Con \a part (>= 0) el indice es de ESA parte de una entidad multi-parte (o la
+    //! 0 de una de una sola parte); con -1, solo geometrias de una parte, como siempre.
+    bool moveVertex(qint64 id, int index, const QGeoCoordinate &to, int part = -1);
+    bool insertVertex(qint64 id, int index, const QGeoCoordinate &at, int part = -1);
+    bool removeVertex(qint64 id, int index, int part = -1);
     bool moveFeature(qint64 id, double deltaLat, double deltaLon);
     //! Fija el desplazamiento de la ETIQUETA (px) de una entidad. false si no
     //! existe. Lo usa el arrastre del rotulo; persiste como cualquier cambio.
@@ -136,6 +163,13 @@ public:
     //! Nombre de la capa a la que van las entidades sin capa indicada.
     static QString defaultLayerId() { return QStringLiteral("default"); }
 
+    //! Ids de los circulos y sectores que tienen dueno (MapFeature::originTargetId o
+    //! originFeatureId): los que hay que mantener sobre su dueno.
+    QVector<qint64> ownedFeatureIds() const;
+    //! Lleva el centro de un circulo o sector a \a center sin apilar un paso de deshacer (es
+    //! seguir a su dueno, no una edicion). false si no existe o no es redondo.
+    bool moveCenter(qint64 id, const QGeoCoordinate &center);
+
 signals:
     //! Algo cambio y hay que repintar. Una sola senal: al que dibuja no le
     //! importa si fue un alta, una edicion o un cambio de visibilidad.
@@ -155,6 +189,10 @@ private:
     mutable QHash<QString, QVector<qint64>> m_idxCapa;
     mutable bool m_idxSucio = true;
     void reconstruirIndice() const;
+    // Apoyo de las operaciones de vertice por parte (ver moveVertex).
+    static const QVector<QGeoCoordinate> *vertexList(const MapFeature &f, int part);
+    static QVector<QGeoCoordinate> *vertexListMutable(MapFeature &f, int part);
+    static void syncFirstPart(MapFeature &f, int part);
     qint64 m_nextId = 1;
     qint64 m_selected = -1;
 
@@ -172,6 +210,7 @@ private:
     int m_groupDepth = 0;
     int m_maxUndo = 50;
     QSet<QString> m_sinDeshacer;   //!< Capas fuera de deshacer/rehacer.
+    QSet<QString> m_tiposOcultos;  //!< Tipos ocultos por el filtro de vista.
 };
 
 } // namespace libmapa

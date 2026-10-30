@@ -33,11 +33,18 @@ private slots:
     void removesAndClearsFeatures();
     void filtersFeaturesByLayer();
     void savesMultiPartFeature();
+    //! Nombre, color (incluido el nulo) y anclaje de cada parte (v6) sobreviven.
+    void savesAndLoadsPartsInfo();
+    //! El dueno de un sector (v8) sobrevive guardar/cargar aunque cambie el id del dueno.
+    void savesOwnerOfSectorWithNewIds();
     //! El desplazamiento de la etiqueta (v3) sobrevive guardar/cargar.
     void savesAndLoadsLabelOffset();
     //! El lado del anclaje y el tamano de fuente del rotulo (v4) sobreviven
     //! guardar/cargar.
     void savesAndLoadsLabelAnchorAndFontSize();
+    //! Un circulo y un arco (v5) guardan su centro, radio y azimuts, y al leer
+    //! vuelven iguales (el contorno se recalcula, no se guarda).
+    void savesAndLoadsCircleAndArc();
     //! Una BD v2 (sin las columnas label_dx/dy) se abre, se migra a v3 y sus
     //! entidades se leen con offset 0, sin romper.
     void migratesV2DatabaseToV3();
@@ -203,6 +210,50 @@ void TstVectorRepository::savesAndLoadsLabelAnchorAndFontSize()
     QCOMPARE(cargadas.at(1).style.labelFontSize, 0);
 }
 
+void TstVectorRepository::savesAndLoadsCircleAndArc()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("round.db"))));
+
+    MapFeature c;
+    c.layerId = QStringLiteral("tma");
+    c.kind = GeometryKind::Circle;
+    c.name = QStringLiteral("TMA Habana");
+    c.geometry = { QGeoCoordinate(23.1136, -82.3666) };
+    c.radiusMeters = 55000.0;
+    QVERIFY(repo.saveFeature(c).has_value());
+
+    MapFeature a = c;
+    a.kind = GeometryKind::Arc;
+    a.name = QStringLiteral("Sector norte");
+    a.radiusMeters = 90000.0;
+    a.arcStartDeg = 315.0;
+    a.arcEndDeg = 45.0;
+    a.arcSector = true;
+    QVERIFY(repo.saveFeature(a).has_value());
+
+    // Un circulo sin radio no es valido y no se guarda.
+    MapFeature malo = c;
+    malo.radiusMeters = 0.0;
+    QVERIFY(!repo.saveFeature(malo).has_value());
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 2);
+    const MapFeature &c2 = cargadas.at(0);
+    QCOMPARE(c2.kind, GeometryKind::Circle);
+    QCOMPARE(c2.geometry.size(), 1);                  // solo el centro, no el contorno
+    QVERIFY(qAbs(c2.radiusMeters - 55000.0) < 1e-9);
+    QVERIFY(c2.isValid());
+    QCOMPARE(c2.outlines().first().size(), 180);       // y el contorno se recalcula
+    const MapFeature &a2 = cargadas.at(1);
+    QCOMPARE(a2.kind, GeometryKind::Arc);
+    QCOMPARE(a2.geometry.size(), 1);
+    QVERIFY(qAbs(a2.radiusMeters - 90000.0) < 1e-9);
+    QVERIFY(qAbs(a2.arcStartDeg - 315.0) < 1e-9 && qAbs(a2.arcEndDeg - 45.0) < 1e-9);
+    QVERIFY(a2.isValid());
+    QVERIFY(a2.arcSector && a2.isArea());              // el sector (v7) sobrevive
+}
+
 void TstVectorRepository::migratesV2DatabaseToV3()
 {
     const QString ruta = dbPath(QStringLiteral("legacy_v2.db"));
@@ -255,6 +306,9 @@ void TstVectorRepository::migratesV2DatabaseToV3()
     // v4: una BD anterior se abre con el rotulo de siempre.
     QCOMPARE(cargadas.first().style.labelAnchor, LabelAnchor::Auto);
     QCOMPARE(cargadas.first().style.labelFontSize, 0);
+    // v5: tampoco es redonda.
+    QCOMPARE(cargadas.first().radiusMeters, 0.0);
+    QCOMPARE(cargadas.first().kind, GeometryKind::Polygon);
 }
 
 void TstVectorRepository::removesAndClearsFeatures()
@@ -319,6 +373,86 @@ void TstVectorRepository::savesMultiPartFeature()
     QCOMPARE(cargadas.first().parts.size(), 2);
     QCOMPARE(cargadas.first().parts.at(0).size(), 2);
     QCOMPARE(cargadas.first().parts.at(1).size(), 3);
+}
+
+void TstVectorRepository::savesAndLoadsPartsInfo()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("partsinfo.db"))));
+
+    MapFeature f;
+    f.layerId = QStringLiteral("sitios");
+    f.kind = GeometryKind::Point;
+    f.name = QStringLiteral("Sitios");
+    for (int i = 0; i < 3; ++i)
+        f.parts.append({ QGeoCoordinate(23.0 + i * 0.1, -82.0) });
+    f.geometry = f.parts.first();
+    PartInfo a; a.name = QStringLiteral("Uno 'quote'"); a.colorOverride = QColor(10, 20, 30);
+    PartInfo b;                                         // sin nada propio
+    PartInfo c; c.name = QStringLiteral("Tres"); c.labelAnchor = LabelAnchor::Top;
+    f.partsInfo = { a, b, c };
+    QVERIFY(repo.saveFeature(f).has_value());
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 1);
+    const MapFeature &g = cargadas.first();
+    QCOMPARE(g.partsInfo.size(), 3);
+    QCOMPARE(g.partsInfo.at(0).name, a.name);
+    QCOMPARE(g.partsInfo.at(0).colorOverride, QColor(10, 20, 30));
+    QVERIFY(!g.partsInfo.at(1).colorOverride.isValid());
+    QCOMPARE(g.partsInfo.at(2).labelAnchor, LabelAnchor::Top);
+    QVERIFY(g.isValid());
+}
+
+void TstVectorRepository::savesOwnerOfSectorWithNewIds()
+{
+    VectorRepository repo;
+    QVERIFY(repo.open(dbPath(QStringLiteral("duenos.db"))));
+
+    // Ids del modelo que NO coinciden con los de la BD (el punto es el 40 y el sector el 7).
+    MapFeature sector;
+    sector.id = 7;
+    sector.kind = GeometryKind::Arc;
+    sector.type = QStringLiteral("sector");
+    sector.geometry = { QGeoCoordinate(23.0, -82.0) };
+    sector.radiusMeters = 50000.0;
+    sector.arcEndDeg = 90.0;
+    sector.arcSector = true;
+    sector.originFeatureId = 40;
+    MapFeature punto;
+    punto.id = 40;
+    punto.kind = GeometryKind::Point;
+    punto.geometry = { QGeoCoordinate(23.0, -82.0) };
+    MapFeature huerfano = sector;
+    huerfano.id = 8;
+    huerfano.originFeatureId = 999;          // dueno que no se guarda
+    MapFeature deObjetivo = sector;
+    deObjetivo.id = 9;
+    deObjetivo.originFeatureId = -1;
+    deObjetivo.originTargetId = 12;
+    QVERIFY(repo.saveFeatures({ sector, punto, huerfano, deObjetivo }));
+
+    const auto cargadas = repo.loadFeatures();
+    QCOMPARE(cargadas.size(), 4);
+    qint64 idPunto = -1;
+    for (const MapFeature &f : cargadas)
+        if (f.kind == GeometryKind::Point)
+            idPunto = f.id;
+    QVERIFY(idPunto > 0);
+    int conDueno = 0, sinDueno = 0, deObj = 0;
+    for (const MapFeature &f : cargadas) {
+        if (f.kind != GeometryKind::Arc)
+            continue;
+        if (f.originTargetId == 12)
+            ++deObj;
+        else if (f.originFeatureId == idPunto)
+            ++conDueno;
+        else if (f.originFeatureId == -1)
+            ++sinDueno;
+    }
+    QCOMPARE(conDueno, 1);          // sigue colgando del punto, con su id nuevo
+    QCOMPARE(sinDueno, 1);          // el dueno que no se guardo lo deja sin dueno
+    QCOMPARE(deObj, 1);
 }
 
 void TstVectorRepository::handlesQuotesAndInjectionInNames()

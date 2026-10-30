@@ -22,6 +22,18 @@ private slots:
     // --- Entidades -------------------------------------------------------
     void assignsIdsAndStoresFeatures();
     void rejectsInvalidGeometry();
+    //! Circulos y arcos: validos con centro y radio, sin vertices que insertar o
+    //! quitar, y moverlos mueve el centro.
+    void roundFeaturesBehaveInTheModel();
+    //! Alta en lote, conteo y borrado por tipo y filtro de visibilidad por tipo:
+    //! UNA senal de repintado y UN paso de deshacer, no una por entidad.
+    void batchAddCountAndClearByType();
+    void typeVisibilityIsAViewFilter();
+    //! Un sector con dueno (entidad) se va con el, en un solo paso de deshacer.
+    void ownedSectorsGoWithTheirOwner();
+    //! Entidad multi-parte con PartInfo: validez, operaciones de vertice por
+    //! parte y primera parte sincronizada con geometry.
+    void partsInfoAndPerPartVertexOps();
     void keepsDomainTypeAndAttributes();
     void filtersByTypeAcrossLayers();
 
@@ -191,6 +203,131 @@ void TstOverlayModel::rejectsInvalidGeometry()
     QCOMPARE(m.addFeature(coordenadaMala), qint64(-1));
 
     QCOMPARE(m.count(), 0);
+}
+
+void TstOverlayModel::roundFeaturesBehaveInTheModel()
+{
+    OverlayModel m;
+
+    MapFeature c;
+    c.kind = GeometryKind::Circle;
+    c.name = QStringLiteral("Zona");
+    c.geometry = { QGeoCoordinate(23.0, -82.0) };
+    c.radiusMeters = 10000.0;
+
+    // Sin radio, o un arco sin barrido, no entran.
+    MapFeature sinRadio = c;
+    sinRadio.radiusMeters = 0.0;
+    QCOMPARE(m.addFeature(sinRadio), qint64(-1));
+    MapFeature arcoPlano = c;
+    arcoPlano.kind = GeometryKind::Arc;
+    arcoPlano.arcStartDeg = arcoPlano.arcEndDeg = 90.0;
+    QCOMPARE(m.addFeature(arcoPlano), qint64(-1));
+
+    const qint64 id = m.addFeature(c);
+    QVERIFY(id > 0);
+    MapFeature a = c;
+    a.kind = GeometryKind::Arc;
+    a.arcStartDeg = 0.0;
+    a.arcEndDeg = 90.0;
+    const qint64 ida = m.addFeature(a);
+    QVERIFY(ida > 0);
+
+    // Un circulo o un arco tiene un solo vertice: no se inserta ni se quita ninguno.
+    QVERIFY(!m.insertVertex(id, 1, QGeoCoordinate(23.1, -82.1)));
+    QVERIFY(!m.insertVertex(ida, 0, QGeoCoordinate(23.1, -82.1)));
+    QVERIFY(!m.removeVertex(id, 0));
+
+    // Mover el vertice o la entidad entera mueve el centro, y el radio se conserva.
+    QVERIFY(m.moveVertex(id, 0, QGeoCoordinate(23.5, -82.5)));
+    QCOMPARE(m.feature(id)->geometry.first(), QGeoCoordinate(23.5, -82.5));
+    QVERIFY(m.moveFeature(ida, 0.5, 0.25));
+    QVERIFY(qAbs(m.feature(ida)->geometry.first().latitude() - 23.5) < 1e-9);
+    QVERIFY(qAbs(m.feature(ida)->radiusMeters - 10000.0) < 1e-9);
+    QVERIFY(m.feature(ida)->isValid());
+}
+
+void TstOverlayModel::batchAddCountAndClearByType()
+{
+    OverlayModel m;
+    QVector<MapFeature> lote;
+    for (int i = 0; i < 6; ++i) {
+        MapFeature f = punto(QStringLiteral("P%1").arg(i), 23.0 + 0.01 * i, -82.0,
+                             i < 4 ? QStringLiteral("aero") : QStringLiteral("zonas"));
+        f.type = (i % 2 == 0) ? QStringLiteral("internos") : QStringLiteral("externos");
+        lote.append(f);
+    }
+    MapFeature malo;                     // sin geometria: no entra
+    malo.kind = GeometryKind::Point;
+    lote.insert(2, malo);
+
+    QSignalSpy cambios(&m, &OverlayModel::changed);
+    QSignalSpy altas(&m, &OverlayModel::featureAdded);
+    const QVector<qint64> ids = m.addFeatures(lote);
+    QCOMPARE(ids.size(), lote.size());
+    QCOMPARE(ids.at(2), qint64(-1));                 // la invalida lleva -1, en su sitio
+    QCOMPARE(m.count(), 6);
+    QCOMPARE(cambios.count(), 1);                    // UN repintado, no seis
+    QCOMPARE(altas.count(), 6);                      // pero cada alta se anuncia (persistencia)
+    QCOMPARE(m.undoDepth(), 1);                      // y un solo paso de deshacer
+
+    // Conteo por tipo, en todo el modelo y por capa.
+    QMap<QString, int> todo = m.typeCounts();
+    QCOMPARE(todo.value(QStringLiteral("internos")), 3);
+    QCOMPARE(todo.value(QStringLiteral("externos")), 3);
+    QCOMPARE(m.typeCounts(QStringLiteral("aero")).value(QStringLiteral("internos")), 2);
+    QCOMPARE(m.typeCounts(QStringLiteral("zonas")).value(QStringLiteral("externos")), 1);
+    QVERIFY(m.typeCounts(QStringLiteral("no_existe")).isEmpty());
+
+    // Borrar un tipo de una capa: solo los de esa capa, con un repintado y un paso.
+    cambios.clear();
+    QSignalSpy bajas(&m, &OverlayModel::featureRemoved);
+    QCOMPARE(m.clearType(QStringLiteral("internos"), QStringLiteral("aero")), 2);
+    QCOMPARE(m.count(), 4);
+    QCOMPARE(cambios.count(), 1);
+    QCOMPARE(bajas.count(), 2);
+    QCOMPARE(m.undoDepth(), 2);
+    QCOMPARE(m.typeCounts().value(QStringLiteral("internos")), 1);   // queda el de «zonas»
+
+    // Deshacer devuelve las dos de golpe.
+    QVERIFY(m.undo());
+    QCOMPARE(m.count(), 6);
+
+    // Sin capa, borra el tipo en todas; un tipo que no existe no hace nada ni repinta.
+    cambios.clear();
+    QCOMPARE(m.clearType(QStringLiteral("externos")), 3);
+    QCOMPARE(m.count(), 3);
+    QCOMPARE(cambios.count(), 1);
+    cambios.clear();
+    QCOMPARE(m.clearType(QStringLiteral("inventado")), 0);
+    QCOMPARE(cambios.count(), 0);
+}
+
+void TstOverlayModel::typeVisibilityIsAViewFilter()
+{
+    OverlayModel m;
+    MapFeature f = punto(QStringLiteral("A"), 23.0, -82.0);
+    f.type = QStringLiteral("internos");
+    const qint64 id = m.addFeature(f);
+    QSignalSpy cambios(&m, &OverlayModel::changed);
+    const int pasos = m.undoDepth();
+
+    QVERIFY(m.isTypeVisible(QStringLiteral("internos")));
+    m.setTypeVisible(QStringLiteral("internos"), false);
+    QVERIFY(!m.isTypeVisible(QStringLiteral("internos")));
+    QCOMPARE(m.hiddenTypes(), QStringList({ QStringLiteral("internos") }));
+    QCOMPARE(cambios.count(), 1);
+    m.setTypeVisible(QStringLiteral("internos"), false);   // sin cambio: no repinta
+    QCOMPARE(cambios.count(), 1);
+
+    // Es solo un filtro: la entidad sigue ahi, visible por si misma y sin deshacer.
+    QVERIFY(m.feature(id)->visible);
+    QCOMPARE(m.featuresOfType(QStringLiteral("internos")).size(), 1);
+    QCOMPARE(m.undoDepth(), pasos);
+
+    m.setTypeVisible(QStringLiteral("internos"), true);
+    QVERIFY(m.hiddenTypes().isEmpty());
+    QCOMPARE(cambios.count(), 2);
 }
 
 void TstOverlayModel::keepsDomainTypeAndAttributes()
@@ -521,3 +658,72 @@ void TstOverlayModel::undoLeavesTransientLayersAlone()
 
 QTEST_MAIN(TstOverlayModel)
 #include "tst_overlaymodel.moc"
+
+void TstOverlayModel::ownedSectorsGoWithTheirOwner()
+{
+    OverlayModel m;
+    MapFeature p = punto(QStringLiteral("Radar"), 23.0, -82.0);
+    const qint64 idP = m.addFeature(p);
+    MapFeature s;
+    s.kind = GeometryKind::Arc;
+    s.geometry = { QGeoCoordinate(23.0, -82.0) };
+    s.radiusMeters = 10000.0;
+    s.arcEndDeg = 90.0;
+    s.arcSector = true;
+    s.originFeatureId = idP;
+    const qint64 idS = m.addFeature(s);
+    const qint64 idLibre = m.addFeature([&] { MapFeature c = s; c.originFeatureId = -1; return c; }());
+    QCOMPARE(m.ownedFeatureIds(), QVector<qint64>{ idS });
+
+    // moveCenter no apila deshacer y mueve solo el centro de uno redondo.
+    QVERIFY(m.moveCenter(idS, QGeoCoordinate(24.0, -82.0)));
+    QCOMPARE(m.feature(idS)->geometry.first().latitude(), 24.0);
+    QVERIFY(!m.moveCenter(idP, QGeoCoordinate(24.0, -82.0)));       // un punto no es redondo
+
+    // Quitar el dueno quita lo que cuelga de el, pero no lo que no tiene dueno.
+    QVERIFY(m.removeFeature(idP));
+    QVERIFY(!m.feature(idS).has_value());
+    QVERIFY(m.feature(idLibre).has_value());
+    m.undo();
+    QVERIFY(m.feature(idP).has_value() && m.feature(idS).has_value());   // un solo paso lo devuelve
+}
+
+// Tres puntos como UNA entidad multi-parte con nombre/color por parte.
+void TstOverlayModel::partsInfoAndPerPartVertexOps()
+{
+    OverlayModel m;
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.name = QStringLiteral("Aerodromos");
+    for (int i = 0; i < 3; ++i)
+        f.parts.append({ QGeoCoordinate(23.0 + i * 0.1, -82.0) });
+    f.geometry = f.parts.first();
+    PartInfo a; a.name = QStringLiteral("A"); a.colorOverride = QColor(Qt::red);
+    PartInfo b; b.name = QStringLiteral("B");
+    PartInfo c; c.name = QStringLiteral("C"); c.labelAnchor = LabelAnchor::Left;
+    f.partsInfo = { a, b, c };
+
+    // partsInfo debe ir paralelo a parts.
+    MapFeature mala = f;
+    mala.partsInfo.removeLast();
+    QCOMPARE(m.addFeature(mala), qint64(-1));
+
+    const qint64 id = m.addFeature(f);
+    QVERIFY(id > 0);
+    QCOMPARE(m.feature(id)->partInfo(1)->name, QStringLiteral("B"));
+    QCOMPARE(m.feature(id)->partLineColor(0), QColor(Qt::red));
+    QCOMPARE(m.feature(id)->partLabelAnchor(2), LabelAnchor::Left);
+    QVERIFY(m.feature(id)->partInfo(3) == nullptr);
+
+    // Mover un vertice de la parte 2 no toca las demas.
+    QVERIFY(m.moveVertex(id, 0, QGeoCoordinate(30.0, -80.0), 2));
+    QCOMPARE(m.feature(id)->parts.at(2).first().latitude(), 30.0);
+    QCOMPARE(m.feature(id)->parts.at(1).first().latitude(), 23.1);
+
+    // Mover la parte 0 mantiene geometry == parts.first().
+    QVERIFY(m.moveVertex(id, 0, QGeoCoordinate(25.0, -81.0), 0));
+    QCOMPARE(m.feature(id)->geometry.first().latitude(), 25.0);
+
+    // Parte inexistente: rechazado, sin tocar nada.
+    QVERIFY(!m.moveVertex(id, 0, QGeoCoordinate(1.0, 1.0), 7));
+}

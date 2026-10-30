@@ -280,10 +280,10 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
         "INSERT INTO entidad (capa, tipo, geometria, nombre, descripcion,"
         " color_linea, color_relleno, ancho_linea, estilo_linea, radio_px,"
         " etiqueta_visible, label_dx, label_dy, label_anchor, label_pos, label_fuente,"
-        " visible, simbolo,"
+        " radio_m, arco_ini, arco_fin, arco_sector, origen_objetivo, origen_entidad, visible, simbolo,"
         " atributos, creado_utc)"
         " VALUES (:capa,:tipo,:geo,:nom,:desc,:cl,:cr,:anc,:el,:rp,:ev,"
-        " :ldx,:ldy,:lan,:lpo,:lfu,:vi,:sim,:atr,:cu)"));
+        " :ldx,:ldy,:lan,:lpo,:lfu,:rad,:ai,:af,:asec,:oob,:oen,:vi,:sim,:atr,:cu)"));
     q.bindValue(QStringLiteral(":capa"), text(f.layerId));
     q.bindValue(QStringLiteral(":tipo"), text(f.type));
     q.bindValue(QStringLiteral(":geo"), static_cast<int>(f.kind));
@@ -300,6 +300,12 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
     q.bindValue(QStringLiteral(":lan"), f.style.labelAnchorVertex);
     q.bindValue(QStringLiteral(":lpo"), static_cast<int>(f.style.labelAnchor));
     q.bindValue(QStringLiteral(":lfu"), f.style.labelFontSize);
+    q.bindValue(QStringLiteral(":rad"), f.radiusMeters);
+    q.bindValue(QStringLiteral(":ai"), f.arcStartDeg);
+    q.bindValue(QStringLiteral(":af"), f.arcEndDeg);
+    q.bindValue(QStringLiteral(":asec"), f.arcSector ? 1 : 0);
+    q.bindValue(QStringLiteral(":oob"), f.originTargetId);
+    q.bindValue(QStringLiteral(":oen"), f.originFeatureId);
     q.bindValue(QStringLiteral(":vi"), f.visible ? 1 : 0);
     q.bindValue(QStringLiteral(":sim"), pixmapToPng(f.style.icon));
     q.bindValue(QStringLiteral(":atr"), atributos);
@@ -317,7 +323,7 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
         " VALUES (:e,:p,:o,:la,:lo)"));
     // Una fila por vertice, agrupadas por parte. Las entidades de una sola
     // parte se guardan como parte 0.
-    const auto partes = f.outlines();
+    const auto partes = f.storedParts();     // en un circulo o un arco, solo el centro
     for (int p = 0; p < partes.size(); ++p) {
         const QVector<QGeoCoordinate> &parte = partes[p];
         for (int i = 0; i < parte.size(); ++i) {
@@ -328,6 +334,28 @@ std::optional<qint64> VectorRepository::writeFeature(QSqlDatabase &database,
             q.bindValue(QStringLiteral(":lo"), parte[i].longitude());
             if (!q.exec()) {
                 fail(QStringLiteral("writeFeature/vertice"), q.lastError().text());
+                return std::nullopt;
+            }
+        }
+    }
+
+    // Los datos propios de cada parte (nombre, color y lado del rotulo), si los hay.
+    if (!f.partsInfo.isEmpty()) {
+        q.prepare(QStringLiteral(
+            "INSERT INTO entidad_parte (entidad_id, parte, nombre, color, label_pos)"
+            " VALUES (:e,:p,:n,:c,:l)"));
+        for (int p = 0; p < f.partsInfo.size(); ++p) {
+            const PartInfo &info = f.partsInfo.at(p);
+            q.bindValue(QStringLiteral(":e"), id);
+            q.bindValue(QStringLiteral(":p"), p);
+            q.bindValue(QStringLiteral(":n"), text(info.name));
+            q.bindValue(QStringLiteral(":c"),
+                        info.colorOverride.isValid()
+                            ? QVariant(static_cast<qint64>(info.colorOverride.rgba()))
+                            : QVariant());
+            q.bindValue(QStringLiteral(":l"), static_cast<int>(info.labelAnchor));
+            if (!q.exec()) {
+                fail(QStringLiteral("writeFeature/parte"), q.lastError().text());
                 return std::nullopt;
             }
         }
@@ -348,9 +376,26 @@ bool VectorRepository::saveFeatures(const QVector<MapFeature> &features)
     if (!tx.isActive())
         return fail(QStringLiteral("saveFeatures"), tr("Sin transaccion"));
 
+    // Al guardar, cada entidad recibe un id nuevo: el dueno de un circulo o sector (que es el id
+    // de OTRA entidad) se reescribe con el id nuevo de esa entidad, para que al abrir siga
+    // colgando de ella. Si el dueno no esta entre las guardadas, queda sin dueno.
+    QHash<qint64, qint64> idNuevo;
+    QVector<QPair<qint64, qint64>> conDueno;       // (id nuevo del sector, id viejo del dueno)
     for (const MapFeature &f : features) {
-        if (!writeFeature(database, f))
+        const auto id = writeFeature(database, f);
+        if (!id)
             return false;      // rollback al salir del scope
+        idNuevo.insert(f.id, *id);
+        if (f.isRound() && f.originTargetId < 0 && f.originFeatureId >= 0)
+            conDueno.append({ *id, f.originFeatureId });
+    }
+    for (const auto &par : conDueno) {
+        QSqlQuery q(database);
+        q.prepare(QStringLiteral("UPDATE entidad SET origen_entidad=:o WHERE id=:id"));
+        q.bindValue(QStringLiteral(":o"), idNuevo.value(par.second, -1));
+        q.bindValue(QStringLiteral(":id"), par.first);
+        if (!q.exec())
+            return fail(QStringLiteral("saveFeatures"), q.lastError().text());
     }
     return tx.commit();
 }
@@ -429,6 +474,15 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         if (lpo.isValid())
             f.style.labelAnchor = static_cast<LabelAnchor>(lpo.toInt());
         f.style.labelFontSize = field(q, "label_fuente").toInt();
+        // Radio y azimuts de un circulo o un arco (esquema v5); 0 si la BD es anterior.
+        f.radiusMeters = field(q, "radio_m").toDouble();
+        f.arcStartDeg = field(q, "arco_ini").toDouble();
+        f.arcEndDeg = field(q, "arco_fin").toDouble();
+        f.arcSector = field(q, "arco_sector").toInt() != 0;      // esquema v7
+        const QVariant oob = field(q, "origen_objetivo");       // esquema v8; sin la columna, sin dueno
+        f.originTargetId = oob.isValid() ? oob.toLongLong() : -1;
+        const QVariant oen = field(q, "origen_entidad");
+        f.originFeatureId = oen.isValid() ? oen.toLongLong() : -1;
         f.style.icon = pngToPixmap(field(q, "simbolo").toByteArray());
         f.visible = field(q, "visible").toInt() != 0;
 
@@ -458,6 +512,17 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         : QStringLiteral("SELECT 0 AS parte, latitud, longitud FROM entidad_vertice"
                          " WHERE entidad_id=:e ORDER BY orden"));
 
+    // Los datos de las partes, si la BD tiene la tabla (esquema v6).
+    bool conInfoPartes = false;
+    {
+        QSqlQuery prueba(db());
+        conInfoPartes = prueba.exec(QStringLiteral("SELECT parte FROM entidad_parte LIMIT 0"));
+    }
+    QSqlQuery qp(db());
+    if (conInfoPartes)
+        qp.prepare(QStringLiteral("SELECT parte, nombre, color, label_pos FROM entidad_parte"
+                                  " WHERE entidad_id=:e ORDER BY parte"));
+
     for (int i = 0; i < out.size(); ++i) {
         qv.bindValue(QStringLiteral(":e"), ids[i]);
         if (!qv.exec())
@@ -480,6 +545,28 @@ QVector<MapFeature> VectorRepository::loadFeatures() const
         out[i].geometry = partes.first();              // la primera parte
         if (partes.size() > 1)
             out[i].parts = partes;                     // multi-parte
+
+        // Datos propios de cada parte (esquema v6). En una BD anterior no hay tabla.
+        if (conInfoPartes && !out[i].parts.isEmpty()) {
+            qp.bindValue(QStringLiteral(":e"), ids[i]);
+            if (qp.exec()) {
+                QVector<PartInfo> info(out[i].parts.size());
+                bool alguna = false;
+                while (qp.next()) {
+                    const int parte = qp.value(0).toInt();
+                    if (parte < 0 || parte >= info.size())
+                        continue;
+                    info[parte].name = qp.value(1).toString();
+                    if (!qp.value(2).isNull())
+                        info[parte].colorOverride =
+                            QColor::fromRgba(static_cast<QRgb>(qp.value(2).toUInt()));
+                    info[parte].labelAnchor = static_cast<LabelAnchor>(qp.value(3).toInt());
+                    alguna = true;
+                }
+                if (alguna)
+                    out[i].partsInfo = info;
+            }
+        }
     }
     return out;
 }

@@ -299,6 +299,18 @@ private:
                                const QGeoCoordinate &hasta = QGeoCoordinate());
     QGeoCoordinate ajustarAPunto(const QGeoCoordinate &p) const;
     qint64 anillosDe(qint64 targetId, qint64 featureId) const;
+
+    // Sectores y circulos con origen en un objetivo o en un punto (VentanaSectores.cpp).
+    bool esSectorConDueno(qint64 id) const;
+    QVector<qint64> sectoresDe(qint64 targetId, qint64 featureId) const;
+    qint64 ponerSector(qint64 targetId, qint64 featureId, bool circulo, double radioKm, double ini,
+                       double fin);
+    void ponerSectorPedido(qint64 targetId, qint64 featureId, bool circulo);
+    void cambiarSectorPedido(qint64 sectorId);
+    QStringList objetivosDentroDe(qint64 sectorId) const;
+    void quitarSectoresDe(qint64 targetId, qint64 featureId);
+    void menuSector(QMenu *menu, qint64 sectorId, bool cabeza = true);
+    void submenuSectores(QMenu *menu, qint64 targetId, qint64 featureId);
     QString nombreObjetivo(qint64 id) const;
 
     void ponerMarcacion();

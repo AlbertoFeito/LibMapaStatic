@@ -10,6 +10,8 @@
 #include <QVariantMap>
 #include <QVector>
 
+#include <cmath>
+
 namespace libmapa {
 
 /*!
@@ -29,7 +31,13 @@ namespace libmapa {
 enum class GeometryKind {
     Point,      //!< Un solo vertice.
     Polyline,   //!< Vertices en orden, sin cerrar.
-    Polygon     //!< Vertices en orden, cerrado.
+    Polygon,    //!< Vertices en orden, cerrado.
+    //! Circunferencia GEODESICA: un vertice (el centro) y \a MapFeature::radiusMeters.
+    //! Se anaden al FINAL del enum porque el tipo se guarda como entero en SQLite.
+    Circle,
+    //! Arco geodesico: centro, radio y los azimuts de inicio y fin
+    //! (\a MapFeature::arcStartDeg y \a arcEndDeg), siempre en sentido horario.
+    Arc
 };
 
 /*!
@@ -103,6 +111,29 @@ struct FeatureStyle
 };
 
 /*!
+ * \brief Lo que distingue a UNA parte de una entidad multi-parte del resto de la entidad.
+ *
+ * Una entidad con muchas partes (18 aerodromos como una sola entidad con 18 puntos)
+ * comparte \a style, \a type y \a attributes, y cada parte puede ademas tener su
+ * propio nombre, su color y el lado donde cuelga su rotulo. Va en
+ * MapFeature::partsInfo, paralelo a MapFeature::parts.
+ */
+struct PartInfo
+{
+    //! Nombre de la parte; se rotula junto a ella. Vacio = sin rotulo propio.
+    QString name;
+    //! Color de la parte (linea o simbolo); invalido = el de \a MapFeature::style.
+    QColor colorOverride;
+    //! Lado donde cuelga su rotulo; \a Auto = el de \a MapFeature::style.
+    LabelAnchor labelAnchor = LabelAnchor::Auto;
+
+    bool operator==(const PartInfo &o) const
+    {
+        return name == o.name && colorOverride == o.colorOverride && labelAnchor == o.labelAnchor;
+    }
+};
+
+/*!
  * \brief Una entidad dibujable sobre el mapa.
  *
  * La libreria dibuja la geometria y la deja editar. Lo que SIGNIFICA cada
@@ -143,6 +174,15 @@ struct MapFeature
      */
     QVector<QVector<QGeoCoordinate>> parts;
 
+    /*!
+     * \brief Datos propios de cada parte (nombre, color, lado del rotulo).
+     *
+     * Vacio = las partes no tienen nada propio (lo de siempre). Si tiene elementos,
+     * debe tener EXACTAMENTE uno por parte de \a parts, en el mismo orden
+     * (\ref isValid lo comprueba). No aplica a un Circle ni a un Arc.
+     */
+    QVector<PartInfo> partsInfo;
+
     FeatureStyle style;
 
     //! Cualquier dato del dominio. Permite anadir campos sin tocar la
@@ -159,16 +199,199 @@ struct MapFeature
     //! persiste: es una pista de interacción que la app vuelve a poner.
     bool draggable = false;
 
+    //! Radio en metros de un Circle o un Arc (0 en el resto).
+    double radiusMeters = 0.0;
+    //! Azimuts de inicio y fin de un Arc, en grados desde el norte y en sentido
+    //! horario: el arco va de \a arcStartDeg a \a arcEndDeg y da la vuelta si hace
+    //! falta (de 315 a 45 son 90 grados). Si son iguales (modulo 360) el arco no es
+    //! valido: para una circunferencia entera esta Circle.
+    double arcStartDeg = 0.0;
+    double arcEndDeg = 0.0;
+    //! Un Arc con \a arcSector es un SECTOR: la cuna entre el centro, los dos radios y el
+    //! arco, un AREA (se rellena, se puede elegir por dentro y sirve de zona), para senalar
+    //! al operador donde concentrarse. Sin el, es solo la linea del arco. En el resto no
+    //! se usa.
+    bool arcSector = false;
+    //! DUENO de un Circle o un Arc, como \ref RangeRings::targetId y featureId: un objetivo
+    //! (\a originTargetId) o una entidad (\a originFeatureId, si no hay objetivo) a la que
+    //! sigue. El centro del circulo o del sector es siempre su posicion, aunque se mueva, y
+    //! desaparece con el: al quitar el objetivo o la entidad, y al quitarla un sector que
+    //! cuelga de ella. -1 = sin dueno (centro fijo, como siempre). El dueno debe existir al
+    //! poner el sector; sin el, se quita. Los sectores de un objetivo se guardan, pero al
+    //! abrir ya no hay objetivo y se quitan.
+    qint64 originTargetId = -1;
+    qint64 originFeatureId = -1;
+
     bool isMultiPart() const { return !parts.isEmpty(); }
 
-    //! Las partes a dibujar/consultar: \a parts si las hay, si no \a geometry.
+    //! Datos propios de la parte \a i, o null si no tiene (sin \a partsInfo o fuera de rango).
+    const PartInfo *partInfo(int i) const
+    {
+        return (i >= 0 && i < partsInfo.size()) ? &partsInfo.at(i) : nullptr;
+    }
+    //! Color de la parte \a i: el suyo si lo tiene y, si no, el de la linea del estilo.
+    QColor partLineColor(int i) const
+    {
+        const PartInfo *p = partInfo(i);
+        return (p && p->colorOverride.isValid()) ? p->colorOverride : style.lineColor;
+    }
+    //! Color de relleno de la parte \a i: el del estilo, o el de la parte con la
+    //! transparencia del relleno del estilo.
+    QColor partFillColor(int i) const
+    {
+        const PartInfo *p = partInfo(i);
+        if (!p || !p->colorOverride.isValid())
+            return style.fillColor;
+        QColor c = p->colorOverride;
+        c.setAlpha(style.fillColor.alpha());
+        return c;
+    }
+    //! Lado del rotulo de la parte \a i: el suyo si lo tiene y, si no, el del estilo.
+    LabelAnchor partLabelAnchor(int i) const
+    {
+        const PartInfo *p = partInfo(i);
+        return (p && p->labelAnchor != LabelAnchor::Auto) ? p->labelAnchor : style.labelAnchor;
+    }
+
+    //! ¿Es un Circle o un Arc? Su geometria se genera a partir del centro y el radio.
+    bool isRound() const { return kind == GeometryKind::Circle || kind == GeometryKind::Arc; }
+    //! ¿Se comporta como un area (relleno, cierre, «dentro»)? Poligonos y circulos.
+    bool isArea() const
+    {
+        return kind == GeometryKind::Polygon || kind == GeometryKind::Circle
+               || (kind == GeometryKind::Arc && arcSector);
+    }
+    //! ¿Se comporta como una linea? Polilineas y arcos.
+    bool isLinear() const
+    {
+        return kind == GeometryKind::Polyline || (kind == GeometryKind::Arc && !arcSector);
+    }
+
+    //! Barrido en grados (de 0 a 360, sin llegar a 360) de un arco que va de \a startDeg
+    //! a \a endDeg en sentido horario; 0 si no son numeros finitos o si coinciden
+    //! (modulo 360). De 315 a 45 son 90; de 45 a 315, 270.
+    static double arcSweepDeg(double startDeg, double endDeg)
+    {
+        if (!std::isfinite(startDeg) || !std::isfinite(endDeg))
+            return 0.0;
+        double barrido = std::fmod(endDeg - startDeg, 360.0);
+        if (barrido < 0.0)
+            barrido += 360.0;
+        return barrido;
+    }
+
+    //! Puntos de un Circle o un Arc, calculados SOBRE EL ELIPSOIDE (una coordenada
+    //! cada 2 grados de azimut): en Mercator un circulo de 300 km no es un circulo
+    //! en pantalla, y asi sale bien a cualquier latitud y radio. Vacio si no es
+    //! redondo o no es valido. El Circle no repite el primer punto (es un area).
+    QVector<QGeoCoordinate> roundOutline() const
+    {
+        QVector<QGeoCoordinate> puntos;
+        if (!isRound() || geometry.size() != 1 || !geometry.first().isValid()
+            || !(radiusMeters > 0.0) || !std::isfinite(radiusMeters))
+            return puntos;
+        const bool arco = kind == GeometryKind::Arc;
+        const double barrido = arco ? arcSweepDeg(arcStartDeg, arcEndDeg) : 360.0;
+        if (!(barrido > 0.0))
+            return puntos;
+        constexpr double kPasoDeg = 2.0;
+        const int tramos = qMax(arco ? 2 : 3, int(std::ceil(barrido / kPasoDeg)));
+        const int n = arco ? tramos + 1 : tramos;     // el circulo no repite el primero
+        puntos.reserve(n + 1);
+        const QGeoCoordinate centro = geometry.first();
+        if (arco && arcSector)
+            puntos.append(centro);                    // la cuna sale del centro
+        const double inicio = arco ? arcStartDeg : 0.0;
+        for (int i = 0; i < n; ++i)
+            puntos.append(centro.atDistanceAndAzimuth(radiusMeters,
+                                                      inicio + barrido * i / tramos));
+        return puntos;
+    }
+
+    //! ¿Cae \a p DENTRO de un Circle o de un sector (Arc con \a arcSector)? Distancia al centro
+    //! no mayor que el radio y, en el sector, azimut entre el inicio y el fin (con la vuelta
+    //! por el norte). Falso en cualquier otra entidad, incluido un arco que es solo linea.
+    bool roundContains(const QGeoCoordinate &p) const
+    {
+        if (!isRound() || !isArea() || !isValid() || !p.isValid())
+            return false;
+        const QGeoCoordinate centro = geometry.first();
+        if (centro.distanceTo(p) > radiusMeters)
+            return false;
+        if (kind == GeometryKind::Circle)
+            return true;
+        double desde = std::fmod(centro.azimuthTo(p) - arcStartDeg, 360.0);
+        if (desde < 0.0)
+            desde += 360.0;
+        return desde <= arcSweepDeg(arcStartDeg, arcEndDeg);
+    }
+
+    //! Punto donde se ancla el rotulo: la mitad del recorrido de un Arc y el punto norte del
+    //! borde de un Circle (en el centro tapaba lo que hubiera dentro). Invalido si no es redondo.
+    QGeoCoordinate roundLabelPoint() const
+    {
+        if (!isRound() || geometry.isEmpty())
+            return QGeoCoordinate();
+        if (kind == GeometryKind::Circle)
+            return geometry.first().atDistanceAndAzimuth(radiusMeters, 0.0);
+        const double barrido = arcSweepDeg(arcStartDeg, arcEndDeg);
+        return geometry.first().atDistanceAndAzimuth(radiusMeters, arcStartDeg + barrido / 2.0);
+    }
+
+    //! Las partes a dibujar/consultar: \a parts si las hay, si no \a geometry. En un
+    //! Circle o un Arc, su contorno ya calculado (\ref roundOutline).
     QVector<QVector<QGeoCoordinate>> outlines() const
+    {
+        if (isRound()) {
+            const QVector<QGeoCoordinate> contorno = roundOutline();
+            return contorno.isEmpty() ? QVector<QVector<QGeoCoordinate>>()
+                                      : QVector<QVector<QGeoCoordinate>>{ contorno };
+        }
+        if (!parts.isEmpty())
+            return parts;
+        if (geometry.isEmpty())
+            return {};
+        return { geometry };
+    }
+
+    //! Lo que se GUARDA de la geometria: las partes si las hay o \a geometry. A
+    //! diferencia de \ref outlines, en un Circle o un Arc es solo el centro (el
+    //! contorno se vuelve a calcular al leer).
+    QVector<QVector<QGeoCoordinate>> storedParts() const
     {
         if (!parts.isEmpty())
             return parts;
         if (geometry.isEmpty())
             return {};
         return { geometry };
+    }
+
+    //! Copia con la geometria de siempre (Polygon para un Circle, Polyline para un
+    //! Arc, con el contorno ya calculado), para los formatos que no conocen circulos
+    //! ni arcos. Guarda el centro, el radio y los azimuts como atributos
+    //! (\c radius_m, \c arc_start_deg, \c arc_end_deg, \c center_lat, \c center_lon).
+    MapFeature toPlain() const
+    {
+        if (!isRound())
+            return *this;
+        MapFeature plana = *this;
+        plana.attributes.insert(QStringLiteral("radius_m"), radiusMeters);
+        if (!geometry.isEmpty()) {
+            plana.attributes.insert(QStringLiteral("center_lat"), geometry.first().latitude());
+            plana.attributes.insert(QStringLiteral("center_lon"), geometry.first().longitude());
+        }
+        if (kind == GeometryKind::Arc) {
+            plana.attributes.insert(QStringLiteral("arc_start_deg"), arcStartDeg);
+            plana.attributes.insert(QStringLiteral("arc_end_deg"), arcEndDeg);
+            plana.attributes.insert(QStringLiteral("arc_sector"), arcSector);
+        }
+        plana.geometry = roundOutline();
+        plana.kind = isArea() ? GeometryKind::Polygon : GeometryKind::Polyline;
+        plana.radiusMeters = 0.0;
+        plana.arcStartDeg = 0.0;
+        plana.arcEndDeg = 0.0;
+        plana.arcSector = false;
+        return plana;
     }
 
     QGeoCoordinate position() const
@@ -186,12 +409,27 @@ struct MapFeature
         case GeometryKind::Point:    return p.size() == 1;
         case GeometryKind::Polyline: return p.size() >= 2;
         case GeometryKind::Polygon:  return p.size() >= 3;
+        case GeometryKind::Circle:   return p.size() == 1;
+        case GeometryKind::Arc:      return p.size() == 1;
         }
         return false;
     }
 
     bool isValid() const
     {
+        if (isRound()) {
+            // Un solo vertice (el centro), sin partes ni datos de partes, radio finito y positivo y, en
+            // un arco, un barrido distinto de cero.
+            if (!parts.isEmpty() || !partsInfo.isEmpty() || geometry.size() != 1
+                || !geometry.first().isValid())
+                return false;
+            if (!(radiusMeters > 0.0) || !std::isfinite(radiusMeters))
+                return false;
+            return kind == GeometryKind::Circle || arcSweepDeg(arcStartDeg, arcEndDeg) > 0.0;
+        }
+        // Los datos de las partes, si los hay, van uno por parte.
+        if (!partsInfo.isEmpty() && partsInfo.size() != parts.size())
+            return false;
         if (!parts.isEmpty()) {
             for (const QVector<QGeoCoordinate> &p : parts)
                 if (!partIsValid(p))
@@ -208,6 +446,8 @@ struct MapFeature
         case GeometryKind::Point:    return 1;
         case GeometryKind::Polyline: return 2;
         case GeometryKind::Polygon:  return 3;
+        case GeometryKind::Circle:   return 1;
+        case GeometryKind::Arc:      return 1;
         }
         return 1;
     }

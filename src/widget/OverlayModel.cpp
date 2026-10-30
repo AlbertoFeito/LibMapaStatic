@@ -383,6 +383,57 @@ qint64 OverlayModel::addFeature(MapFeature feature)
     return feature.id;
 }
 
+// Anade varias entidades de una vez. Valida cada una (las invalidas llevan -1 y no
+// entran), asigna capa e id como addFeature, apila UN solo paso de deshacer si alguna
+// capa afectada se deshace, y emite una sola vez layersChanged y changed: con
+// miles de entidades la diferencia con N altas sueltas es el repintado de la vista.
+QVector<qint64> OverlayModel::addFeatures(const QVector<MapFeature> &features)
+{
+    QVector<qint64> ids(features.size(), -1);
+    QVector<MapFeature> validas;
+    QVector<int> posiciones;
+    validas.reserve(features.size());
+    bool algunaDeshacible = false;
+    for (int i = 0; i < features.size(); ++i) {
+        MapFeature f = features.at(i);
+        if (!f.isValid()) {
+            qCWarning(lcMapaRender)
+                << "Entidad descartada: geometria invalida para" << f.name;
+            continue;
+        }
+        if (f.layerId.isEmpty())
+            f.layerId = defaultLayerId();
+        algunaDeshacible = algunaDeshacible || isLayerUndoable(f.layerId);
+        validas.append(f);
+        posiciones.append(i);
+    }
+    if (validas.isEmpty())
+        return ids;
+
+    if (algunaDeshacible)
+        pushUndo();
+    for (int k = 0; k < validas.size(); ++k) {
+        MapFeature &f = validas[k];
+        if (!m_layers.contains(f.layerId)) {
+            // Una capa nueva se crea sin su propia senal: la de todo el lote basta.
+            LayerInfo capa;
+            capa.id = f.layerId;
+            capa.displayName = f.layerId;
+            m_layers.insert(capa.id, capa);
+        }
+        f.id = m_nextId++;
+        m_features.insert(f.id, f);
+        ids[posiciones.at(k)] = f.id;
+    }
+    m_idxSucio = true;
+
+    for (int k = 0; k < validas.size(); ++k)
+        emit featureAdded(validas.at(k).id);
+    emit layersChanged();
+    emit changed();
+    return ids;
+}
+
 // Reemplaza una entidad existente (por id) por una version nueva. Conserva la
 // capa anterior si la nueva no trae ninguna. false si el id no existe o la
 // geometria no es valida.
@@ -412,16 +463,53 @@ bool OverlayModel::updateFeature(const MapFeature &feature)
     return true;
 }
 
-// Borra una entidad por id. Si estaba seleccionada, limpia la seleccion. false si
-// no existe.
+// Ids de los circulos y sectores con dueno.
+QVector<qint64> OverlayModel::ownedFeatureIds() const
+{
+    QVector<qint64> ids;
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it)
+        if (it->isRound() && (it->originTargetId >= 0 || it->originFeatureId >= 0))
+            ids.append(it.key());
+    return ids;
+}
+
+// Centro nuevo de un circulo o sector que sigue a su dueno: sin paso de deshacer.
+bool OverlayModel::moveCenter(qint64 id, const QGeoCoordinate &center)
+{
+    auto it = m_features.find(id);
+    if (it == m_features.end() || !it->isRound() || !center.isValid())
+        return false;
+    it->geometry = { center };
+    m_idxSucio = true;
+    emit featureUpdated(id);
+    emit changed();
+    return true;
+}
+
+// Borra una entidad por id (y los circulos y sectores que cuelgan de ella). Si estaba
+// seleccionada, limpia la seleccion. false si no existe.
 bool OverlayModel::removeFeature(qint64 id)
 {
     if (!m_features.contains(id))
         return false;
+    // Lo que cuelga de la entidad se va con ella, en el mismo paso de deshacer.
+    QVector<qint64> colgados;
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it)
+        if (it->isRound() && it->originTargetId < 0 && it->originFeatureId == id)
+            colgados.append(it.key());
     if (isLayerUndoable(m_features.value(id).layerId))
         pushUndo();
+    for (const qint64 c : colgados)
+        m_features.remove(c);
     m_features.remove(id);
     m_idxSucio = true;
+    for (const qint64 c : colgados) {
+        if (m_selected == c) {
+            m_selected = -1;
+            emit selectionChanged(-1);
+        }
+        emit featureRemoved(c);
+    }
     if (m_selected == id) {
         m_selected = -1;
         emit selectionChanged(-1);
@@ -462,6 +550,62 @@ void OverlayModel::clearLayer(const QString &layerId)
         emit layersChanged();      // los contadores por capa cambiaron
         emit changed();
     }
+}
+
+// Borra todas las entidades de un tipo (de una capa o de todas). Como clearLayer: un
+// featureRemoved por entidad (barato) y una sola vez layersChanged y changed, y un
+// solo paso de deshacer si alguna de las capas afectadas se deshace.
+int OverlayModel::clearType(const QString &type, const QString &layerId)
+{
+    QVector<qint64> aBorrar;
+    bool algunaDeshacible = false;
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it) {
+        const MapFeature &f = it.value();
+        if (f.type != type || (!layerId.isEmpty() && f.layerId != layerId))
+            continue;
+        aBorrar.append(it.key());
+        algunaDeshacible = algunaDeshacible || isLayerUndoable(f.layerId);
+    }
+    if (aBorrar.isEmpty())
+        return 0;
+
+    if (algunaDeshacible)
+        pushUndo();
+    for (qint64 id : aBorrar)
+        m_features.remove(id);
+    m_idxSucio = true;
+    if (aBorrar.contains(m_selected)) {
+        m_selected = -1;
+        emit selectionChanged(-1);
+    }
+    for (qint64 id : aBorrar)
+        emit featureRemoved(id);
+    emit layersChanged();
+    emit changed();
+    return int(aBorrar.size());
+}
+
+// Cuantas entidades hay de cada tipo, en una capa o en todas.
+QMap<QString, int> OverlayModel::typeCounts(const QString &layerId) const
+{
+    QMap<QString, int> cuentas;
+    for (auto it = m_features.constBegin(); it != m_features.constEnd(); ++it)
+        if (layerId.isEmpty() || it.value().layerId == layerId)
+            ++cuentas[it.value().type];
+    return cuentas;
+}
+
+// Oculta o muestra un tipo entero (filtro de vista) y repinta si cambia algo.
+void OverlayModel::setTypeVisible(const QString &type, bool visible)
+{
+    const bool estabaVisible = !m_tiposOcultos.contains(type);
+    if (visible == estabaVisible)
+        return;
+    if (visible)
+        m_tiposOcultos.remove(type);
+    else
+        m_tiposOcultos.insert(type);
+    emit changed();
 }
 
 // Borra TODAS las entidades de todas las capas (las capas se conservan). Como
@@ -564,19 +708,48 @@ QVector<MapFeature> OverlayModel::featuresOfType(const QString &type) const
 
 // ------------------------------------------------------------- geometria --
 
+// Lista de vertices que edita una operacion de vertice: 'part' < 0 o una entidad de una
+// sola parte con 'part' 0 son 'geometry'; en una multi-parte con 'part' valido, esa
+// parte. Null si el indice de parte no existe.
+const QVector<QGeoCoordinate> *OverlayModel::vertexList(const MapFeature &f, int part)
+{
+    if (part < 0)
+        return &f.geometry;
+    if (f.isMultiPart())
+        return part < f.parts.size() ? &f.parts.at(part) : nullptr;
+    return part == 0 ? &f.geometry : nullptr;
+}
+
+// Lo mismo, para escribir (la entidad ya esta separada de la copia de deshacer).
+QVector<QGeoCoordinate> *OverlayModel::vertexListMutable(MapFeature &f, int part)
+{
+    return const_cast<QVector<QGeoCoordinate> *>(vertexList(f, part));
+}
+
+// En una entidad multi-parte 'geometry' es siempre una copia de la PRIMERA parte: tras
+// editar la parte 0 se vuelve a copiar para que no se separen.
+void OverlayModel::syncFirstPart(MapFeature &f, int part)
+{
+    if (part == 0 && f.isMultiPart())
+        f.geometry = f.parts.first();
+}
+
 // Mueve un vertice suelto de una entidad a una nueva coordenada. Solo geometrias
 // de una parte (en una multi-parte no se sabria a que parte pertenece el indice).
 // false si el id/indice no es valido, la entidad es multi-parte o la coord no vale.
-bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
+bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to, int part)
 {
     auto it = m_features.find(id);
     if (it == m_features.end() || !to.isValid())
         return false;
-    // La edicion de vertices sueltos es de una sola parte: en una entidad
+    // Sin \a part la edicion de vertices sueltos es de una sola parte: en una entidad
     // multi-parte (un .geo entero) no se sabria que parte tocar.
-    if (it->isMultiPart())
+    if (part < 0 && it->isMultiPart())
         return false;
-    if (index < 0 || index >= it->geometry.size())
+    if (it->isRound() && part >= 0)
+        return false;
+    const QVector<QGeoCoordinate> *destino = vertexList(*it, part);
+    if (!destino || index < 0 || index >= destino->size())
         return false;
 
     pushUndo();
@@ -584,7 +757,8 @@ bool OverlayModel::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
     // los datos: escribir con el iterador de antes alteraria tambien la
     // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
     it = m_features.find(id);
-    it->geometry[index] = to;
+    vertexListMutable(*it, part)->replace(index, to);
+    syncFirstPart(*it, part);
     emit featureUpdated(id);
     emit changed();
     return true;
@@ -611,21 +785,22 @@ bool OverlayModel::setLabelOffset(qint64 id, const QPointF &offsetPx)
 // Inserta un vertice nuevo en la posicion 'index' de una entidad (para prolongar
 // o subdividir una linea/poligono). No aplica a puntos ni a multi-parte. false si
 // algo no cuadra.
-bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
+bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at, int part)
 {
     auto it = m_features.find(id);
     if (it == m_features.end() || !at.isValid())
         return false;
-    if (it->isMultiPart())
+    if (part < 0 && it->isMultiPart())
         return false;
-    if (it->kind == GeometryKind::Point)
-        return false;                       // un punto tiene un solo vertice
-    if (index < 0 || index > it->geometry.size())
+    if (it->kind == GeometryKind::Point || it->isRound())
+        return false;                       // un punto, un circulo o un arco: un solo vertice
+    const QVector<QGeoCoordinate> *destino = vertexList(*it, part);
+    if (!destino || index < 0 || index > destino->size())
         return false;
     // Tope opcional de vertices (p. ej. un «area objetivo» de ≤10 puntos): si la
     // entidad lo declara en sus atributos, no se inserta por encima del limite.
     const int cap = it->attributes.value(QStringLiteral("max_vertices")).toInt();
-    if (cap > 0 && it->geometry.size() >= cap)
+    if (cap > 0 && destino->size() >= cap)
         return false;
 
     pushUndo();
@@ -633,7 +808,8 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
     // los datos: escribir con el iterador de antes alteraria tambien la
     // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
     it = m_features.find(id);
-    it->geometry.insert(index, at);
+    vertexListMutable(*it, part)->insert(index, at);
+    syncFirstPart(*it, part);
     emit featureUpdated(id);
     emit changed();
     return true;
@@ -642,19 +818,20 @@ bool OverlayModel::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
 // Elimina un vertice de una entidad, pero NUNCA hasta degenerarla (un poligono no
 // puede quedar con menos de 3 vertices, etc.): para eso esta removeFeature. No
 // aplica a multi-parte. false si el borrado no es valido.
-bool OverlayModel::removeVertex(qint64 id, int index)
+bool OverlayModel::removeVertex(qint64 id, int index, int part)
 {
     auto it = m_features.find(id);
     if (it == m_features.end())
         return false;
-    if (it->isMultiPart())
+    if (part < 0 && it->isMultiPart())
         return false;
-    if (index < 0 || index >= it->geometry.size())
+    const QVector<QGeoCoordinate> *destino = vertexList(*it, part);
+    if (!destino || index < 0 || index >= destino->size())
         return false;
 
     // No se deja degenerar la geometria: un poligono de dos vertices no es un
     // poligono. Quien quiera eliminarlo del todo tiene removeFeature.
-    if (it->geometry.size() <= it->minimumVertices())
+    if (destino->size() <= it->minimumVertices())
         return false;
 
     pushUndo();
@@ -662,7 +839,8 @@ bool OverlayModel::removeVertex(qint64 id, int index)
     // los datos: escribir con el iterador de antes alteraria tambien la
     // instantanea (y deshacer no haria nada). Re-buscar separa los datos.
     it = m_features.find(id);
-    it->geometry.remove(index);
+    vertexListMutable(*it, part)->remove(index);
+    syncFirstPart(*it, part);
     emit featureUpdated(id);
     emit changed();
     return true;

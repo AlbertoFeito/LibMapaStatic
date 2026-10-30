@@ -15,10 +15,15 @@ private slots:
     void detectsFormatByExtension();
     void readsGeoJsonFeatureCollection();
     void geoJsonRoundTripKeepsEverything();
+    //! Nombre y color de cada parte (PartInfo) van y vuelven por GeoJSON.
+    void geoJsonRoundTripKeepsPartsInfo();
     void readsKmlWithSharedStyleAndFolders();
     void kmlRoundTrip();
     void readsGpxWaypointsRoutesAndTracks();
     void gpxRoundTripKeepsPolygons();
+    //! Un circulo sale como poligono y un arco como linea (con su radio y azimuts
+    //! en las propiedades) en GeoJSON, KML y GPX.
+    void exportsCirclesAndArcsAsPlainShapes();
     void reportsBadInput();
     void writesAndReadsFiles();
     void gpxTracksKeepTimes();
@@ -146,6 +151,30 @@ void TstVectorFormats::geoJsonRoundTripKeepsEverything()
     QVERIFY(qAbs(f[2].style.fillColor.alpha() - 64) <= 1);
 }
 
+void TstVectorFormats::geoJsonRoundTripKeepsPartsInfo()
+{
+    MapFeature f;
+    f.kind = GeometryKind::Point;
+    f.name = QStringLiteral("Sitios");
+    for (int i = 0; i < 3; ++i)
+        f.parts.append({ QGeoCoordinate(23.0 + i * 0.1, -82.0) });
+    f.geometry = f.parts.first();
+    PartInfo a; a.name = QStringLiteral("Alfa"); a.colorOverride = QColor(200, 0, 0);
+    PartInfo b; b.name = QStringLiteral("Bravo");
+    PartInfo c;
+    f.partsInfo = { a, b, c };
+
+    const QVector<MapFeature> r = parseGeoJson(toGeoJson({ f }));
+    QCOMPARE(r.size(), 1);
+    QCOMPARE(r.first().partsInfo.size(), 3);
+    QCOMPARE(r.first().partsInfo.at(0).name, QStringLiteral("Alfa"));
+    QCOMPARE(r.first().partsInfo.at(0).colorOverride, QColor(200, 0, 0));
+    QVERIFY(!r.first().partsInfo.at(1).colorOverride.isValid());
+    QVERIFY(r.first().partsInfo.at(2).name.isEmpty());
+    // Las claves de las partes no se cuelan como atributos de dominio.
+    QVERIFY(!r.first().attributes.contains(QStringLiteral("part_names")));
+}
+
 // KML como lo escribe Google Earth: estilos compartidos por id, carpetas,
 // colores aabbggrr, ExtendedData y un MultiGeometry.
 void TstVectorFormats::readsKmlWithSharedStyleAndFolders()
@@ -248,6 +277,52 @@ void TstVectorFormats::gpxRoundTripKeepsPolygons()
 }
 
 // Contenido roto o vacio: lista vacia con motivo, sin colgarse.
+void TstVectorFormats::exportsCirclesAndArcsAsPlainShapes()
+{
+    MapFeature c;
+    c.kind = GeometryKind::Circle;
+    c.name = QStringLiteral("TMA");
+    c.geometry = { QGeoCoordinate(23.1136, -82.3666) };
+    c.radiusMeters = 55000.0;
+    MapFeature a = c;
+    a.kind = GeometryKind::Arc;
+    a.name = QStringLiteral("Sector");
+    a.arcStartDeg = 315.0;
+    a.arcEndDeg = 45.0;
+    const QVector<MapFeature> redondas{ c, a };
+
+    // GeoJSON: Polygon con 180 puntos y el cierre, LineString con 46; el radio y los
+    // azimuts van en las propiedades.
+    const QJsonObject raiz = QJsonDocument::fromJson(toGeoJson(redondas)).object();
+    const QJsonArray feats = raiz.value(QStringLiteral("features")).toArray();
+    QCOMPARE(feats.size(), 2);
+    const QJsonObject g0 = feats.at(0).toObject().value(QStringLiteral("geometry")).toObject();
+    QCOMPARE(g0.value(QStringLiteral("type")).toString(), QStringLiteral("Polygon"));
+    QCOMPARE(g0.value(QStringLiteral("coordinates")).toArray().at(0).toArray().size(), 181);
+    const QJsonObject p0 = feats.at(0).toObject().value(QStringLiteral("properties")).toObject();
+    QCOMPARE(p0.value(QStringLiteral("radius_m")).toDouble(), 55000.0);
+    const QJsonObject g1 = feats.at(1).toObject().value(QStringLiteral("geometry")).toObject();
+    QCOMPARE(g1.value(QStringLiteral("type")).toString(), QStringLiteral("LineString"));
+    QCOMPARE(g1.value(QStringLiteral("coordinates")).toArray().size(), 46);
+    const QJsonObject p1 = feats.at(1).toObject().value(QStringLiteral("properties")).toObject();
+    QCOMPARE(p1.value(QStringLiteral("arc_start_deg")).toDouble(), 315.0);
+    QCOMPARE(p1.value(QStringLiteral("arc_end_deg")).toDouble(), 45.0);
+
+    // KML y GPX tambien: un poligono y una linea, y un track por entidad.
+    const QByteArray kml = toKml(redondas);
+    QVERIFY(kml.contains("<Polygon>"));
+    QVERIFY(kml.contains("<LineString>"));
+    QVERIFY(kml.contains("radius_m"));
+    const QByteArray gpx = toGpx(redondas);
+    QCOMPARE(gpx.count("<trk>"), 2);
+
+    // Y vuelven a leerse como poligono y linea (los formatos no conocen los circulos).
+    const QVector<MapFeature> de_vuelta = parseGeoJson(toGeoJson(redondas));
+    QCOMPARE(de_vuelta.size(), 2);
+    QCOMPARE(de_vuelta.at(0).kind, GeometryKind::Polygon);
+    QCOMPARE(de_vuelta.at(1).kind, GeometryKind::Polyline);
+}
+
 void TstVectorFormats::reportsBadInput()
 {
     QString err;

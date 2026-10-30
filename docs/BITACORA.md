@@ -7209,3 +7209,233 @@ del anexo B tiene un error (el arco que da la vuelta, p. ej. de 315° a 45°, sa
 puntos geodésicos en vez de `drawArc`.
 
 **Estado: 32 tests (29 sin QCustomPlot).**
+
+## 175. Ejemplo `laboratorio_anillos`: comprobar la escala de los anillos
+
+El usuario quería una aplicación para **analizar y comprobar** los anillos de distancia:
+- que arranque con el mapa de costas (`costas`, `Cuba_Vector.sqlitedb`), solo, sin nada híbrido;
+- mostrar y ocultar los anillos, y llevarlos a otro punto;
+- ver las coordenadas del ratón;
+- ver la escala de los anillos y los radiales para comprobarlos;
+- tener a la derecha la lista de qué ver y qué probar.
+
+Empezó como un añadido al `laboratorio_rotulos` del PR #46. El usuario prefirió un ejemplo
+**aparte** con todo lo de esta sesión, para no mezclarlo con la fase 1 de la convergencia. Por
+eso este ejemplo sale de `main` y usa solo el API que ya está ahí: no depende del #46.
+
+**Cómo está hecho.** No toca la librería: todo lo que pedía ya existía.
+- **Mapa de arranque:** la app elige `costas` con `setBaseLayerId` si el paquete la trae (si no,
+  queda la de `start`) y llama a `clearVectorOverlay`, que quita el híbrido aunque lo pida el
+  `mapa.json`. El overlay del paquete se instala dentro del constructor de `MapWidget`, así que
+  quitarlo justo después es seguro.
+- **Mostrar, ocultar y ajustar:** los ajustes viven en el panel. Ocultar es `removeRangeMark`, y
+  cualquier cambio vuelve a poner un `RangeRings` nuevo con lo que diga el panel.
+- **Centro con un clic:** `MapTool::PickPoint` con `pointPicked`. Esc o el clic derecho cancelan
+  (`pickCancelled`).
+- **Unidades:** `setScaleBarUnits` cambia a la vez la barra y los rótulos de los anillos, que se
+  rotulan en las unidades de la escala.
+- **Lectura del ratón:** es la herramienta de comprobación. Da la distancia y la marcación desde
+  el centro (`distanceTo` / `azimuthTo`, geodésicas como los anillos) y el anillo más cercano; al
+  pasar por un anillo tiene que coincidir con su rótulo.
+
+**Comprobado.** Con una captura sobre el MBTiles de Cuba: el ratón en el tercer anillo al 060°
+da «30.0 km · 060°». `--comprobar` revisa, sin ventana:
+- la capa inicial y que no hay híbrido, sobre un paquete con `costas` y `vectorOverlay`;
+- los diez anillos de 10 km;
+- el cambio de centro, y el ocultar y mostrar;
+- las millas náuticas;
+- la lectura del ratón.
+
+Va en `herramientas/probar_instalacion.sh` (sobre su paquete mínimo, que no tiene `costas`) y en
+los dos proyectos de ejemplos (CMake y qmake).
+
+**Un detalle de los demás ejemplos.** Si el paquete no carga, con `--comprobar` no se abre el
+diálogo de error, porque sin nadie delante se quedaría esperando. El fallo sale por la consola.
+
+**Lo que no es.** Los anillos son círculos geodésicos: en Mercator se estiran hacia el norte, y
+así lo explica el panel. No hay un medidor libre entre dos puntos cualesquiera (para eso está
+«Medir» en la demo).
+
+**Estado: 32 tests (29 sin QCustomPlot), contrato de instalación en verde con el ejemplo nuevo.**
+
+
+## 176. `laboratorio_anillos` reúne lo de la fase 1 de la convergencia
+
+**Origen.** La conversación de la convergencia con el fork extendido (§174) se tuvo por error en la sesión que no era: el ejemplo donde debía vivir es `laboratorio_anillos` (§175, PR #47). La
+fase 1 ya está en `main` (PR #46) con su propio banco de pruebas, `laboratorio_rotulos`; aquí se lleva todo al ejemplo de los anillos, que es el que se va a usar.
+
+**Qué se añade al ejemplo.** (1) La **escala polar**: los botones «Escala de 300 km» y «Escala de 600 km» ponen 30 o 60 anillos de 10 km y radiales cada 10° en **un solo** `RangeRings` (el tope de
+anillos es 100 y `count` no cuenta los radiales), con el **énfasis** de uno de cada N anillos y cada N grados en rojo oscuro y, si se quiere, radiales de otro color (`majorRingEvery`,
+`majorSpokeEveryDeg`, `majorColor`, `spokeColor`); el selector de anillos pasa de 50 a 100. La escala fija la separación en kilómetros aunque se estuviera en millas. (2) Seis **aeródromos** con su
+rótulo, para cambiar en vivo el lado del anclaje (`LabelAnchor`) y la fuente (`labelFontSize`). (3) Tres **objetivos** con formulario de tres líneas y colores por segmento
+(`MapTarget::labelContent`), con la colocación `Hanging`, la fuente monoespaciada, el ancho y las columnas 8 + 8, el offset por defecto, el color de selección, «quitar offsets propios» y el aviso
+`targetLabelMoved` en la barra de estado (soltar fuera del mapa cancela).
+
+**Pruebas.** `--comprobar` crece: la escala de 600 y de 300 km (cuenta, separación, radiales y énfasis), el lado y la fuente de un rótulo de entidad en píxeles, y el formulario (tres líneas, offset por
+defecto frente a propio, colgado y ancho fijo de 16 columnas). Con la ventana oculta la capa de objetivos no llega a pintarse, así que `--comprobar` la muestra (con `offscreen` no abre nada de verdad)
+y selecciona el objetivo que mira: el seleccionado salta el declutter, que a poco zoom dibuja un solo rótulo por celda de pantalla; el paquete mínimo de `probar_instalacion.sh` solo llega a zoom 2.
+Pasa tres veces seguidas. Una captura (`--captura=`) se ha mirado: el formulario sale con sus tres líneas, las columnas y los colores por segmento.
+
+**Lo que no es.** Los círculos y los arcos, agrupar por capa y tipo y las partes con nombre y color propios son las fases 2 a 4 y **no existen aún en la librería**, así que no pueden estar en el
+ejemplo; se añadirán cuando se hagan. Lo del tamaño real de los 600 km no se ha visto en una pantalla con el mapa de costas (el paquete mínimo no tiene zoom suficiente): es lo primero que hay que
+mirar. `laboratorio_rotulos` sigue existiendo y repite buena parte de esto; no se ha quitado.
+
+**Estado: 32 tests (29 sin QCustomPlot).**
+
+
+## 177. Fases 2 a 4 de la convergencia: círculos y arcos, agrupar por capa y tipo, partes con nombre y color
+
+**Origen.** Lo que quedaba de la propuesta final de la convergencia (§174; lo acordado fue hacerlo todo aquí, sin otro debate) y que §176 dejaba sin hacer. Las tres fases son aditivas: los valores por
+defecto reproducen lo de siempre y las bases de datos antiguas se abren y se migran solas.
+
+**Fase 2 — círculos y arcos.** `GeometryKind::Circle` y `Arc` (añadidos al final del enum, que se guarda como entero), con `MapFeature::radiusMeters`, `arcStartDeg` y `arcEndDeg`. Son
+**geodésicos**: el contorno se calcula con `atDistanceAndAzimuth` desde el centro, así que un círculo de 50 km mide 50 km en cualquier latitud y se estira en Mercator igual que los anillos. El
+barrido va en sentido horario desde el norte: `fmod(fin − ini + 360, 360)`, de modo que de 330° a 30° cruza el norte y mide 60°. `outlines()` da el contorno muestreado (para dibujar y consultar),
+`storedParts()` solo el centro (para persistir) y `toPlain()` el polígono o la polilínea que entienden los exportadores (GeoJSON, KML, GPX). Un círculo o un arco no tiene vértices que insertar o
+quitar, y mover su único vértice mueve el centro. Esquema SQLite **v5**: `radio_m`, `arco_ini`, `arco_fin`. Un círculo sin radio o un arco sin barrido no son válidos.
+
+**Fase 3 — agrupar por capa y tipo.** Capa = `layerId`, tipo = `type`. `featureTypeCounts(capa)`, `clearFeaturesOfType`, `addFeatures` (alta en lote: **una sola** señal `changed` y **un solo** paso de
+deshacer, no una por entidad; las capas que faltan se crean en silencio dentro del lote, porque `addLayer` emitía las suyas y salían tres) y `setFeatureTypeVisible`/`isFeatureTypeVisible`/
+`hiddenFeatureTypes`. La visibilidad por tipo es un filtro **de la vista**: ocultar no borra, no cambia el recuento y las entidades ocultas no se dibujan ni se pueden elegir.
+
+**Fase 4 — partes con nombre y color.** Una entidad con muchas partes (`parts`) puede llevar un `PartInfo` por parte (`partsInfo`, paralelo a `parts`): nombre (con su rótulo propio), color
+(inválido = el de la entidad) y lado del rótulo. Se eligió un vector paralelo y no una estructura `SubEntity` para no romper nada de lo que ya lee `parts`. Invariantes: `partsInfo` está vacío o mide
+lo mismo que `parts`, y `geometry == parts.first()` (el modelo lo mantiene al mover vértices de la parte 0). `MapHit::subIndex` y `featureAt(pixel, tol, &sub)` dicen **qué parte** hay bajo el
+pixel (la de menor distancia); `moveVertex`/`insertVertex`/`removeVertex` aceptan `part`; `featurePartLabelRect(id, parte)` da la caja del rótulo de una parte. Esquema **v6**: tabla
+`entidad_parte(entidad_id, parte, nombre, color NULL, label_pos)`. GeoJSON exporta y lee `part_names` y `part_colors` (color vacío = sin color propio) solo si cuadran con las partes leídas, y no los cuela
+como atributos de dominio.
+
+**Medición con 5.000 puntos** (`measuresFiveThousandPointsAsPartsOrFeatures`, en `tst_mapwidget`, Linux, `offscreen`): 5.000 puntos con nombre y la mitad en otro color, como **una** entidad con 5.000
+partes frente a **5.000** entidades:
+
+| | memoria residente | alta | borrado |
+|---|---|---|---|
+| una entidad con partes | 2,8–3,0 MiB | 0–1 ms | 0 ms |
+| 5.000 entidades | 5,9–6,8 MiB | 7–10 ms | 1 ms |
+
+`sizeof(MapFeature)` = 376 B y `sizeof(PartInfo)` = 48 B: cada entidad suelta paga sus 376 B más el índice y el rótulo; cada parte, solo los 48 B más su vector. **Decisión:** para miles de elementos
+iguales (aeródromos, balizas) una entidad con partes ocupa menos de la mitad y se da de alta antes; se mantienen entidades sueltas cuando cada una necesita su propio estilo, atributos o vida
+(borrarla, moverla). El tiempo de dibujo medido con `grab()` en `offscreen` (1–2 ms en ambos casos) **no es representativo**: con la ventana oculta y a poco zoom casi todo se descarta antes de pintar; hay
+que medirlo en una pantalla real con el mapa de costas.
+
+**En el ejemplo.** `laboratorio_anillos` (PR #47) suma el grupo «Sectores, tipos y partes»: un círculo de 50 km y tres sectores (uno de 330° a 30°) que siguen al centro, alta en lote y borrado por tipo, recuento
+y visibilidad por tipo, y los «Sitios», una entidad de tres partes con nombre y color cada una (la tercera sin color propio) cuyo clic dice la parte. `--comprobar` crece: cuatro sectores, borrarlos por
+tipo y volver a ponerlos, ocultar sin borrar, y el clic en un sitio (devuelve la entidad y una de sus tres partes; con el paquete mínimo el zoom solo llega a 2 y las partes se solapan, así que ahí no se
+distingue cuál: eso lo prueba `tst_mapwidget` con zoom 10).
+
+**Pruebas nuevas.** `tst_roundgeometry` (geometría geodésica, barrido, validez), `tst_labelplacement` (esquinas por azimut), y casos en `tst_overlaymodel` (lote, tipos, partes y vértices por parte),
+`tst_vectorrepository` (v5, v6 con color nulo y comillas), `tst_vectorformats` (círculos como polígono, `part_names`/`part_colors`) y `tst_mapwidget` (subIndex y rótulos por parte, medición).
+`QPixmap` dentro de `MapFeature` exige `QGuiApplication` en los tests (`QTEST_MAIN`), y con Qt 6.10 `QSqlDatabase` exige `QCoreApplication` (`QTEST_GUILESS_MAIN`).
+
+**Lo que no es.** KML y GPX no guardan `PartInfo` (solo GeoJSON y SQLite). Un círculo o un arco no se edita vértice a vértice (solo se mueve o se cambia su radio con `updateFeature`). El tiempo de dibujo con
+5.000 elementos en una pantalla real queda por medir.
+
+**Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 178. Los sectores son áreas: cuña rellena, uno por uno y con análisis
+
+**Origen.** Al probar `laboratorio_anillos` en pantalla los «sectores» salían como arcos sueltos (una línea), sin cerrar hasta el centro. Un sector sirve para **señalar un área** donde el operador debe
+concentrarse, y eso es una cuña: centro, dos radios y arco, rellena.
+
+**Qué cambia.** `MapFeature::arcSector`: con él, un `Arc` es un **sector** (área); sin él sigue siendo solo la línea del arco. `roundOutline()` antepone el centro al contorno del sector (un polígono),
+`isArea()`/`isLinear()` lo reflejan (así se rellena, se elige por dentro y puede servir de zona de alerta), `toPlain()` lo exporta como polígono y `roundContains(punto)` dice si un punto cae dentro de un
+círculo o un sector (distancia ≤ radio y azimut entre el inicio y el fin, con la vuelta por el norte). Esquema SQLite **v7**: `arco_sector`.
+
+**En el ejemplo.** La casilla única de sectores se sustituye por una lista donde cada sector se **muestra u oculta** con su casilla (`MapFeature::visible`), se **cambia** (radio y azimuts), se **elimina**,
+se **agrega** otro o se restablecen los de ejemplo; cada fila dice el área en km² y cuántos objetivos caen dentro, y al elegir uno la barra de estado nombra esos objetivos. `--comprobar` prueba ocultar uno sin
+tocar los demás, cambiar solo ese, eliminar uno, restablecer y el análisis.
+
+**Pruebas.** `tst_roundgeometry` (`sectorIsAWedgeArea`: área, contorno con el centro, polígono al exportar y `roundContains` dentro y fuera, incluida la cuña que cruza el norte) y `tst_vectorrepository`
+(el sector sobrevive guardar y cargar). **Lo que no es:** el relleno del sector depende del color de relleno de la entidad; el recuento de objetivos se calcula al cambiar un sector, no mientras se mueven.
+
+**Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 179. Análisis de lo pedido y `laboratorio_anillos` en pestañas
+
+**Origen.** El usuario pidió comprobar, desde el punto de vista de un operador, si la aplicación cumple lo que pidió el equipo de la versión extendida («está confusa»), revisar el intercambio completo y
+averiguar el **objetivo** de cada petición. El resultado, petición por petición, está en [`Analisis_cumplimiento.md`](Analisis_cumplimiento.md).
+
+**Brecha real encontrada en la librería.** El color por segmento es información operativa (identificación y **estado**), pero un objetivo ya creado no podía cambiar su rótulo por segmentos sin borrarlo y perder
+su traza e historial. Se añade `MapWidget::setTargetLabelContent(id, líneas)` (y `TargetModel::setLabelContent`), con test: avisa, conserva la traza, vacío vuelve al texto plano y un id inexistente da `false`.
+
+**El ejemplo.** Se reorganiza en **pestañas** con su objetivo escrito arriba: *Anillos* (escala, énfasis y colores, con los grises del Anexo C), *Sectores*, *Puntos* (buscador, lista de lo agregado y lado,
+fuente y color **por elemento**; botones de estado Activo, Inactivo y Alarma), *Objetivos* (agregar con un clic, tres pegados para probar solapes, estado que cambia el color, simulación de movimiento y el aspecto
+de los formularios), *Capas* (árbol de capas y tipos con cuentas, solo-este-tipo y borrar-este-tipo) y *Ayuda*. La lectura del ratón y de la última entidad tocada queda siempre visible. Tocar una entidad la elige
+también en su lista. `--comprobar` crece: agregar un objetivo, cambiar su estado (el color del segmento cambia y la traza no se pierde) y cambiar el color de una sola parte.
+
+**Pendiente de decidir** (no es código): la equivalencia de nombres de los parámetros de ancho del formulario y que el compañero sepa que los anillos son un solo objeto (§3 del análisis).
+
+**Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 180. Anillos y sectores pertenecen a un punto (origen)
+
+**Origen.** El usuario lo planteó así: el sector se define **desde un punto**; puede haber varios puntos y cada uno lleva sus sectores, y lo mismo los anillos. Click en un punto: se ven sus anillos o se le añade
+un sector. El ejemplo tenía un único centro global, con lo que no servía para eso.
+
+**Qué cambia en `laboratorio_anillos`.** Aparece el **origen**: un punto con sus ajustes de anillos (separación, número, radiales, énfasis, colores, unidades comunes), sus sectores y los que el usuario ocultó. Arriba del
+panel se elige el punto (lista o tocándolo en el mapa, o tocando uno de sus sectores); los controles de Anillos y de Sectores pasan a ser los de ese punto. Agregar un punto suelto crea su origen con anillos y sin
+sectores, y quitarlo se lleva sus anillos y sectores. «Mover el origen» lleva el punto, sus anillos y sus sectores. Por defecto se ven los anillos y los sectores de **todos** los puntos a la vez; con «solo el elegido» no se dibujan los de los demás. Es solo del ejemplo: la librería no cambia, un `RangeRings` o un sector ya eran de un centro propio.
+
+**Pruebas.** `--comprobar`: un segundo punto crea su origen y lo elige, no hereda los sectores del primero, tiene sus anillos en su sitio, el sector nuevo va a él, y al volver al primero vuelven sus anillos y sus cuatro
+sectores.
+
+**Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 181. Menú del clic derecho: sectores y anillos por punto, en el ejemplo y en la demo
+
+**Origen.** El usuario pidió llevar esas funciones (anillos y sectores con origen en un punto) al **menú del clic del ratón** y a la **demo**.
+
+**Ejemplo `laboratorio_anillos`.** El clic derecho ofrece, según lo que haya debajo: sobre un **punto**, elegirlo, sus anillos (mostrar, escala de 300 o 600 km, ajustes), sus sectores (agregar sector o círculo con un diálogo de radio y azimuts,
+y por cada uno mostrarlo u ocultarlo, cambiarlo o eliminarlo, con los objetivos que tiene dentro), moverlo con un clic y quitarlo con lo suyo; sobre un **sector**, las mismas opciones y elegir su punto; sobre un **objetivo**, su estado
+(cambia el color del rótulo) y quitarlo; sobre un **lugar vacío**, agregar allí un punto o un objetivo o llevar allí el punto elegido.
+
+**Demo.** Nueva `demo/VentanaSectores.cpp`. Los sectores y círculos cuelgan de un **objetivo o de un punto del usuario**, como ya hacían los anillos: submenú «Sectores (N)» en el menú de cada uno (agregar sector, agregar círculo y,
+por cada uno, mostrarlo, cambiarlo con un diálogo, eliminarlo, ir a su origen y ver qué objetivos tiene dentro), y el clic derecho sobre un sector abre su propio menú. Puede haber varios en cada origen y varios orígenes a la vez. Un
+reloj de 0,5 s hace que sigan a su dueño si se mueve y los quita si desaparece; al borrar el punto u objetivo se van con él. El dueño de los sectores de un punto se guarda en sus atributos (`origen_punto`), así que sobreviven al guardado;
+los de un objetivo no (los objetivos no se guardan) y se quitan al abrir. Capa propia «sectores».
+
+**Lo que no es.** Esto vive en la aplicación, no en la librería: la librería no tiene el concepto de «dueño» de un sector como sí lo tiene `RangeRings` (`targetId`, `featureId`); si se quisiera que sector y anillos compartieran la
+misma regla de seguimiento, sería un campo nuevo de `MapFeature`. Lo de la demo está **compilado y arranca** con el paquete mínimo, pero no se ha ejercitado el menú con el ratón (no hay un `--comprobar` para la demo).
+
+**Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 182. Rótulos de anillos y radiales: translúcidos, destacados con el ratón y ocultables
+
+**Origen.** En la demo y en el ejemplo los rótulos de distancia de los anillos y de marcación de los radiales ocupaban demasiado sitio y tapaban el mapa. Se pidió que fueran translúcidos, que resaltaran con el ratón y que se pudieran ocultar.
+
+**Qué cambia en la librería.** `RangeRings` gana `labelOpacity` (0,45 por defecto; 1 = opacos, como antes), `distanceLabels` y `bearingLabels` (las distancias y las marcaciones se ocultan por separado; `labels` sigue siendo el interruptor general).
+Los rótulos de anillos y de radiales se dibujan más pequeños, sin negrita y translúcidos; el que tiene el ratón encima (`RangeLayer::setHoverPixel`, llamado desde el movimiento del ratón y al salir del mapa) se pinta el último, opaco y en
+negrita, y la capa se repinta solo cuando cambia el rótulo destacado. Los rótulos de las marcaciones (`BearingLine`), que se arrastran, siguen opacos. Cambia el aspecto por defecto de los anillos ya existentes (ahora translúcidos); `labelOpacity = 1` lo devuelve a
+como era.
+
+**En el ejemplo y en la demo.** El ejemplo (pestaña Anillos) separa «Rotular las distancias» y «Rotular las marcaciones» y tiene la opacidad en %. El diálogo de anillos de la demo trae lo mismo.
+
+**Pruebas.** `rangeLabelsAreSoftHighlightOnHoverAndHideable` en `tst_mapwidget`: el rótulo bajo el ratón se ve distinto del suave y con `labels = false` desaparece. `--comprobar` comprueba la opacidad y los dos interruptores.
+
+**Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 183. Dueño de un círculo o sector, en la librería (como `RangeRings`)
+
+**Origen.** En §181 el seguimiento y la baja de los sectores de un punto u objetivo quedaron en la aplicación (un temporizador en la demo). El usuario pidió hacerlo en la librería, «como los anillos».
+
+**Qué cambia.** `MapFeature::originTargetId` y `originFeatureId` (como `RangeRings::targetId` y `featureId`): el centro de un `Circle` o de un `Arc` es siempre la posición de su dueño y se va con él. (1) **Seguir:** `MapView::sincronizaDuenos`, enganchada a los
+cambios de `TargetModel` y de `OverlayModel`, lleva cada círculo o sector a la posición de su objetivo o entidad (`OverlayModel::moveCenter`, sin paso de deshacer: seguir no es una edición); un bucle de guarda evita que su propio ajuste la vuelva a disparar.
+(2) **Desaparecer con el dueño:** `OverlayModel::removeFeature` quita también lo que cuelga de la entidad, en **el mismo paso de deshacer** (un `undo` devuelve las dos cosas); un círculo de un objetivo que ya no existe se quita al sincronizar. Un dueño-entidad que
+todavía no está (se está cargando) no se toma por perdido. (3) **Guardado, esquema v8:** columnas `origen_objetivo` y `origen_entidad` (-1 = sin dueño: lo ya guardado sigue igual). Como al guardar cada entidad recibe un id nuevo, `saveFeatures` reescribe el dueño-entidad
+con el id nuevo de su entidad (si el dueño no se guarda, queda sin dueño); los de objetivo se guardan pero, al abrir, ya no hay objetivo y se quitan.
+
+**En la demo y el ejemplo.** Desaparece el código propio: la demo ya no lleva el reloj de 0,5 s, el mapa de dueños ni los atributos `origen_punto`/`origen_objetivo`; el menú pregunta a la librería (`featuresOfType("sector")` filtrando por dueño). El ejemplo pone `originFeatureId`
+a cada sector y `ponCentro` ya no los mueve a mano.
+
+**Pruebas.** `tst_overlaymodel` (`ownedSectorsGoWithTheirOwner`: dueños, `moveCenter` sin deshacer, baja con el dueño y un solo `undo`), `tst_vectorrepository` (`savesOwnerOfSectorWithNewIds`: el dueño sobrevive con ids distintos, el huérfano queda sin dueño y el de objetivo
+se conserva) y `tst_mapwidget` (`sectorFollowsItsOwner`: sigue al objetivo, se va con él, sigue a una entidad que se mueve y se va con ella). `--comprobar`: el sector sigue a su punto al moverlo.
+
+**Lo que no es.** El dueño debe existir al poner el sector. El dueño solo vale para círculos y sectores (para el resto de entidades no hace nada).
+
+**Estado: 33 tests (30 sin QCustomPlot).**

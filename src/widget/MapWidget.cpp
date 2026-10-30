@@ -454,7 +454,7 @@ public:
         if (!zones.hasZone(featureId) || !view)
             return;
         const std::optional<MapFeature> f = view->overlayModel()->feature(featureId);
-        if (!f || f->kind != GeometryKind::Polygon) {
+        if (!f || !f->isArea()) {
             dropZone(featureId);
             return;
         }
@@ -1520,6 +1520,42 @@ qint64 MapWidget::addFeature(const MapFeature &feature)
     return d->view ? d->view->overlayModel()->addFeature(feature) : -1;
 }
 
+// Anade varias entidades con un solo repintado.
+QVector<qint64> MapWidget::addFeatures(const QVector<MapFeature> &features)
+{
+    return d->view ? d->view->overlayModel()->addFeatures(features)
+                   : QVector<qint64>(features.size(), -1);
+}
+
+// Cuantas entidades hay de cada tipo.
+QMap<QString, int> MapWidget::featureTypeCounts(const QString &layerId) const
+{
+    return d->view ? d->view->overlayModel()->typeCounts(layerId) : QMap<QString, int>();
+}
+
+// Borra las entidades de un tipo con un solo repintado.
+int MapWidget::clearFeaturesOfType(const QString &type, const QString &layerId)
+{
+    return d->view ? d->view->overlayModel()->clearType(type, layerId) : 0;
+}
+
+// Filtro de vista: oculta o muestra un tipo entero.
+void MapWidget::setFeatureTypeVisible(const QString &type, bool visible)
+{
+    if (d->view)
+        d->view->overlayModel()->setTypeVisible(type, visible);
+}
+
+bool MapWidget::isFeatureTypeVisible(const QString &type) const
+{
+    return d->view ? d->view->overlayModel()->isTypeVisible(type) : true;
+}
+
+QStringList MapWidget::hiddenFeatureTypes() const
+{
+    return d->view ? d->view->overlayModel()->hiddenTypes() : QStringList();
+}
+
 // Reemplaza una entidad existente.
 bool MapWidget::updateFeature(const MapFeature &feature)
 {
@@ -1580,21 +1616,21 @@ int MapWidget::featureCount() const
 }
 
 // Mueve un vertice de una entidad.
-bool MapWidget::moveVertex(qint64 id, int index, const QGeoCoordinate &to)
+bool MapWidget::moveVertex(qint64 id, int index, const QGeoCoordinate &to, int part)
 {
-    return d->view ? d->view->overlayModel()->moveVertex(id, index, to) : false;
+    return d->view ? d->view->overlayModel()->moveVertex(id, index, to, part) : false;
 }
 
 // Inserta un vertice en una entidad.
-bool MapWidget::insertVertex(qint64 id, int index, const QGeoCoordinate &at)
+bool MapWidget::insertVertex(qint64 id, int index, const QGeoCoordinate &at, int part)
 {
-    return d->view ? d->view->overlayModel()->insertVertex(id, index, at) : false;
+    return d->view ? d->view->overlayModel()->insertVertex(id, index, at, part) : false;
 }
 
 // Elimina un vertice de una entidad (sin degenerarla).
-bool MapWidget::removeVertex(qint64 id, int index)
+bool MapWidget::removeVertex(qint64 id, int index, int part)
 {
-    return d->view ? d->view->overlayModel()->removeVertex(id, index) : false;
+    return d->view ? d->view->overlayModel()->removeVertex(id, index, part) : false;
 }
 
 // Desplaza una entidad entera un delta de lat/lon.
@@ -1904,6 +1940,12 @@ bool MapWidget::setTargetLabel(qint64 id, const QString &text)
     return d->view && d->view->targetModel()->setLabel(id, text);
 }
 
+// Cambia el rotulo por segmentos de un objetivo. Reenvio al modelo, que avisa para repintar.
+bool MapWidget::setTargetLabelContent(qint64 id, const QVector<TargetLabelLine> &content)
+{
+    return d->view && d->view->targetModel()->setLabelContent(id, content);
+}
+
 // Desplazamiento de la etiqueta del objetivo (px). Reenvio al modelo, que avisa
 // para repintar. La etiqueta queda unida al simbolo por una linea guia.
 bool MapWidget::setTargetLabelOffset(qint64 id, const QPointF &offsetPx)
@@ -2157,7 +2199,7 @@ bool MapWidget::watchZone(qint64 featureId)
     if (!d->view)
         return false;
     const std::optional<MapFeature> f = d->view->overlayModel()->feature(featureId);
-    if (!f || f->kind != GeometryKind::Polygon || !f->isValid())
+    if (!f || !f->isArea() || !f->isValid())
         return false;
     if (d->zones.hasZone(featureId)) {
         d->syncZone(featureId);
@@ -2465,7 +2507,7 @@ MapHit MapWidget::hitTest(const QPoint &pixel) const
     h.clusterTargets = targetClusterAt(pixel);
     // Lo que se puede ELEGIR bajo el cursor (el menu contextual no ofrece acciones
     // sobre una provincia de fondo): sin las capas fijas no seleccionables.
-    h.featureId = d->view ? d->view->featureLayer()->featureAt(pixel) : -1;
+    h.featureId = d->view ? d->view->featureLayer()->featureAt(pixel, 8.0, false, &h.subIndex) : -1;
     if (d->view->rangeLayer())
         h.rangeMarkId = d->view->rangeLayer()->markAt(pixel);
     const qint64 sel = d->view->overlayModel()->selectedId();
@@ -2477,6 +2519,22 @@ MapHit MapWidget::hitTest(const QPoint &pixel) const
         }
     }
     return h;
+}
+
+// Como featureAt, y ademas dice que parte de la entidad esta bajo el pixel.
+qint64 MapWidget::featureAt(const QPoint &pixel, double tolerancePx, int *subIndex) const
+{
+    d->syncGeometry();
+    return d->view ? d->view->featureLayer()->featureAt(pixel, tolerancePx, true, subIndex) : -1;
+}
+
+// Caja del rotulo propio de una parte, en pixeles.
+QRect MapWidget::featurePartLabelRect(qint64 id, int part) const
+{
+    d->syncGeometry();
+    if (!d->view)
+        return QRect();
+    return d->view->featureLayer()->partLabelRectOf(id, part).toAlignedRect();
 }
 
 // Entidad cuyo rotulo cae bajo el pixel (hit-test de la caja de etiqueta).

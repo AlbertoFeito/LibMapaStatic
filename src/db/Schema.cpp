@@ -93,6 +93,52 @@ QStringList migrations(int from)
             "ALTER TABLE entidad ADD COLUMN label_fuente INTEGER NOT NULL DEFAULT 0");
     }
 
+    if (from < 5) {
+        // v5: circulos y arcos geodesicos (GeometryKind::Circle y Arc). El vertice
+        // guardado es el centro; el radio va en metros y los azimuts del arco en
+        // grados. Con DEFAULT 0 una BD anterior se migra sola: sus entidades no son
+        // redondas y estas columnas no se leen.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN radio_m REAL NOT NULL DEFAULT 0");
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN arco_ini REAL NOT NULL DEFAULT 0");
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN arco_fin REAL NOT NULL DEFAULT 0");
+    }
+
+    if (from < 6) {
+        // v6: datos propios de cada PARTE de una entidad multi-parte (MapFeature::partsInfo):
+        // nombre, color (ARGB; NULL = el del estilo) y lado del rotulo. Una fila por parte
+        // con algun dato; las entidades sin partsInfo no tienen filas. Se borran con su
+        // entidad, como sus vertices.
+        sql << QStringLiteral(
+            "CREATE TABLE entidad_parte ("
+            "  entidad_id INTEGER NOT NULL"
+            "             REFERENCES entidad(id) ON DELETE CASCADE,"
+            "  parte      INTEGER NOT NULL,"
+            "  nombre     TEXT    NOT NULL DEFAULT '',"
+            "  color      INTEGER,"
+            "  label_pos  INTEGER NOT NULL DEFAULT 0,"
+            "  PRIMARY KEY (entidad_id, parte)"
+            ") WITHOUT ROWID");
+    }
+
+    if (from < 7) {
+        // v7: un Arc puede ser un SECTOR (cuna cerrada hasta el centro, un area): MapFeature::
+        // arcSector. Con DEFAULT 0 los arcos ya guardados siguen siendo solo la linea.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN arco_sector INTEGER NOT NULL DEFAULT 0");
+    }
+
+    if (from < 8) {
+        // v8: dueno de un circulo o sector (MapFeature::originTargetId y originFeatureId). -1 =
+        // sin dueno, asi que lo ya guardado sigue con su centro fijo.
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN origen_objetivo INTEGER NOT NULL DEFAULT -1");
+        sql << QStringLiteral(
+            "ALTER TABLE entidad ADD COLUMN origen_entidad INTEGER NOT NULL DEFAULT -1");
+    }
+
     return sql;
 }
 

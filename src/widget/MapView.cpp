@@ -93,6 +93,10 @@ MapView::MapView(TileService *service, QWidget *parent)
     });
     if (m_model)
         connect(m_model, &OverlayModel::featureUpdated, m_rangeLayer, &RangeLayer::featureChanged);
+    // Circulos y sectores con dueno: siguen a su objetivo o entidad y se quitan con el.
+    connect(m_targetModel, &TargetModel::changed, this, [this] { sincronizaDuenos(); });
+    if (m_model)
+        connect(m_model, &OverlayModel::changed, this, [this] { sincronizaDuenos(); });
     m_targetLayer = new TargetLayer(this, m_targetModel);
     m_targetLayer->setLayer(QStringLiteral("targets"));
     m_targetLayer->setAxisMapper(
@@ -652,6 +656,8 @@ void MapView::actualizarCursorHover(const QPoint &pos)
     if (m_hoverClock.isValid() && m_hoverClock.elapsed() < 30)
         return;
     m_hoverClock.restart();
+    if (m_rangeLayer)
+        m_rangeLayer->setHoverPixel(QPointF(pos));      // destaca el rotulo de anillo bajo el raton
 
     Qt::CursorShape c = Qt::ArrowCursor;
     if (m_tool == MapTool::None) {
@@ -955,7 +961,7 @@ void MapView::mouseDoubleClickEvent(QMouseEvent *event)
         const qint64 id = m_featureLayer->featureAt(event->pos());
         if (id >= 0) {
             const auto f = m_model->feature(id);
-            if (f && f->kind != GeometryKind::Point) {
+            if (f && f->kind != GeometryKind::Point && !f->isRound()) {
                 const int tras = m_featureLayer->segmentAt(*f, event->pos());
                 if (tras >= 0) {
                     if (!capaEditable(f->layerId)) {
@@ -1255,6 +1261,46 @@ void MapView::mousePressEvent(QMouseEvent *event)
         }
     }
     event->accept();
+}
+
+// Lleva cada circulo o sector con dueno a la posicion de su objetivo o de su entidad, y quita
+// el de un objetivo que ya no existe. El de una entidad que desaparece lo quita el propio
+// modelo al quitarla (y mientras se cargan, un dueno que aun no esta no se toma por perdido).
+void MapView::sincronizaDuenos()
+{
+    if (!m_model || m_sincronizandoDuenos)
+        return;
+    const QVector<qint64> ids = m_model->ownedFeatureIds();
+    if (ids.isEmpty())
+        return;
+    m_sincronizandoDuenos = true;
+    for (const qint64 id : ids) {
+        const auto f = m_model->feature(id);
+        if (!f)
+            continue;
+        QGeoCoordinate p;
+        if (f->originTargetId >= 0) {
+            const auto t = m_targetModel->target(f->originTargetId);
+            if (!t) {
+                m_model->removeFeature(id);
+                continue;
+            }
+            p = t->position;
+        } else if (const auto dueno = m_model->feature(f->originFeatureId)) {
+            p = dueno->position();
+        }
+        if (p.isValid() && !f->geometry.isEmpty() && f->geometry.first().distanceTo(p) > 0.5)
+            m_model->moveCenter(id, p);
+    }
+    m_sincronizandoDuenos = false;
+}
+
+// Al salir el raton del mapa ya no hay rotulo de anillo destacado.
+void MapView::leaveEvent(QEvent *event)
+{
+    if (m_rangeLayer)
+        m_rangeLayer->setHoverPixel(QPointF(-1.0, -1.0));
+    QCustomPlot::leaveEvent(event);
 }
 
 // Movimiento del raton: emite la coordenada bajo el cursor y, segun el estado,

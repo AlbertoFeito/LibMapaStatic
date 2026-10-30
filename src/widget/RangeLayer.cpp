@@ -414,9 +414,28 @@ void RangeLayer::applyDefaultAntialiasingHint(QCPPainter *painter) const
 // Anota un rotulo para pintarlo despues, por encima de todo (drawLabels). Se
 // pinta aparte para que ni los objetivos ni las entidades lo tapen.
 void RangeLayer::label(const QPointF &anchor, const QString &txt, const QColor &color,
-                       const QPointF &offset, qint64 bearingId) const
+                       const QPointF &offset, qint64 bearingId, double opacity) const
 {
-    m_pending.append({anchor, txt, color, offset, bearingId});
+    m_pending.append({anchor, txt, color, offset, bearingId, opacity});
+}
+
+// Recuerda donde esta el raton y, si ahora esta sobre otro rotulo suave (o ya no esta sobre
+// ninguno), repinta la capa para destacarlo. Sin cambio no hace nada: se llama en cada
+// movimiento del raton.
+void RangeLayer::setHoverPixel(const QPointF &pixel)
+{
+    m_hoverPx = pixel;
+    QRectF nueva;
+    for (const QRectF &b : m_softBoxes)
+        if (b.adjusted(-3.0, -3.0, 3.0, 3.0).contains(pixel)) {
+            nueva = b;
+            break;
+        }
+    if (nueva == m_hoverBox)
+        return;
+    m_hoverBox = nueva;
+    if (mParentPlot)
+        mParentPlot->replot(QCustomPlot::rpQueuedReplot);
 }
 
 // Pinta los rotulos anotados por draw(): cada uno centrado en anclaje + offset
@@ -426,16 +445,47 @@ void RangeLayer::label(const QPointF &anchor, const QString &txt, const QColor &
 void RangeLayer::drawLabels(QCPPainter *painter) const
 {
     m_bearingLabelBoxes.clear();
+    m_softBoxes.clear();
     if (m_pending.isEmpty())
         return;
     painter->save();
     QFont f = painter->font();
     f.setPointSizeF(7.5);
     f.setBold(true);
-    painter->setFont(f);
-    const QFontMetricsF fm(f);
-    for (const PendingLabel &p : m_pending) {
-        const QSizeF t(fm.horizontalAdvance(p.text) + 8.0, fm.height() + 2.0);
+    // Los rotulos suaves (anillos y radiales) son mas pequenos, sin negrita y translucidos; el que
+    // tiene el raton encima se pinta el ultimo, opaco y en negrita, para que se lea.
+    QFont fSuave = f;
+    fSuave.setPointSizeF(6.5);
+    fSuave.setBold(false);
+    const QFontMetricsF fmDuro(f);
+    const QFontMetricsF fmSuave(fSuave);
+    QVector<int> orden;
+    int destacado = -1;
+    for (int i = 0; i < m_pending.size(); ++i) {
+        const PendingLabel &p = m_pending.at(i);
+        if (p.opacity < 1.0) {
+            const QSizeF t(fmSuave.horizontalAdvance(p.text) + 6.0, fmSuave.height() + 1.0);
+            const QPointF c = p.anchor + p.offset;
+            const QRectF caja(c.x() - t.width() / 2.0, c.y() - t.height() / 2.0, t.width(), t.height());
+            m_softBoxes.append(caja);
+            if (caja == m_hoverBox)
+                destacado = i;
+            if (caja != m_hoverBox)
+                orden.append(i);
+        } else {
+            orden.append(i);
+        }
+    }
+    if (destacado >= 0)
+        orden.append(destacado);
+    for (const int idx : orden) {
+        const PendingLabel &p = m_pending.at(idx);
+        const bool suave = p.opacity < 1.0 && idx != destacado;
+        const QFont &fuente = suave ? fSuave : f;
+        painter->setFont(fuente);
+        const QFontMetricsF fm(fuente);
+        painter->setOpacity(suave ? std::clamp(p.opacity, 0.1, 1.0) : 1.0);
+        const QSizeF t(fm.horizontalAdvance(p.text) + (suave ? 6.0 : 8.0), fm.height() + (suave ? 1.0 : 2.0));
         const QPointF centro = p.anchor + p.offset;
         const QRectF caja(centro.x() - t.width() / 2.0, centro.y() - t.height() / 2.0,
                           t.width(), t.height());
@@ -445,7 +495,7 @@ void RangeLayer::drawLabels(QCPPainter *painter) const
             painter->drawLine(p.anchor, caja.center());
         }
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(255, 255, 255, 215));
+        painter->setBrush(QColor(255, 255, 255, suave ? 190 : 235));
         painter->drawRoundedRect(caja, 3.0, 3.0);
         painter->setPen(p.color.darker(130));
         painter->drawText(caja, Qt::AlignCenter, p.text);
@@ -523,9 +573,11 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
         painter->setPen(QPen(colorAnillo, mayor ? 2.0 : 1.4,
                              i == n ? Qt::SolidLine : Qt::DashLine));
         painter->drawPolyline(anillo);
-        if (r.labels)
+        if (r.labels && r.distanceLabels)
             label(dentroDeVista(anillo.first(), anillo),
-                  MapDecor::formatDistance(paso * i, m_units), colorAnillo);
+                  MapDecor::formatDistance(paso * i, m_units), colorAnillo, QPointF(), -1,
+                  std::clamp(r.labelOpacity, 0.1, 1.0) < 1.0 ? std::clamp(r.labelOpacity, 0.1, 1.0)
+                                                             : 1.0);
     }
 
     if (r.spokeEveryDeg > 0) {
@@ -542,9 +594,10 @@ void RangeLayer::drawRings(QCPPainter *painter, const RangeRings &r) const
             const double hueco = propio ? 14.0 : 0.0;
             if (radial.length() > hueco)
                 painter->drawLine(radial.pointAt(hueco / radial.length()), fin);
-            if (r.labels && az != 0) {       // el 000 lo tapa el rotulo del anillo
+            if (r.labels && r.bearingLabels && az != 0) {   // el 000 lo tapa el rotulo del anillo
                 const QPointF fuera = screenPos(c.atDistanceAndAzimuth(paso * n * 1.08, az));
-                label(bordeDeVista(pc, fuera), MapDecor::formatBearing(az), colorEste);
+                label(bordeDeVista(pc, fuera), MapDecor::formatBearing(az), colorEste, QPointF(), -1,
+                      std::clamp(r.labelOpacity, 0.1, 1.0));
             }
         }
     }

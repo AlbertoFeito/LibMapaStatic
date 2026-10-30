@@ -217,6 +217,7 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
 
@@ -252,6 +253,9 @@ private:
      * QCustomPlot actualiza en su resizeEvent, con rect() como ultimo recurso.
      */
     QRect plotArea() const;
+    //! Mantiene cada circulo o sector con dueno sobre su dueno (y quita el de un objetivo que ya
+    //! no existe). Se llama al cambiar los objetivos o las entidades.
+    void sincronizaDuenos();
 
     TileService *m_service = nullptr;
     TileLayer *m_tileLayer = nullptr;
@@ -261,6 +265,7 @@ private:
     OverlayModel *m_model = nullptr;
     FeatureLayer *m_featureLayer = nullptr;
     TargetModel *m_targetModel = nullptr;
+    bool m_sincronizandoDuenos = false;   //!< evita que el propio ajuste vuelva a dispararse
     TargetLayer *m_targetLayer = nullptr;
     CoverageLayer *m_coverageLayer = nullptr;
     GraticuleLayer *m_graticuleLayer = nullptr;
