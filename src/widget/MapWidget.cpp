@@ -1940,6 +1940,12 @@ bool MapWidget::setTargetLabel(qint64 id, const QString &text)
     return d->view && d->view->targetModel()->setLabel(id, text);
 }
 
+// Cambia el rotulo por segmentos de un objetivo. Reenvio al modelo, que avisa para repintar.
+bool MapWidget::setTargetLabelContent(qint64 id, const QVector<TargetLabelLine> &content)
+{
+    return d->view && d->view->targetModel()->setLabelContent(id, content);
+}
+
 // Desplazamiento de la etiqueta del objetivo (px). Reenvio al modelo, que avisa
 // para repintar. La etiqueta queda unida al simbolo por una linea guia.
 bool MapWidget::setTargetLabelOffset(qint64 id, const QPointF &offsetPx)

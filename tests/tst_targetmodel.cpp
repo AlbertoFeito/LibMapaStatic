@@ -28,6 +28,9 @@ private slots:
     void estimatesVelocityFromTrack();
     //! Offset de rotulo por defecto frente al propio: marca, quitar, restaurar.
     void labelOffsetDefaultOwnAndRestore();
+    //! Cambiar el rotulo por segmentos de un objetivo ya creado (el estado que cambia de
+    //! color) conserva su traza y avisa; un id que no existe da false.
+    void labelContentCanChangeAfterCreation();
 };
 
 static MapTarget objetivo(double lat, double lon, const QString &etq = QString())
@@ -363,6 +366,28 @@ void TstTargetModel::labelOffsetDefaultOwnAndRestore()
     QVERIFY(!m.setLabelOffset(999, QPointF()));
     QVERIFY(!m.clearLabelOffset(999));
     QVERIFY(!m.restoreLabelOffset(999, QPointF(), false));
+}
+
+void TstTargetModel::labelContentCanChangeAfterCreation()
+{
+    TargetModel m;
+    const qint64 id = m.upsert(objetivo(23.0, -82.0, QStringLiteral("A")));
+    m.upsert([&] { MapTarget t = *m.target(id); t.position = QGeoCoordinate(23.1, -82.0); return t; }());
+    const int puntos = int(m.trail(id).size());
+    QSignalSpy cambios(&m, &TargetModel::changed);
+
+    TargetLabelLine l;
+    l.segments.append({ QStringLiteral("E046"), QColor(0, 70, 200) });
+    l.segments.append({ QStringLiteral("EMER"), QColor(200, 0, 0) });
+    QVERIFY(m.setLabelContent(id, { l }));
+    QCOMPARE(cambios.size(), 1);
+    QCOMPARE(m.target(id)->labelContent.size(), 1);
+    QCOMPARE(m.target(id)->labelContent.first().segments.at(1).color, QColor(200, 0, 0));
+    QCOMPARE(int(m.trail(id).size()), puntos);       // la traza sigue ahi
+
+    QVERIFY(m.setLabelContent(id, {}));                      // vuelve al texto plano
+    QVERIFY(m.target(id)->labelContent.isEmpty());
+    QVERIFY(!m.setLabelContent(9999, { l }));
 }
 
 QTEST_MAIN(TstTargetModel)

@@ -66,6 +66,8 @@ public:
                 const QDateTime &time = QDateTime());
 
     bool setLabel(qint64 id, const QString &text);
+    //! Cambia el contenido por segmentos del rotulo (MapTarget::labelContent).
+    bool setLabelContent(qint64 id, const QVector<TargetLabelLine> &content);
     //! Desplazamiento de la etiqueta respecto al simbolo (px). false si no existe.
     //! Lo marca como PROPIO del objetivo (MapTarget::labelOffsetSet).
     bool setLabelOffset(qint64 id, const QPointF &offsetPx);

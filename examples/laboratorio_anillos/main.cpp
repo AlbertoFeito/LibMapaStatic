@@ -50,11 +50,14 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QHash>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QTextStream>
 #include <QTimer>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 
 using namespace libmapa;
@@ -81,6 +84,25 @@ const Posicion kPosiciones[] = {
     {"Abajo derecha", LabelAnchor::BottomRight}, {"Centrado", LabelAnchor::Center},
 };
 
+// Estados de un objetivo y el color de su segundo segmento (informacion operativa: el color
+// dice si esta detectado, en seguimiento o en emergencia).
+struct Estado {
+    const char *nombre;
+    QRgb color;
+};
+const Estado kEstados[] = {
+    {"DET", 0xffef6c00}, {"M1M2", 0xff2e7d32}, {"EMER", 0xffc62828}, {"SIN", 0xff757575},
+};
+
+// Color asociado a un estado (gris si no se conoce).
+QColor colorEstado(const QString &estado)
+{
+    for (const Estado &e : kEstados)
+        if (estado == QLatin1String(e.nombre))
+            return QColor::fromRgb(e.color);
+    return QColor(0x75, 0x75, 0x75);
+}
+
 // Una linea del formulario de un objetivo con sus segmentos (texto y color).
 TargetLabelLine linea(std::initializer_list<TargetLabelSegment> segmentos)
 {
@@ -90,51 +112,41 @@ TargetLabelLine linea(std::initializer_list<TargetLabelSegment> segmentos)
     return l;
 }
 
-// Texto con la ayuda del panel: que se ve y que hay que comprobar, por pasos.
+// Texto con la ayuda del panel: para que sirve cada pestana y que hay que comprobar en ella.
 QString textoAyuda()
 {
     return QObject::tr(
-        "<b>Qué ver</b><ul>"
-        "<li>El mapa de <b>costas</b>, solo, sin nada híbrido encima.</li>"
-        "<li>Anillos discontinuos (el último continuo) alrededor de un cuadrado con cruz: "
-        "el <b>centro</b>.</li>"
-        "<li>Cada anillo rotulado con su <b>distancia</b> arriba, y cada radial con su "
-        "<b>marcación</b> en el extremo (el de 000° no se rotula: lo tapa el rótulo del "
-        "anillo).</li>"
-        "<li>La <b>barra de escala</b> abajo, en las mismas unidades.</li></ul>"
-        "<b>Qué probar</b><ol>"
-        "<li><b>Escala:</b> pasa el ratón por un anillo. «Desde el centro» tiene que dar "
-        "su rótulo (10 km, 20 km...). Compáralo también con la barra de escala.</li>"
-        "<li><b>Radiales:</b> pasa el ratón por un radial. La marcación tiene que ser la de "
-        "su rótulo (030°, 060°...).</li>"
-        "<li><b>Centro:</b> pulsa «Elegir centro» y haz clic en otro sitio (un cabo, una "
-        "ciudad). Los anillos se mueven allí; clic derecho o Esc cancela.</li>"
-        "<li><b>Mostrar/ocultar:</b> la casilla quita y vuelve a poner los anillos con "
-        "los mismos ajustes.</li>"
-        "<li><b>Unidades:</b> pasa a millas náuticas. Los rótulos, la barra y la lectura del "
-        "ratón cambian juntos; la separación se lee en NM.</li>"
-        "<li><b>Forma:</b> los anillos son círculos reales sobre el terreno; en el mapa "
-        "(Mercator) se estiran un poco hacia el norte, y más cuanto más grandes.</li>"
-        "<li><b>Cuadrícula:</b> enciéndela y comprueba que las coordenadas del ratón "
-        "coinciden con las líneas.</li>"
-        "<li><b>Escala polar:</b> «Escala de 600 km» pone 60 anillos de 10 km y radiales cada "
-        "10° en un solo objeto, con el gris oscuro de un anillo de cada cinco y un radial de "
-        "cada tres. «Escala de 300 km» hace lo mismo con 30 anillos.</li>"
-        "<li><b>Rótulos de entidades:</b> agrega puntos con el buscador y cambia el lado del "
-        "anclaje y la fuente: los nombres se recolocan y cambian de tamaño.</li>"
-        "<li><b>Formulario de objetivos:</b> arrastra uno con el ratón (queda fijado y la "
-        "barra de estado dice dónde lo soltaste); soltarlo <i>fuera del mapa</i> cancela. "
-        "Con «Colgado de la esquina» la caja cuelga del punto por la esquina cercana al "
-        "objetivo; prueba también la fuente monoespaciada, el ancho, las columnas 8 + 8, el "
-        "offset por defecto y el color de selección.</li>"
-        "<li><b>Sectores:</b> son áreas rellenas (cuña entre el centro, los dos radios y el arco) "
-        "para señalar dónde concentrarse; el de 330° a 30° cruza el norte. Cada uno va por "
-        "separado: la casilla lo muestra u oculta, «Cambiar» le pone otro radio o azimut, "
-        "«Eliminar» lo quita y «Agregar» crea otro. La lista dice su área y cuántos objetivos "
-        "caen dentro. Siguen al centro de los anillos.</li>"
-        "<li><b>Partes:</b> agrega varios lugares «como parte de Sitios» y toca uno: el panel "
-        "dice qué parte de la entidad es. Todos son <i>una</i> entidad con nombre y color por "
-        "parte.</li></ol>");
+        "<b>Anillos</b> · medir distancia y marcación desde un punto"
+        "<ul><li>Pasa el ratón por un anillo: «Desde el centro» debe dar su rótulo (10 km, "
+        "20 km...); compáralo con la barra de escala.</li>"
+        "<li>Pasa el ratón por un radial: la marcación debe ser la de su rótulo.</li>"
+        "<li>«Elegir centro» y un clic mueve los anillos; Esc o clic derecho cancela.</li>"
+        "<li>«Escala de 300 km» y «de 600 km» ponen 30 o 60 anillos de 10 km y radiales cada "
+        "10° en un solo objeto, con uno de cada cinco anillos y uno de cada tres radiales más "
+        "oscuro. Prueba también los grises del Anexo C y los radiales de otro color.</li>"
+        "<li>En millas náuticas cambian a la vez rótulos, barra y lectura del ratón.</li></ul>"
+        "<b>Sectores</b> · señalar un área donde concentrarse"
+        "<ul><li>Cada sector es una cuña rellena entre el centro, los dos radios y el arco "
+        "(el de 330° a 30° cruza el norte). La casilla lo oculta sin borrarlo; «Cambiar» le pone "
+        "otro radio o azimut; «Eliminar» quita solo ese.</li>"
+        "<li>La lista dice el área y cuántos objetivos caen dentro; con «Simular movimiento» "
+        "(pestaña Objetivos) el recuento cambia solo.</li>"
+        "<li>Siguen al centro de los anillos. El círculo lleva su rótulo en el borde norte.</li></ul>"
+        "<b>Puntos</b> · muchos elementos con un mismo icono, cada nombre en su lado"
+        "<ul><li>Busca un lugar y agrégalo como punto suelto o como una <i>parte</i> de la entidad "
+        "«Sitios» (una sola entidad con nombre y color por parte); también con un clic.</li>"
+        "<li>Elige uno de la lista (o tócalo en el mapa) y cambia el lado de su rótulo, la fuente "
+        "y el color según su estado (Activo, Inactivo, Alarma). El panel inferior dice qué parte "
+        "tocaste.</li></ul>"
+        "<b>Objetivos</b> · leer varios a la vez"
+        "<ul><li>El color del segundo segmento es el estado (DET, M1M2, EMER): cámbialo y el "
+        "rótulo cambia sin perder la traza. «Agregar 3 objetivos pegados» muestra cómo se pisan "
+        "los formularios; arrástralos (soltar fuera del mapa cancela).</li>"
+        "<li>Colgado de la esquina, fuente monoespaciada, ancho, columnas 8 + 8, offset por "
+        "defecto y color de selección son del aspecto común.</li></ul>"
+        "<b>Capas</b> · filtrar y borrar en bloque"
+        "<ul><li>Cada capa con sus tipos y cuántas entidades hay. Oculta un tipo, muestra solo "
+        "uno («solo los aeródromos internos») o bórralo de una vez.</li></ul>");
 }
 
 } // namespace
@@ -168,6 +180,8 @@ public:
         // «aerodromo» de laboratorio_rotulos): se parte limpio, los puntos los agrega el usuario.
         quitaPuntos();
         m_mapa->addFeatureLayer(QStringLiteral("puntos"), tr("Puntos"), 50);
+        m_timerSim.setInterval(1000);
+        connect(&m_timerSim, &QTimer::timeout, this, [this] { muevePasoObjetivos(); });
         creaObjetivos();
 
         auto *cuerpo = new QWidget(this);
@@ -181,10 +195,16 @@ public:
                 [this](const QGeoCoordinate &p) { leeRaton(p); });
         connect(m_mapa, &MapWidget::pointPicked, this, [this](const QGeoCoordinate &p) {
             m_mapa->setActiveTool(MapTool::None);
-            if (m_colocando) {                    // el clic agrega un punto
-                m_colocando = false;
+            if (m_modoClic == 1) {                // el clic agrega un punto
+                m_modoClic = 0;
                 m_colocar->setText(tr("Agregar un punto con un clic en el mapa"));
                 agrega(p, tr("Punto %1").arg(m_puntos.size() + 1), false);
+                return;
+            }
+            if (m_modoClic == 2) {                // el clic agrega un objetivo
+                m_modoClic = 0;
+                m_agregaObjetivo->setText(tr("Agregar un objetivo con un clic en el mapa"));
+                agregaObjetivo(p, QString(), 90.0, QStringLiteral("DET"));
                 return;
             }
             m_elegir->setText(tr("Elegir centro (clic en el mapa)"));
@@ -193,8 +213,9 @@ public:
                                          .arg(formatCoordinate(p, CoordinateFormat::DMS)), 6000);
         });
         connect(m_mapa, &MapWidget::pickCancelled, this, [this] {
-            m_colocando = false;
+            m_modoClic = 0;
             m_colocar->setText(tr("Agregar un punto con un clic en el mapa"));
+            m_agregaObjetivo->setText(tr("Agregar un objetivo con un clic en el mapa"));
             m_elegir->setText(tr("Elegir centro (clic en el mapa)"));
             statusBar()->showMessage(tr("Elección del centro cancelada"), 4000);
         });
@@ -207,6 +228,9 @@ public:
         // Tocar una entidad dice que parte de ella es (subIndex) y cuantas tiene.
         connect(m_mapa, &MapWidget::elementClicked, this,
                 [this](const MapHit &hit, const QPoint &) { leeElemento(hit); });
+        connect(m_mapa, &MapWidget::targetClicked, this, [this](qint64 id, const QGeoCoordinate &) {
+            seleccionaObjetivo(id);
+        });
         aplicaFormato();
         aplicaAnillos();
         restableceSectores();
@@ -221,6 +245,8 @@ public:
     qint64 primerPunto() const { return m_puntos.value(0, -1); }
     QVector<qint64> objetivos() const { return m_objetivos; }
     qint64 sitios() const { return m_sitios; }
+    // Cambia de pestana del panel (la usa --captura=... --pestana=N).
+    void ponPestana(int i) { if (m_pestanas) m_pestanas->setCurrentIndex(i); }
     QString lecturaElemento() const { return m_lblElemento ? m_lblElemento->text() : QString(); }
 
     // Dice que hay bajo el clic: la entidad, y si tiene varias partes, CUAL (subIndex).
@@ -238,6 +264,7 @@ public:
             }
         }
         m_lblElemento->setText(txt);
+        seleccionaElemento(hit.featureId, hit.subIndex);
     }
 
 public:
@@ -493,12 +520,14 @@ private:
         r.count = m_numero->value();
         r.spokeEveryDeg = m_radiales->currentData().toInt();
         r.labels = m_rotulos->isChecked();
-        r.color = QColor(0xc6, 0x28, 0x28);       // rojo: se lee sobre la costa y el mar
+        const bool grises = m_paleta && m_paleta->currentIndex() == 1;
+        r.color = grises ? QColor(180, 180, 180)             // gris claro (Anexo C)
+                         : QColor(0xc6, 0x28, 0x28);         // rojo: se lee sobre la costa y el mar
         r.name = tr("Centro");
         if (m_enfasis->isChecked()) {
             r.majorRingEvery = m_cadaAnillos->value();
             r.majorSpokeEveryDeg = m_cadaGrados->value();
-            r.majorColor = QColor(0x5d, 0x0e, 0x0e);     // rojo oscuro
+            r.majorColor = grises ? QColor(80, 80, 80) : QColor(0x5d, 0x0e, 0x0e);
         }
         if (m_colorRadiales->isChecked())
             r.spokeColor = QColor(0x15, 0x65, 0xc0);     // radiales en azul
@@ -581,55 +610,343 @@ private:
             statusBar()->showMessage(tr("Sin resultados para «%1»").arg(texto), 5000);
     }
 
-    // Escribe en el panel cuantas entidades hay de cada tipo (y cuales estan ocultas).
+    // Vuelve a escribir lo que depende de lo que hay en el mapa: el arbol de capas y tipos con
+    // sus cuentas y la lista de lo agregado.
     void actualizaConteos()
     {
-        if (!m_lblConteos)
-            return;
-        QStringList l;
-        const QMap<QString, int> c = m_mapa->featureTypeCounts();
-        for (auto it = c.constBegin(); it != c.constEnd(); ++it)
-            l << QStringLiteral("%1: %2").arg(it.key()).arg(it.value());
-        m_lblConteos->setText(l.isEmpty() ? tr("(ninguna)") : l.join(QStringLiteral("  ·  ")));
+        actualizaArbol();
+        actualizaElementos();
     }
 
-    // Tres objetivos con formulario de tres lineas: identificacion y estado (cada uno de su
-    // color) en la primera, y datos de dominio en las otras dos.
-    void creaObjetivos()
+    // Reconstruye el arbol de la pestana «Capas»: cada capa con su casilla de visible y, debajo,
+    // sus tipos con cuantas entidades hay y su casilla (ocultar un tipo lo oculta en todas las
+    // capas). Los tipos vacios (sin nombre) se cuentan pero no se pueden ocultar.
+    void actualizaArbol()
     {
-        struct Dato {
-            double lat, lon, rumbo;
-            const char *id, *estado, *l2, *l3;
-        };
-        const Dato datos[] = {
-            { 23.40, -82.00, 80.0, "E046", "M1M2", "+42  I   01655", "_S_A     1.2.3.4" },
-            { 23.40, -82.80, 160.0, "E051", "EMER", "+38  I   00980", "_S_B     5.6.7.8" },
-            { 22.80, -82.00, 300.0, "E077", "DET", "+35  I   00720", "_S_C     9.0.1.2" },
-        };
-        const QColor colorEstado[] = { QColor(0, 120, 0), QColor(200, 0, 0), QColor(200, 120, 0) };
-        int i = 0;
-        for (const Dato &d : datos) {
-            MapTarget t;
-            t.position = QGeoCoordinate(d.lat, d.lon);
-            t.headingDeg = d.rumbo;
-            t.kind = QStringLiteral("aeronave");
-            t.label = QString::fromUtf8(d.id);       // lo que se veria sin formulario por segmentos
-            t.labelContent = {
-                linea({ { QString::fromUtf8(d.id), QColor(0, 70, 200) },
-                        { QString::fromUtf8(d.estado), colorEstado[i] } }),
-                linea({ { QString::fromUtf8(d.l2), QColor() } }),
-                linea({ { QString::fromUtf8(d.l3), QColor() } }),
-            };
-            m_objetivos.append(m_mapa->addTarget(t));
-            ++i;
+        if (!m_arbol)
+            return;
+        const QSignalBlocker b(m_arbol);
+        m_arbol->clear();
+        for (const LayerInfo &capa : m_mapa->featureLayers()) {
+            auto *it = new QTreeWidgetItem(m_arbol);
+            it->setText(0, capa.displayName.isEmpty() ? capa.id : capa.displayName);
+            it->setText(1, QString::number(capa.featureCount));
+            it->setData(0, Qt::UserRole, capa.id);
+            it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+            it->setCheckState(0, capa.visible ? Qt::Checked : Qt::Unchecked);
+            const QMap<QString, int> tipos = m_mapa->featureTypeCounts(capa.id);
+            for (auto t = tipos.constBegin(); t != tipos.constEnd(); ++t) {
+                auto *h = new QTreeWidgetItem(it);
+                h->setText(0, t.key().isEmpty() ? tr("(sin tipo)") : t.key());
+                h->setText(1, QString::number(t.value()));
+                h->setData(0, Qt::UserRole, capa.id);
+                h->setData(0, Qt::UserRole + 1, t.key());
+                if (!t.key().isEmpty()) {
+                    h->setFlags(h->flags() | Qt::ItemIsUserCheckable);
+                    h->setCheckState(0, m_mapa->isFeatureTypeVisible(t.key()) ? Qt::Checked
+                                                                               : Qt::Unchecked);
+                }
+            }
+            it->setExpanded(!tipos.isEmpty() && capa.featureCount < 100);
         }
     }
 
+    // Rellena la lista de lo agregado: cada punto suelto y cada parte de «Sitios».
+    void actualizaElementos()
+    {
+        if (!m_listaElementos)
+            return;
+        const QPair<qint64, int> previo = elementoElegido();
+        const QSignalBlocker b(m_listaElementos);
+        m_listaElementos->clear();
+        const auto anade = [this](const QString &texto, qint64 id, int parte) {
+            auto *it = new QListWidgetItem(texto, m_listaElementos);
+            it->setData(Qt::UserRole, id);
+            it->setData(Qt::UserRole + 1, parte);
+        };
+        for (qint64 id : m_puntos)
+            if (const auto f = m_mapa->feature(id))
+                anade(tr("Punto · %1").arg(f->name), id, -1);
+        if (const auto s = m_mapa->feature(m_sitios))
+            for (int i = 0; i < s->parts.size(); ++i)
+                anade(tr("Sitios · %1").arg(s->partInfo(i) ? s->partInfo(i)->name : QString()),
+                      m_sitios, i);
+        for (int i = 0; i < m_listaElementos->count(); ++i)
+            if (m_listaElementos->item(i)->data(Qt::UserRole).toLongLong() == previo.first &&
+                m_listaElementos->item(i)->data(Qt::UserRole + 1).toInt() == previo.second)
+                m_listaElementos->setCurrentRow(i);
+    }
+
+    // (id de la entidad, parte o -1) del elemento elegido en la lista, o (-1, -1).
+    QPair<qint64, int> elementoElegido() const
+    {
+        const auto *it = m_listaElementos ? m_listaElementos->currentItem() : nullptr;
+        return it ? qMakePair(it->data(Qt::UserRole).toLongLong(), it->data(Qt::UserRole + 1).toInt())
+                  : qMakePair(qint64(-1), -1);
+    }
+
+    // Elige en la lista el elemento (entidad, parte) que se acaba de tocar en el mapa.
+    void seleccionaElemento(qint64 id, int parte)
+    {
+        if (!m_listaElementos)
+            return;
+        for (int i = 0; i < m_listaElementos->count(); ++i)
+            if (m_listaElementos->item(i)->data(Qt::UserRole).toLongLong() == id &&
+                m_listaElementos->item(i)->data(Qt::UserRole + 1).toInt() == parte) {
+                m_listaElementos->setCurrentRow(i);
+                return;
+            }
+    }
+
+    // Carga en los controles el lado del rotulo y la fuente del elemento elegido.
+    void cargaElementoElegido()
+    {
+        const auto [id, parte] = elementoElegido();
+        const auto f = m_mapa->feature(id);
+        if (!f)
+            return;
+        const LabelAnchor a = parte >= 0 && f->partInfo(parte) ? f->partInfo(parte)->labelAnchor
+                                                                : f->style.labelAnchor;
+        int idx = 0;
+        for (int i = 0; i < int(sizeof(kPosiciones) / sizeof(kPosiciones[0])); ++i)
+            if (kPosiciones[i].ancla == a)
+                idx = i;
+        const QSignalBlocker b1(m_elAncla), b2(m_elFuente);
+        m_elAncla->setCurrentIndex(idx);
+        m_elFuente->setValue(f->style.labelFontSize);
+    }
+
+    // Aplica al elemento elegido (o a todos, si se pidio) el lado y la fuente de los controles.
+    void aplicaElementoElegido()
+    {
+        const LabelAnchor ancla = kPosiciones[qMax(0, m_elAncla->currentIndex())].ancla;
+        const int fuente = m_elFuente->value();
+        if (m_elATodos->isChecked()) {
+            ponAncla(ancla);
+            ponTamano(fuente);
+            if (auto s = m_mapa->feature(m_sitios)) {
+                for (PartInfo &pi : s->partsInfo)
+                    pi.labelAnchor = ancla;
+                s->style.labelFontSize = fuente;
+                m_mapa->updateFeature(*s);
+            }
+            return;
+        }
+        const auto [id, parte] = elementoElegido();
+        auto f = m_mapa->feature(id);
+        if (!f)
+            return;
+        if (parte >= 0 && parte < f->partsInfo.size())
+            f->partsInfo[parte].labelAnchor = ancla;
+        else
+            f->style.labelAnchor = ancla;
+        f->style.labelFontSize = fuente;           // la fuente es de toda la entidad
+        m_mapa->updateFeature(*f);
+    }
+
+public:
+    // Cambia el color de un elemento: el de la parte (colorOverride) o el del punto suelto.
+    void ponColor(qint64 id, int parte, const QColor &color)
+    {
+        auto f = m_mapa->feature(id);
+        if (!f)
+            return;
+        if (parte >= 0 && parte < f->partsInfo.size())
+            f->partsInfo[parte].colorOverride = color;
+        else
+            f->style.lineColor = color;
+        m_mapa->updateFeature(*f);
+    }
+
+private:
+    // Pone el color (el estado) al elemento elegido en la lista.
+    void ponColorElegido(const QColor &color)
+    {
+        const auto [id, parte] = elementoElegido();
+        ponColor(id, parte, color);
+    }
+
+    // Quita el elemento elegido: un punto suelto, o una parte de «Sitios» (si era la ultima,
+    // la entidad entera).
+    void quitaElementoElegido()
+    {
+        const auto [id, parte] = elementoElegido();
+        auto f = m_mapa->feature(id);
+        if (!f)
+            return;
+        if (parte >= 0 && id == m_sitios && parte < f->parts.size()) {
+            f->parts.removeAt(parte);
+            if (parte < f->partsInfo.size())
+                f->partsInfo.removeAt(parte);
+            if (f->parts.isEmpty()) {
+                m_mapa->removeFeature(id);
+                m_sitios = -1;
+            } else {
+                f->geometry = f->parts.first();
+                m_mapa->updateFeature(*f);
+            }
+        } else {
+            m_mapa->removeFeature(id);
+            m_puntos.removeAll(id);
+        }
+        actualizaConteos();
+    }
+
+    // Pone el rotulo por segmentos de un objetivo a partir de sus datos: identificacion y estado
+    // (cada uno de su color) en la primera linea y los datos de dominio en las otras dos.
+    void ponContenido(qint64 id)
+    {
+        const DatosObj d = m_datosObj.value(id);
+        QVector<TargetLabelLine> lineas;
+        lineas << linea({ { d.ident, QColor(0, 70, 200) }, { d.estado, colorEstado(d.estado) } });
+        lineas << linea({ { d.l2, QColor() } });
+        lineas << linea({ { d.l3, QColor() } });
+        m_mapa->setTargetLabelContent(id, lineas);
+        m_mapa->setTargetLabel(id, d.ident);
+    }
+
+public:
+    // Agrega un objetivo en \a p con su rumbo y estado; sin identificacion se le da una. Es el
+    // mismo que usa el clic en el mapa. Devuelve su id.
+    qint64 agregaObjetivo(const QGeoCoordinate &p, const QString &ident, double rumbo,
+                          const QString &estado)
+    {
+        MapTarget t;
+        t.position = p;
+        t.headingDeg = rumbo;
+        t.kind = QStringLiteral("aeronave");
+        const qint64 id = m_mapa->addTarget(t);
+        DatosObj d;
+        d.ident = ident.isEmpty() ? QStringLiteral("E%1").arg(100 + m_objetivos.size()) : ident;
+        d.estado = estado;
+        d.l2 = QStringLiteral("+%1  I   0%2").arg(30 + m_objetivos.size()).arg(1000 + 37 * m_objetivos.size());
+        d.l3 = QStringLiteral("_S_%1     1.2.3.%2").arg(QChar(char('A' + int(m_objetivos.size() % 26)))).arg(m_objetivos.size());
+        m_datosObj.insert(id, d);
+        m_objetivos.append(id);
+        ponContenido(id);
+        actualizaObjetivos();
+        return id;
+    }
+
+    // Cambia el estado de un objetivo (y con el, el color de su segundo segmento).
+    void cambiaEstadoObjetivo(qint64 id, const QString &estado)
+    {
+        if (!m_datosObj.contains(id))
+            return;
+        m_datosObj[id].estado = estado;
+        ponContenido(id);
+        actualizaObjetivos();
+    }
+
+private:
+    // Tres objetivos de ejemplo con formulario de tres lineas.
+    void creaObjetivos()
+    {
+        agregaObjetivo(QGeoCoordinate(23.40, -82.00), QStringLiteral("E046"), 80.0, QStringLiteral("M1M2"));
+        agregaObjetivo(QGeoCoordinate(23.40, -82.80), QStringLiteral("E051"), 160.0, QStringLiteral("EMER"));
+        agregaObjetivo(QGeoCoordinate(22.80, -82.00), QStringLiteral("E077"), 300.0, QStringLiteral("DET"));
+    }
+
+    // Tres objetivos casi en el mismo sitio, para ver que los formularios se pisan y arrastrarlos.
+    void agregaTresPegados()
+    {
+        const QGeoCoordinate c = m_mapa->center();
+        for (int i = 0; i < 3; ++i)
+            agregaObjetivo(c.atDistanceAndAzimuth(600.0 * i, 45.0), QString(), 90.0 + 40.0 * i,
+                           QString::fromUtf8(kEstados[i % 3].nombre));
+    }
+
+    // Rellena la lista de objetivos: identificacion y estado.
+    void actualizaObjetivos()
+    {
+        if (!m_listaObjetivos)
+            return;
+        const int fila = m_listaObjetivos->currentRow();
+        const QSignalBlocker b(m_listaObjetivos);
+        m_listaObjetivos->clear();
+        for (qint64 id : m_objetivos) {
+            const DatosObj d = m_datosObj.value(id);
+            auto *it = new QListWidgetItem(QStringLiteral("%1 · %2").arg(d.ident, d.estado),
+                                           m_listaObjetivos);
+            it->setData(Qt::UserRole, id);
+            it->setForeground(colorEstado(d.estado));
+        }
+        m_listaObjetivos->setCurrentRow(qBound(-1, fila, m_listaObjetivos->count() - 1));
+    }
+
+    // Id del objetivo elegido en la lista, o -1.
+    qint64 objetivoElegido() const
+    {
+        const auto *it = m_listaObjetivos ? m_listaObjetivos->currentItem() : nullptr;
+        return it ? it->data(Qt::UserRole).toLongLong() : -1;
+    }
+
+    // Elige en la lista (y en el mapa) el objetivo \a id.
+    void seleccionaObjetivo(qint64 id)
+    {
+        if (!m_listaObjetivos)
+            return;
+        for (int i = 0; i < m_listaObjetivos->count(); ++i)
+            if (m_listaObjetivos->item(i)->data(Qt::UserRole).toLongLong() == id)
+                m_listaObjetivos->setCurrentRow(i);
+    }
+
+    // Carga en los campos los datos del objetivo elegido y lo selecciona en el mapa.
+    void cargaObjetivoElegido()
+    {
+        const qint64 id = objetivoElegido();
+        if (id < 0)
+            return;
+        const DatosObj d = m_datosObj.value(id);
+        m_obId->setText(d.ident);
+        m_obEstado->setCurrentText(d.estado);
+        m_obL2->setText(d.l2);
+        m_obL3->setText(d.l3);
+        m_mapa->setSelectedTarget(id);
+    }
+
+    // Aplica al objetivo elegido lo escrito en los campos: su rotulo cambia de texto y de color.
+    void aplicaObjetivoElegido()
+    {
+        const qint64 id = objetivoElegido();
+        if (id < 0)
+            return;
+        DatosObj &d = m_datosObj[id];
+        d.ident = m_obId->text();
+        d.estado = m_obEstado->currentText();
+        d.l2 = m_obL2->text();
+        d.l3 = m_obL3->text();
+        ponContenido(id);
+        actualizaObjetivos();
+    }
+
+    // Quita el objetivo elegido.
+    void quitaObjetivoElegido()
+    {
+        const qint64 id = objetivoElegido();
+        if (id < 0)
+            return;
+        m_mapa->removeTarget(id);
+        m_objetivos.removeAll(id);
+        m_datosObj.remove(id);
+        actualizaObjetivos();
+    }
+
+    // Un paso de la simulacion: cada objetivo avanza unos kilometros por su rumbo.
+    void muevePasoObjetivos()
+    {
+        for (qint64 id : m_objetivos)
+            if (const auto t = m_mapa->target(id))
+                m_mapa->updateTarget(id, t->position.atDistanceAndAzimuth(3000.0, t->headingDeg));
+        actualizaSectores();                       // los objetivos dentro de cada sector cambian
+    }
+
+
     // Grupo del panel para los sectores: lista con casilla de visible, valores para agregar o
     // cambiar uno, y botones para eliminar uno o todos. Cada sector va por separado.
-    void crearGrupoSectores(QWidget *panel, QVBoxLayout *col)
+    QGroupBox *crearGrupoSectores()
     {
-        auto *gz = new QGroupBox(tr("Sectores (áreas a vigilar)"), panel);
+        auto *gz = new QGroupBox(tr("Sectores (áreas a vigilar)"));
         auto *vz = new QVBoxLayout(gz);
         m_listaSectores = new QListWidget(gz);
         m_listaSectores->setMaximumHeight(130);
@@ -660,7 +977,6 @@ private:
         vz->addLayout(fz);
         for (QPushButton *b : { agregaSec, cambiaSec, quitaSec, restSec, borraSec })
             vz->addWidget(b);
-        col->addWidget(gz);
         connect(m_listaSectores, &QListWidget::itemChanged, this, [this](QListWidgetItem *it) {
             const qint64 id = it->data(Qt::UserRole).toLongLong();
             auto f = m_mapa->feature(id);
@@ -716,17 +1032,34 @@ private:
             eliminaTodosSectores();
             actualizaSectores();
         });
+        return gz;
     }
 
-    // Construye el panel de la derecha: mapa, anillos, raton y la ayuda, con barra de
-    // desplazamiento por si la ventana es baja.
-    QWidget *creaPanel()
+    // Envuelve el contenido de una pestana en una zona con desplazamiento, con una linea al
+    // principio que dice PARA QUE SIRVE (el objetivo operativo de lo que hay en ella).
+    QWidget *pestana(const QString &objetivo, const QList<QWidget *> &grupos)
     {
-        auto *panel = new QWidget;
-        auto *col = new QVBoxLayout(panel);
+        auto *interior = new QWidget;
+        auto *col = new QVBoxLayout(interior);
+        auto *obj = new QLabel(QStringLiteral("<b>%1</b>").arg(objetivo.toHtmlEscaped()), interior);
+        obj->setWordWrap(true);
+        obj->setStyleSheet(QStringLiteral("background:#e8f1f8;padding:6px;border-radius:4px;"));
+        col->addWidget(obj);
+        for (QWidget *g : grupos)
+            col->addWidget(g);
+        col->addStretch(1);
+        auto *scroll = new QScrollArea;
+        scroll->setWidget(interior);
+        scroll->setWidgetResizable(true);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scroll->setFrameShape(QFrame::NoFrame);
+        return scroll;
+    }
 
-        // --- Mapa ----------------------------------------------------------------
-        auto *g0 = new QGroupBox(tr("Mapa"), panel);
+    // Pestana «Anillos»: el grafico polar azimut-distancia (escala, radiales, enfasis, colores).
+    QWidget *pestanaAnillos()
+    {
+        auto *g0 = new QGroupBox(tr("Mapa"));
         auto *f0 = new QFormLayout(g0);
         auto *base = new QComboBox(g0);
         for (const BaseLayerInfo &c : m_mapa->availableBaseLayers())
@@ -740,10 +1073,8 @@ private:
         f0->addRow(tr("Capa base"), base);
         f0->addRow(m_barra);
         f0->addRow(m_cuadricula);
-        col->addWidget(g0);
 
-        // --- Anillos ---------------------------------------------------------------
-        auto *g1 = new QGroupBox(tr("Anillos y radiales"), panel);
+        auto *g1 = new QGroupBox(tr("Centro y anillos"));
         auto *f1 = new QFormLayout(g1);
         m_mostrar = new QCheckBox(tr("Mostrar anillos"), g1);
         m_mostrar->setChecked(true);
@@ -770,13 +1101,6 @@ private:
         f1->addRow(m_mostrar);
         f1->addRow(tr("Centro"), m_lblCentro);
         f1->addRow(m_elegir);
-        m_colocar = new QPushButton(tr("Agregar un punto con un clic en el mapa"), g1);
-        f1->addRow(m_colocar);
-        connect(m_colocar, &QPushButton::clicked, this, [this] {
-            m_colocando = true;
-            m_mapa->setActiveTool(MapTool::PickPoint);
-            m_colocar->setText(tr("Haz clic donde va el punto... (Esc cancela)"));
-        });
         f1->addRow(habana);
         f1->addRow(ir);
         f1->addRow(tr("Unidades"), m_unidades);
@@ -784,14 +1108,12 @@ private:
         f1->addRow(tr("Anillos"), m_numero);
         f1->addRow(tr("Radiales"), m_radiales);
         f1->addRow(m_rotulos);
-        col->addWidget(g1);
 
-        // --- Escala polar -------------------------------------------------------------
-        auto *gp = new QGroupBox(tr("Escala polar y énfasis"), panel);
+        auto *gp = new QGroupBox(tr("Escala polar, énfasis y colores"));
         auto *fp = new QFormLayout(gp);
         auto *e300 = new QPushButton(tr("Escala de 300 km (30 anillos)"), gp);
         auto *e600 = new QPushButton(tr("Escala de 600 km (60 anillos)"), gp);
-        m_enfasis = new QCheckBox(tr("Énfasis: anillo y radial «mayor» en rojo oscuro"), gp);
+        m_enfasis = new QCheckBox(tr("Énfasis: anillo y radial «mayor» más oscuro"), gp);
         m_cadaAnillos = new QSpinBox(gp);
         m_cadaAnillos->setRange(1, 50);
         m_cadaAnillos->setValue(5);
@@ -799,46 +1121,69 @@ private:
         m_cadaGrados->setRange(5, 180);
         m_cadaGrados->setValue(30);
         m_colorRadiales = new QCheckBox(tr("Radiales de otro color (azul)"), gp);
+        m_paleta = new QComboBox(gp);
+        m_paleta->addItems({ tr("Rojo (se lee sobre costa y mar)"),
+                             tr("Grises: claro y oscuro (como el Anexo C)") });
         fp->addRow(e300);
         fp->addRow(e600);
         fp->addRow(m_enfasis);
         fp->addRow(tr("Un anillo de cada"), m_cadaAnillos);
         fp->addRow(tr("Un radial cada (°)"), m_cadaGrados);
         fp->addRow(m_colorRadiales);
-        col->addWidget(gp);
+        fp->addRow(tr("Colores"), m_paleta);
+        connect(e300, &QPushButton::clicked, this, [this] { escala(300); });
+        connect(e600, &QPushButton::clicked, this, [this] { escala(600); });
+        connect(m_elegir, &QPushButton::clicked, this, [this] {
+            m_modoClic = 0;
+            m_mapa->setActiveTool(MapTool::PickPoint);
+            m_elegir->setText(tr("Haz clic en el mapa... (Esc cancela)"));
+        });
+        connect(habana, &QPushButton::clicked, this, [this] { ponCentro(kHabana); });
+        connect(ir, &QPushButton::clicked, this, [this] { m_mapa->setCenter(m_centro); });
+        // Las conexiones de los ajustes, al final: aplicaAnillos lee todos los controles.
+        for (QCheckBox *c : { m_mostrar, m_rotulos, m_barra, m_cuadricula, m_enfasis,
+                              m_colorRadiales })
+            connect(c, &QCheckBox::toggled, this, [this] { aplicaAnillos(); });
+        for (QSpinBox *sp : { m_cadaAnillos, m_cadaGrados })
+            connect(sp, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                    [this] { aplicaAnillos(); });
+        for (QComboBox *c : { m_unidades, m_radiales, m_paleta })
+            connect(c, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                    [this] { aplicaAnillos(); });
+        connect(m_separacion, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+                [this] { aplicaAnillos(); });
+        connect(m_numero, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this] { aplicaAnillos(); });
+        return pestana(tr("Medir distancia y marcación desde un punto: anillos cada N km y "
+                          "radiales cada N°, con uno de cada varios más oscuro para leer rápido."),
+                       { g0, g1, gp });
+    }
 
-        // --- Rotulos de entidades ------------------------------------------------------
-        auto *gr = new QGroupBox(tr("Rótulos de los puntos agregados"), panel);
-        auto *fr = new QFormLayout(gr);
-        auto *posicion = new QComboBox(gr);
-        for (const Posicion &po : kPosiciones)
-            posicion->addItem(tr(po.nombre));
-        auto *tamano = new QSpinBox(gr);
-        tamano->setRange(0, 40);
-        tamano->setSpecialValueText(tr("0 (el del mapa)"));
-        fr->addRow(tr("Lado del anclaje"), posicion);
-        fr->addRow(tr("Fuente (pt)"), tamano);
-        connect(posicion, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-                [this](int i) { ponAncla(kPosiciones[i].ancla); });
-        connect(tamano, QOverload<int>::of(&QSpinBox::valueChanged), this,
-                [this](int v) { ponTamano(v); });
-        col->addWidget(gr);
+    // Pestana «Sectores»: areas a vigilar, una por una.
+    QWidget *pestanaSectores()
+    {
+        return pestana(tr("Señalar al operador un área donde concentrarse (círculo o cuña), "
+                          "mostrarla, cambiarla o quitarla sin tocar las demás, y saber qué "
+                          "objetivos hay dentro."), { crearGrupoSectores() });
+    }
 
-        // --- Buscador de lugares: los puntos los agrega el usuario -------------------------
-        auto *gb = new QGroupBox(tr("Agregar puntos (buscador de lugares)"), panel);
+    // Pestana «Puntos»: buscar lugares, agregarlos y ajustar cada uno (rotulo, fuente, color).
+    QWidget *pestanaPuntos()
+    {
+        auto *gb = new QGroupBox(tr("1. Agregar (buscador de lugares)"));
         auto *vb = new QVBoxLayout(gb);
         auto *caja = new QLineEdit(gb);
         caja->setPlaceholderText(tr("Nombre de un lugar y Enter"));
         m_resultados = new QListWidget(gb);
-        m_resultados->setMaximumHeight(150);
-        auto *aPunto = new QPushButton(tr("Agregar como punto"), gb);
+        m_resultados->setMaximumHeight(120);
+        auto *aPunto = new QPushButton(tr("Agregar como punto suelto"), gb);
         auto *aParte = new QPushButton(tr("Agregar como parte de «Sitios» (una entidad)"), gb);
-        auto *quitaTodo = new QPushButton(tr("Quitar todos los puntos y sitios"), gb);
+        m_colocar = new QPushButton(tr("Agregar un punto con un clic en el mapa"), gb);
         vb->addWidget(caja);
         vb->addWidget(m_resultados);
         vb->addWidget(aPunto);
         vb->addWidget(aParte);
-        vb->addWidget(quitaTodo);
+        vb->addWidget(m_colocar);
         connect(caja, &QLineEdit::returnPressed, this, [this, caja] { busca(caja->text()); });
         const auto agregaElegido = [this](bool comoParte) {
             const int i = m_resultados->currentRow();
@@ -849,43 +1194,106 @@ private:
         connect(aParte, &QPushButton::clicked, this, [agregaElegido] { agregaElegido(true); });
         connect(m_resultados, &QListWidget::itemDoubleClicked, this,
                 [agregaElegido](QListWidgetItem *) { agregaElegido(false); });
+        connect(m_colocar, &QPushButton::clicked, this, [this] {
+            m_modoClic = 1;
+            m_mapa->setActiveTool(MapTool::PickPoint);
+            m_colocar->setText(tr("Haz clic donde va el punto... (Esc cancela)"));
+        });
+
+        auto *ge = new QGroupBox(tr("2. Lo agregado (elige uno para ajustarlo)"));
+        auto *ve = new QVBoxLayout(ge);
+        m_listaElementos = new QListWidget(ge);
+        m_listaElementos->setMaximumHeight(130);
+        auto *fe = new QFormLayout;
+        m_elAncla = new QComboBox(ge);
+        for (const Posicion &po : kPosiciones)
+            m_elAncla->addItem(tr(po.nombre));
+        m_elFuente = new QSpinBox(ge);
+        m_elFuente->setRange(0, 40);
+        m_elFuente->setSpecialValueText(tr("0 (el del mapa)"));
+        m_elATodos = new QCheckBox(tr("Aplicar el lado y la fuente a TODOS"), ge);
+        fe->addRow(tr("Lado del rótulo"), m_elAncla);
+        fe->addRow(tr("Fuente (pt)"), m_elFuente);
+        fe->addRow(m_elATodos);
+        auto *estados = new QHBoxLayout;
+        const struct { const char *t; QRgb c; } est[] = {
+            {"Activo", 0xff2e7d32}, {"Inactivo", 0xff757575}, {"Alarma", 0xffc62828}, {"Normal", 0xff1565c0}};
+        for (const auto &e : est) {
+            auto *b = new QPushButton(tr(e.t), ge);
+            const QColor col = QColor::fromRgb(e.c);
+            b->setStyleSheet(QStringLiteral("color:%1;font-weight:bold;").arg(col.name()));
+            connect(b, &QPushButton::clicked, this, [this, col] { ponColorElegido(col); });
+            estados->addWidget(b);
+        }
+        auto *quitaEl = new QPushButton(tr("Quitar el elegido"), ge);
+        auto *quitaTodo = new QPushButton(tr("Quitar todos los puntos y sitios"), ge);
+        ve->addWidget(m_listaElementos);
+        ve->addLayout(fe);
+        ve->addWidget(new QLabel(tr("Color (estado) del elegido:"), ge));
+        ve->addLayout(estados);
+        ve->addWidget(quitaEl);
+        ve->addWidget(quitaTodo);
+        connect(m_listaElementos, &QListWidget::currentRowChanged, this,
+                [this](int) { cargaElementoElegido(); });
+        connect(m_elAncla, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int) { aplicaElementoElegido(); });
+        connect(m_elFuente, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this](int) { aplicaElementoElegido(); });
+        connect(quitaEl, &QPushButton::clicked, this, [this] { quitaElementoElegido(); });
         connect(quitaTodo, &QPushButton::clicked, this, [this] {
             quitaPuntos();
             actualizaConteos();
         });
-        col->addWidget(gb);
+        return pestana(tr("Tener muchos elementos con el mismo icono (una entidad con partes) o "
+                          "sueltos, elegir el lado de cada nombre para que no se pisen y "
+                          "cambiar el color según su estado."), { gb, ge });
+    }
 
-        // --- Sectores: cada uno se ve, se cambia, se analiza y se elimina por separado --------
-        crearGrupoSectores(panel, col);
+    // Pestana «Objetivos»: formularios arrastrables, estado por colores y prueba de solape.
+    QWidget *pestanaObjetivos()
+    {
+        auto *gl = new QGroupBox(tr("1. Objetivos"));
+        auto *vl = new QVBoxLayout(gl);
+        m_listaObjetivos = new QListWidget(gl);
+        m_listaObjetivos->setMaximumHeight(110);
+        auto *fo = new QFormLayout;
+        m_obId = new QLineEdit(gl);
+        m_obEstado = new QComboBox(gl);
+        for (const auto &e : kEstados)
+            m_obEstado->addItem(QString::fromUtf8(e.nombre));
+        m_obL2 = new QLineEdit(gl);
+        m_obL3 = new QLineEdit(gl);
+        fo->addRow(tr("Identificación"), m_obId);
+        fo->addRow(tr("Estado (su color)"), m_obEstado);
+        fo->addRow(tr("Línea 2"), m_obL2);
+        fo->addRow(tr("Línea 3"), m_obL3);
+        auto *aplicaOb = new QPushButton(tr("Cambiar el rótulo del elegido"), gl);
+        auto *agregaOb = new QPushButton(tr("Agregar un objetivo con un clic en el mapa"), gl);
+        auto *tres = new QPushButton(tr("Agregar 3 objetivos pegados (probar solapes)"), gl);
+        auto *quitaOb = new QPushButton(tr("Quitar el elegido"), gl);
+        m_simula = new QCheckBox(tr("Simular movimiento (se desplazan por su rumbo)"), gl);
+        vl->addWidget(m_listaObjetivos);
+        vl->addLayout(fo);
+        vl->addWidget(aplicaOb);
+        vl->addWidget(agregaOb);
+        vl->addWidget(tres);
+        vl->addWidget(quitaOb);
+        vl->addWidget(m_simula);
+        m_agregaObjetivo = agregaOb;
+        connect(m_listaObjetivos, &QListWidget::currentRowChanged, this,
+                [this](int) { cargaObjetivoElegido(); });
+        connect(aplicaOb, &QPushButton::clicked, this, [this] { aplicaObjetivoElegido(); });
+        connect(agregaOb, &QPushButton::clicked, this, [this] {
+            m_modoClic = 2;
+            m_mapa->setActiveTool(MapTool::PickPoint);
+            m_agregaObjetivo->setText(tr("Haz clic donde va el objetivo... (Esc cancela)"));
+        });
+        connect(tres, &QPushButton::clicked, this, [this] { agregaTresPegados(); });
+        connect(quitaOb, &QPushButton::clicked, this, [this] { quitaObjetivoElegido(); });
+        connect(m_simula, &QCheckBox::toggled, this,
+                [this](bool on) { on ? m_timerSim.start() : m_timerSim.stop(); });
 
-        // --- Entidades por tipo y partes -------------------------------------
-        auto *gs = new QGroupBox(tr("Sectores, tipos y partes"), panel);
-        auto *fs = new QFormLayout(gs);
-        m_lblConteos = new QLabel(gs);
-        m_lblConteos->setWordWrap(true);
-        auto *tSector = new QCheckBox(tr("Ver sectores"), gs);
-        auto *tSitio = new QCheckBox(tr("Ver sitios (una entidad, tres partes)"), gs);
-        auto *tPunto = new QCheckBox(tr("Ver puntos agregados"), gs);
-        for (QCheckBox *c : { tSector, tSitio, tPunto })
-            c->setChecked(true);
-        m_lblElemento = new QLabel(QStringLiteral("—"), gs);
-        m_lblElemento->setWordWrap(true);
-        fs->addRow(tr("Entidades por tipo"), m_lblConteos);
-        fs->addRow(tSector);
-        fs->addRow(tSitio);
-        fs->addRow(tPunto);
-        fs->addRow(tr("Último clic en entidad"), m_lblElemento);
-        connect(tSector, &QCheckBox::toggled, this,
-                [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("sector"), v); });
-        connect(tSitio, &QCheckBox::toggled, this,
-                [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("sitio"), v); });
-        connect(tPunto, &QCheckBox::toggled, this,
-                [this](bool v) { m_mapa->setFeatureTypeVisible(QStringLiteral("punto"), v); });
-        col->addWidget(gs);
-        actualizaConteos();
-
-        // --- Formulario de los objetivos -------------------------------------------------
-        auto *gf = new QGroupBox(tr("Formulario de objetivos (arrastrable)"), panel);
+        auto *gf = new QGroupBox(tr("2. Aspecto de los formularios (arrastrables)"));
         auto *ff = new QFormLayout(gf);
         m_colgado = new QCheckBox(tr("Colgado de la esquina más cercana"), gf);
         m_mono = new QCheckBox(tr("Fuente monoespaciada"), gf);
@@ -900,7 +1308,7 @@ private:
         m_offX->setValue(-31);
         m_offY->setValue(-31);
         auto *colorSel = new QPushButton(tr("Color de selección..."), gf);
-        auto *quitar = new QPushButton(tr("Quitar offsets propios"), gf);
+        auto *quitar = new QPushButton(tr("Quitar offsets propios (vuelven al de por defecto)"), gf);
         ff->addRow(m_colgado);
         ff->addRow(m_mono);
         ff->addRow(m_columnas);
@@ -923,12 +1331,96 @@ private:
             for (qint64 id : m_objetivos)
                 m_mapa->clearTargetLabelOffset(id);
         });
-        col->addWidget(gf);
-        connect(e300, &QPushButton::clicked, this, [this] { escala(300); });
-        connect(e600, &QPushButton::clicked, this, [this] { escala(600); });
+        actualizaObjetivos();
+        return pestana(tr("Leer varios objetivos a la vez: el color de cada segmento es información "
+                          "(identificación, estado) y el operador arrastra cada formulario para "
+                          "que no se pisen."), { gl, gf });
+    }
 
-        // --- Raton -------------------------------------------------------------------
-        auto *g2 = new QGroupBox(tr("Ratón"), panel);
+    // Pestana «Capas»: que hay en el mapa, por capa y por tipo, para filtrar y borrar en bloque.
+    QWidget *pestanaCapas()
+    {
+        auto *g = new QGroupBox(tr("Capas y tipos (con cuántas entidades hay)"));
+        auto *v = new QVBoxLayout(g);
+        m_arbol = new QTreeWidget(g);
+        m_arbol->setHeaderLabels({ tr("Capa / tipo"), tr("Nº") });
+        m_arbol->setColumnWidth(0, 250);
+        m_arbol->setMinimumHeight(260);
+        auto *soloEste = new QPushButton(tr("Mostrar SOLO el tipo elegido"), g);
+        auto *todo = new QPushButton(tr("Mostrar todo"), g);
+        auto *borra = new QPushButton(tr("Borrar el tipo elegido (en esa capa)"), g);
+        auto *act = new QPushButton(tr("Actualizar"), g);
+        v->addWidget(new QLabel(tr("La casilla de una capa la muestra u oculta; la de un tipo "
+                                   "oculta ese tipo en todas las capas."), g));
+        v->addWidget(m_arbol);
+        v->addWidget(soloEste);
+        v->addWidget(todo);
+        v->addWidget(borra);
+        v->addWidget(act);
+        connect(m_arbol, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *it, int) {
+            const QString capa = it->data(0, Qt::UserRole).toString();
+            const QString tipo = it->data(0, Qt::UserRole + 1).toString();
+            const bool ver = it->checkState(0) == Qt::Checked;
+            if (tipo.isEmpty() && !capa.isEmpty())
+                m_mapa->setFeatureLayerVisible(capa, ver);
+            else if (!tipo.isEmpty())
+                m_mapa->setFeatureTypeVisible(tipo, ver);
+        });
+        connect(act, &QPushButton::clicked, this, [this] { actualizaConteos(); });
+        connect(todo, &QPushButton::clicked, this, [this] {
+            for (const QString &t : m_mapa->hiddenFeatureTypes())
+                m_mapa->setFeatureTypeVisible(t, true);
+            actualizaConteos();
+        });
+        connect(soloEste, &QPushButton::clicked, this, [this] {
+            const auto *it = m_arbol->currentItem();
+            const QString elegido = it ? it->data(0, Qt::UserRole + 1).toString() : QString();
+            if (elegido.isEmpty())
+                return;
+            for (const QString &t : m_mapa->featureTypeCounts().keys())
+                m_mapa->setFeatureTypeVisible(t, t == elegido);
+            actualizaConteos();
+        });
+        connect(borra, &QPushButton::clicked, this, [this] {
+            const auto *it = m_arbol->currentItem();
+            if (!it || it->data(0, Qt::UserRole + 1).toString().isEmpty())
+                return;
+            m_mapa->clearFeaturesOfType(it->data(0, Qt::UserRole + 1).toString(),
+                                        it->data(0, Qt::UserRole).toString());
+            actualizaConteos();
+        });
+        actualizaConteos();
+        return pestana(tr("Mostrar solo lo que importa («solo los aeródromos internos»), ocultar "
+                          "una categoría o borrarla de una vez, y saber cuántas hay."), { g });
+    }
+
+    // Pestana «Ayuda»: que ver y que probar, pestana por pestana.
+    QWidget *pestanaAyuda()
+    {
+        auto *g = new QGroupBox(tr("Qué ver y qué probar"));
+        auto *v = new QVBoxLayout(g);
+        auto *ayuda = new QLabel(textoAyuda(), g);
+        ayuda->setWordWrap(true);
+        ayuda->setTextFormat(Qt::RichText);
+        v->addWidget(ayuda);
+        return pestana(tr("Guía de lo que hace cada pestaña y cómo comprobarlo."), { g });
+    }
+
+    // Construye el panel de la derecha: pestanas (una por tema) y, siempre a la vista debajo,
+    // la lectura del raton y de la ultima entidad tocada.
+    QWidget *creaPanel()
+    {
+        auto *tabs = new QTabWidget;
+        m_pestanas = tabs;
+        tabs->setUsesScrollButtons(true);
+        tabs->addTab(pestanaAnillos(), tr("Anillos"));
+        tabs->addTab(pestanaSectores(), tr("Sectores"));
+        tabs->addTab(pestanaPuntos(), tr("Puntos"));
+        tabs->addTab(pestanaObjetivos(), tr("Objetivos"));
+        tabs->addTab(pestanaCapas(), tr("Capas"));
+        tabs->addTab(pestanaAyuda(), tr("Ayuda"));
+
+        auto *g2 = new QGroupBox(tr("Ratón y último clic"));
         auto *f2 = new QFormLayout(g2);
         m_lblDecimal = new QLabel(QStringLiteral("—"), g2);
         m_lblDms = new QLabel(QStringLiteral("—"), g2);
@@ -938,52 +1430,44 @@ private:
         QFont negrita = m_desdeCentro->font();
         negrita.setBold(true);
         m_desdeCentro->setFont(negrita);
+        m_lblElemento = new QLabel(QStringLiteral("—"), g2);
+        m_lblElemento->setWordWrap(true);
         f2->addRow(tr("Decimal"), m_lblDecimal);
         f2->addRow(tr("GMS"), m_lblDms);
         f2->addRow(tr("UTM"), m_lblUtm);
         f2->addRow(tr("Desde el centro"), m_desdeCentro);
+        f2->addRow(tr("Entidad tocada"), m_lblElemento);
+
+        auto *panel = new QWidget(this);
+        auto *col = new QVBoxLayout(panel);
+        col->setContentsMargins(0, 0, 0, 0);
+        col->addWidget(tabs, 1);
         col->addWidget(g2);
-
-        // --- Que ver y que probar ------------------------------------------------------
-        auto *g3 = new QGroupBox(tr("Qué ver y qué probar"), panel);
-        auto *v3 = new QVBoxLayout(g3);
-        auto *ayuda = new QLabel(textoAyuda(), g3);
-        ayuda->setWordWrap(true);
-        ayuda->setTextFormat(Qt::RichText);
-        v3->addWidget(ayuda);
-        col->addWidget(g3);
-        col->addStretch(1);
-
-        // Las conexiones, al final: aplicaAnillos lee todos los controles.
-        for (QCheckBox *c : { m_mostrar, m_rotulos, m_barra, m_cuadricula, m_enfasis,
-                              m_colorRadiales })
-            connect(c, &QCheckBox::toggled, this, [this] { aplicaAnillos(); });
-        for (QSpinBox *sp : { m_cadaAnillos, m_cadaGrados })
-            connect(sp, QOverload<int>::of(&QSpinBox::valueChanged), this,
-                    [this] { aplicaAnillos(); });
-        for (QComboBox *c : { m_unidades, m_radiales })
-            connect(c, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-                    [this] { aplicaAnillos(); });
-        connect(m_separacion, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-                [this] { aplicaAnillos(); });
-        connect(m_numero, QOverload<int>::of(&QSpinBox::valueChanged), this,
-                [this] { aplicaAnillos(); });
-        connect(m_elegir, &QPushButton::clicked, this, [this] {
-            m_mapa->setActiveTool(MapTool::PickPoint);
-            m_elegir->setText(tr("Haz clic en el mapa... (Esc cancela)"));
-        });
-        connect(habana, &QPushButton::clicked, this, [this] { ponCentro(kHabana); });
-        connect(ir, &QPushButton::clicked, this, [this] { m_mapa->setCenter(m_centro); });
-
-        auto *scroll = new QScrollArea(this);
-        scroll->setWidget(panel);
-        scroll->setWidgetResizable(true);
-        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        scroll->setFixedWidth(400);
-        return scroll;
+        panel->setFixedWidth(440);
+        return panel;
     }
 
+    struct DatosObj {
+        QString ident, estado, l2, l3;
+    };
     MapWidget *m_mapa = nullptr;
+    QHash<qint64, DatosObj> m_datosObj;
+    QTimer m_timerSim;
+    QTreeWidget *m_arbol = nullptr;
+    QTabWidget *m_pestanas = nullptr;
+    QListWidget *m_listaElementos = nullptr;
+    QComboBox *m_elAncla = nullptr;
+    QSpinBox *m_elFuente = nullptr;
+    QCheckBox *m_elATodos = nullptr;
+    QListWidget *m_listaObjetivos = nullptr;
+    QLineEdit *m_obId = nullptr;
+    QComboBox *m_obEstado = nullptr;
+    QLineEdit *m_obL2 = nullptr;
+    QLineEdit *m_obL3 = nullptr;
+    QCheckBox *m_simula = nullptr;
+    QPushButton *m_agregaObjetivo = nullptr;
+    QComboBox *m_paleta = nullptr;
+    int m_modoClic = 0;             // 0 = ninguno; 1 = agregar punto; 2 = agregar objetivo
     qint64 m_anillos = -1;
     QGeoCoordinate m_centro;
     QCheckBox *m_mostrar = nullptr;
@@ -993,7 +1477,6 @@ private:
     QLabel *m_lblCentro = nullptr;
     QPushButton *m_elegir = nullptr;
     QPushButton *m_colocar = nullptr;
-    bool m_colocando = false;       // el proximo clic agrega un punto
     QListWidget *m_resultados = nullptr;
     QVector<Place> m_lugares;       // lo que muestra la lista de resultados
     QComboBox *m_unidades = nullptr;
@@ -1012,7 +1495,6 @@ private:
     qint64 m_sitios = -1;
     QVector<qint64> m_sectoresIds;
     QListWidget *m_listaSectores = nullptr;
-    QLabel *m_lblConteos = nullptr;
     QLabel *m_lblElemento = nullptr;
     QVector<qint64> m_objetivos;
     QCheckBox *m_colgado = nullptr;
@@ -1242,6 +1724,28 @@ int comprobar(Ventana &v)
               "las partes con nombre deberian tener rotulo propio", &fallos);
     }
 
+    // 12. Objetivos: agregar uno, cambiar su estado (el color del segmento cambia, la traza no
+    //     se pierde) y quitarlo.
+    const int antesObj = v.objetivos().size();
+    const qint64 nuevoObj = v.agregaObjetivo(kHabana.atDistanceAndAzimuth(20000.0, 10.0),
+                                              QString(), 45.0, QStringLiteral("DET"));
+    exige(v.objetivos().size() == antesObj + 1 && m->target(nuevoObj).has_value(),
+          "no se agrego el objetivo", &fallos);
+    m->updateTarget(nuevoObj, kHabana.atDistanceAndAzimuth(21000.0, 10.0));
+    v.cambiaEstadoObjetivo(nuevoObj, QStringLiteral("EMER"));
+    const auto ob = m->target(nuevoObj);
+    exige(ob && ob->labelContent.size() == 3 && ob->labelContent.first().segments.size() == 2 &&
+              ob->labelContent.first().segments.at(1).text == QStringLiteral("EMER") &&
+              ob->labelContent.first().segments.at(1).color == QColor(0xc6, 0x28, 0x28),
+          "el estado no cambio el color del rotulo", &fallos);
+
+    // 13. Un elemento de «Sitios» cambia de color por si solo, sin tocar las otras partes.
+    v.ponColor(sitios, 0, QColor(0x15, 0x65, 0xc0));
+    const auto sit = m->feature(sitios);
+    exige(sit && sit->partInfo(0)->colorOverride == QColor(0x15, 0x65, 0xc0) &&
+              sit->partInfo(1)->colorOverride != QColor(0x15, 0x65, 0xc0),
+          "el color de una parte debe cambiar solo esa", &fallos);
+
     if (fallos == 0)
         QTextStream(stdout) << "laboratorio_anillos --comprobar: todo correcto\n";
     return fallos == 0 ? 0 : 1;
@@ -1270,7 +1774,7 @@ int main(int argc, char *argv[])
         return comprobar(ventana);
     ventana.show();
 
-    // --captura=imagen.png: la ventana con la escala de 600 km, el formulario colgado y el raton
+    // --captura=imagen.png [--pestana=N]: la ventana con la escala de 600 km, el formulario colgado y el raton
     // «puesto» sobre el tercer anillo al 060, y sale.
     for (const QString &a : app.arguments()) {
         if (a.startsWith(QLatin1String("--captura="))) {
@@ -1281,6 +1785,9 @@ int main(int argc, char *argv[])
                 fmt.monospace = true;
                 fmt.maxChars = 16;
                 fmt.segmentChars = { 8, 8 };
+                for (const QString &b : app.arguments())
+                    if (b.startsWith(QLatin1String("--pestana=")))
+                        ventana.ponPestana(b.mid(10).toInt());
                 ventana.mapa()->setTargetLabelFormat(fmt);
                 ventana.mapa()->setDefaultTargetLabelOffset(QPointF(-31.0, -31.0));
                 ventana.ponAncla(LabelAnchor::Top);

@@ -44,6 +44,22 @@ el mapa, y «Quitar todos» los borra por tipo.
 
 Todo en un solo fichero, [`main.cpp`](main.cpp), pensado para leerse de arriba abajo.
 
+## Cómo está organizado
+
+El panel de la derecha va en **pestañas**, cada una con una línea que dice para qué sirve; la lectura del ratón y
+de la última entidad tocada queda siempre debajo.
+
+| Pestaña | Para qué sirve |
+|---|---|
+| Anillos | Medir distancia y marcación desde un punto: escala de 300/600 km, énfasis, colores (rojo o los grises del Anexo C) |
+| Sectores | Señalar un área donde concentrarse; cada sector se muestra, cambia, analiza y elimina por separado |
+| Puntos | Buscar lugares, agregarlos sueltos o como partes de una entidad, y elegir por elemento el lado del rótulo, la fuente y el color (estado) |
+| Objetivos | Leer varios a la vez: estado que cambia el color del rótulo, tres objetivos pegados para probar solapes, simulación de movimiento y aspecto de los formularios |
+| Capas | Ver qué hay por capa y tipo, mostrar solo un tipo y borrar uno de una vez |
+| Ayuda | Qué hace y cómo comprobar cada pestaña |
+
+El análisis de si esto cumple lo pedido está en [`docs/Analisis_cumplimiento.md`](../../docs/Analisis_cumplimiento.md).
+
 ## Probarlo
 
 Con libmapa instalada (ver [`docs/DESPLIEGUE.md`](../../docs/DESPLIEGUE.md)), sobre el paquete de

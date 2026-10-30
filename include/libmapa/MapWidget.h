@@ -524,6 +524,11 @@ public:
                       const QDateTime &time = QDateTime());
 
     bool setTargetLabel(qint64 id, const QString &text);
+    //! Cambia el rotulo por segmentos de un objetivo ya existente (texto y color de cada
+    //! segmento: el estado que pasa de «detectado» a «emergencia», por ejemplo) sin perder
+    //! su traza ni su historial. Vacio = vuelve al texto plano de \ref setTargetLabel.
+    //! false si el id no existe.
+    bool setTargetLabelContent(qint64 id, const QVector<TargetLabelLine> &content);
 
     //! Desplazamiento de la ETIQUETA del objetivo respecto a su simbolo, en
     //! pixeles. Relativo: al moverse el objetivo la etiqueta lo sigue. Cuando no

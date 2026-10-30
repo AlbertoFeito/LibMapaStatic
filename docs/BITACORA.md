@@ -7350,3 +7350,21 @@ tocar los demás, cambiar solo ese, eliminar uno, restablecer y el análisis.
 (el sector sobrevive guardar y cargar). **Lo que no es:** el relleno del sector depende del color de relleno de la entidad; el recuento de objetivos se calcula al cambiar un sector, no mientras se mueven.
 
 **Estado: 33 tests (30 sin QCustomPlot).**
+
+
+## 179. Análisis de lo pedido y `laboratorio_anillos` en pestañas
+
+**Origen.** El usuario pidió comprobar, desde el punto de vista de un operador, si la aplicación cumple lo que pidió el equipo de la versión extendida («está confusa»), revisar el intercambio completo y
+averiguar el **objetivo** de cada petición. El resultado, petición por petición, está en [`Analisis_cumplimiento.md`](Analisis_cumplimiento.md).
+
+**Brecha real encontrada en la librería.** El color por segmento es información operativa (identificación y **estado**), pero un objetivo ya creado no podía cambiar su rótulo por segmentos sin borrarlo y perder
+su traza e historial. Se añade `MapWidget::setTargetLabelContent(id, líneas)` (y `TargetModel::setLabelContent`), con test: avisa, conserva la traza, vacío vuelve al texto plano y un id inexistente da `false`.
+
+**El ejemplo.** Se reorganiza en **pestañas** con su objetivo escrito arriba: *Anillos* (escala, énfasis y colores, con los grises del Anexo C), *Sectores*, *Puntos* (buscador, lista de lo agregado y lado,
+fuente y color **por elemento**; botones de estado Activo, Inactivo y Alarma), *Objetivos* (agregar con un clic, tres pegados para probar solapes, estado que cambia el color, simulación de movimiento y el aspecto
+de los formularios), *Capas* (árbol de capas y tipos con cuentas, solo-este-tipo y borrar-este-tipo) y *Ayuda*. La lectura del ratón y de la última entidad tocada queda siempre visible. Tocar una entidad la elige
+también en su lista. `--comprobar` crece: agregar un objetivo, cambiar su estado (el color del segmento cambia y la traza no se pierde) y cambiar el color de una sola parte.
+
+**Pendiente de decidir** (no es código): la equivalencia de nombres de los parámetros de ancho del formulario y que el compañero sepa que los anillos son un solo objeto (§3 del análisis).
+
+**Estado: 33 tests (30 sin QCustomPlot).**
