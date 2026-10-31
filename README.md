@@ -159,7 +159,11 @@ mueve buques, aeronaves y UAVs con su icono orientado al rumbo.
 **Clic en un objetivo → sus datos.** Sin herramienta activa, pulsar sobre un
 objetivo lo resalta y emite `targetClicked(id, pos)`; desde ahí lees sus
 `attributes`. También a mano: `targetAt(pixel)` da el objetivo bajo un punto y
-`setSelectedTarget(id)` lo resalta.
+`setSelectedTarget(id)` lo resalta y `clearSelectedTarget()` lo suelta (con la señal
+`targetSelectionChanged`). El **formulario** de un objetivo es aparte: se arrastra con el
+botón que elija la app (`setTargetLabelDragButton`, izquierdo por defecto; con el derecho
+no abre el menú contextual), se marca con un recuadro solo mientras se arrastra
+(`targetLabelSelected`) y **no** selecciona el objetivo.
 
 ```cpp
 connect(mapa, &libmapa::MapWidget::targetClicked, this, [=](qint64 id, auto){

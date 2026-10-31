@@ -7439,3 +7439,73 @@ se conserva) y `tst_mapwidget` (`sectorFollowsItsOwner`: sigue al objetivo, se v
 **Lo que no es.** El dueño debe existir al poner el sector. El dueño solo vale para círculos y sectores (para el resto de entidades no hace nada).
 
 **Estado: 33 tests (30 sin QCustomPlot).**
+
+## 184. Formulario y objetivo por separado: el formulario se arrastra con el clic derecho
+
+**El problema.** El usuario probó `laboratorio_anillos` y mandó una petición de revisión
+(30/10/2026), con dos problemas:
+- El formulario de un objetivo se movía con el **clic izquierdo**, y tenía que ser con el
+  **derecho**.
+- Al pulsarlo se seleccionaba también el **objetivo**: aparecía el círculo amarillo del icono.
+
+Son dos gestos distintos: uno es mover el formulario y otro es elegir el objetivo. La causa
+estaba en la librería: `MapView` llamaba a `setSelectedTarget` al agarrar el rótulo, y
+`TargetLayer` tenía un único estado (`m_selected`) que pintaba a la vez el halo del icono y el
+tinte del formulario.
+
+**Qué cambia (aditivo, salvo lo que se pedía quitar).**
+- **Botón configurable:** `MapWidget::setTargetLabelDragButton(Qt::MouseButton)` (izquierdo por
+  defecto, o derecho; otro botón se ignora). Con el derecho:
+  - el formulario se agarra al pulsar y se suelta al soltar;
+  - ese clic derecho no llega a abrir el menú contextual;
+  - sobre el icono, una entidad o el vacío, el clic derecho sigue emitiendo `contextMenuRequested`;
+  - el izquierdo queda para seleccionar y para la herramienta activa.
+- **Segundo estado, el formulario agarrado:** `setTargetLabelSelected` / `targetLabelSelected` /
+  `clearTargetLabelSelected`, y la capa con `m_labelSelected`.
+  - Solo dura lo que dura el botón pulsado. Además vuelve a -1 con Esc, con un clic en vacío o
+    con un clic en otro objetivo.
+  - Se ve como un **recuadro** del color de selección alrededor de la caja, y ese color en los
+    segmentos sin color propio. Es la opción C de la petición, sumada a la B: los colores del
+    estado (ident azul, EMER rojo...) no se pierden mientras se arrastra.
+  - Mientras está agarrado, el formulario no desaparece por el declutter.
+  - Agarrarlo **ya no selecciona el objetivo**. Es el único cambio de comportamiento, y es el que
+    se pedía; el test `targetLabelDragSignalAndCancel` pasa a exigir que no se seleccione.
+- **Deselección desde la app:** `clearSelectedTarget()`. Señales:
+  - `targetSelectionChanged(id)`: una por cambio, lo pida la app o el usuario; llamar sin cambio
+    no emite nada;
+  - `targetLabelSelectionChanged(id)`;
+  - `targetLabelClicked(id)`.
+
+  Así la app puede soltar el objetivo al cerrar un menú, una tarjeta o desde un botón.
+- **Sin cambios:** `MapHit`, `contextMenuRequested` y las herramientas. La librería sigue sin
+  abrir menús: dice qué hay debajo y la app decide. El vértice de un polígono sigue la opción A de
+  la petición: la app selecciona la entidad antes.
+
+**Laboratorio.**
+- Arrastra el formulario con el **clic derecho**. Un selector en la pestaña Objetivos vuelve al
+  izquierdo, para comparar.
+- La línea «Selección» dice qué objetivo está elegido y qué formulario está agarrado.
+- «Deseleccionar el objetivo» llama a `clearSelectedTarget`.
+- La ayuda explica la diferencia, y `--comprobar` cubre el botón y la independencia de los dos
+  estados.
+
+**Pruebas.** `tst_mapwidget::targetLabelGrabIsIndependentOfSelection` comprueba:
+- el clic derecho sobre el formulario: agarrado sin halo, el recuadro en píxeles, movido al
+  soltar, sin menú y sin cambio de objetivo;
+- el izquierdo no agarra si el botón es el derecho;
+- el clic derecho sobre el icono: menú, sin resaltar;
+- `clearSelectedTarget` y las señales, que se emiten una vez por cambio;
+- que al volver al izquierdo el derecho sobre el formulario vuelve a ser el menú.
+
+**Overlays de teselas (pregunta 8.3 de la petición).**
+- Con la API pública hay **un** overlay encima de la base: el vectorial del mapa híbrido
+  (`setVectorOverlay`), que se pone, se quita, se muestra y se oculta.
+- Varios a la vez, o reordenables en caliente, **no** se pueden montar desde la app ni siquiera
+  con `customPlot()`. `TileService` y `TileLayer` son internos (no se instalan sus cabeceras):
+  sin ellos no hay quien pida las teselas ni las sincronice con la vista.
+- La decisión de la petición (un overlay activo a la vez) encaja con lo que hay. Si hiciera falta
+  más, sería API nueva en `MapWidget`, del tipo `addOverlay(file, zOrder)` / `setOverlayZOrder` /
+  `removeOverlay`, con cada overlay en su `QCPLayer` entre la base y las entidades.
+
+**Estado: 33 tests (30 sin QCustomPlot) y el contrato de instalación en verde.**
+

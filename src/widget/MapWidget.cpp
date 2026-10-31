@@ -752,6 +752,10 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
     connect(d->view, &MapView::featureDragStarted, this, &MapWidget::featureDragStarted);
     connect(d->view, &MapView::featureDragMovedTo, this, &MapWidget::featureDragMovedTo);
     connect(d->view, &MapView::targetLabelMoved, this, &MapWidget::targetLabelMoved);
+    connect(d->view, &MapView::targetSelectionChanged, this, &MapWidget::targetSelectionChanged);
+    connect(d->view, &MapView::targetLabelSelectionChanged, this,
+            &MapWidget::targetLabelSelectionChanged);
+    connect(d->view, &MapView::targetLabelClicked, this, &MapWidget::targetLabelClicked);
     connect(d->view, &MapView::featureDragFinished, this, &MapWidget::featureDragFinished);
     connect(d->view, &MapView::drawingCancelled, this, &MapWidget::drawingCancelled);
 
@@ -2049,6 +2053,44 @@ void MapWidget::setSelectedTarget(qint64 id)
 qint64 MapWidget::selectedTarget() const
 {
     return d->view ? d->view->selectedTarget() : -1;
+}
+
+// Quita el resaltado del objetivo.
+void MapWidget::clearSelectedTarget()
+{
+    setSelectedTarget(-1);
+}
+
+// Marca un formulario como agarrado (-1 = ninguno), sin tocar el objetivo resaltado.
+void MapWidget::setTargetLabelSelected(qint64 id)
+{
+    if (d->view)
+        d->view->setTargetLabelSelected(id);
+}
+
+// Formulario agarrado, o -1.
+qint64 MapWidget::targetLabelSelected() const
+{
+    return d->view ? d->view->targetLabelSelected() : -1;
+}
+
+// Suelta el formulario agarrado.
+void MapWidget::clearTargetLabelSelected()
+{
+    setTargetLabelSelected(-1);
+}
+
+// Boton que arrastra el formulario de un objetivo (izquierdo o derecho).
+void MapWidget::setTargetLabelDragButton(Qt::MouseButton button)
+{
+    if (d->view)
+        d->view->setTargetLabelDragButton(button);
+}
+
+// Boton que arrastra el formulario; izquierdo si aun no hay mapa.
+Qt::MouseButton MapWidget::targetLabelDragButton() const
+{
+    return d->view ? d->view->targetLabelDragButton() : Qt::LeftButton;
 }
 
 // Elimina un objetivo; tambien lo olvidan las zonas vigiladas, sin emitir salida.

@@ -141,6 +141,10 @@ private slots:
     //! Arrastrar el rotulo de un objetivo: la senal se emite al soltar dentro del
     //! mapa y soltar fuera cancela y restaura el estado anterior.
     void targetLabelDragSignalAndCancel();
+    //! Agarrar el formulario y elegir el objetivo son gestos distintos: el boton
+    //! de arrastre es configurable (derecho: no abre el menu), agarrar no resalta
+    //! el icono y al soltar se suelta; la app deselecciona con clearSelectedTarget.
+    void targetLabelGrabIsIndependentOfSelection();
     //! Colocacion Hanging: la caja cuelga de posicion+offset por la esquina que
     //! corresponde al azimut, y Classic no cambia.
     void targetLabelHangingPlacement();
@@ -4308,7 +4312,9 @@ void TstMapWidget::targetLabelDragSignalAndCancel()
     QCOMPARE(movido.first().at(1).toPointF(), QPointF(60.0, -20.0));
     QVERIFY(w.target(id)->labelOffsetSet);
     QCOMPARE(w.target(id)->labelOffsetPx, QPointF(60.0, -20.0));
-    QCOMPARE(w.selectedTarget(), id);
+    // Agarrar el formulario no resalta el objetivo, y al soltar se suelta.
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    QCOMPARE(w.targetLabelSelected(), qint64(-1));
 
     // Un clic sin mover no emite nada.
     repintaObjetivos(w);
@@ -4354,6 +4360,125 @@ void TstMapWidget::targetLabelDragSignalAndCancel()
     QVERIFY(!w.target(otro)->labelOffsetSet);
     QCOMPARE(w.target(otro)->labelOffsetPx, QPointF(0.0, 0.0));
     QCOMPARE(movido.size(), 1);
+}
+
+static int pixelesDeColor(const QImage &img, const QRect &r, const QColor &c, int tol = 40);
+
+void TstMapWidget::targetLabelGrabIsIndependentOfSelection()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate centro(21.5, -79.5);
+    w.setCenter(centro);
+    w.setZoom(12);
+    auto *vista = qobject_cast<MapView *>(w.customPlot());
+    QVERIFY(vista != nullptr);
+    const QColor magenta(255, 0, 255);
+    w.setTargetLabelSelectionColor(magenta);
+
+    // Por defecto se arrastra con el izquierdo; un boton que no sea izquierdo ni
+    // derecho se ignora.
+    QCOMPARE(w.targetLabelDragButton(), Qt::LeftButton);
+    w.setTargetLabelDragButton(Qt::MiddleButton);
+    QCOMPARE(w.targetLabelDragButton(), Qt::LeftButton);
+    w.setTargetLabelDragButton(Qt::RightButton);
+    QCOMPARE(w.targetLabelDragButton(), Qt::RightButton);
+
+    const qint64 id = objetivoConRotulo(w, centro, QStringLiteral("FORMULARIO"));
+    const QRect caja = w.targetLabelRect(id);
+    QVERIFY(caja.isValid());
+    QSignalSpy agarrado(&w, &MapWidget::targetLabelClicked);
+    QSignalSpy cambiosFormulario(&w, &MapWidget::targetLabelSelectionChanged);
+    QSignalSpy cambiosObjetivo(&w, &MapWidget::targetSelectionChanged);
+    QSignalSpy menu(&w, &MapWidget::contextMenuRequested);
+    QSignalSpy movido(&w, &MapWidget::targetLabelMoved);
+
+    // Clic DERECHO sobre el formulario: queda agarrado (marco magenta) sin halo ni
+    // seleccion del objetivo.
+    const QPoint inicio = caja.center();
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, inicio,
+                                   Qt::RightButton, Qt::RightButton);
+    QCoreApplication::sendEvent(vista, &pulsa);
+    QCOMPARE(w.targetLabelSelected(), id);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    QCOMPARE(agarrado.size(), 1);
+    QCOMPARE(agarrado.first().at(0).toLongLong(), id);
+    repintaObjetivos(w);
+    QVERIFY2(pixelesDeColor(w.grab().toImage(), w.targetLabelRect(id).adjusted(-4, -3, 4, 3),
+                            magenta) > 10,
+             "El formulario agarrado no lleva el marco del color de seleccion");
+
+    // Se mueve con el derecho y al soltar se suelta: senal de movido, sin menu.
+    QMouseEvent mueve = mouseEvent(QEvent::MouseMove, inicio + QPoint(40, 30),
+                                   Qt::NoButton, Qt::RightButton);
+    QCoreApplication::sendEvent(vista, &mueve);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, inicio + QPoint(40, 30),
+                                    Qt::RightButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &suelta);
+    QCOMPARE(movido.size(), 1);
+    QCOMPARE(w.target(id)->labelOffsetPx, QPointF(40.0, 30.0));
+    QCOMPARE(w.targetLabelSelected(), qint64(-1));
+    QCOMPARE(menu.size(), 0);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    QCOMPARE(cambiosObjetivo.size(), 0);
+    QCOMPARE(cambiosFormulario.size(), 2);                 // agarrado y suelto
+    QCOMPARE(cambiosFormulario.last().at(0).toLongLong(), qint64(-1));
+    repintaObjetivos(w);
+    QCOMPARE(pixelesDeColor(w.grab().toImage(), w.targetLabelRect(id).adjusted(-4, -3, 4, 3),
+                            magenta), 0);
+
+    // Con el derecho como boton de arrastre, el izquierdo NO agarra el formulario.
+    const QPoint otraVez = w.targetLabelRect(id).center();
+    QMouseEvent pi = mouseEvent(QEvent::MouseButtonPress, otraVez, Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(vista, &pi);
+    QCOMPARE(w.targetLabelSelected(), qint64(-1));
+    QMouseEvent si = mouseEvent(QEvent::MouseButtonRelease, otraVez, Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &si);
+    QCOMPARE(agarrado.size(), 1);
+
+    // Clic derecho sobre el ICONO: menu contextual, sin resaltar el objetivo.
+    const QPointF ax = MapView::toAxis(centro);
+    const QPoint icono(int(std::lround(vista->xAxis->coordToPixel(ax.x()))),
+                       int(std::lround(vista->yAxis->coordToPixel(ax.y()))));
+    QMouseEvent pd = mouseEvent(QEvent::MouseButtonPress, icono, Qt::RightButton, Qt::RightButton);
+    QCoreApplication::sendEvent(vista, &pd);
+    QMouseEvent sd = mouseEvent(QEvent::MouseButtonRelease, icono, Qt::RightButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &sd);
+    QCOMPARE(menu.size(), 1);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    QCOMPARE(w.targetLabelSelected(), qint64(-1));
+
+    // La app resalta y deselecciona: una senal por cambio, ninguna si no cambia.
+    w.setSelectedTarget(id);
+    w.setSelectedTarget(id);
+    QCOMPARE(cambiosObjetivo.size(), 1);
+    QCOMPARE(cambiosObjetivo.last().at(0).toLongLong(), id);
+    w.clearSelectedTarget();
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    QCOMPARE(cambiosObjetivo.size(), 2);
+    QCOMPARE(cambiosObjetivo.last().at(0).toLongLong(), qint64(-1));
+    w.clearSelectedTarget();
+    QCOMPARE(cambiosObjetivo.size(), 2);
+
+    // Lo mismo con el formulario desde codigo; no toca el objetivo.
+    w.setTargetLabelSelected(id);
+    QCOMPARE(w.targetLabelSelected(), id);
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    w.clearTargetLabelSelected();
+    w.clearTargetLabelSelected();
+    QCOMPARE(w.targetLabelSelected(), qint64(-1));
+    QCOMPARE(cambiosFormulario.size(), 4);
+
+    // Volviendo al izquierdo, el derecho sobre el formulario vuelve a ser el menu.
+    w.setTargetLabelDragButton(Qt::LeftButton);
+    const QPoint enCaja = w.targetLabelRect(id).center();
+    QMouseEvent pd2 = mouseEvent(QEvent::MouseButtonPress, enCaja, Qt::RightButton, Qt::RightButton);
+    QCoreApplication::sendEvent(vista, &pd2);
+    QCOMPARE(w.targetLabelSelected(), qint64(-1));
+    QMouseEvent sd2 = mouseEvent(QEvent::MouseButtonRelease, enCaja, Qt::RightButton, Qt::NoButton);
+    QCoreApplication::sendEvent(vista, &sd2);
+    QCOMPARE(menu.size(), 2);
 }
 
 void TstMapWidget::targetLabelHangingPlacement()
@@ -4412,7 +4537,7 @@ void TstMapWidget::targetLabelHangingPlacement()
 }
 
 // Cuenta pixeles de un color (con tolerancia) dentro de un recuadro.
-static int pixelesDeColor(const QImage &img, const QRect &r, const QColor &c, int tol = 40)
+static int pixelesDeColor(const QImage &img, const QRect &r, const QColor &c, int tol)
 {
     int n = 0;
     const QRect dentro = r.intersected(img.rect());

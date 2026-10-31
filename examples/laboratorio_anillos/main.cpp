@@ -190,8 +190,9 @@ QString textoAyuda()
         "<i>sus</i> sectores; se ven todos a la vez; «solo el elegido» oculta los de los demás.</li>"
         "<li>Agrega más puntos en la pestaña Puntos y ponles anillos o sectores propios.</li>"
         "<li><b>Clic derecho:</b> sobre un punto, sus anillos y sus sectores; sobre un sector, "
-        "cambiarlo, ocultarlo o quitarlo; sobre un objetivo, su estado; sobre un lugar vacío, "
-        "agregar un punto o un objetivo allí.</li></ul>"
+        "cambiarlo, ocultarlo o quitarlo; sobre el icono de un objetivo, su estado; sobre un "
+        "lugar vacío, agregar un punto o un objetivo allí. Sobre el <i>formulario</i> de un "
+        "objetivo el clic derecho no abre menú: lo arrastra.</li></ul>"
         "<b>Anillos</b> · medir distancia y marcación desde un punto"
         "<ul><li>Pasa el ratón por un anillo: «Desde el centro» debe dar su rótulo (10 km, "
         "20 km...); compáralo con la barra de escala.</li>"
@@ -217,7 +218,14 @@ QString textoAyuda()
         "<b>Objetivos</b> · leer varios a la vez"
         "<ul><li>El color del segundo segmento es el estado (DET, M1M2, EMER): cámbialo y el "
         "rótulo cambia sin perder la traza. «Agregar 3 objetivos pegados» muestra cómo se pisan "
-        "los formularios; arrástralos (soltar fuera del mapa cancela).</li>"
+        "los formularios; arrástralos con el <b>clic derecho</b> (soltar fuera del mapa "
+        "cancela).</li>"
+        "<li>Formulario y objetivo son <b>dos cosas distintas</b>: agarrar el formulario lo "
+        "enmarca solo mientras lo arrastras y <i>no</i> selecciona el objetivo (sin círculo "
+        "amarillo). El objetivo se selecciona con el clic izquierdo en su icono o desde la "
+        "lista, y «Deseleccionar el objetivo» lo suelta. La línea «Selección» dice en todo "
+        "momento qué está elegido.</li>"
+        "<li>«Arrastrar el formulario con» vuelve al clic izquierdo, para comparar.</li>"
         "<li>Colgado de la esquina, fuente monoespaciada, ancho, columnas 8 + 8, offset por "
         "defecto y color de selección son del aspecto común.</li></ul>"
         "<b>Capas</b> · filtrar y borrar en bloque"
@@ -311,6 +319,15 @@ public:
         connect(m_mapa, &MapWidget::targetClicked, this, [this](qint64 id, const QGeoCoordinate &) {
             seleccionaObjetivo(id);
         });
+        // Formulario y objetivo, por separado: agarrar un formulario no selecciona su objetivo.
+        m_mapa->setTargetLabelDragButton(Qt::RightButton);
+        connect(m_mapa, &MapWidget::targetSelectionChanged, this, [this] { muestraSeleccion(); });
+        connect(m_mapa, &MapWidget::targetLabelSelectionChanged, this, [this] { muestraSeleccion(); });
+        connect(m_mapa, &MapWidget::targetLabelClicked, this, [this](qint64 id) {
+            statusBar()->showMessage(tr("Formulario de %1 agarrado: arrástralo; el objetivo no se "
+                                        "selecciona").arg(m_datosObj.value(id).ident), 6000);
+        });
+        muestraSeleccion();
         connect(m_soloElegido, &QCheckBox::toggled, this, [this] { aplicaVisibilidad(); });
         aplicaFormato();
         // El primer origen: La Habana, con anillos y los cuatro sectores de ejemplo.
@@ -1167,6 +1184,18 @@ private:
                 m_listaObjetivos->setCurrentRow(i);
     }
 
+    // Escribe en el panel que objetivo esta seleccionado y que formulario esta agarrado: son
+    // dos estados distintos y la linea deja ver que uno no arrastra al otro.
+    void muestraSeleccion()
+    {
+        const auto nombre = [this](qint64 id) {
+            return id < 0 ? tr("ninguno") : m_datosObj.value(id).ident;
+        };
+        m_lblSeleccion->setText(tr("objetivo: %1 · formulario agarrado: %2")
+                                    .arg(nombre(m_mapa->selectedTarget()),
+                                         nombre(m_mapa->targetLabelSelected())));
+    }
+
     // Carga en los campos los datos del objetivo elegido y lo selecciona en el mapa.
     void cargaObjetivoElegido()
     {
@@ -1792,8 +1821,17 @@ private:
             sp->setRange(-300, 300);
         m_offX->setValue(-31);
         m_offY->setValue(-31);
+        m_botonFormulario = new QComboBox(gf);
+        m_botonFormulario->addItem(tr("Clic derecho"), int(Qt::RightButton));
+        m_botonFormulario->addItem(tr("Clic izquierdo"), int(Qt::LeftButton));
+        m_lblSeleccion = new QLabel(gf);
+        m_lblSeleccion->setWordWrap(true);
+        auto *deselecciona = new QPushButton(tr("Deseleccionar el objetivo"), gf);
         auto *colorSel = new QPushButton(tr("Color de selección..."), gf);
         auto *quitar = new QPushButton(tr("Quitar offsets propios (vuelven al de por defecto)"), gf);
+        ff->addRow(tr("Arrastrar el formulario con"), m_botonFormulario);
+        ff->addRow(tr("Selección"), m_lblSeleccion);
+        ff->addRow(deselecciona);
         ff->addRow(m_colgado);
         ff->addRow(m_mono);
         ff->addRow(m_columnas);
@@ -1807,6 +1845,14 @@ private:
         for (QSpinBox *sp : { m_maxChars, m_offX, m_offY })
             connect(sp, QOverload<int>::of(&QSpinBox::valueChanged), this,
                     [this] { aplicaFormato(); });
+        // El boton que arrastra el formulario lo elige la app; el laboratorio usa el derecho
+        // y deja el izquierdo para seleccionar el objetivo y para la herramienta activa.
+        connect(m_botonFormulario, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this](int) {
+                    m_mapa->setTargetLabelDragButton(
+                        Qt::MouseButton(m_botonFormulario->currentData().toInt()));
+                });
+        connect(deselecciona, &QPushButton::clicked, this, [this] { m_mapa->clearSelectedTarget(); });
         connect(colorSel, &QPushButton::clicked, this, [this] {
             const QColor c = QColorDialog::getColor(m_mapa->targetLabelSelectionColor(), this);
             if (c.isValid())
@@ -1970,6 +2016,8 @@ private:
     QLineEdit *m_obL3 = nullptr;
     QCheckBox *m_simula = nullptr;
     QPushButton *m_agregaObjetivo = nullptr;
+    QComboBox *m_botonFormulario = nullptr;   //!< Boton que arrastra el formulario.
+    QLabel *m_lblSeleccion = nullptr;         //!< Que objetivo y que formulario estan elegidos.
     QComboBox *m_paleta = nullptr;
     int m_modoClic = 0;             // 0 = ninguno; 1 = agregar punto; 2 = agregar objetivo
     QGeoCoordinate m_centro;
@@ -2158,6 +2206,21 @@ int comprobar(Ventana &v)
     exige(m->targetLabelRect(t0).topLeft() != conDefecto + QPoint(51, 61),
           "el offset propio deberia mandar sobre el de por defecto", &fallos);
     exige(m->clearTargetLabelOffset(t0), "no se pudo quitar el offset propio", &fallos);
+
+    // Formulario y objetivo por separado: el laboratorio arrastra con el derecho, agarrar un
+    // formulario no selecciona su objetivo y la app deselecciona cuando quiere.
+    exige(m->targetLabelDragButton() == Qt::RightButton,
+          "el laboratorio deberia arrastrar el formulario con el clic derecho", &fallos);
+    m->clearSelectedTarget();
+    m->setTargetLabelSelected(t0);
+    exige(m->targetLabelSelected() == t0 && m->selectedTarget() == -1,
+          "agarrar el formulario no debe seleccionar el objetivo", &fallos);
+    m->clearTargetLabelSelected();
+    m->setSelectedTarget(t0);
+    exige(m->targetLabelSelected() == -1, "seleccionar el objetivo no agarra su formulario", &fallos);
+    m->clearSelectedTarget();
+    exige(m->selectedTarget() == -1, "clearSelectedTarget no deselecciono", &fallos);
+    m->setSelectedTarget(t0);       // lo que sigue mira el rotulo del seleccionado
 
     // Colgado y ancho fijo: con 16 columnas todos los formularios miden lo mismo.
     TargetLabelFormat fmt;

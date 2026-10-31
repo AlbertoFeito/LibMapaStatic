@@ -636,6 +636,38 @@ public:
     //! \ref targetClicked; esto permite hacerlo tambien desde codigo.
     void setSelectedTarget(qint64 id);
     qint64 selectedTarget() const;
+    //! Quita el resaltado del objetivo (equivale a setSelectedTarget(-1)). Para que
+    //! la APP deseleccione cuando acabe una interaccion suya (al volver de un menu
+    //! contextual, al cerrar una tarjeta, desde un boton «Deseleccionar»...), sin
+    //! depender de que el usuario pulse Esc o haga clic en vacio.
+    void clearSelectedTarget();
+
+    /*!
+     * \brief Formulario de objetivo AGARRADO (-1 = ninguno), aparte del objetivo.
+     *
+     * Agarrar el formulario y elegir el objetivo son gestos distintos: pulsar el
+     * formulario con el boton de arrastre (\ref setTargetLabelDragButton) lo marca
+     * como agarrado (un marco del color de seleccion y ese color en los segmentos
+     * sin color propio) SIN resaltar el icono, y al soltar vuelve a -1. Tambien
+     * vuelve a -1 con Esc, con un clic en vacio o en otro objetivo. Desde codigo
+     * sirve para probarlo o para resaltar un formulario concreto.
+     */
+    void setTargetLabelSelected(qint64 id);
+    qint64 targetLabelSelected() const;
+    //! Equivale a setTargetLabelSelected(-1).
+    void clearTargetLabelSelected();
+
+    /*!
+     * \brief Boton con el que se arrastra el formulario de un objetivo cuando no
+     *        hay herramienta activa: Qt::LeftButton (por defecto) o Qt::RightButton.
+     *
+     * Con el derecho, el izquierdo queda libre para la herramienta activa y el clic
+     * derecho sobre un formulario lo arrastra en vez de abrir el menu contextual;
+     * sobre el icono, una entidad o el vacio sigue emitiendo \ref contextMenuRequested.
+     * Otro boton se ignora.
+     */
+    void setTargetLabelDragButton(Qt::MouseButton button);
+    Qt::MouseButton targetLabelDragButton() const;
 
     // --- Alertas de zona (objetivos que entran o salen de un area) --------
     /*!
@@ -1232,6 +1264,15 @@ signals:
     //! su desplazamiento final (ya aplicado y marcado como propio). No se emite si
     //! se cancela soltando fuera del mapa ni si no llego a moverse.
     void targetLabelMoved(qint64 id, const QPointF &offsetPx);
+    //! Cambio el objetivo resaltado: \a id, o -1 al deseleccionar. Se emite una
+    //! vez por cambio, lo provoque la app (\ref setSelectedTarget,
+    //! \ref clearSelectedTarget) o el usuario (clic, Esc, clic en vacio).
+    void targetSelectionChanged(qint64 id);
+    //! Cambio el formulario agarrado (\ref setTargetLabelSelected): \a id, o -1.
+    void targetLabelSelectionChanged(qint64 id);
+    //! Se pulso el FORMULARIO de un objetivo con el boton de arrastre: queda
+    //! agarrado (solo el formulario; el icono no se resalta).
+    void targetLabelClicked(qint64 id);
     void featureDragFinished(qint64 id);
     void drawingCancelled();
     void zoomChanged(int zoom);
