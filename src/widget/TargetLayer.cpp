@@ -70,6 +70,16 @@ void TargetLayer::setSelected(qint64 id)
     programarRepintado();
 }
 
+// Fija el formulario agarrado (o ninguno) y repinta. No toca la seleccion del
+// objetivo: agarrar su formulario y elegir el objetivo son gestos distintos.
+void TargetLayer::setLabelSelected(qint64 id)
+{
+    if (m_labelSelected == id)
+        return;
+    m_labelSelected = id;
+    programarRepintado();
+}
+
 // Enciende/apaga el historial del objetivo seleccionado y repinta.
 void TargetLayer::setSelectedHistoryVisible(bool on)
 {
@@ -507,9 +517,11 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
     // --- Etiqueta (multilinea: un parametro por linea) ---------------------
     // El objetivo seleccionado muestra SIEMPRE su etiqueta (salta el presupuesto
     // y el declutter), para poder leer sus datos aunque este en una zona densa.
+    // El formulario agarrado tampoco desaparece a mitad del arrastre.
     const QVector<TargetLabelLine> lineas = labelLinesOf(t);
-    if ((drawLabel || selected) && t.labelVisible && !lineas.isEmpty()) {
-        if (!selected) {
+    const bool agarrado = t.id == m_labelSelected;
+    if ((drawLabel || selected || agarrado) && t.labelVisible && !lineas.isEmpty()) {
+        if (!selected && !agarrado) {
             // Declutter: una sola etiqueta por celda de pantalla (~40 px). Si ya
             // hay una etiqueta en la celda de este objetivo, se omite la suya
             // para que a densidad alta no se solapen en una mancha ilegible.
@@ -601,7 +613,16 @@ void TargetLayer::drawTarget(QPainter *painter, const TargetModel::Entry &e,
             painter->drawLine(pos, finGuia);
         }
 
-        const QColor porDefecto = selected ? m_labelSelectionColor : QColor(Qt::black);
+        // Formulario agarrado: un marco del color de seleccion alrededor de la caja,
+        // para ver QUE se esta moviendo sin perder los colores propios del texto.
+        if (agarrado) {
+            painter->setBrush(QColor(255, 255, 255, 170));
+            painter->setPen(QPen(m_labelSelectionColor, 1.5));
+            painter->drawRect(caja.adjusted(-3.0, -2.0, 3.0, 2.0));
+        }
+
+        const QColor porDefecto = (selected || agarrado) ? m_labelSelectionColor
+                                                         : QColor(Qt::black);
         double y = caja.top() + fm.ascent();
         for (const QVector<Trozo> &fila : filas) {
             for (const Trozo &trozo : fila) {

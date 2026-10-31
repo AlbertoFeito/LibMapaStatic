@@ -97,6 +97,17 @@ public:
     void setSelectedTarget(qint64 id);
     qint64 selectedTarget() const { return m_selectedTarget; }
 
+    //! Formulario de objetivo AGARRADO (-1 = ninguno). Independiente del objetivo
+    //! resaltado: solo dura lo que dura el boton pulsado sobre el formulario.
+    void setTargetLabelSelected(qint64 id);
+    qint64 targetLabelSelected() const { return m_labelSelected; }
+
+    //! Boton con el que se arrastra el formulario de un objetivo sin herramienta
+    //! activa (izquierdo por defecto). Con el derecho, el izquierdo queda libre y
+    //! el clic derecho sobre el formulario no abre el menu contextual.
+    void setTargetLabelDragButton(Qt::MouseButton button);
+    Qt::MouseButton targetLabelDragButton() const { return m_labelDragButton; }
+
     //! Geografico <-> coordenadas de eje (lon, mercatorY). Las necesita
     //! cualquier overlay que se dibuje con coordenadas de eje.
     static QPointF toAxis(const QGeoCoordinate &c);
@@ -184,6 +195,12 @@ signals:
     void featureDragMovedTo(qint64 id, const QGeoCoordinate &position);
     //! Se solto el rotulo de un objetivo tras moverlo: offset final en pixeles.
     void targetLabelMoved(qint64 id, const QPointF &offsetPx);
+    //! Cambio el objetivo resaltado (-1 = ninguno), lo pidiera la app o el usuario.
+    void targetSelectionChanged(qint64 id);
+    //! Cambio el formulario agarrado (-1 al soltarlo).
+    void targetLabelSelectionChanged(qint64 id);
+    //! Se pulso el formulario de un objetivo con el boton de arrastre.
+    void targetLabelClicked(qint64 id);
     void featureDragFinished(qint64 id);
     void drawingCancelled();
     void centerChanged(const QGeoCoordinate &center);
@@ -278,6 +295,8 @@ private:
     int m_maxZoomOverride = -1;     //!< tope de sobre-zoom (-1 = recommendedMaxZoom)
     QGeoCoordinate m_center{23.1136, -82.3666};
     qint64 m_selectedTarget = -1;    //!< Objetivo resaltado (-1 = ninguno).
+    qint64 m_labelSelected = -1;     //!< Formulario agarrado (-1 = ninguno).
+    Qt::MouseButton m_labelDragButton = Qt::LeftButton;   //!< Arrastra el formulario.
 
     MapTool m_tool = MapTool::None;
     bool m_dragging = false;            //!< pulsado para mover el mapa (aun puede ser un clic)
@@ -318,6 +337,8 @@ private:
     //! restaurarlo exacto si se cancela (soltar fuera del mapa).
     QPointF m_dragLabelStartRaw;
     bool m_dragLabelStartSet = false;
+    //! Empieza a arrastrar el formulario de objetivo bajo el pixel, si lo hay.
+    bool empiezaArrastreFormulario(const QPoint &pixel);
 
     //! Entidad (punto) marcada draggable que se arrastra con la herramienta None.
     qint64 m_dragFeature = -1;

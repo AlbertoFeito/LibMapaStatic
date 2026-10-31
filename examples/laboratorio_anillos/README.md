@@ -27,6 +27,7 @@ arrastrable con colores por segmento.
 | Formulario colgado de la esquina más cercana, fuente monoespaciada, ancho y columnas 8 + 8 | `MapWidget::setTargetLabelFormat` (`TargetLabelFormat`, `TargetLabelPlacement`) |
 | Offset por defecto de los formularios y propio de cada objetivo; color de selección | `setDefaultTargetLabelOffset`, `setTargetLabelOffset`, `clearTargetLabelOffset`, `setTargetLabelSelectionColor` |
 | Aviso al soltar un formulario arrastrado (soltar fuera del mapa cancela) | señal `targetLabelMoved`, `targetLabelRect` |
+| Formulario y objetivo por separado: el formulario se arrastra con el clic derecho y no selecciona el objetivo; «Deseleccionar» desde la app | `setTargetLabelDragButton`, `targetLabelSelected`, `targetLabelClicked`, `clearSelectedTarget`, `targetSelectionChanged` |
 | Círculo de 50 km y tres **sectores** (cuñas rellenas, una cruza el norte, de 330° a 30°) alrededor del centro, geodésicos; cada uno se muestra, oculta, cambia, analiza (área y objetivos dentro) y elimina por separado | `GeometryKind::Circle` y `Arc` con `arcSector`, `radiusMeters`, `arcStartDeg`, `arcEndDeg`, `roundContains`, `visible` |
 | Alta de los cuatro en un lote (una señal de repintado, un paso de deshacer) y borrado por tipo | `addFeatures`, `clearFeaturesOfType` |
 | Recuento por tipo y ocultar/mostrar un tipo sin borrarlo | `featureTypeCounts`, `setFeatureTypeVisible`, `isFeatureTypeVisible` |
@@ -88,7 +89,7 @@ El panel de la derecha trae la misma lista de lo que hay que ver y probar:
    controles de énfasis y el de «radiales de otro color» se pueden tocar en vivo.
 9. **Rótulos de entidades**: agrega puntos y cambia el lado del anclaje y la fuente; los nombres se
    recolocan y cambian de tamaño.
-10. **Formulario de objetivos**: arrastra uno con el ratón (la barra de estado dice dónde lo soltaste) y
+10. **Formulario de objetivos**: arrastra uno con el **clic derecho** (agarrarlo no selecciona el objetivo: sin círculo amarillo; la línea «Selección» lo muestra) (la barra de estado dice dónde lo soltaste) y
     suéltalo **fuera del mapa**: se cancela. Marca «Colgado de la esquina más cercana», la fuente
     monoespaciada, el ancho y las columnas 8 + 8; cambia el offset por defecto y el color de selección.
 

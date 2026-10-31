@@ -409,12 +409,58 @@ qint64 MapView::targetAt(const QPoint &pixel, double tolPx) const
 }
 
 // Fija el objetivo resaltado y lo propaga a la capa (que dibuja el halo y le
-// fuerza la etiqueta). No emite senal: la seleccion es decision de quien llama.
+// fuerza la etiqueta). Avisa con targetSelectionChanged solo si cambia, venga el
+// cambio de la app o del usuario (clic, Esc, clic en vacio).
 void MapView::setSelectedTarget(qint64 id)
 {
+    if (m_selectedTarget == id)
+        return;
     m_selectedTarget = id;
     if (m_targetLayer)
         m_targetLayer->setSelected(id);
+    emit targetSelectionChanged(id);
+}
+
+// Fija el formulario agarrado (marco y tinte en su caja) sin tocar el objetivo
+// resaltado. Avisa con targetLabelSelectionChanged solo si cambia.
+void MapView::setTargetLabelSelected(qint64 id)
+{
+    if (m_labelSelected == id)
+        return;
+    m_labelSelected = id;
+    if (m_targetLayer)
+        m_targetLayer->setLabelSelected(id);
+    emit targetLabelSelectionChanged(id);
+}
+
+// Cambia el boton que arrastra el formulario. Solo el izquierdo o el derecho:
+// el central siempre mueve el mapa.
+void MapView::setTargetLabelDragButton(Qt::MouseButton button)
+{
+    if (button == Qt::LeftButton || button == Qt::RightButton)
+        m_labelDragButton = button;
+}
+
+// Agarra el formulario de objetivo que haya bajo el pixel: recuerda su offset
+// para moverlo y para poder cancelar, y lo marca como agarrado. NO selecciona el
+// objetivo: agarrar el formulario y elegir el objetivo son gestos distintos.
+bool MapView::empiezaArrastreFormulario(const QPoint &pixel)
+{
+    const qint64 tlab = m_targetLayer ? m_targetLayer->labelAt(pixel) : -1;
+    if (tlab < 0)
+        return false;
+    m_dragLabelTarget = tlab;
+    m_dragLabelStartPx = pixel;
+    const auto t = m_targetModel->target(tlab);
+    // Se arrastra a partir del offset que se VE (el propio o el de por defecto);
+    // el estado propio se guarda para poder cancelar.
+    m_dragLabelStartOffset = t ? m_targetModel->effectiveLabelOffset(*t) : QPointF();
+    m_dragLabelStartRaw = t ? t->labelOffsetPx : QPointF();
+    m_dragLabelStartSet = t ? t->labelOffsetSet : false;
+    setTargetLabelSelected(tlab);
+    emit targetLabelClicked(tlab);
+    setCursor(Qt::SizeAllCursor);
+    return true;
 }
 
 // Coordenada geografica -> punto de EJE (x = longitud, y = grados de Mercator).
@@ -845,9 +891,10 @@ void MapView::keyPressEvent(QKeyEvent *event)
             event->accept();
             return;
         }
-        if (m_model->selectedId() >= 0 || m_selectedTarget >= 0) {
+        if (m_model->selectedId() >= 0 || m_selectedTarget >= 0 || m_labelSelected >= 0) {
             m_model->clearSelection();
             setSelectedTarget(-1);
+            setTargetLabelSelected(-1);
             event->accept();
             return;
         }
@@ -1014,6 +1061,14 @@ void MapView::mousePressEvent(QMouseEvent *event)
         return;
     }
 
+    // Formulario de objetivo con el boton DERECHO (si la app lo eligio asi): se
+    // agarra al pulsar y no llega a abrir el menu contextual al soltar.
+    if (m_tool == MapTool::None && event->button() == Qt::RightButton
+        && m_labelDragButton == Qt::RightButton && empiezaArrastreFormulario(event->pos())) {
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton) {
         switch (m_tool) {
         case MapTool::None: {
@@ -1045,21 +1100,8 @@ void MapView::mousePressEvent(QMouseEvent *event)
                 setCursor(Qt::SizeAllCursor);
                 break;
             }
-            const qint64 tlab = m_targetLayer ? m_targetLayer->labelAt(event->pos())
-                                              : -1;
-            if (tlab >= 0) {
-                m_dragLabelTarget = tlab;
-                m_dragLabelStartPx = event->pos();
-                const auto t = m_targetModel->target(tlab);
-                // Se arrastra a partir del offset que se VE (el propio o el de por
-                // defecto); el estado propio se guarda para poder cancelar.
-                m_dragLabelStartOffset = t ? m_targetModel->effectiveLabelOffset(*t) : QPointF();
-                m_dragLabelStartRaw = t ? t->labelOffsetPx : QPointF();
-                m_dragLabelStartSet = t ? t->labelOffsetSet : false;
-                setSelectedTarget(tlab);
-                setCursor(Qt::SizeAllCursor);
+            if (m_labelDragButton == Qt::LeftButton && empiezaArrastreFormulario(event->pos()))
                 break;
-            }
 
             // Prioridad 2: una entidad PUNTO marcada 'draggable' (un pin A/B, un
             // radar...) se arrastra en vez de desplazar el mapa. Se selecciona al
@@ -1466,7 +1508,7 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-    if (izq && m_dragLabelTarget >= 0) {
+    if (event->button() == m_labelDragButton && m_dragLabelTarget >= 0) {
         const qint64 id = m_dragLabelTarget;
         m_dragLabelTarget = -1;
         if (!rect().contains(event->pos())) {
@@ -1476,6 +1518,7 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
                    t && m_targetModel->effectiveLabelOffset(*t) != m_dragLabelStartOffset) {
             emit targetLabelMoved(id, t->labelOffsetPx);
         }
+        setTargetLabelSelected(-1);     // al soltar, el formulario vuelve a su color
         unsetCursor();
         m_hoverSet = false;
         event->accept();
@@ -1546,6 +1589,7 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
                 case Pend::Objetivo:
                     if (!dbl) {
                         setSelectedTarget(id);
+                        setTargetLabelSelected(-1);
                         emit targetClicked(id, donde);
                         emit elementClicked(event->pos(), globalDe(event));
                     }
@@ -1572,6 +1616,7 @@ void MapView::mouseReleaseEvent(QMouseEvent *event)
                     } else {
                         m_model->clearSelection();      // clic en vacio: deselecciona
                         setSelectedTarget(-1);
+                        setTargetLabelSelected(-1);
                     }
                     break;
                 }

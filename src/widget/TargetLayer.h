@@ -49,6 +49,12 @@ public:
     //! etiqueta aunque el nivel de detalle las haya apagado.
     void setSelected(qint64 id);
 
+    //! Formulario AGARRADO (-1 = ninguno): mientras se arrastra se le dibuja un marco
+    //! del color de seleccion y ese color en los segmentos sin color propio. Es
+    //! independiente de \ref setSelected: no pinta halo en el icono.
+    void setLabelSelected(qint64 id);
+    qint64 labelSelected() const { return m_labelSelected; }
+
     //! Si el objetivo seleccionado dibuja su HISTORIAL COMPLETO desde el origen
     //! (donde se vio por primera vez, marcado con un cuadro y su hora). Activo
     //! por defecto.
@@ -156,6 +162,7 @@ private:
     int m_labelBudget = 150;         //!< Tope de etiquetas visibles (nivel detalle).
     int m_trailBudget = 400;         //!< Tope de trazas visibles (nivel detalle).
     qint64 m_selected = -1;          //!< Objetivo resaltado (-1 = ninguno).
+    qint64 m_labelSelected = -1;     //!< Formulario agarrado (no toca el halo).
     bool m_historyVisible = true;    //!< El seleccionado muestra su historial.
     QVector<ProximityLine> m_proximity;              //!< Pares en alerta CPA.
     QColor m_proximityColor = QColor(0xff, 0x3d, 0x00);
