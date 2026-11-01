@@ -38,6 +38,7 @@
 #include "libmapa/MapFeature.h"
 #include "geo/TileMatrix.h"
 
+#include <QDebug>
 #include <QBuffer>
 #include <QFile>
 #include <QFileInfo>

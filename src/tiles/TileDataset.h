@@ -3,6 +3,7 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 
 namespace libmapa {
 

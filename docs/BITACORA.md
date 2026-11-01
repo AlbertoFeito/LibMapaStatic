@@ -7538,3 +7538,43 @@ probar de punta a punta**. Queda sin confirmar qué módulo de aqtinstall aporta
 Qt 5.14 (vive en `qtlocation`): por eso `QT5_MODULOS` empieza vacío.
 
 **Estado: solo herramientas y documentación; no cambia código de la librería, no hace falta build.**
+
+## 186. Primera prueba real de `preparar_sesion.sh --qt5`: Qt 5.14 compila y pasa los 33 tests
+
+La #185 dejaba sin probar la ruta `--qt5`. Con los dominios ya permitidos, en una sesión nueva:
+el script instala Qt 6.4.2 (apt), QCustomPlot y Qt 5.14.2 (aqtinstall) sin errores y **sin
+necesitar `QT5_MODULOS=qtlocation`** (Qt Positioning viene en el paquete base). Con Qt 6 pasan
+los 33 tests de primeras.
+
+**Lo que aportó la prueba.** El build con Qt 5.14.2 falló, y con razón: eran includes que Qt 6
+arrastra solo y Qt 5 no. Es justo el tipo de fallo que la política «Qt 5.14 / 5.15 / 6.x» quiere
+cazar, y que nadie veía por compilar solo con Qt 6. Arreglados:
+- `src/tiles/TileDataset.h`: faltaba `<QStringList>`.
+- `tools/dem_to_hillshade/main.cpp`: faltaba `<QDebug>`.
+
+**Aviso de entorno, no de código.** Qt 5.14 con GCC 11 o más nuevo no compila `qfloat16.h` (le
+falta `<limits>`). No se toca el código del proyecto: se compila con
+`-DCMAKE_CXX_FLAGS='-include limits'`, y el script lo imprime junto a la línea de CMake.
+
+**Limpieza.** aqtinstall escribía `aqtinstall.log` en el repo; ahora se ejecuta en un directorio
+temporal.
+
+**Estado: con Qt 5.14.2 y con Qt 6.4.2 compila y pasan los 33 tests.**
+
+## 187. Menos contexto fijo y Qt 5.14 en el CI
+
+Dos mejoras para ahorrar tokens y evitar sesiones gastadas en fallos de compatibilidad.
+
+**`CLAUDE.md` más ligero.** Más de la mitad del fichero era la tabla de ramas (unas 40 filas que
+crecen con cada PR) y se cargaba entera en cada sesión. Se movió a `docs/RAMAS.md`; `CLAUDE.md`
+conserva la regla y el enlace. Hay que abrir `RAMAS.md` solo para añadir la línea de la rama nueva.
+
+**Job de Qt 5.14.2 en el CI.** El job «Qt5» que ya existía usa el Qt 5.15 de apt, y sus cabeceras
+arrastran includes que 5.14 no: por eso `QStringList` y `QDebug` (#186) pasaron el CI. El job nuevo
+`build-test-qt514` instala la versión mínima con aqtinstall (cacheada en `~/Qt`), compila con
+`-include limits` y pasa `ctest`. Así el objetivo «Qt 5.14 / 5.15 / 6.x» se vigila sin gastar sesión.
+
+**Sin probar:** el workflow no se puede ejecutar en el contenedor (solo se validó el YAML); su
+primera ejecución real es la del PR. Los comandos son los mismos que se comprobaron a mano en #186.
+
+**Estado: CI y documentación; no cambia código de la librería.**
