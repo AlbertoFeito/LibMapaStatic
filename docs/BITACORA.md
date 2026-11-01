@@ -7560,3 +7560,21 @@ falta `<limits>`). No se toca el código del proyecto: se compila con
 temporal.
 
 **Estado: con Qt 5.14.2 y con Qt 6.4.2 compila y pasan los 33 tests.**
+
+## 187. Menos contexto fijo y Qt 5.14 en el CI
+
+Dos mejoras para ahorrar tokens y evitar sesiones gastadas en fallos de compatibilidad.
+
+**`CLAUDE.md` más ligero.** Más de la mitad del fichero era la tabla de ramas (unas 40 filas que
+crecen con cada PR) y se cargaba entera en cada sesión. Se movió a `docs/RAMAS.md`; `CLAUDE.md`
+conserva la regla y el enlace. Hay que abrir `RAMAS.md` solo para añadir la línea de la rama nueva.
+
+**Job de Qt 5.14.2 en el CI.** El job «Qt5» que ya existía usa el Qt 5.15 de apt, y sus cabeceras
+arrastran includes que 5.14 no: por eso `QStringList` y `QDebug` (#186) pasaron el CI. El job nuevo
+`build-test-qt514` instala la versión mínima con aqtinstall (cacheada en `~/Qt`), compila con
+`-include limits` y pasa `ctest`. Así el objetivo «Qt 5.14 / 5.15 / 6.x» se vigila sin gastar sesión.
+
+**Sin probar:** el workflow no se puede ejecutar en el contenedor (solo se validó el YAML); su
+primera ejecución real es la del PR. Los comandos son los mismos que se comprobaron a mano en #186.
+
+**Estado: CI y documentación; no cambia código de la librería.**

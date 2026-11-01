@@ -83,3 +83,64 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: herramientas/probar_instalacion.sh "$RUNNER_TEMP/libmapa" "$RUNNER_TEMP/prueba"
+
+  # Qt 5.14.2: la version MINIMA que soporta el proyecto. El job Qt5 de arriba usa el
+  # Qt 5.15 de apt, cuyas cabeceras arrastran includes que 5.14 no (asi se colaron
+  # `QStringList` y `QDebug` sin incluir). Se instala con aqtinstall, igual que
+  # herramientas/preparar_sesion.sh --qt5, y se cachea para no bajarlo en cada push.
+  # `-include limits` evita el fallo de qfloat16.h de Qt 5.14 con GCC moderno.
+  build-test-qt514:
+    name: Qt5.14 (minimo)
+    runs-on: ubuntu-latest
+    env:
+      QT5_VERSION: 5.14.2
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar herramientas de build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ make curl ca-certificates python3-pip \
+            libgl1-mesa-dev libxkbcommon0 libfontconfig1 libglib2.0-0
+
+      - name: Cache de Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: ~/Qt
+          key: qt-${{ env.QT5_VERSION }}-gcc_64
+
+      - name: Instalar Qt 5.14.2 (aqtinstall)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          pip install --break-system-packages -q aqtinstall
+          python3 -m aqt install-qt linux desktop "$QT5_VERSION" gcc_64 -O "$HOME/Qt"
+
+      - name: Obtener QCustomPlot 2.1.1 (no va en git, es GPLv3)
+        run: |
+          set -e
+          curl -fsSL https://www.qcustomplot.com/release/2.1.1/QCustomPlot-source.tar.gz -o /tmp/qcp.tar.gz
+          mkdir -p /tmp/qcp
+          tar xf /tmp/qcp.tar.gz -C /tmp/qcp
+          src="$(dirname "$(find /tmp/qcp -name qcustomplot.h | head -n1)")"
+          test -n "$src"
+          cp "$src/qcustomplot.h" "$src/qcustomplot.cpp" third_party/qcustomplot/
+
+      - name: Configurar (CMake, Release)
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$HOME/Qt/$QT5_VERSION/gcc_64" \
+            -DCMAKE_CXX_FLAGS='-include limits'
+
+      - name: Compilar
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Tests (ctest, sin pantalla)
+        working-directory: build
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          export LD_LIBRARY_PATH="$HOME/Qt/$QT5_VERSION/gcc_64/lib"
+          ctest --output-on-failure
