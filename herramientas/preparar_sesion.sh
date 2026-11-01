@@ -104,10 +104,13 @@ if [ "$QUIERE_QT5" -eq 1 ]; then
         paso "Instalando Qt $QT5_VERSION con aqtinstall en $QT_DIR"
         pip install --break-system-packages -q aqtinstall
         # shellcheck disable=SC2086
-        python3 -m aqt install-qt linux desktop "$QT5_VERSION" gcc_64 -O "$QT_DIR" \
-            ${QT5_MODULOS:+-m $QT5_MODULOS}
+        # aqt escribe aqtinstall.log en el directorio actual: se ejecuta en uno temporal
+        # para no ensuciar el repo.
+        ( cd "$(mktemp -d)" && python3 -m aqt install-qt linux desktop "$QT5_VERSION" gcc_64 -O "$QT_DIR" \
+            ${QT5_MODULOS:+-m $QT5_MODULOS} )
     fi
-    echo "Qt 5: usa -DCMAKE_PREFIX_PATH=$QT_DIR/$QT5_VERSION/gcc_64"
+    echo "Qt 5: cmake -S . -B build5 -DCMAKE_PREFIX_PATH=$QT_DIR/$QT5_VERSION/gcc_64 -DCMAKE_CXX_FLAGS='-include limits'"
+    echo "      (el -include limits evita el fallo de qfloat16.h de Qt 5.14 con GCC 11 o mas nuevo)"
 fi
 
 # --- Resumen -----------------------------------------------------------

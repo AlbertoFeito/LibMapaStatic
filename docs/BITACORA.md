@@ -7538,3 +7538,25 @@ probar de punta a punta**. Queda sin confirmar qué módulo de aqtinstall aporta
 Qt 5.14 (vive en `qtlocation`): por eso `QT5_MODULOS` empieza vacío.
 
 **Estado: solo herramientas y documentación; no cambia código de la librería, no hace falta build.**
+
+## 186. Primera prueba real de `preparar_sesion.sh --qt5`: Qt 5.14 compila y pasa los 33 tests
+
+La #185 dejaba sin probar la ruta `--qt5`. Con los dominios ya permitidos, en una sesión nueva:
+el script instala Qt 6.4.2 (apt), QCustomPlot y Qt 5.14.2 (aqtinstall) sin errores y **sin
+necesitar `QT5_MODULOS=qtlocation`** (Qt Positioning viene en el paquete base). Con Qt 6 pasan
+los 33 tests de primeras.
+
+**Lo que aportó la prueba.** El build con Qt 5.14.2 falló, y con razón: eran includes que Qt 6
+arrastra solo y Qt 5 no. Es justo el tipo de fallo que la política «Qt 5.14 / 5.15 / 6.x» quiere
+cazar, y que nadie veía por compilar solo con Qt 6. Arreglados:
+- `src/tiles/TileDataset.h`: faltaba `<QStringList>`.
+- `tools/dem_to_hillshade/main.cpp`: faltaba `<QDebug>`.
+
+**Aviso de entorno, no de código.** Qt 5.14 con GCC 11 o más nuevo no compila `qfloat16.h` (le
+falta `<limits>`). No se toca el código del proyecto: se compila con
+`-DCMAKE_CXX_FLAGS='-include limits'`, y el script lo imprime junto a la línea de CMake.
+
+**Limpieza.** aqtinstall escribía `aqtinstall.log` en el repo; ahora se ejecuta en un directorio
+temporal.
+
+**Estado: con Qt 5.14.2 y con Qt 6.4.2 compila y pasan los 33 tests.**

@@ -64,6 +64,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 | `claude/sweet-cray-74nz88` (tercera vez, desde `main`) | #47 | Ejemplo `laboratorio_anillos`: mapa de costas sin híbrido, anillos y radiales con escala, centro con un clic y coordenadas del ratón; incluye la fase 1 de la convergencia (escala polar de 300/600 km con énfasis, rótulos de entidades y formulario de objetivos arrastrable) y las fases 2 a 4 (círculos y arcos geodésicos, agrupar por capa y tipo, partes con nombre y color por entidad) con su medición de 5.000 puntos |
 | `claude/sweet-cray-74nz88` (cuarta vez, desde `main`) | #48 | Formulario y objetivo por separado: botón configurable para arrastrar el formulario (`setTargetLabelDragButton`), formulario agarrado aparte del objetivo resaltado y deselección desde la app (`clearSelectedTarget`, señales de cambio); en `laboratorio_anillos`, con el clic derecho |
 | `claude/preparar-sesion` | #49 | `herramientas/preparar_sesion.sh`: deja un contenedor nuevo listo (Qt 6 por apt, QCustomPlot y, con `--qt5`, Qt 5.14.2 con aqtinstall) |
+| `claude/intelligent-ride-jqhh3a` | pendiente | Primera prueba real de `--qt5`: includes que faltaban para Qt 5 (`QStringList`, `QDebug`), aviso de `-include limits` y log de aqt fuera del repo |
 
 ## Estilo de código
 - C++17. Sigue el estilo del fichero que edites (nombres, densidad de comentarios).
@@ -137,7 +138,7 @@ Historial de las ramas de trabajo (fusionadas en `main`, salvo la última si su 
 - Contenedor nuevo sin Qt: **`herramientas/preparar_sesion.sh`** instala Qt 6 por apt
   (`qt6-base-dev qt6-positioning-dev`) y recupera QCustomPlot (arriba); es repetible.
   Con `--qt5` instala además Qt 5.14.2 con aqtinstall en `~/Qt` (compila contra
-  `-DCMAKE_PREFIX_PATH=~/Qt/5.14.2/gcc_64`). Necesita que la sesión permita los dominios
+  `-DCMAKE_PREFIX_PATH=~/Qt/5.14.2/gcc_64 -DCMAKE_CXX_FLAGS='-include limits'`; lo segundo evita el fallo de `qfloat16.h` con GCC moderno). Necesita que la sesión permita los dominios
   `www.qcustomplot.com` (QCustomPlot) y `download.qt.io` (solo `--qt5`): se añaden en
   claude.ai > Settings > Capabilities, y puede hacer falta una sesión nueva.
 - Cambios solo de documentación (`.md`, `.html`, skills) no necesitan build.
