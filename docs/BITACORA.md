@@ -7509,3 +7509,32 @@ tinte del formulario.
 
 **Estado: 33 tests (30 sin QCustomPlot) y el contrato de instalación en verde.**
 
+
+## 185. `herramientas/preparar_sesion.sh`: un contenedor nuevo de la nube, listo con un comando
+
+**Por qué.** El contenedor de la nube es efímero: cada sesión empezaba sin Qt y sin QCustomPlot
+(que está en `.gitignore`), y había que repetir a mano el `apt-get` y el `curl` que estaban
+copiados en `CLAUDE.md` y en la skill `libmapa-docs`. Además no había camino para Qt 5.14: el apt
+de Ubuntu 24.04 trae Qt 6.4.2 y Qt 5.15, pero no 5.14, que es la versión más antigua que decimos
+soportar.
+
+**Qué hace.** El script es repetible (lo ya instalado se salta):
+- Instala por apt `qt6-base-dev`, `qt6-positioning-dev` y las cabeceras de OpenGL y xkb.
+- Recupera `qcustomplot.{h,cpp}` 2.1.1 en `third_party/qcustomplot/` si faltan, descomprimiendo en
+  una carpeta temporal nueva y copiando solo esos dos ficheros. La dirección se puede cambiar con
+  `QCP_URL`.
+- Con `--qt5`, instala Qt 5.14.2 con aqtinstall en `~/Qt` (versión, módulos y carpeta con
+  `QT5_VERSION`, `QT5_MODULOS` y `QT_DIR`). Si no llega a `download.qt.io`, lo dice y sale en vez
+  de fallar a medias.
+- `CLAUDE.md` y `.claude/skills/libmapa-docs/SKILL.md` apuntan ahora al script en lugar de llevar
+  los comandos sueltos.
+
+**Lo que se ha comprobado y lo que no.** En un contenedor Ubuntu 24.04 el apt instala Qt 6.4.2 y
+la lógica de QCustomPlot (extracción, copia, segunda pasada sin descargar) funciona con un
+`.tar.gz` de prueba. En esa sesión el proxy de la nube respondió 403 tanto a `www.qcustomplot.com`
+como a `download.qt.io`: son dominios que hay que permitir en la sesión (claude.ai > Settings >
+Capabilities). Por eso **la descarga real de QCustomPlot y la ruta `--qt5` no se han podido
+probar de punta a punta**. Queda sin confirmar qué módulo de aqtinstall aporta Qt Positioning en
+Qt 5.14 (vive en `qtlocation`): por eso `QT5_MODULOS` empieza vacío.
+
+**Estado: solo herramientas y documentación; no cambia código de la librería, no hace falta build.**

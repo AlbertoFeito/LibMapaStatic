@@ -838,7 +838,7 @@ cmake/               libmapaConfig.cmake.in (para find_package)
 qmake/libmapa/       compilar e instalar la librería solo con qmake (+ libmapa.pri; instala también libtelemetria)
 qmake/libtelemetria/ libtelemetria con qmake (+ telemetria.pri)
 qmake/*.pro          herramientas sueltas con qmake
-herramientas/        probar_instalacion.sh (instalación + ejemplos); desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete;
+herramientas/        probar_instalacion.sh (instalación + ejemplos); preparar_sesion.sh (contenedor nuevo de la nube: Qt 6 + QCustomPlot, `--qt5` para Qt 5.14); desplegar.bat (Qt 6) y desplegar_qt5.bat (Qt 5): app + Qt + paquete;
                      osm_costa_a_sqlitedb.py: costa de OSM -> máscara de tierra (--water-mask)
 docs/DESPLIEGUE.md   guía paso a paso: integrar la librería y llevar la app a otro PC
 docs/BITACORA.md     qué se encontró y por qué se decidió cada cosa
