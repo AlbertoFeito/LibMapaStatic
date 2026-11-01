@@ -49,15 +49,10 @@ En el PC local (Windows, Qt 6.11.2 MinGW), compila con Qt Creator o en la
 carpeta `build/Desktop_Qt_6_11_2_MinGW_64_bit_Release` y lanza `ctest` con
 `C:\Qt\6.11.2\mingw_64\bin` y `C:\Qt\Tools\mingw1310_64\bin` en el `PATH`.
 
-Contenedor nuevo sin Qt:
+Contenedor nuevo sin Qt (instala Qt 6 por apt y recupera QCustomPlot, que está gitignored;
+se puede repetir sin miedo; `--qt5` añade Qt 5.14.2, ver `CLAUDE.md`):
 ```bash
-sudo apt-get update && sudo apt-get install -y qt6-base-dev qt6-positioning-dev
-```
-QCustomPlot (gitignored) si falta:
-```bash
-curl -fsSL -o /tmp/qcp.tgz https://www.qcustomplot.com/release/2.1.1/QCustomPlot-source.tar.gz
-tar xzf /tmp/qcp.tgz -C /tmp
-cp /tmp/qcustomplot-source/qcustomplot.{h,cpp} third_party/qcustomplot/
+herramientas/preparar_sesion.sh
 ```
 Compila y pasa los tests (sin pantalla):
 ```bash
