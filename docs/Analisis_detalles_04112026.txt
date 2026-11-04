@@ -1,0 +1,78 @@
+Resultado del análisis, sin tocar nada.
+
+## 1. Rectángulo blanco detrás de los labels
+
+**Confirmado: está fijo en el código, sin acceso desde el API.** Cada capa pinta su propia caja con colores incrustados:
+
+| Dónde | Qué pinta |
+|---|---|
+| FeatureLayer.cpp:855-857 (drawLabel) | Fondo blanco con alfa 190 |
+| FeatureLayer.cpp:876-878 (drawPartLabels, partes de multi-parte) | Igual |
+| RangeLayer.cpp:497-499 | Blanco con alfa 190/235 (rótulos de anillos y marcaciones) |
+| GraticuleLayer.cpp:25 | fillRect blanco alfa 185 (rótulos de la cuadrícula) |
+| FeatureLayer.cpp:489-492 | Rótulos de inicio/fin de ruta, alfa 225 |
+| TargetLayer.cpp:360 | Rótulos de proximidad (alerta CPA), alfa 225 |
+| FeatureLayer.cpp:629-631 | Rótulo de medida en vivo, alfa 230 |
+
+- El **texto** sí es configurable: labelColor y labelFontSize en FeatureStyle. El fondo no.
+- Las etiquetas de **objetivos móviles** son una excepción: solo llevan halo de texto (TargetLayer.cpp:631-635) y, si el formulario está agarrado, un marco. No tienen la caja blanca.
+- Si el rectángulo que ve tu compañero está en los iconos de fuentes con el número debajo, es el de FeatureLayer::drawLabel.
+
+**Propuesta.** Añadir a FeatureStyle un labelBackground (QColor, por defecto el blanco alfa 190 actual, así nada existente cambia) y un labelBorder/radio opcional. Para los rótulos de RangeLayer y Graticule, que no son entidades, un setter global en MapWidget (setLabelBackground(QColor)). Con alfa 0 se elimina la caja. El hit-test no cambia, porque usa la misma caja geométrica.
+
+## 2. Selección y resaltado en blanco
+
+Esto es lo que encontré:
+
+- **La librería no selecciona con clic derecho.** En MapView::mouseReleaseEvent (líneas 1670-1679) el clic derecho solo emite mapClicked y contextMenuRequested. Quien selecciona y resalta es:
+  - el **clic izquierdo** con «Navegar» (Pend::Entidad, línea 1603) o con «Editar» (línea 1287);
+  - la **app**, si en su handler de contextMenuRequested llama a selectFeature(hit.featureId).
+
+  Por eso lo del clic derecho hay que mirarlo en la app. Lo que sí es de la librería es el resaltado: drawPathPart pinta el halo blanco (FeatureLayer.cpp:536-551).
+- **Cuadrícula, escala y marcas de anillo/marcación no son entidades.** GraticuleLayer y ScaleBarLayer ni siquiera tienen selección. Si se resaltan, es porque en la app se dibujan como MapFeature (zonas, líneas, red), y ese es el caso a resolver.
+- **Ya existen dos flags, pero hacen otra cosa.** MapFeature::selectable y LayerInfo::selectable hacen que el elemento **no sea ni encontrable**. featureAt los salta (FeatureLayer.cpp:971-975), y también hitTest. Así se pierde contextMenuRequested con featureId, elementClicked y el arrastre. Tu compañero necesita otra cosa: que **se detecte pero no se resalte**.
+- La señal mapClicked (clic en el mapa) se emite siempre (línea 1624), así que no se rompe con nada de esto.
+
+**Propuesta, con un ajuste a lo que plantea.** Una variable "por GeometryKind" es poco flexible: una red de coordenadas y una zona de interés son ambas Polyline/Polygon. Sugiero:
+
+1. MapFeature::highlightOnSelect (bool, por defecto true). Si es false, setSelected sigue funcionando y emitiendo featureSelected/elementClicked, pero drawPathPart (y el resto de draw*) no pintan halo ni tiradores.
+2. Opcional, para cubrir lo que dice tu compañero: un valor por defecto por kind, MapWidget::setSelectionHighlight(GeometryKind, bool), que se aplica si la entidad no fija el suyo.
+3. Si la red de coordenadas vive en una capa propia, también serviría un flag por capa (LayerInfo).
+
+Coste: pequeño, es un if en el dibujado. Hay que añadir un test.
+
+## 3. Varias "layers" de objetivos
+
+Cómo funciona hoy:
+
+- Hay **un solo TargetModel** (un QHash<id, Entry>) y **una sola TargetLayer**, creados en MapView.cpp:77-101. Van en la QCPLayer "targets", en modo **buffered**. Esa capa se repinta sola, sin rehacer teselas ni entidades.
+- TargetLayer::draw hace *culling* por pantalla, nivel de detalle (150 etiquetas y 400 trazas) y *declutter* por celdas de 40 px. **No cachea pixmaps**: cada frame recorre los visibles.
+- **No hay una noción de "fuente" o "capa" de objetivos.** Lo único parecido es MapTarget::kind + attributes y el TargetFilter (por kind, velocidad o predicate). Con dim=false el filtro oculta e **inhabilita el clic**.
+- La API de borrado es removeTarget(id) y clearTargets(). Esta última borra **todo** el modelo. No hay nada que borre "solo los de la fuente X".
+- La "cache" que menciona tu compañero, en objetivos, es la traza (trail, hasta 300 puntos) y el historial (hasta 5000 puntos por objetivo). Los dos viven en el Entry, así que se van con él.
+
+**Opciones, de menor a mayor esfuerzo.** Mi recomendación es la A, con la B como evolución.
+
+- **A. Una sola capa y la fuente como dato (recomendada).** La app marca cada objetivo con un identificador de fuente, por ejemplo MapTarget::kind = "fuenteA" o attributes["fuente"].
+  - Para mostrar solo una a la vez se usa setTargetFilter con kinds = {"fuenteA"}, dim=false.
+  - **Rendimiento sin cambio**: no se añade ninguna capa ni pasada de dibujado. Con un filtro, los que no pasan se descartan antes de dibujar.
+  - Falta un clearTargetsOfKind(kind) (nuevo, trivial) para el borrado por fuente.
+  - Cambiar de fuente sería: filtro + conservar los de las otras en memoria, o clearTargetsOfKind si se prefiere liberar memoria.
+- **B. Un grupo de objetivos ("source") dentro del mismo modelo.** Es lo mismo que A, pero con un API explícito: setTargetSourceVisible(name, bool), clearTargetSource(name), y la traza e historial separados por fuente. Un solo TargetLayer y un solo repintado.
+- **C. Varias TargetLayer / TargetModel, una por fuente.** Es la opción más cercana a lo que pregunta, y la **no recomendada**.
+  - Cada capa repinta aparte y hay que tocar RangeLayer, LabelLayer, el *hit-test*, targetAt y los *clusters*, que hoy asumen un único modelo.
+  - Si solo se ve una a la vez, no se gana nada de rendimiento frente a A.
+
+**Respuestas a sus dudas concretas:**
+
+- **¿La app puede crear otras layers sin CustomPlot?** Hoy no hay API para crear capas de objetivos. La librería oculta QCustomPlot por diseño (MapWidget es la fachada).
+- **¿Implicaciones de cambiar de fuente?** Con A/B, ninguna sobre el dibujado. Solo decidir si las no visibles se **conservan** (memoria, trazas e historial seguidos) o se **borran** (se pierden trazas e historial).
+- **¿Empeora la eficiencia?** Con A/B no, porque se reutiliza el mismo pipeline con culling y presupuestos.
+
+## Decisiones que necesito de ti
+
+1. Punto 1: ¿quieres solo el fondo configurable, o también poder quitar la caja y el borde por completo?
+2. Punto 2: ¿flag por entidad (más flexible) o por GeometryKind como pide tu compañero?
+3. Punto 3: ¿A (solo kind/filtro + borrado por fuente) o B (API explícito de fuentes)?
+
+Y una pregunta para tu compañero: ¿esa red y esas zonas las dibuja la app como MapFeature y llama a selectFeature en el clic derecho? Con eso afinamos el punto 2.
