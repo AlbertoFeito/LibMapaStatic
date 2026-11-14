@@ -1,0 +1,74 @@
+Emitido: sábado 14-11-2026 10:50 (hora del sistema)
+
+ANÁLISIS DE LA RESPUESTA POR PUNTOS
+===================================
+Análisis contra el código de libmapa / LibMapaStatic. Sin cambios de código.
+
+
+## Punto 3: tu compañero ha dado datos que cambian mi recomendación
+
+**Retiro el setTargets como prioridad.** Con 1000 objetivos y 150 entidades, el coste N x F que te señalé son unas 150.000 iteraciones triviales por recarga. Es una estimación mía, no una medición, pero a esa escala queda muy por debajo de lo que se nota, y el cambio es manual. Para el rendimiento basta con clearTargets() + addTarget(). Lo que de verdad hace falta es la historia.
+
+**Su parche previo es correcto.** clearSelectedTarget() y clearTargetLabelSelected() existen (MapWidget.h:643 y :658) y corrigen el id reutilizado. Mejor aún: que lo haga la propia clearTargets(), porque es un fallo de la librería y no debería depender de que la app se acuerde.
+
+### Su propuesta: addTarget(target, time, QVector<QGeoCoordinate> Historial)
+
+La idea es buena, pero tiene cuatro problemas:
+
+1. **QGeoCoordinate no lleva hora.** Hay que usar QVector<TargetTrackPoint>, que ya existe (MapTarget.h:139, posición + hora). Sin la hora se rompen:
+   - la marca "origen HH:mm:ss";
+   - estimateVelocity;
+   - la exportación GPX con hora;
+   - la reproducción con TrackPlayer, que necesita tiempos.
+2. **La siembra no puede pasar por anotarHistoria.** Esa función aplica el recorte de 1 m y el aclarado a 5000 en cada punto (TargetModel.cpp:33-49). Si se siembran X puntos así, se pierden. Hay que asignarlos directamente y decidir qué pasa si X supera el tope: aclarar una vez o subir setTargetHistoryLimit. Memoria, también estimada: 1000 objetivos x 5000 puntos x 24 B son unos 120 MB en la librería, además de la copia de la app.
+3. **La traza dibujada (trail, 300 puntos) y la posición actual** tienen que salir de los últimos puntos del vector. Además, upsert añade target.position al historial, así que hay que evitar duplicar el último punto.
+4. **"Si es el primer dato, size() = 1" sobra.** Un vector vacío ya equivale al comportamiento de hoy. Y conviene **no cambiar la firma actual**, porque addTarget tiene unos 34 usos en tst_mapwidget.cpp y otras apps. Mejor una sobrecarga nueva o un setTargetHistory(id, puntos).
+
+updateTarget queda igual, y eso es correcto.
+
+**Un punto a su favor frente a lo que yo planteé.** Si la app guarda las trayectorias, la app de seguimiento ya funciona con la pantalla oculta, que era el requisito. Mientras una pantalla no se ve, la app sigue acumulando sus puntos y, al volver, siembra todo. El archivo de seguimiento en el núcleo (propuesto en el documento anterior) sigue siendo la evolución natural (disco, reproducción, análisis común), pero **no es excluyente**: esta sobrecarga con historia sembrada es justo el paso 1 de ese plan. La contrapartida es que la app asume la persistencia y la poda.
+
+### Su duda: ¿conserva el reemplazo atómico la historia y las entidades asociadas?
+
+**No por sí solo.** Con su propuesta de siembra, la historia sí, porque la entrega la app. Las entidades asociadas, no del todo:
+
+- **Sectores y círculos con dueño** (originTargetId): al limpiar, sincronizaDuenos los **borra de forma permanente** (MapView.cpp:1324-1329). No reaparecen al volver: la app tiene que recrearlos.
+- **Anillos y marcaciones con targetId:** por el código (RangeLayer::resolve, línea 360) se quedan en la capa y no resuelven posición mientras no exista el objetivo, así que lo normal es que reaparezcan al volver con el mismo id. **Lo supongo por la lectura; conviene confirmarlo con un test.**
+- **Alertas de zona y proximidad: hay un riesgo que no se había visto.** clearTargets() es silencioso, pero addTarget sí llama a zones.updateTarget y syncProximity (MapWidget.cpp:1920-1926). Al volver a cargar, los objetivos que estén dentro de una zona vigilada **emitirán targetEnteredZone otra vez** (y las alertas CPA, igual). Es decir, alarmas duplicadas en cada cambio de pantalla. La app puede ignorarlas durante la carga, o la librería podría ofrecer una carga silenciosa.
+- El **filtro** y las **zonas vigiladas** sí se conservan.
+
+
+## Puntos 1 y 2: de acuerdo
+
+- labelBackground + labelBorder, setter global para el resto de rótulos, y halo como opción con color, alfa y grosor. Un detalle técnico: el halo actual son 8 pasadas de texto desplazadas 1 px (TargetLayer.cpp:631-635). Para grosor variable conviene trazar el contorno del texto con un QPainterPath y no repetir más pasadas.
+- highlightWhenSelected con el clic izquierdo seleccionando y emitiendo featureSelected, sin tocar selectable. Es la opción que propuse.
+
+
+## Punto 4: varias entidades bajo un clic derecho
+
+Hoy se emite **una sola señal por clic derecho** (MapView.cpp:1678) con un único featureId: la entidad de la capa más alta que acierta y, dentro de la capa, la más cercana (FeatureLayer.cpp:963-1039). **No existe ningún "todas las entidades bajo el cursor".**
+
+**No recomiendo la opción B (N señales).**
+- Cada señal sirve para abrir un menú en globalPos; N señales darían N menús seguidos o solapados, en orden indefinido.
+- Rompería a los consumidores que esperan una señal por clic (los tests la espían).
+
+**Propuesta alternativa:** una sola señal, y que MapHit gane QVector<qint64> featureIds (todas las entidades bajo el cursor, de arriba abajo, con su parte), manteniendo featureId como la de arriba. La app monta un solo menú con un submenú por entidad. Es compatible con lo existente y barato; falta una función featuresAt nueva.
+
+
+## Acuerdo de fecha y hora
+
+De acuerdo. Desde ahora cada documento que se deje llevará fecha y hora de emisión.
+
+
+## Decisiones que necesito
+
+1. ¿Historia con hora (TargetTrackPoint) en lugar de solo coordenadas? Lo veo imprescindible.
+   RESPUESTA: ______________________________________________________________
+2. ¿Los sectores y círculos con dueño los recrea la app al volver, o quieres que la librería los guarde ocultos mientras el objetivo no está?
+   RESPUESTA: ______________________________________________________________
+3. ¿Carga silenciosa (sin alertas de zona ni proximidad) o la app filtra esas señales durante la carga?
+   RESPUESTA: ______________________________________________________________
+4. ¿La app persistirá las trayectorias en disco (para sobrevivir a un reinicio)? Si sí, el archivo del núcleo pasa a ser más urgente.
+   RESPUESTA: ______________________________________________________________
+5. Punto 4: ¿te vale la propuesta de una señal con lista, en lugar de la opción B?
+   RESPUESTA: ______________________________________________________________
