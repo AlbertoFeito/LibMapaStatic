@@ -1,0 +1,75 @@
+Emitido: sábado 14-11-2026 14:27 (hora del sistema)
+
+ANÁLISIS DE LAS DECISIONES (documento "Puntualizando respuesta por puntos")
+===========================================================================
+Análisis contra el código de libmapa / LibMapaStatic. Sin cambios de código.
+
+Con estas respuestas el alcance se reduce y queda más claro. Primero, la pregunta del punto 5, y luego dos implicaciones de las decisiones 2 y 3 que conviene cerrar antes de implementar.
+
+
+## Punto 5: cómo queda contextMenuRequested
+
+**La firma no cambia:**
+
+    void contextMenuRequested(const libmapa::MapHit &hit, const QPoint &globalPos);
+
+Lo que cambia es MapHit (MapTypes.h:165), que gana una lista:
+
+    struct MapHitFeature { qint64 id; int subIndex; };   // subIndex: parte, o -1
+    QVector<MapHitFeature> features;   // TODAS las entidades bajo el cursor, de arriba abajo
+    // featureId / subIndex siguen igual: son features.first()
+
+- **Compatible:** las apps que solo leen featureId no notan nada.
+- **Qué entra en la lista:** las mismas que hoy featureAt considera (visibles, de capa seleccionable y dentro de su rango de zoom, con su tolerancia de 8 px).
+- **Orden:** capa más alta primero y, dentro de la capa, la más cercana.
+- **Qué hace la app:** un solo menú, con un submenú por entidad.
+- **Lo mismo para elementClicked**, porque comparten MapHit.
+- **Trabajo:** una función nueva (featuresAt) y tests.
+
+
+## Decisión 2: la librería guarda ocultos los sectores y círculos con dueño
+
+Es viable, pero hay que cerrar tres cosas:
+
+1. **¿Qué los oculta?** Hoy sincronizaDuenos borra el sector en cuanto desaparece su objetivo (MapView.cpp:1324-1329).
+   - Si se cambia a "ocultar siempre", un objetivo que de verdad desaparece (removeTarget) dejaría sus sectores ocultos para siempre.
+   - Propuesta: distinguir. **removeTarget los borra** (el objetivo dejó de existir) y **clearTargets los suspende** (cambio de pantalla).
+2. **Ids únicos entre pantallas.** Los sectores se enlazan por originTargetId. Si dos pantallas usan el mismo id para objetivos distintos, un sector podría reaparecer colgado del objetivo equivocado. ¿Los ids son únicos entre todas las informaciones? Si no, hay que asociar los sectores suspendidos a una clave de pantalla.
+3. **Mientras están ocultos**, no deben contar para el clic, el menú, el hitTest, las zonas vigiladas ni el deshacer.
+
+Con la decisión 4 (reinicio desde cero), nada de esto se persiste a disco, lo que simplifica.
+
+
+## Decisión 3: carga silenciosa
+
+También es viable: se actualiza el estado interno de zonas y proximidad (para que las transiciones posteriores sean correctas), pero no se emite ninguna señal durante la carga.
+
+**Una cosa que quizá no se haya pensado:** mientras una pantalla está oculta, sus objetivos no están en la librería, así que **la librería no vigila zonas ni proximidad para ellos**. La app sigue recibiendo sus datos, pero las alertas de esa información no saltan hasta que se vuelve a mostrar. ¿Eso es aceptable, o la app necesita alertas también de lo que está oculto? Si lo segundo, habría que calcularlas en la app.
+
+
+## Decisión 4 y lo que cambia en el plan
+
+Sin persistencia a disco, el **archivo de seguimiento del núcleo deja de ser necesario** por ahora. Queda aparcado. Para el compañero, la memoria de la historia de pantallas ocultas vive en la app.
+
+
+## Plan resultante, en este orden
+
+1. **clearTargets() limpia la selección** (corrección de fallo, pequeña).
+2. **Historia con hora:** sobrecarga de addTarget con QVector<TargetTrackPoint> o setTargetHistory. La siembra no pasa por el recorte; la traza dibujada se deriva de los últimos puntos; la firma actual no cambia.
+3. **Carga silenciosa** de alertas de zona y proximidad.
+4. **Sectores con dueño suspendidos** al limpiar y borrados al quitar el objetivo.
+5. **MapHit con lista de entidades** y featuresAt.
+6. **highlightWhenSelected**.
+7. **Fondo, borde y halo de los rótulos.**
+
+Cada uno es independiente. Según las reglas del proyecto, saldrían como ramas separadas desde main, cada una con su PR en borrador, tests y entrada en la bitácora. La rama actual solo tiene documentación.
+
+
+## Qué necesito para empezar
+
+1. **Ids:** ¿únicos entre pantallas, sí o no?
+   RESPUESTA: ______________________________________________________________
+2. **Alertas de pantallas ocultas:** ¿aceptable que no salten, o hace falta otra solución?
+   RESPUESTA: ______________________________________________________________
+3. **Orden:** ¿empezar por 1 y 2, que desbloquean el cambio de pantalla, o preferís otro orden?
+   RESPUESTA: ______________________________________________________________
