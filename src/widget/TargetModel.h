@@ -65,6 +65,16 @@ public:
                 double headingDeg = std::numeric_limits<double>::quiet_NaN(),
                 const QDateTime &time = QDateTime());
 
+    /*!
+     * \brief Sustituye el historial de un objetivo por \a points (con hora, en orden).
+     *
+     * Para sembrar la trayectoria que guardo la app. Los puntos entran tal cual, sin
+     * la distancia minima; los invalidos o sin hora se descartan. Si pasan del tope
+     * se aclaran una vez. La traza dibujada pasa a ser el final del historial y, si
+     * el ultimo punto no es la posicion actual, esta se anade. false si no existe.
+     */
+    bool setHistory(qint64 id, const QVector<TargetTrackPoint> &points);
+
     bool setLabel(qint64 id, const QString &text);
     //! Cambia el contenido por segmentos del rotulo (MapTarget::labelContent).
     bool setLabelContent(qint64 id, const QVector<TargetLabelLine> &content);

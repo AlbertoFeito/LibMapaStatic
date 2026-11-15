@@ -66,6 +66,13 @@ public:
     //! pixel si la entidad es multi-parte (-1 si no lo es o no hay entidad).
     qint64 featureAt(const QPoint &pixel, double tolerancePx = 8.0,
                      bool incluirNoSeleccionables = false, int *subIndex = nullptr) const;
+    //! TODAS las entidades bajo el pixel, de arriba abajo (capa mas alta primero y,
+    //! en cada capa, la mas cercana primero), con la parte acertada de cada una. La
+    //! primera es la que devuelve \ref featureAt. Con \a soloPrimera se queda en la
+    //! primera capa que acierta.
+    QVector<MapHitFeature> featuresAt(const QPoint &pixel, double tolerancePx = 8.0,
+                                      bool incluirNoSeleccionables = false,
+                                      bool soloPrimera = false) const;
 
     //! Entidad cuya CAJA DE ETIQUETA cae bajo el pixel, o -1 (la de encima gana).
     //! Permite seleccionar/arrastrar el rotulo por separado de la geometria.
@@ -123,6 +130,8 @@ protected:
     void draw(QCPPainter *painter) override;
 
 private:
+    //! Distancia (px) de un punto de la pantalla a una entidad, y la parte acertada.
+    double distanciaAEntidad(const MapFeature &f, const QPointF &p, int *parte) const;
     void drawFeature(QPainter *painter, const MapFeature &f, bool selected) const;
     void drawAlert(QPainter *painter, const MapFeature &f) const;
     void drawEndpoints(QPainter *painter, const MapFeature &f, bool selected) const;

@@ -85,6 +85,21 @@ struct FeatureStyle
     bool labelVisible = true;
     QColor labelColor = Qt::black;
 
+    //! Fondo de la caja del rotulo. Por defecto, el blanco semitransparente de
+    //! siempre (sobre fotografia aerea el texto suelto no se lee). Con alfa 0 no
+    //! hay fondo; sin fondo y sin borde, el rotulo queda «sin caja» (conviene
+    //! entonces darle halo, \a labelHaloColor). No cambia la caja que usa el raton.
+    QColor labelBackground = QColor(255, 255, 255, 190);
+    //! Borde de la caja del rotulo: invalido (por defecto) o con alfa 0 = sin borde.
+    QColor labelBorderColor;
+    //! Grosor del borde, en pixeles (solo con \a labelBorderColor valido).
+    double labelBorderWidth = 1.0;
+    //! Halo alrededor de las LETRAS del rotulo: invalido (por defecto) = sin halo.
+    //! Se puede combinar con la caja o usarse en su lugar.
+    QColor labelHaloColor;
+    //! Grosor del halo a cada lado de la letra, en pixeles.
+    double labelHaloWidth = 2.0;
+
     //! Desplazamiento de la ETIQUETA respecto a su anclaje, en PIXELES. Como es
     //! relativo al punto, al mover la entidad la etiqueta la sigue (se mueven al
     //! unisono); al arrastrar la etiqueta solo cambia esto. (0,0) = pegada al
@@ -191,6 +206,16 @@ struct MapFeature
 
     bool visible = true;
     bool selectable = true;
+
+    //! Si al SELECCIONARLA se resalta (halo, tiradores de vertice y rotulos de
+    //! extremo). Con false la entidad se sigue pudiendo elegir —el clic la
+    //! selecciona y se emiten \c featureSelected, \c featureClicked y
+    //! \c elementClicked, y sale en el menu contextual—, pero se dibuja igual que
+    //! sin seleccionar: para una red de coordenadas, una marca o una zona de fondo
+    //! que no deben «encenderse» al tocarlas. A diferencia de \a selectable, que la
+    //! hace invisible al raton. Para editarla a mano conviene dejarlo en true (sin
+    //! tiradores no se ve que arrastrar). No se persiste, como \a draggable.
+    bool highlightWhenSelected = true;
 
     //! Si es true y es un PUNTO, la herramienta «Navegar» (None) lo arrastra:
     //! al pulsar sobre él empieza el arrastre (en vez de desplazar el mapa) y la

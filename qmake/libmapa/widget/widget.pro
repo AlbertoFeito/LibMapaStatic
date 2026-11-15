@@ -49,6 +49,7 @@ HEADERS += \
     $$ROOT/src/widget/OverlayModel.h \
     $$ROOT/src/widget/FeatureLayer.h \
     $$ROOT/src/widget/LabelPlacement.h \
+    $$ROOT/src/widget/LabelPaint.h \
     $$ROOT/src/widget/TargetModel.h \
     $$ROOT/src/widget/TargetLayer.h \
     $$ROOT/src/widget/CoverageLayer.h \

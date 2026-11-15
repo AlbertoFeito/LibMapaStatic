@@ -25,6 +25,8 @@ private slots:
     void historyThinningKeepsOriginAndLast();
     //! Distancia minima, horas dadas por la app y borrado.
     void historyTimesMinDistanceAndRemoval();
+    //! La app siembra el historial (con hora): entra tal cual y alimenta la traza.
+    void seededHistoryReplacesAndFeedsTrail();
     void estimatesVelocityFromTrack();
     //! Offset de rotulo por defecto frente al propio: marca, quitar, restaurar.
     void labelOffsetDefaultOwnAndRestore();
@@ -388,6 +390,61 @@ void TstTargetModel::labelContentCanChangeAfterCreation()
     QVERIFY(m.setLabelContent(id, {}));                      // vuelve al texto plano
     QVERIFY(m.target(id)->labelContent.isEmpty());
     QVERIFY(!m.setLabelContent(9999, { l }));
+}
+
+// Historial sembrado por la app: se guarda tal cual (sin la distancia minima), con sus
+// horas; la traza dibujada es su final; y lo que llega despues continua desde ahi.
+void TstTargetModel::seededHistoryReplacesAndFeedsTrail()
+{
+    TargetModel m;
+    m.setHistoryMinDistance(50.0);            // la siembra NO debe recortar por distancia
+    m.setTrailMaxPoints(5);
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1700000000000LL).toUTC();
+
+    QVector<TargetTrackPoint> puntos;
+    for (int i = 0; i < 20; ++i)              // ~11 m entre puntos
+        puntos.append({QGeoCoordinate(23.0 + 0.0001 * i, -82.0), t0.addSecs(i)});
+    puntos.append({QGeoCoordinate(), t0.addSecs(99)});                    // invalido
+    puntos.append({QGeoCoordinate(24.0, -82.0), QDateTime()});            // sin hora
+
+    QVERIFY(!m.setHistory(77, puntos));       // no existe
+
+    // El objetivo esta donde acaba la historia: no se duplica el ultimo punto.
+    const qint64 id = m.upsert(objetivo(23.0019, -82.0), t0.addSecs(19));
+    QVERIFY(m.setHistory(id, puntos));
+    const QVector<TargetTrackPoint> h = m.history(id);
+    QCOMPARE(h.size(), 20);
+    QCOMPARE(h.first().time, t0);
+    QCOMPARE(m.origin(id).time, t0);
+    QCOMPARE(h.last().time, t0.addSecs(19));
+    QCOMPARE(m.lastUpdateMsecs(id), t0.addSecs(19).toMSecsSinceEpoch());
+    QCOMPARE(m.trail(id).size(), 5);
+    QVERIFY(m.trail(id).last().distanceTo(QGeoCoordinate(23.0019, -82.0)) < 0.5);
+    QVERIFY(m.trail(id).first().distanceTo(QGeoCoordinate(23.0015, -82.0)) < 0.5);
+
+    // Con hora, la velocidad estimada sale de la historia sembrada (~11 m/s).
+    double vel = 0.0, rumbo = 0.0;
+    QVERIFY(m.estimateVelocity(id, 10000, &vel, &rumbo));
+    QVERIFY2(vel > 9.0 && vel < 13.0, qPrintable(QString::number(vel)));
+
+    // Lo siguiente continua el historial.
+    QVERIFY(m.update(id, QGeoCoordinate(23.05, -82.0), 0.0, t0.addSecs(60)));
+    QCOMPARE(m.history(id).size(), 21);
+    QCOMPARE(m.origin(id).time, t0);
+
+    // Si el objetivo NO esta en el ultimo punto, su posicion actual cierra el historial.
+    const qint64 otro = m.upsert(objetivo(30.0, -70.0), t0.addSecs(500));
+    QVERIFY(m.setHistory(otro, puntos));
+    QCOMPARE(m.history(otro).size(), 21);
+    QVERIFY(m.history(otro).last().position.distanceTo(QGeoCoordinate(30.0, -70.0)) < 0.5);
+    QCOMPARE(m.history(otro).last().time, t0.addSecs(500));
+
+    // Por encima del tope se aclara una vez; origen y ultimo se conservan.
+    m.setHistoryMaxPoints(8);
+    QVERIFY(m.setHistory(id, puntos));
+    QVERIFY(m.history(id).size() <= 8);
+    QCOMPARE(m.history(id).first().time, t0);
+    QVERIFY(m.history(id).last().position.distanceTo(QGeoCoordinate(23.05, -82.0)) < 0.5);
 }
 
 QTEST_MAIN(TstTargetModel)

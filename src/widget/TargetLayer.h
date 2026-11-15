@@ -3,6 +3,7 @@
 
 #include "qcustomplot.h"
 
+#include "libmapa/MapTypes.h"
 #include "libmapa/TargetSymbol.h"
 #include "widget/TargetModel.h"
 
@@ -72,6 +73,8 @@ public:
     //! Lineas de maximo acercamiento de los pares en alerta (vacio = ninguna).
     void setProximityLines(const QVector<ProximityLine> &lines);
     void setProximityColor(const QColor &c) { m_proximityColor = c; }
+    //! Caja de los rotulos de proximidad (fondo, borde, halo). Ver LabelBoxStyle.
+    void setLabelBoxStyle(const LabelBoxStyle &s) { m_labelBox = s; }
 
     /*!
      * \brief Objetivos que NO pasan el filtro de la app.
@@ -166,6 +169,7 @@ private:
     bool m_historyVisible = true;    //!< El seleccionado muestra su historial.
     QVector<ProximityLine> m_proximity;              //!< Pares en alerta CPA.
     QColor m_proximityColor = QColor(0xff, 0x3d, 0x00);
+    LabelBoxStyle m_labelBox;                        //!< Caja de los rotulos CPA.
     QSet<qint64> m_filteredOut;                      //!< No pasan el filtro.
     TargetClustering m_clustering;
     //! Grupos del ultimo repintado, para el hit-test: centro, radio y miembros.

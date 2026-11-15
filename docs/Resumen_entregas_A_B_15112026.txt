@@ -1,0 +1,167 @@
+Emitido: domingo 15-11-2026 12:00 (hora del sistema)
+
+RESUMEN DE LAS ENTREGAS A Y B Y CÓMO ACTUALIZAR EL PROYECTO
+===========================================================
+
+Estado: implementado en la rama ccr-e86ff116-2imngk (PR #51, en BORRADOR, sin
+fusionar todavía en main). Compila con Qt 6 y pasan los 33 tests; el CI del PR
+está en verde, incluido el job de Qt 5.14. Falta la prueba en la app real.
+
+Nada cambia por defecto: el código que ya usa la librería sigue funcionando igual.
+
+
+ENTREGA A: CAMBIO DE PANTALLA DE OBJETIVOS
+------------------------------------------
+1. clearTargets() y removeTarget(id) quitan el objetivo resaltado y el formulario
+   agarrado. Ya no hace falta llamar antes a clearSelectedTarget().
+
+2. Historia con hora. API nueva (la firma de siempre no cambia):
+       qint64 addTarget(const MapTarget &target, const QVector<TargetTrackPoint> &history);
+       bool   setTargetHistory(qint64 id, const QVector<TargetTrackPoint> &history);
+   Los puntos entran tal cual (sin la distancia mínima de 1 m), en orden de tiempo.
+   updateTarget sigue igual.
+
+3. Carga silenciosa:
+       void beginTargetLoad();
+       void endTargetLoad();
+   Entre las dos no se emiten alertas de zona ni de proximidad, pero el estado
+   interno sí se actualiza.
+
+4. Sectores y círculos con dueño:
+       void clearTargets(bool keepOwnedFeatures = false);
+   Con true quedan suspendidos (no se ven ni se pinchan) y reaparecen cuando
+   vuelve un objetivo con el mismo id. Los anillos y marcaciones se conservan solos.
+
+Secuencia para cambiar de pantalla:
+
+    // guardar lo de la pantalla que se va
+    for (const MapTarget &t : mapa->targets())
+        guardado[t.id] = { t, mapa->targetHistory(t.id) };
+
+    // cargar la nueva
+    mapa->beginTargetLoad();
+    mapa->clearTargets(true);
+    for (const auto &g : pantallaNueva)
+        mapa->addTarget(g.objetivo, g.historia);
+    mapa->endTargetLoad();
+
+
+ENTREGA B
+---------
+5. Todas las entidades bajo el cursor. La señal no cambia de firma y se emite una
+   sola vez por clic; MapHit lleva la lista:
+       struct MapHitFeature { qint64 id; int subIndex; };
+       QVector<MapHitFeature> features;      // de arriba abajo; la primera es featureId
+   Sin clic: QVector<MapHitFeature> MapWidget::featuresAt(pixel, tolerancePx = 8).
+
+6. Seleccionar sin resaltar:
+       f.highlightWhenSelected = false;      // por defecto, true
+   El clic izquierdo la sigue seleccionando y emite featureSelected, pero no se
+   dibuja el halo ni los tiradores. No toca selectable.
+
+7. Caja de los rótulos. Por entidad, en FeatureStyle:
+       QColor labelBackground = QColor(255, 255, 255, 190);   // alfa 0 = sin fondo
+       QColor labelBorderColor;   double labelBorderWidth = 1.0;   // inválido = sin borde
+       QColor labelHaloColor;     double labelHaloWidth = 2.0;     // inválido = sin halo
+   Para anillos, marcaciones, cuadrícula y alertas de proximidad:
+       LabelBoxStyle s;  s.background = ...;  mapa->setLabelBoxStyle(s);
+
+
+A TENER EN CUENTA
+-----------------
+- highlightWhenSelected y los campos nuevos del rótulo NO se guardan en la BD de
+  entidades: la app los pone al crear o cargar la entidad.
+- Siguen con su caja fija: rótulos de inicio/fin de ruta, la medida en vivo, el
+  origen del historial y la escala gráfica.
+- Una entidad sin resaltado tampoco muestra tiradores al editarla: ponerle el
+  resaltado mientras se edita a mano.
+- Si la historia sembrada supera el tope (5000 puntos por defecto) se aclara una
+  vez. Para conservarla entera, subir antes setTargetHistoryLimit.
+- Las alertas de una pantalla oculta no saltan: sus objetivos no están en la librería.
+- Los ids de objetivo deben ser únicos entre pantallas.
+
+Guías detalladas (en docs/):
+  Entrega_A_cambio_de_pantalla_15112026.txt
+  Entrega_B_clic_resaltado_rotulos_15112026.txt
+  BITACORA.md, secciones 188 y 189
+
+
+COMANDOS DE GIT PARA ACTUALIZAR EL PROYECTO
+-------------------------------------------
+En una consola (Git Bash o cmd), dentro de la carpeta del proyecto:
+
+    cd /d D:\QtPro\LibMapaStatic
+
+Paso 0. Ver si hay cambios locales sin guardar:
+
+    git status
+
+  Si aparecen ficheros modificados que NO quieres perder, guárdalos aparte antes
+  de cambiar de rama:
+
+    git stash
+    (para recuperarlos después:  git stash pop)
+
+CASO 1. Probar AHORA las entregas (el PR aún no está fusionado)
+
+    git fetch origin ccr-e86ff116-2imngk
+    git checkout ccr-e86ff116-2imngk
+
+  Si más adelante se suben correcciones a esa misma rama:
+
+    git pull origin ccr-e86ff116-2imngk
+
+  Para volver a main:
+
+    git checkout main
+
+CASO 2. Después de fusionar el PR #51 en main
+
+    git checkout main
+    git pull origin main
+
+Comprobar en qué rama y commit estás:
+
+    git branch --show-current
+    git log --oneline -3
+
+  El último commit de las entregas es:
+    22fad2a  Varias entidades bajo el clic, seleccionar sin resaltar y caja de los rotulos configurable
+  (pueden aparecer encima commits posteriores solo de documentación).
+
+
+DESPUÉS DE ACTUALIZAR, EN QT CREATOR
+------------------------------------
+Cambian cabeceras públicas (MapWidget.h, MapFeature.h, MapTypes.h) y hay una
+cabecera nueva (src/widget/LabelPaint.h), así que hay que recompilar todo:
+
+  1. Compilar > Ejecutar CMake   (con qmake: Compilar > Ejecutar qmake)
+  2. Compilar > Recompilar todo
+  3. Si la app usa la librería INSTALADA (find_package / libmapa.pri), volver a
+     instalarla y recompilar también la app.
+  4. Opcional, para comprobar: en la carpeta de build, ejecutar  ctest
+     (con C:/Qt/6.11.2/mingw_64/bin y C:/Qt/Tools/mingw1310_64/bin en el PATH).
+
+QCustomPlot no cambia: la copia de third_party/qcustomplot sigue sirviendo.
+
+
+EJEMPLO PARA PROBARLO A OJO: examples/cambio_pantalla
+-----------------------------------------------------
+(añadido el 15-11-2026, después de emitir este resumen)
+
+Una ventana con el mapa y un panel para tocar todo lo de las dos entregas, sin
+usar la app real. Qué probar, paso a paso: examples/cambio_pantalla/README.md
+
+Se compila contra la librería INSTALADA, como los demás ejemplos:
+
+  1. Instalar la librería (desde su carpeta de build):
+       cmake --install . --prefix C:/libmapa
+  2. Compilar los ejemplos:
+       cmake -S examples -B build-examples -DCMAKE_PREFIX_PATH="C:/libmapa;C:/Qt/6.11.2/mingw_64"
+       cmake --build build-examples
+     (o abrir examples/cambio_pantalla/cambio_pantalla.pro en Qt Creator)
+  3. Lanzarlo con vuestro paquete de datos:
+       cambio_pantalla.exe <carpeta del paquete de datos>
+     Sin ventana, solo para comprobar (sale con 0 si todo está bien):
+       cambio_pantalla.exe <carpeta del paquete de datos> --comprobar
+

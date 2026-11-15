@@ -1308,6 +1308,8 @@ void MapView::mousePressEvent(QMouseEvent *event)
 // Lleva cada circulo o sector con dueno a la posicion de su objetivo o de su entidad, y quita
 // el de un objetivo que ya no existe. El de una entidad que desaparece lo quita el propio
 // modelo al quitarla (y mientras se cargan, un dueno que aun no esta no se toma por perdido).
+// Uno SUSPENDIDO (cambio de pantalla, ver suspenderDuenos) no se quita aunque falte su
+// objetivo: espera oculto y, cuando el objetivo vuelve, se le levanta la suspension.
 void MapView::sincronizaDuenos()
 {
     if (!m_model || m_sincronizandoDuenos)
@@ -1324,17 +1326,41 @@ void MapView::sincronizaDuenos()
         if (f->originTargetId >= 0) {
             const auto t = m_targetModel->target(f->originTargetId);
             if (!t) {
-                m_model->removeFeature(id);
+                if (!m_model->isFeatureSuspended(id))
+                    m_model->removeFeature(id);
                 continue;
             }
             p = t->position;
         } else if (const auto dueno = m_model->feature(f->originFeatureId)) {
             p = dueno->position();
         }
+        // Primero al sitio y luego a la vista: que reaparezca ya sobre su dueno.
         if (p.isValid() && !f->geometry.isEmpty() && f->geometry.first().distanceTo(p) > 0.5)
             m_model->moveCenter(id, p);
+        if (f->originTargetId >= 0 && m_model->isFeatureSuspended(id))
+            m_model->setFeatureSuspended(id, false);
     }
     m_sincronizandoDuenos = false;
+}
+
+// Antes de vaciar los objetivos: con 'conservar', suspende los circulos y sectores que
+// cuelgan de un objetivo (sincronizaDuenos ya no los quitara); sin el, levanta las
+// suspensiones y quita ya los que se habian quedado sin objetivo.
+void MapView::suspenderDuenos(bool conservar)
+{
+    if (!m_model || m_sincronizandoDuenos)
+        return;
+    // Con el cerrojo puesto: suspender avisa con changed() y, como el objetivo aun
+    // existe, sincronizaDuenos levantaria la suspension en el acto.
+    m_sincronizandoDuenos = true;
+    for (const qint64 id : m_model->ownedFeatureIds()) {
+        const auto f = m_model->feature(id);
+        if (f && f->originTargetId >= 0)
+            m_model->setFeatureSuspended(id, conservar);
+    }
+    m_sincronizandoDuenos = false;
+    if (!conservar)
+        sincronizaDuenos();
 }
 
 // Al salir el raton del mapa ya no hay rotulo de anillo destacado.

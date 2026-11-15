@@ -75,6 +75,8 @@ public:
     //! Pixel donde esta el raton, para destacar el rotulo de anillo o de radial que tiene debajo
     //! (los demas son translucidos). Repinta solo si cambia el rotulo destacado. (-1,-1) = ninguno.
     void setHoverPixel(const QPointF &pixel);
+    //! Caja de los rotulos de anillos y marcaciones (fondo, borde, halo).
+    void setLabelBoxStyle(const LabelBoxStyle &s) { m_labelBox = s; }
     //! Desplaza el rotulo de una marcacion (pixeles, relativo a su centro). false
     //! si no existe esa marcacion.
     bool setBearingLabelOffset(qint64 id, const QPointF &offsetPx);
@@ -139,6 +141,7 @@ private:
     //! Cajas de los rotulos suaves de la ultima pasada y la que tiene el raton encima.
     mutable QVector<QRectF> m_softBoxes;
     QRectF m_hoverBox;
+    LabelBoxStyle m_labelBox;       //!< Caja de los rotulos (MapWidget::setLabelBoxStyle).
     QPointF m_hoverPx = QPointF(-1.0, -1.0);
     //! Cajas de los rotulos de marcacion de la ultima pasada, para bearingLabelAt.
     mutable QVector<std::pair<qint64, QRectF>> m_bearingLabelBoxes;

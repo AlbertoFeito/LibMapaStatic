@@ -1,0 +1,206 @@
+OBJETIVOS Y TRAYECTORIA: PREGUNTAS Y RESPUESTAS
+================================================
+Análisis contra el código de libmapa / LibMapaStatic. Sin cambios de código.
+
+
+PARTE 1. LA PROPUESTA DE GULDRIS
+--------------------------------
+
+PREGUNTA 1.1
+"La historia de la trayectoria se guarda en un vector en la clase que dibuja los
+objetivos. Deberíamos guardarla nosotros y pasarle a la librería el vector con
+todos los puntos al crear o actualizar un objetivo, para pintar."
+
+RESPUESTA
+Una precisión: la historia no está en la clase que dibuja (TargetLayer). Está en
+el modelo, en TargetModel::Entry (trail = lo que se dibuja, tope 300 puntos;
+history = historial completo, tope 5000). TargetLayer solo lee de ahí. Por eso
+clearTargets() ya descarta traza e historial junto con los objetivos.
+
+Sobre pasar el vector en cada actualización: empeora la eficiencia.
+ - Hoy el camino rápido es updateTarget(id, pos, rumbo), que añade un punto, O(1).
+ - Con el vector entero en cada actualización, copiar y validar cuesta O(longitud)
+   por objetivo y por refresco. Con cientos de objetivos y varias actualizaciones
+   por segundo, es justo lo que el diseño actual evita.
+ - La librería usa la historia para más cosas que dibujar: estimateVelocity
+   (velocidad y rumbo por traza), el marcador de origen con su hora,
+   exportTargetHistory, targetHistory y targetOrigin.
+ - La app tendría que reimplementar la poda (1 m mínimo y aclarado a 5000) o la
+   memoria se dispara, y habría dos copias de los puntos (app y librería).
+
+Lo que sí es válido de su idea: guardar fuera de la clase que dibuja. Cambiar de
+pantalla con clearTargets() + addTarget() ya es simple, pero la historia de la
+pantalla anterior se pierde. Esa necesidad se cubre mejor con un archivo de
+seguimiento común (ver Parte 2) que con un vector pasado en cada actualización.
+
+PREGUNTA 1.2
+¿Qué haría falta si solo se quiere conservar la historia al cambiar de pantalla?
+
+RESPUESTA
+Lo mínimo, sin cambiar la propiedad de la historia:
+ - Un alta con historia inicial: addTarget(target, initialHistory) o
+   setTargetHistory(id, puntos). El vector se pasa UNA sola vez, al crear; las
+   actualizaciones en vivo siguen por updateTarget (O(1)).
+ - Al cambiar de pantalla, la app hace una foto con targetHistory(id) (ya
+   existe), borra, y al volver siembra la historia guardada.
+ - Un reemplazo en bloque (setTargets) que acepte opcionalmente la historia por
+   objetivo: una sola pasada y un solo repintado.
+
+
+PARTE 2. REQUISITO: GUARDAR CADA OBJETIVO CON SU TRAYECTORIA COMPLETA
+---------------------------------------------------------------------
+"Una app de seguimiento debe funcionar incluso si no se muestra el mapa. Se debe
+guardar cada objetivo con su trayectoria completa y poder seleccionar los puntos
+a ver, pero guardarlos todos para reproducción y análisis."
+
+PREGUNTA 2.1
+¿Lo cumple hoy la librería?
+
+RESPUESTA
+No. Tres motivos:
+
+1) El almacén vive dentro del widget.
+   - TargetModel se compila en el bloque que depende de QCustomPlot
+     (CMakeLists.txt:233). libmapa_core no lo tiene.
+   - No se pueden registrar objetivos sin crear un MapWidget, y el registro
+     vive y muere con él.
+   - El API lo dice: los objetivos NO se persisten (MapWidget.h:433) y el
+     historial se pierde con removeTarget o clearTargets.
+
+2) El historial pierde información a propósito (TargetModel.cpp:33-66):
+   - Distancia mínima de 1 m: un objetivo parado no anota nada, así que no queda
+     constancia de cuánto tiempo estuvo quieto.
+   - Tope de 5000 puntos: al pasarse se tira uno de cada dos de los intermedios;
+     pérdida irreversible que se repite mientras el objetivo viva.
+   - Solo lat, lon y hora (HistoryPoint, 24 bytes): sin rumbo, velocidad,
+     altitud ni estado.
+
+3) La memoria no admite "todo en RAM". A 24 bytes por punto, un objetivo a 1 Hz
+   durante 24 h son unos 2 MB; con 1000 objetivos, unos 2 GB al día sin tope.
+   (Estimación a partir del tamaño de HistoryPoint, no una medición.)
+   Lo completo tiene que ir a disco.
+
+PREGUNTA 2.2
+¿Se puede separar lo que se guarda de lo que se ve?
+
+RESPUESTA
+Sí, y ya está medio hecho. La traza que se dibuja (trail, 300 puntos) es
+independiente del historial (history), que solo se pinta entero para el objetivo
+seleccionado. Hoy la selección de qué ver es global (setTargetTrailLength) o "el
+seleccionado entero". Falta una ventana de visualización por tiempo o por número
+de puntos, global o por objetivo.
+
+PREGUNTA 2.3
+¿Y la reproducción?
+
+RESPUESTA
+La infraestructura existe: TrackPlayer y sampleTrack reproducen pistas con hora,
+interpolando entre puntos. Pero se alimentan de GPX, y exportTargetHistory
+exporta el historial ya recortado. Falta una fuente completa de la que
+reproducir.
+
+PREGUNTA 2.4
+¿Qué propones?
+
+RESPUESTA
+Separar tres cosas que hoy están mezcladas: guardar, ver y reproducir.
+
+A. Un archivo de seguimiento en el núcleo (independiente del mapa).
+   - Clase nueva en libmapa_core, sin QCustomPlot ni GUI, que recibe (id, hora,
+     posición, rumbo, velocidad, altitud, atributos) y lo AÑADE a SQLite sin
+     perder nada.
+   - Reutiliza SqliteConnectionPool (una conexión por hilo, lectura concurrente)
+     y el patrón de guardado con antirebote de las entidades.
+   - Escritura fuera del hilo de la interfaz y por lotes: no añade coste al
+     dibujado.
+   - Tabla de puntos indexada por (objetivo, hora) y tabla de objetivos con
+     metadatos (kind, etiqueta, atributos, primera y última vez visto).
+   - La app lo alimenta aunque no haya ventana; el widget, si existe, solo lo
+     muestra.
+   - Convive con libtelemetria sin tocarla (sigue siendo solo Qt Core).
+
+B. El widget mantiene una caché acotada, como ahora.
+   - El camino caliente (updateTarget O(1)) y el dibujado no cambian: sin pérdida
+     de eficiencia.
+   - El historial en RAM pasa a ser solo para visualización; su poda ya no afecta
+     a lo guardado.
+   - Nuevo: elegir qué ver ("últimos N minutos", "entre T1 y T2"), global o por
+     objetivo, consultando el archivo y decimando según el zoom.
+
+C. Reproducción y análisis desde el archivo.
+   - Un origen para TrackPlayer que lea del archivo por tramos de tiempo, sin
+     cargar todo en memoria.
+   - Consultas por intervalo de tiempo y por objetivo; por zona después, con el
+     índice espacial de SQLite.
+
+D. Cambiar de pantalla deja de ser un problema. clearTargets() + carga de la
+   nueva información no destruye nada: la historia de la pantalla A sigue en
+   disco y se puede volver a ver.
+
+PREGUNTA 2.5
+¿En qué orden se haría?
+
+RESPUESTA
+1. Pequeño y sin riesgo: modo "sin recorte" en el historial actual (sin distancia
+   mínima ni aclarado) y, si interesa, ampliar el punto con rumbo y velocidad.
+2. El archivo en el núcleo, con tests (con verificación contra datos
+   independientes, no solo ida y vuelta).
+3. Visualización por ventana (tiempo o N puntos) y vínculo con el widget.
+4. Reproducción desde el archivo.
+
+
+PARTE 3. PREGUNTAS ABIERTAS (a responder por el equipo)
+-------------------------------------------------------
+
+PREGUNTA 3.1  Volumen
+¿Cuántos objetivos a la vez, a qué frecuencia de actualización y cuántas horas o
+días hay que conservar?
+RESPUESTA: ______________________________________________________________
+
+PREGUNTA 3.2  Campos por punto
+¿Qué hay que guardar además de posición y hora (rumbo, velocidad, altitud,
+estado, algún atributo)?
+RESPUESTA: ______________________________________________________________
+
+PREGUNTA 3.3  Retención
+¿Un fichero por sesión, por día, o uno continuo con borrado de lo antiguo?
+RESPUESTA: ______________________________________________________________
+
+PREGUNTA 3.4  Quién escribe
+¿La app tiene un hilo de datos propio desde el que alimentar el archivo, o debe
+encargarse la librería del hilo?
+RESPUESTA: ______________________________________________________________
+
+PREGUNTA 3.5  Análisis
+¿Qué consultas harán falta (por objetivo y tiempo, por zona, cruces entre
+objetivos)?
+RESPUESTA: ______________________________________________________________
+
+PREGUNTA 3.6  Alcance de lo anterior
+Si basta con empezar de cero al cambiar de pantalla (sin recuperar trayectorias),
+¿se descarta el archivo y solo se hace el reemplazo en bloque (setTargets)?
+RESPUESTA: ______________________________________________________________
+
+
+PARTE 4. OTRAS DECISIONES PENDIENTES DEL ANÁLISIS ANTERIOR
+-----------------------------------------------------------
+
+PREGUNTA 4.1  Fondo de los rótulos
+Al quitar la caja y el borde, ¿el texto lleva el halo de contorno como sustituto
+(el de los objetivos, TargetLayer.cpp:631-635) o solo texto plano? Sobre
+fotografía aérea el texto suelto puede perder legibilidad.
+RESPUESTA: ______________________________________________________________
+
+PREGUNTA 4.2  Selección sin resaltado
+Con MapFeature::highlightWhenSelected = false, ¿el clic izquierdo debe seguir
+seleccionando la entidad (señal featureSelected, sin halo) o no tocar nada?
+RESPUESTA: ______________________________________________________________
+
+PREGUNTA 4.3  Recarga en bloque de objetivos
+Cada addTarget dispara TargetModel::changed, que llama de forma síncrona a
+MapView::sincronizaDuenos() y esta recorre TODAS las entidades
+(OverlayModel::ownedFeatureIds). Recargar N objetivos cuesta N x (nº de
+entidades). ¿Cuántos objetivos por información y cuántas entidades a la vez (la
+red cuenta)? De eso depende si basta con limpiar la selección antes de
+clearTargets() o si hace falta setTargets / beginTargetBatch.
+RESPUESTA: ______________________________________________________________

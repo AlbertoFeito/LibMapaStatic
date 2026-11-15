@@ -442,7 +442,7 @@ la API que usa la aplicación:</p>
 <tr><td>Edición geometría</td><td class="mono">moveVertex · insertVertex · removeVertex · moveFeature · undo/redo</td></tr>
 <tr><td>Paquete de datos</td><td class="mono">MapConfig::dataDir · packageInfo · dataWarnings</td></tr>
 <tr><td>Persistencia</td><td class="mono">saveFeaturesTo · loadFeaturesFrom · setFeaturesDbFile · saveFeaturesNow</td></tr>
-<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget · <b>clearSelectedTarget · targetSelectionChanged</b></td></tr>
+<tr><td>Objetivos móviles</td><td class="mono">addTarget · updateTarget (con hora) · targetHistory · targetOrigin · setTargetHistoryLimit · setTargetHistoryMinDistance · setSelectedTargetHistoryVisible · setTargetLabel · setTargetAttribute · targetAttribute · setTargetSymbolProvider · setTargetDetailBudget · setTargetTrailLength · targetAt · setSelectedTarget · <b>clearSelectedTarget · targetSelectionChanged</b> · <b>addTarget(objetivo, historia) · setTargetHistory · beginTargetLoad · endTargetLoad · clearTargets(conservar)</b></td></tr>
 <tr><td>Alertas de zona</td><td class="mono">watchZone · unwatchZone · isZoneWatched · watchedZones · targetsInZone · zonesOfTarget · featuresInZone · zonesOfFeature · setZoneAlertHighlight · setZoneAlertColor · <b>señales targetEnteredZone / targetLeftZone / featureEnteredZone / featureLeftZone</b> · consulta puntual <b>targetsInArea · featuresInArea</b></td></tr>
 <tr><td>Agrupación de objetivos</td><td class="mono"><b>setTargetClustering(TargetClustering) · targetClustering · targetClusterAt · señal targetClusterClicked</b> · núcleo: MapDecor::clusterPoints (rejilla anclada al mundo)</td></tr>
 <tr><td>Filtro de objetivos</td><td class="mono"><b>setTargetFilter(TargetFilter) · clearTargetFilter · hasTargetFilter · targetPassesFilter · filteredOutTargets</b> (clase, velocidad, zonas vigiladas, predicado de la app; ocultar o atenuar)</td></tr>
@@ -712,6 +712,28 @@ objetivo (sin herramienta) lo resalta y emite <code>targetClicked(id, pos)</code
 completo</b> (posición y hora) desde que se vio por primera vez; al seleccionarlo se dibuja
 entero, del <b>origen</b> (marcado con su hora) a la posición actual, aunque la traza que se
 dibuja para todos sea corta.</p>
+<p><b>Cambio de pantalla de objetivos.</b> Una app que muestra varias informaciones, una cada vez,
+sobre la misma capa: guarda la historia de cada objetivo (<code>targetHistory</code>) y, al
+volver, la devuelve con <code>addTarget(objetivo, historia)</code> (puntos con hora; entran tal
+cual, sin la distancia mínima). Entre <code>beginTargetLoad()</code> y
+<code>endTargetLoad()</code> la carga es <b>silenciosa</b>: zonas y proximidad actualizan su
+estado pero no emiten alertas, así que los objetivos que ya estaban dentro de una zona no vuelven
+a dar la alarma. <code>clearTargets(true)</code> deja <b>suspendidos</b> los círculos y sectores
+con dueño (existen, pero no se ven ni se pinchan ni cuentan como zona) hasta que vuelve un
+objetivo con el mismo id; <code>clearTargets()</code> y <code>removeTarget</code> los quitan como
+siempre, y ambos quitan además el resaltado.</p>
+<p><b>Lo que hay bajo el cursor.</b> <code>hitTest(pixel)</code> devuelve un <code>MapHit</code>;
+cuando coinciden varias entidades en el punto, <code>MapHit::features</code> las lleva todas, de
+arriba abajo (la primera es <code>featureId</code>). <code>contextMenuRequested</code> y
+<code>elementClicked</code> se emiten <b>una vez</b> por clic con esa lista, para que la app monte
+un solo menú. Una entidad con <code>highlightWhenSelected = false</code> se selecciona y avisa como
+las demás, pero no se resalta (a diferencia de <code>selectable = false</code>, que la hace
+invisible al ratón).</p>
+<p><b>Caja de los rótulos.</b> Fondo, borde y halo se configuran por entidad en
+<code>FeatureStyle</code> (<code>labelBackground</code>, <code>labelBorderColor</code>,
+<code>labelHaloColor</code>) y, para anillos, marcaciones, cuadrícula y alertas de proximidad, con
+<code>setLabelBoxStyle</code>. Todas las capas pintan con el mismo ayudante
+(<code>widget/LabelPaint.h</code>); por defecto, la caja clara de siempre.</p>
 <p><b>Alertas de zona.</b> <code>watchZone(idPoligono)</code> convierte una entidad
 poligonal en zona vigilada: cada <code>addTarget</code>/<code>updateTarget</code>
 pasa por <code>ZoneMonitor</code> y, si el objetivo cruza el borde, se emite

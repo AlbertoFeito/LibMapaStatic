@@ -162,6 +162,7 @@ void OverlayModel::setContents(const QVector<MapFeature> &features,
     pushUndo();
 
     m_features.clear();
+    m_suspendidas.clear();
 
     m_idxSucio = true;
     m_layers.clear();
@@ -499,9 +500,12 @@ bool OverlayModel::removeFeature(qint64 id)
             colgados.append(it.key());
     if (isLayerUndoable(m_features.value(id).layerId))
         pushUndo();
-    for (const qint64 c : colgados)
+    for (const qint64 c : colgados) {
         m_features.remove(c);
+        m_suspendidas.remove(c);
+    }
     m_features.remove(id);
+    m_suspendidas.remove(id);
     m_idxSucio = true;
     for (const qint64 c : colgados) {
         if (m_selected == c) {
@@ -608,6 +612,24 @@ void OverlayModel::setTypeVisible(const QString &type, bool visible)
     emit changed();
 }
 
+// Suspende o devuelve una entidad: filtro de vista, sin paso de deshacer. La
+// seleccion no puede quedarse en algo que no se ve.
+bool OverlayModel::setFeatureSuspended(qint64 id, bool suspended)
+{
+    if (!m_features.contains(id) || m_suspendidas.contains(id) == suspended)
+        return false;
+    if (suspended) {
+        m_suspendidas.insert(id);
+        if (m_selected == id)
+            setSelected(-1);
+    } else {
+        m_suspendidas.remove(id);
+    }
+    emit featureSuspendedChanged(id, suspended);
+    emit changed();
+    return true;
+}
+
 // Borra TODAS las entidades de todas las capas (las capas se conservan). Como
 // clearLayer, avisa entidad a entidad para que los oyentes se pongan al dia.
 void OverlayModel::clear()
@@ -622,6 +644,7 @@ void OverlayModel::clear()
 
     pushUndo();
     m_features.clear();
+    m_suspendidas.clear();
     m_idxSucio = true;
     if (m_selected != -1) {
         m_selected = -1;

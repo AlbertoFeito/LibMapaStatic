@@ -1,0 +1,50 @@
+## Análisis de la respuesta
+
+### Punto 1: fondo configurable y poder quitar la caja y el borde
+Es viable, y ya sabemos dónde está cada caja (tabla del análisis anterior). Queda así:
+- FeatureStyle gana labelBackground (por defecto el blanco alfa 190 actual) y labelBorder, un QColor más un bool o grosor. Con alfa 0 desaparece la caja y con borde nulo desaparece el borde.
+- Los rótulos de RangeLayer, GraticuleLayer y proximidad no son entidades. Para ellos habría un setter global en MapWidget, con el mismo concepto.
+- El hit-test no cambia, porque usa la caja geométrica y no el color.
+- **Una cosa a tener en cuenta.** Hoy el fondo es lo que hace legible el texto sobre fotografía aérea (el comentario de FeatureLayer.cpp:854 lo dice). Si se quita la caja, el texto puede perder legibilidad. Convendría ofrecer, como alternativa a la caja, el mismo halo de texto que ya usan los objetivos (TargetLayer.cpp:631-635).
+
+### Punto 2: MapFeature::highlightWhenSelected
+La propuesta es correcta y coincide con la mía. Con la aclaración de que el que activa es el clic izquierdo, queda confirmado el camino exacto:
+- MapView::mouseReleaseEvent (Pend::Entidad, línea 1603), o la herramienta Editar (línea 1287), llama a m_model->setSelected(id).
+- El resaltado es el halo blanco de FeatureLayer::drawPathPart (líneas 536-551), más los tiradores si la herramienta es Editar.
+- Que no use selectFeature en el clic derecho no cambia nada: la selección sale del clic izquierdo, dentro de la librería.
+
+Diseño recomendado:
+- highlightWhenSelected = true por defecto, así nada existente cambia.
+- Con false, la entidad **sigue siendo encontrable** (hitTest, elementClicked, menú contextual, featureSelected), pero no se le pinta halo ni tiradores. Ahí se distingue de selectable=false, que la hace invisible al ratón.
+- Sobre la señal: mapClicked se emite siempre, y eso no cambia.
+- Hay que decidir **si ese clic selecciona o no**. Opción simple: sí selecciona (la señal sale), pero no se resalta. Así no cambia ningún flujo.
+- Coste: un if en el dibujado, más un test.
+
+### Punto 3: una capa, clearTargets() + addTarget(...) al cambiar de información
+Es la opción A de antes, y es viable. Pero revisé el código y hay **tres cosas que afectan a la eficiencia y a la corrección**:
+
+1. **Coste de recargar en bloque.**
+   - Cada addTarget emite TargetModel::changed.
+   - Ese aviso llama a MapView::sincronizaDuenos() de forma síncrona (MapView.cpp:97).
+   - Esa función recorre **todas las entidades** (OverlayModel::ownedFeatureIds, OverlayModel.cpp:467-474) para ver si alguna es un círculo o sector con dueño.
+   - Resultado: recargar N objetivos cuesta **N × (nº de entidades)**. Y tu compañero dibuja la red y las zonas como entidades, así que puede haber muchas.
+   - Además, cada addTarget hace zones.updateTarget, syncProximity y syncFiltro por separado.
+   - El repintado sí está bien: se agrupa con un temporizador de 33 ms (TargetLayer.cpp:28-41). No hay N repintados.
+2. **La selección no se limpia con clearTargets().**
+   - MapWidget::clearTargets (líneas 2110-2122) limpia zonas, proximidad, filtro y modelo, pero no m_selectedTarget ni m_labelSelected.
+   - Si el objetivo seleccionado de la fuente anterior tiene un id que se reutiliza en la nueva, el objetivo nuevo aparece con halo, etiqueta forzada e historial.
+   - Solución en la app, mientras tanto: llamar a clearSelectedTarget() y clearTargetLabelSelected() antes de clearTargets().
+3. **Los sectores y círculos con dueño en un objetivo se borran** al limpiar (sincronizaDuenos, líneas 1324-1329). Los de la fuente que se oculta se pierden. Está documentado así en MapFeature.h:219-221. Los anillos y marcaciones colgados de un objetivo habría que comprobarlos aparte.
+
+Lo que sí se conserva entre cambios: los filtros de información (la definición se mantiene, solo se recalcula el conjunto de los que no pasan) y las zonas vigiladas, que quedan vacías sin emitir salidas.
+
+**Propuesta concreta para que no empeore la eficiencia:**
+- Un API de **reemplazo atómico**: MapWidget::setTargets(const QVector<MapTarget> &), o replaceTargets. Hace una sola limpieza (incluida la selección) y un alta masiva, con un único changed, una única sincronizaDuenos, y las zonas, la proximidad y el filtro evaluados en bloque. Es el camino rápido para cambiar de información: de coste lineal en el nº de objetivos y sin repintados intermedios.
+- Como alternativa o complemento, un par beginTargetBatch() / endTargetBatch() que suspenda los avisos y los sincronice al final, por si la app prefiere seguir llamando a addTarget.
+- La traza y el historial empiezan de cero en cada carga. Es coherente con "información distinta", pero conviene que tu compañero lo sepa.
+- Si el cambio se hace con poca frecuencia (a mano, desde un selector) y los conjuntos son de cientos de objetivos, el clearTargets() + addTarget() actual ya sirve, sin cambios. El problema aparece con miles de objetivos y muchas entidades.
+
+## Cosas que necesito saber
+1. Del punto 3: ¿cuántos objetivos tiene cada información (cientos o miles) y cuántas entidades hay a la vez (la red cuenta)? Eso decide si basta con corregir la selección o si hace falta setTargets.
+2. Del punto 2: ¿el clic izquierdo sobre una entidad sin resaltado debe seguir seleccionándola (señal featureSelected) o no tocar nada?
+3. Del punto 1: ¿quieres que, al quitar la caja, el texto lleve el halo de contorno como sustituto, o prefieres solo texto plano?

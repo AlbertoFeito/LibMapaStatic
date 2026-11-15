@@ -516,6 +516,57 @@ public:
     //! Es la hora del ORIGEN del historial si el objetivo es nuevo.
     qint64 addTarget(const MapTarget &target, const QDateTime &time = QDateTime());
 
+    /*!
+     * \brief Da de alta un objetivo CON su trayectoria ya recorrida.
+     *
+     * Para volver a mostrar una informacion que la app guardo (p. ej. al cambiar de
+     * pantalla): \a history son sus puntos con hora, en orden de tiempo, del origen
+     * al mas reciente. Equivale a \ref addTarget seguido de \ref setTargetHistory,
+     * en un solo paso. La posicion actual es \a target.position.
+     */
+    qint64 addTarget(const MapTarget &target, const QVector<TargetTrackPoint> &history);
+
+    /*!
+     * \brief Sustituye el historial de un objetivo por el que da la app.
+     *
+     * Los puntos se guardan TAL CUAL (no se les aplica la distancia minima de
+     * \ref setTargetHistoryMinDistance); se descartan los de posicion invalida o
+     * sin hora. Si son mas que \ref setTargetHistoryLimit se aclaran una vez (el
+     * origen y el ultimo se conservan): subir antes ese tope si se quieren todos.
+     * La traza dibujada pasa a ser el final de ese historial y, si el ultimo punto
+     * no es la posicion actual del objetivo, esta se anade al final. Las
+     * actualizaciones siguientes (\ref updateTarget) continuan desde ahi.
+     *
+     * \return false si el objetivo no existe.
+     */
+    bool setTargetHistory(qint64 id, const QVector<TargetTrackPoint> &history);
+
+    /*!
+     * \brief Abre una CARGA de objetivos: mientras este abierta no se emiten las
+     *        alertas de zona ni de proximidad.
+     *
+     * Para recargar una informacion entera (cambio de pantalla) sin que cada
+     * objetivo que ya estaba dentro de una zona vuelva a dar la alarma. El estado
+     * interno (quien esta en cada zona, pares en alerta, resaltado, lineas CPA) SI
+     * se actualiza, asi que al cerrar \ref targetsInZone y \ref proximityAlerts
+     * dicen la verdad y las transiciones siguientes se emiten con normalidad. No
+     * se emiten \ref targetEnteredZone, \ref targetLeftZone,
+     * \ref proximityAlertRaised ni \ref proximityAlertCleared (ni las de entidades
+     * punto, \ref featureEnteredZone / \ref featureLeftZone, que puede provocar un
+     * sector vigilado al reaparecer con su objetivo). Se puede anidar:
+     * cada \c beginTargetLoad lleva su \ref endTargetLoad.
+     *
+     *     mapa->beginTargetLoad();
+     *     mapa->clearTargets(true);                 // conserva sectores con dueno
+     *     for (...) mapa->addTarget(objetivo, historia);
+     *     mapa->endTargetLoad();
+     */
+    void beginTargetLoad();
+    //! Cierra la carga abierta con \ref beginTargetLoad.
+    void endTargetLoad();
+    //! ¿Hay una carga de objetivos abierta?
+    bool isLoadingTargets() const;
+
     //! Via rapida del tiempo real: nueva posicion (y rumbo) de un objetivo ya
     //! existente, anadiendola a su traza y a su historial. NaN en el rumbo lo
     //! deja como estaba; \a time es la hora del dato (invalida = ahora).
@@ -562,8 +613,23 @@ public:
     //! Valor de un atributo de un objetivo, o QVariant() invalido si no existe.
     QVariant targetAttribute(qint64 id, const QString &key) const;
 
+    //! Quita un objetivo. Si era el resaltado o el del formulario agarrado, deja
+    //! de estarlo (se emiten \ref targetSelectionChanged /
+    //! \ref targetLabelSelectionChanged). Sus circulos y sectores (los que lo tienen
+    //! de dueno) se quitan con el.
     bool removeTarget(qint64 id);
-    void clearTargets();
+    /*!
+     * \brief Quita todos los objetivos (y el resaltado, si lo habia).
+     *
+     * Con \a keepOwnedFeatures false (por defecto, como siempre) los circulos y
+     * sectores con dueno en un objetivo (MapFeature::originTargetId) se quitan con
+     * ellos. Con true quedan SUSPENDIDOS: siguen existiendo pero no se dibujan, no
+     * se pueden pinchar ni cuentan como zona vigilada; cuando vuelve un objetivo
+     * con el mismo id reaparecen sobre el. Es lo que usa un cambio de pantalla
+     * (los ids deben ser unicos entre pantallas). Un \c clearTargets() posterior
+     * sin conservar los quita tambien a ellos.
+     */
+    void clearTargets(bool keepOwnedFeatures = false);
 
     std::optional<MapTarget> target(qint64 id) const;
     QVector<MapTarget> targets() const;
@@ -821,6 +887,11 @@ public:
     //! Igual que \ref featureAt y, ademas, la PARTE de la entidad que cae bajo el pixel
     //! en \a subIndex (-1 si es de una sola parte o no hay entidad).
     qint64 featureAt(const QPoint &pixel, double tolerancePx, int *subIndex) const;
+    //! TODAS las entidades que se pueden elegir bajo un punto de la pantalla, de
+    //! arriba abajo (capa mas alta primero; en cada capa, la mas cercana primero).
+    //! Es la lista que lleva \ref MapHit::features en \ref contextMenuRequested y
+    //! \ref elementClicked. No cambia la seleccion.
+    QVector<MapHitFeature> featuresAt(const QPoint &pixel, double tolerancePx = 8.0) const;
     //! Caja, en pixeles, del rotulo propio de la parte \a part de una entidad
     //! multi-parte (\ref PartInfo::name), o un rectangulo nulo si no lo tiene.
     QRect featurePartLabelRect(qint64 id, int part) const;
@@ -1148,6 +1219,17 @@ public:
     //! Color de lineas y rotulos (p. ej. claro sobre la capa satelital).
     void setGraticuleColor(const QColor &color);
     QColor graticuleColor() const;
+    /*!
+     * \brief Caja de los rotulos que NO son de una entidad: anillos y marcaciones,
+     *        cuadricula y alertas de proximidad.
+     *
+     * Fondo, borde y halo, ver \ref LabelBoxStyle. Por defecto (colores invalidos)
+     * cada capa conserva su caja de siempre. Los rotulos de las entidades se
+     * configuran en su estilo: FeatureStyle::labelBackground, labelBorderColor y
+     * labelHaloColor. La caja que usa el raton para agarrar un rotulo no cambia.
+     */
+    void setLabelBoxStyle(const LabelBoxStyle &style);
+    LabelBoxStyle labelBoxStyle() const;
     //! Cuadricula geografica (por defecto) o UTM: lineas de este/norte
     //! constantes de cada zona visible, cada 100 km .. 100 m segun el zoom,
     //! con los limites de zona marcados. Las conversiones, en Coordinates.h.

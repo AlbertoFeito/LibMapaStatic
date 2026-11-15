@@ -180,6 +180,15 @@ private slots:
     void rangeLabelsAreSoftHighlightOnHoverAndHideable();
     //! Un sector con dueno sigue a su objetivo, se va con el y sigue a una entidad que se mueve.
     void sectorFollowsItsOwner();
+    //! Cambio de pantalla: limpiar quita el resaltado, la carga es silenciosa, la
+    //! historia vuelve con sus horas y los sectores y anillos del objetivo reaparecen.
+    void screenSwitchReloadsTargetsSilently();
+    //! Varias entidades en el mismo punto: UNA señal de menu con la lista entera.
+    void hitTestListsEveryFeatureUnderTheCursor();
+    //! highlightWhenSelected = false: se selecciona y avisa, pero no se resalta.
+    void featureCanBeSelectedWithoutHighlight();
+    //! Fondo, borde y halo del rotulo: por entidad y, para el resto, global.
+    void labelBoxIsConfigurable();
     //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
     //! del PRIMER vértice, no del centro.
     void areaLabelHangsFromFirstVertex();
@@ -6448,6 +6457,328 @@ void TstMapWidget::sectorFollowsItsOwner()
     QVERIFY(w.feature(idC)->geometry.first().distanceTo(QGeoCoordinate(21.5, -79.5)) < 1.0);
     QVERIFY(w.removeFeature(idP));
     QVERIFY(!w.feature(idC).has_value());
+}
+
+// Cambio de pantalla de objetivos, de principio a fin: la app guarda la historia, limpia
+// conservando lo que cuelga de los objetivos, carga otra informacion y vuelve.
+void TstMapWidget::screenSwitchReloadsTargetsSilently()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setCenter(QGeoCoordinate(22.0, -80.0));
+
+    MapFeature zona;
+    zona.kind = GeometryKind::Polygon;
+    zona.geometry = { QGeoCoordinate(21.5, -80.5), QGeoCoordinate(22.5, -80.5),
+                      QGeoCoordinate(22.5, -79.5), QGeoCoordinate(21.5, -79.5) };
+    const qint64 zonaId = w.addFeature(zona);
+    QVERIFY(w.watchZone(zonaId));
+
+    QSignalSpy entra(&w, &MapWidget::targetEnteredZone);
+    QSignalSpy sale(&w, &MapWidget::targetLeftZone);
+    QSignalSpy seleccion(&w, &MapWidget::targetSelectionChanged);
+
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1700000000000LL).toUTC();
+    MapTarget t;
+    t.id = 500;
+    t.position = QGeoCoordinate(22.0, -80.0);            // dentro de la zona
+    QCOMPARE(w.addTarget(t, t0), qint64(500));
+    QVERIFY(w.updateTarget(500, QGeoCoordinate(22.01, -80.0), 0.0, t0.addSecs(60)));
+    QVERIFY(w.updateTarget(500, QGeoCoordinate(22.02, -80.0), 0.0, t0.addSecs(120)));
+    QCOMPARE(entra.count(), 1);
+
+    MapFeature s;
+    s.kind = GeometryKind::Arc;
+    s.geometry = { QGeoCoordinate(0.0, 0.0) };
+    s.radiusMeters = 20000.0;
+    s.arcEndDeg = 90.0;
+    s.arcSector = true;
+    s.originTargetId = 500;
+    const qint64 idS = w.addFeature(s);
+    QVERIFY(idS > 0);
+    RangeRings r;
+    r.targetId = 500;
+    r.spacingMeters = 1852.0;
+    r.count = 3;
+    const qint64 anillos = w.addRangeRings(r);
+    QVERIFY(anillos > 0);
+
+    w.setSelectedTarget(500);
+    QCOMPARE(w.selectedTarget(), qint64(500));
+
+    // La app guarda lo suyo antes de cambiar de pantalla.
+    const MapTarget guardado = *w.target(500);
+    const QVector<TargetTrackPoint> historia = w.targetHistory(500);
+    QCOMPARE(historia.size(), 3);
+
+    // --- Pantalla B ----------------------------------------------------------
+    w.beginTargetLoad();
+    QVERIFY(w.isLoadingTargets());
+    w.clearTargets(true);
+    QCOMPARE(w.targetCount(), 0);
+    QCOMPARE(w.selectedTarget(), qint64(-1));            // el resaltado no sobrevive
+    QCOMPARE(seleccion.last().at(0).toLongLong(), qint64(-1));
+    QVERIFY2(w.feature(idS).has_value(), "el sector queda suspendido, no borrado");
+    // Suspendido no se puede pinchar: en su sitio solo queda la zona.
+    const QPoint centro(400, 300);
+    QCOMPARE(w.hitTest(centro).featureId, zonaId);
+
+    MapTarget otro;
+    otro.id = 900;
+    otro.position = QGeoCoordinate(22.2, -80.2);         // tambien dentro de la zona
+    QCOMPARE(w.addTarget(otro), qint64(900));
+    w.endTargetLoad();
+    QCOMPARE(entra.count(), 1);                          // la carga no dio la alarma...
+    QCOMPARE(w.targetsInZone(zonaId), QVector<qint64>({900}));   // ...pero el estado es cierto
+    QVERIFY(w.feature(idS).has_value());
+
+    // --- Vuelta a la pantalla A ----------------------------------------------
+    w.beginTargetLoad();
+    w.clearTargets(true);
+    QCOMPARE(w.addTarget(guardado, historia), qint64(500));
+    w.endTargetLoad();
+    QCOMPARE(entra.count(), 1);
+    QCOMPARE(sale.count(), 0);
+    QCOMPARE(w.targetsInZone(zonaId), QVector<qint64>({500}));
+
+    const QVector<TargetTrackPoint> vuelta = w.targetHistory(500);
+    QCOMPARE(vuelta.size(), 3);
+    QCOMPARE(vuelta.first().time, t0);
+    QCOMPARE(w.targetOrigin(500).time, t0);
+    QCOMPARE(vuelta.last().time, t0.addSecs(120));
+
+    // El sector reaparece sobre su objetivo y vuelve a poderse pinchar; los anillos siguen.
+    QVERIFY(w.feature(idS).has_value());
+    QVERIFY(w.feature(idS)->geometry.first().distanceTo(guardado.position) < 1.0);
+    w.setCenter(guardado.position.atDistanceAndAzimuth(8000.0, 45.0));   // dentro de la cuna
+    QCOMPARE(w.hitTest(centro).featureId, idS);
+    QVERIFY(w.rangeRings(anillos).has_value());
+    QCOMPARE(w.rangeRings(anillos)->targetId, qint64(500));
+
+    // Fuera de la carga, las alertas vuelven a sonar.
+    QVERIFY(w.updateTarget(500, QGeoCoordinate(25.0, -80.0)));
+    QCOMPARE(sale.count(), 1);
+
+    // Quitar el objetivo resaltado quita tambien el resaltado y su sector.
+    w.setSelectedTarget(500);
+    QVERIFY(w.removeTarget(500));
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    QVERIFY(!w.feature(idS).has_value());
+
+    // Limpiar SIN conservar se lleva tambien lo que estaba suspendido.
+    QCOMPARE(w.addTarget(guardado), qint64(500));
+    s.originTargetId = 500;
+    const qint64 idS2 = w.addFeature(s);
+    w.clearTargets(true);
+    QVERIFY(w.feature(idS2).has_value());
+    w.clearTargets();
+    QVERIFY(!w.feature(idS2).has_value());
+}
+
+// Dos zonas solapadas en la misma capa, una linea que las cruza en una capa mas alta:
+// hitTest las da todas, de arriba abajo, y el clic derecho emite UNA sola señal.
+void TstMapWidget::hitTestListsEveryFeatureUnderTheCursor()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate c(22.0, -80.0);
+    w.setCenter(c);
+    auto *plot = w.findChild<QCustomPlot *>();
+    QVERIFY(plot);
+    const QPoint centro(400, 300);
+
+    const auto cuadro = [&](double medio) {
+        MapFeature z;
+        z.kind = GeometryKind::Polygon;
+        z.geometry = { QGeoCoordinate(c.latitude() - medio, c.longitude() - medio),
+                       QGeoCoordinate(c.latitude() + medio, c.longitude() - medio),
+                       QGeoCoordinate(c.latitude() + medio, c.longitude() + medio),
+                       QGeoCoordinate(c.latitude() - medio, c.longitude() + medio) };
+        return z;
+    };
+    const qint64 grande = w.addFeature(cuadro(0.5));
+    const qint64 chica = w.addFeature(cuadro(0.2));
+    QVERIFY(w.addFeatureLayer(QStringLiteral("encima"), QStringLiteral("Encima"), 10));
+    MapFeature linea;
+    linea.kind = GeometryKind::Polyline;
+    linea.layerId = QStringLiteral("encima");
+    linea.geometry = { QGeoCoordinate(c.latitude(), c.longitude() - 1.0),
+                       QGeoCoordinate(c.latitude(), c.longitude() + 1.0) };
+    const qint64 idLinea = w.addFeature(linea);
+    // Una cuarta que no esta bajo el cursor, y otra que no se puede elegir.
+    MapFeature lejos = cuadro(0.1);
+    for (QGeoCoordinate &v : lejos.geometry)
+        v.setLatitude(v.latitude() + 3.0);
+    w.addFeature(lejos);
+    MapFeature fija = cuadro(0.6);
+    fija.selectable = false;
+    w.addFeature(fija);
+
+    const MapHit h = w.hitTest(centro);
+    QCOMPARE(h.features.size(), 3);
+    QCOMPARE(h.features.at(0).id, idLinea);              // la capa mas alta, primero
+    QCOMPARE(h.featureId, idLinea);                      // y es la de siempre
+    QCOMPARE(h.featureId, w.featureAt(centro));
+    // En la capa de abajo, las dos zonas (a igual distancia, la dibujada despues).
+    QCOMPARE(h.features.at(1).id, chica);
+    QCOMPARE(h.features.at(2).id, grande);
+    QCOMPARE(w.featuresAt(centro), h.features);
+
+    // Fuera de la zona chica pero dentro de la grande: solo la grande.
+    const MapHit soloGrande = w.hitTest(QPoint(400, 300 - 40));
+    QVERIFY(soloGrande.features.size() >= 1);
+    for (const MapHitFeature &f : soloGrande.features)
+        QVERIFY(f.id != idLinea);
+
+    // Clic derecho: una señal, con la lista entera.
+    QSignalSpy menu(&w, &MapWidget::contextMenuRequested);
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, centro, Qt::RightButton, Qt::RightButton);
+    QCoreApplication::sendEvent(plot, &pulsa);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, centro, Qt::RightButton, Qt::NoButton);
+    QCoreApplication::sendEvent(plot, &suelta);
+    QCOMPARE(menu.count(), 1);
+    const MapHit recibido = menu.at(0).at(0).value<MapHit>();
+    QCOMPARE(recibido.features, h.features);
+    QCOMPARE(recibido.featureId, idLinea);
+}
+
+// Una entidad con highlightWhenSelected = false se elige como las demas (seleccion y
+// señales), pero el mapa se ve igual que sin seleccionar; con true, cambia.
+void TstMapWidget::featureCanBeSelectedWithoutHighlight()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate c(22.0, -80.0);
+    w.setCenter(c);
+    auto *plot = w.findChild<QCustomPlot *>();
+    QVERIFY(plot);
+    const QPoint centro(400, 300);
+
+    MapFeature z;
+    z.kind = GeometryKind::Polygon;
+    z.geometry = { QGeoCoordinate(21.8, -80.2), QGeoCoordinate(22.2, -80.2),
+                   QGeoCoordinate(22.2, -79.8), QGeoCoordinate(21.8, -79.8) };
+    z.highlightWhenSelected = false;
+    const qint64 id = w.addFeature(z);
+    QVERIFY(!w.feature(id)->highlightWhenSelected);
+
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+    QTest::qWait(300);                                   // que lleguen las teselas
+
+    // El clic izquierdo la selecciona y avisa.
+    QSignalSpy seleccion(&w, &MapWidget::featureSelected);
+    QSignalSpy clic(&w, &MapWidget::elementClicked);
+    QMouseEvent pulsa = mouseEvent(QEvent::MouseButtonPress, centro, Qt::LeftButton, Qt::LeftButton);
+    QCoreApplication::sendEvent(plot, &pulsa);
+    QMouseEvent suelta = mouseEvent(QEvent::MouseButtonRelease, centro, Qt::LeftButton, Qt::NoButton);
+    QCoreApplication::sendEvent(plot, &suelta);
+    QCOMPARE(w.selectedFeature(), id);
+    QCOMPARE(seleccion.count(), 1);
+    QCOMPARE(seleccion.at(0).at(0).toLongLong(), id);
+    QCOMPARE(clic.count(), 1);
+
+    // Seleccionada y sin seleccionar se ven igual.
+    const QImage seleccionada = captura();
+    w.clearSelection();
+    const QImage sinSeleccion = captura();
+    QVERIFY2(seleccionada == sinSeleccion, "sin resaltado, seleccionada se ve igual");
+
+    // Con el resaltado puesto, la misma entidad seleccionada se ve distinta.
+    MapFeature con = *w.feature(id);
+    con.highlightWhenSelected = true;
+    QVERIFY(w.updateFeature(con));
+    QVERIFY(captura() == sinSeleccion);                  // aun sin seleccionar
+    w.selectFeature(id);
+    QVERIFY2(captura() != sinSeleccion, "con resaltado, seleccionada cambia");
+}
+
+// La caja del rotulo de una entidad se configura en su estilo (fondo, borde, halo) sin
+// mover la caja que usa el raton; la de anillos, cuadricula y proximidad, con
+// setLabelBoxStyle. Por defecto todo queda como estaba.
+void TstMapWidget::labelBoxIsConfigurable()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    const QGeoCoordinate c(22.0, -80.0);
+    w.setCenter(c);
+
+    // Valores por defecto: la caja blanca de siempre, sin borde ni halo.
+    const FeatureStyle porDefecto;
+    QCOMPARE(porDefecto.labelBackground, QColor(255, 255, 255, 190));
+    QVERIFY(!porDefecto.labelBorderColor.isValid());
+    QVERIFY(!porDefecto.labelHaloColor.isValid());
+    QVERIFY(!w.labelBoxStyle().background.isValid());
+
+    MapFeature p;
+    p.kind = GeometryKind::Point;
+    p.geometry = { c };
+    p.name = QStringLiteral("FUENTE 12");
+    const qint64 id = w.addFeature(p);
+    QTest::qWait(300);                                   // que lleguen las teselas
+
+    const auto captura = [&w] {
+        QCoreApplication::processEvents();
+        return w.grab().toImage();
+    };
+    const QImage deSiempre = captura();
+    const QRect caja = w.featureLabelRect(id);
+    QVERIFY(caja.isValid());
+
+    // Otro fondo.
+    MapFeature f = *w.feature(id);
+    f.style.labelBackground = QColor(0, 0, 120, 255);
+    QVERIFY(w.updateFeature(f));
+    const QImage fondoAzul = captura();
+    QVERIFY(fondoAzul != deSiempre);
+    QCOMPARE(fondoAzul.pixelColor(caja.left() + 2, caja.center().y()), QColor(0, 0, 120));
+    QCOMPARE(w.featureLabelRect(id), caja);              // el raton agarra lo mismo
+
+    // Sin caja: el fondo del rotulo es ya el del mapa.
+    f.style.labelBackground = QColor(0, 0, 0, 0);
+    QVERIFY(w.updateFeature(f));
+    const QImage sinCaja = captura();
+    QVERIFY(sinCaja != deSiempre);
+    QVERIFY(sinCaja != fondoAzul);
+    QCOMPARE(w.featureLabelRect(id), caja);
+    QCOMPARE(w.featureLabelAt(caja.center()), id);
+
+    // Borde y halo se notan, cada uno por su cuenta.
+    f.style.labelBorderColor = QColor(200, 0, 0);
+    f.style.labelBorderWidth = 2.0;
+    QVERIFY(w.updateFeature(f));
+    const QImage conBorde = captura();
+    QVERIFY(conBorde != sinCaja);
+    f.style.labelBorderColor = QColor();
+    f.style.labelHaloColor = QColor(255, 255, 0);
+    f.style.labelHaloWidth = 2.0;
+    QVERIFY(w.updateFeature(f));
+    const QImage conHalo = captura();
+    QVERIFY(conHalo != sinCaja);
+    QVERIFY(conHalo != conBorde);
+
+    // Lo que no es entidad: unos anillos con rotulos y el estilo global.
+    QVERIFY(w.removeFeature(id));
+    RangeRings r;
+    r.center = c;
+    r.spacingMeters = 20000.0;
+    r.count = 3;
+    QVERIFY(w.addRangeRings(r) > 0);
+    const QImage anillos = captura();
+    LabelBoxStyle global;
+    global.background = QColor(0, 0, 120, 255);
+    w.setLabelBoxStyle(global);
+    QCOMPARE(w.labelBoxStyle().background, QColor(0, 0, 120, 255));
+    const QImage anillosAzul = captura();
+    QVERIFY(anillosAzul != anillos);
+    w.setLabelBoxStyle(LabelBoxStyle());                 // vuelta a lo de siempre
+    QVERIFY(captura() == anillos);
 }
 
 QTEST_MAIN(TstMapWidget)

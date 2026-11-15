@@ -7578,3 +7578,122 @@ arrastran includes que 5.14 no: por eso `QStringList` y `QDebug` (#186) pasaron 
 primera ejecución real es la del PR. Los comandos son los mismos que se comprobaron a mano en #186.
 
 **Estado: CI y documentación; no cambia código de la librería.**
+
+## 188. Cambio de pantalla de objetivos: historia sembrada, carga silenciosa y sectores suspendidos
+
+Una app muestra varias «informaciones» de objetivos, una cada vez, sobre la misma capa. Al cambiar
+de pantalla borra los objetivos y carga los de la otra. Hecho con `clearTargets()` + `addTarget()`
+tal cual, eso tenía cuatro problemas, y los cuatro se arreglan aquí sin cambiar nada por defecto.
+
+**El resaltado sobrevivía al borrado.** `clearTargets()` y `removeTarget()` no tocaban el objetivo
+resaltado ni el formulario agarrado: si la pantalla nueva reutilizaba ese id, el objetivo nuevo
+aparecía ya con halo, etiqueta forzada e historial. Ahora los dos quitan el resaltado (y emiten
+`targetSelectionChanged` / `targetLabelSelectionChanged`).
+
+**La historia se perdía.** La trayectoria vive en `TargetModel::Entry` y se va con el objetivo. La
+app guarda la suya (`targetHistory`) y la devuelve al volver: `addTarget(target, historia)` o
+`setTargetHistory(id, historia)`, con `QVector<TargetTrackPoint>` (posición **y hora**: sin hora no
+hay marca de origen, ni velocidad estimada, ni GPX con tiempos). La siembra **no pasa por
+`anotarHistoria`**: esos puntos ya los filtró quien los guardó, y la distancia mínima los recortaría
+otra vez. Si superan `setTargetHistoryLimit` se aclaran una sola vez. La traza dibujada se rehace
+con el final de la historia, y si el último punto no es la posición actual, esta la cierra.
+`updateTarget` no cambia: sigue siendo O(1). La firma de `addTarget` de siempre tampoco.
+
+**Las alarmas se repetían.** `clearTargets()` es silencioso, pero cada `addTarget` evalúa zonas y
+proximidad: los objetivos que ya estaban dentro de una zona volvían a emitir `targetEnteredZone` en
+cada cambio de pantalla. `beginTargetLoad()` / `endTargetLoad()` (anidables) abren una **carga
+silenciosa**: el estado se actualiza (quién está en cada zona, pares en alerta, resaltado, líneas
+CPA) pero no se emite ninguna señal de alerta. Al cerrar, `targetsInZone` dice la verdad y las
+transiciones siguientes suenan con normalidad.
+
+**Los sectores y círculos del objetivo se borraban para siempre.** `sincronizaDuenos` quita el que
+se queda sin objetivo. Con `clearTargets(true)` quedan **suspendidos**: siguen en el modelo, pero no
+se dibujan, no se pueden pinchar (`featureAt`, `labelAt`, `hitTest`) y, si eran zona vigilada, dejan
+de evaluarse; cuando vuelve un objetivo con ese id reaparecen sobre él y la zona se vuelve a
+vigilar. La suspensión es un filtro de vista del `OverlayModel` (`setFeatureSuspended`, como
+`setTypeVisible`): no se guarda ni se deshace, y no toca `MapFeature::visible`. `removeTarget(id)`
+sigue borrando los suyos (ese objetivo dejó de existir, no ha cambiado de pantalla), y un
+`clearTargets()` sin conservar se lleva también lo suspendido. Los ids de objetivo deben ser únicos
+entre pantallas. Los anillos y marcaciones con `targetId` ya se conservaban solos (no resuelven
+posición mientras falta el objetivo y vuelven con él); ahora lo comprueba un test.
+
+    mapa->beginTargetLoad();
+    mapa->clearTargets(true);
+    for (...) mapa->addTarget(objetivo, historiaGuardada);
+    mapa->endTargetLoad();
+
+**Lo que NO hace:** mientras una pantalla está oculta sus objetivos no están en la librería, así
+que no se vigilan sus zonas ni su proximidad (decisión aceptada). Tampoco se añadió un reemplazo en
+bloque (`setTargets`): con hasta 1000 objetivos y 150 entidades el coste de `addTarget` uno a uno
+se estimó despreciable, sin medirlo.
+
+**Tests:** `seededHistoryReplacesAndFeedsTrail` (modelo) y `screenSwitchReloadsTargetsSilently`
+(el cambio de pantalla completo: ida, vuelta, alarmas, sector, anillos, resaltado). 33 tests.
+
+**Estado: hecho y probado en Qt 6; a la espera de la prueba en la app.**
+
+## 189. Varias entidades bajo el clic, seleccionar sin resaltar y caja de los rótulos configurable
+
+Tres peticiones de la misma app, las tres sin cambiar nada por defecto.
+
+**Todas las entidades bajo el cursor (`MapHit::features`).** Con una línea cruzando una zona, o dos
+zonas solapadas, `hitTest` solo daba la de arriba. Se pidió emitir una señal por entidad, pero cada
+`contextMenuRequested` sirve para abrir un menú: N señales serían N menús seguidos. Se emite **una**,
+como siempre, y `MapHit` lleva la lista entera (`QVector<MapHitFeature>`: id y parte), de arriba
+abajo: capa más alta primero y, dentro de cada capa, la más cercana (a igual distancia, la dibujada
+después). `featureId`/`subIndex` siguen siendo la primera. `MapWidget::featuresAt` la da también
+sin clic. `FeatureLayer::featureAt` pasa a ser «la primera de `featuresAt`»: el cálculo de distancia
+se sacó a `distanciaAEntidad` y solo hay una implementación del acierto.
+
+**`MapFeature::highlightWhenSelected`.** Una red de coordenadas o una zona de fondo dibujadas como
+entidades se «encendían» en blanco al tocarlas. `selectable = false` no servía: las hace invisibles
+al ratón (ni menú, ni `elementClicked`). Con `highlightWhenSelected = false` la entidad se
+selecciona igual y se emiten las mismas señales, pero se dibuja como sin seleccionar (sin halo, sin
+tiradores, sin rótulos de extremo). No se persiste, como `draggable`.
+
+**Caja de los rótulos.** El fondo blanco estaba fijo en cada capa. Ahora, por entidad, en
+`FeatureStyle`: `labelBackground` (por defecto el blanco alfa 190 de siempre; alfa 0 = sin fondo),
+`labelBorderColor` + `labelBorderWidth` y `labelHaloColor` + `labelHaloWidth` (sin borde ni halo
+por defecto). Para lo que no es entidad —anillos y marcaciones, cuadrícula, alertas de proximidad—,
+`MapWidget::setLabelBoxStyle(LabelBoxStyle)`, donde un color inválido significa «el de cada capa».
+Todo pasa por `src/widget/LabelPaint.h` (caja + borde + texto con halo). El halo es el contorno del
+texto trazado con un `QPainterPath`, no varias pasadas desplazadas, para que el grosor sea el pedido.
+La caja que usa el ratón (`featureLabelRect`, `labelAt`) no cambia.
+
+**Lo que queda fuera:** los campos nuevos del rótulo **no se guardan** en la BD de entidades (igual
+que `labelColor`, que tampoco se guarda): la app los vuelve a poner al cargar. Siguen con su caja
+fija los rótulos de inicio/fin de ruta, el de la medida en vivo, el del origen del historial y la
+escala gráfica. Las etiquetas de los objetivos móviles ya no tenían caja.
+
+**Tests:** `hitTestListsEveryFeatureUnderTheCursor`, `featureCanBeSelectedWithoutHighlight` y
+`labelBoxIsConfigurable`. 33 tests.
+
+**Estado: hecho y probado en Qt 6; a la espera de la prueba en la app.**
+
+## 190. Ejemplo `cambio_pantalla`: probar a ojo el cambio de pantalla, el clic y los rótulos
+
+Lo de #188 y #189 tenía tests, pero nada donde verlo y tocarlo sin la app real. `examples/cambio_pantalla`
+es ese banco de pruebas, con el patrón de los otros laboratorios (contra la librería instalada,
+`--comprobar` y `--captura=`).
+
+**Hace de app, no de demo.** Guarda dos informaciones de objetivos (A y B) en su propio almacén
+—posición e historia con hora— y las mueve **las dos** con un reloj simulado, se vea la que se vea;
+al mapa solo va la visible. Cambiar de pantalla es la secuencia recomendada, y tres casillas quitan
+cada pieza (carga silenciosa, conservar sectores, devolver la historia) para ver en el contador de
+alarmas y en el registro qué arregla cada una. Así se comprueba también lo que el test no cubría: la
+historia vuelve con lo recorrido **mientras la pantalla estaba oculta**.
+
+El resto del panel: el menú del clic derecho con un submenú por entidad de `MapHit::features`, una
+red de líneas con `highlightWhenSelected` conmutable y los controles de fondo, borde y halo.
+
+**`--comprobar`** hace el viaje de ida y vuelta y verifica historia, origen, alarmas (cero con carga
+silenciosa, más de cero sin ella), sector, anillos y resaltado; las tres entidades del cruce; la
+selección sin resaltado y que quitar la caja del rótulo no mueve la que usa el ratón. Como el API
+público no da el píxel de una coordenada, lo interpola con `hitTest` entre dos puntos de la vista: el
+paquete de prueba de `probar_instalacion.sh` no pasa de zoom 2 y la vista no se centra donde se pide.
+Con ese paquete no se exige el orden exacto del cruce (todo cabe en unos píxeles); se comprobó aparte
+con un paquete declarado hasta zoom 12.
+
+`probar_instalacion.sh` lo compila y lo ejecuta con los demás. 33 tests, sin cambios en la librería.
+
+**Estado: hecho; el uso con ratón queda para la prueba en Windows.**

@@ -11,7 +11,7 @@
 #       el indice de lugares de prueba; sin red);
 #    3. compila TODOS los ejemplos (examples/CMakeLists.txt) contra el prefijo;
 #    4. arranca app_minima, visor_gpx, editor_rutas, buscador_lugares, medidor_campo, monitor_trafico, vigilancia_zonas,
-#       analisis_terreno, rutas_tierra (con su propia red de demostracion), laboratorio_rotulos, laboratorio_anillos, emisor_nmea y cliente_telemetria con
+#       analisis_terreno, rutas_tierra (con su propia red de demostracion), laboratorio_rotulos, laboratorio_anillos, cambio_pantalla, emisor_nmea y cliente_telemetria con
 #       --comprobar, y check_data, sobre ese paquete.
 #
 #  libtelemetria (decodificador NMEA/AIS) se instala en el mismo prefijo que libmapa: tambien se comprueba aqui.
@@ -172,6 +172,11 @@ EMISOR="$(find "$TRABAJO/ejemplos" -type f -name emisor_nmea -perm -u+x | head -
 LABORATORIO="$(find "$TRABAJO/ejemplos" -type f -name laboratorio_rotulos -perm -u+x | head -1)"
 [ -n "$LABORATORIO" ] || fallo "no se encuentra laboratorio_rotulos compilado"
 "$LABORATORIO" "$PAQ" --comprobar || fallo "laboratorio_rotulos --comprobar no sale con 0"
+
+# cambio_pantalla: ida y vuelta de pantalla (historia, alarmas, sector, anillos), tres entidades bajo el clic, sin resaltado y caja de rotulos.
+CAMBIO="$(find "$TRABAJO/ejemplos" -type f -name cambio_pantalla -perm -u+x | head -1)"
+[ -n "$CAMBIO" ] || fallo "no se encuentra cambio_pantalla compilado"
+"$CAMBIO" "$PAQ" --comprobar || fallo "cambio_pantalla --comprobar no sale con 0"
 
 # cliente_telemetria: barco propio, contactos AIS, ruido, mensaje publicado de referencia, UDP real, captura y glosario.
 CLIENTE="$(find "$TRABAJO/ejemplos" -type f -name cliente_telemetria -perm -u+x | head -1)"

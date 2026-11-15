@@ -1,0 +1,102 @@
+Emitido: domingo 15-11-2026 11:37 (hora del sistema)
+
+ENTREGA A: CAMBIO DE PANTALLA DE OBJETIVOS
+==========================================
+Implementado en la rama ccr-e86ff116-2imngk (PR #51, en borrador). Compilado con
+Qt 6 y con los 33 tests en verde. Pendiente de probar en la app.
+
+Nada cambia por defecto: el código que ya llama a addTarget, updateTarget,
+removeTarget o clearTargets() sigue funcionando igual, salvo el punto 1.
+
+
+1. EL RESALTADO SE LIMPIA AL BORRAR
+-----------------------------------
+clearTargets() y removeTarget(id) quitan ahora el objetivo resaltado y el
+formulario agarrado (y emiten targetSelectionChanged / targetLabelSelectionChanged).
+Ya NO hace falta llamar antes a clearSelectedTarget() ni a
+clearTargetLabelSelected(); si se llaman, no pasa nada.
+
+
+2. HISTORIA CON HORA
+--------------------
+API nueva (la firma de siempre no cambia):
+
+    qint64 addTarget(const MapTarget &target, const QVector<TargetTrackPoint> &history);
+    bool   setTargetHistory(qint64 id, const QVector<TargetTrackPoint> &history);
+
+TargetTrackPoint = { QGeoCoordinate position; QDateTime time; }  (MapTarget.h)
+
+- Los puntos van en orden de tiempo, del origen al más reciente.
+- Entran TAL CUAL: no se les aplica la distancia mínima de 1 m.
+- Se descartan los de posición inválida o sin hora.
+- Si son más que el tope (setTargetHistoryLimit, 5000 por defecto) se aclaran una
+  vez; el origen y el último se conservan. Para guardarlos todos, subir antes el tope.
+- La traza dibujada pasa a ser el final de esa historia.
+- Si el último punto no es target.position, la posición actual se añade al final.
+- updateTarget(id, pos, rumbo, hora) sigue igual y continúa la historia.
+- Para un objetivo nuevo sin historia: el addTarget(target, time) de siempre.
+
+Para guardar la historia antes de cambiar de pantalla:
+
+    QVector<TargetTrackPoint> h = mapa->targetHistory(id);
+
+
+3. CARGA SILENCIOSA
+-------------------
+    void beginTargetLoad();
+    void endTargetLoad();
+    bool isLoadingTargets() const;
+
+Entre las dos llamadas NO se emiten targetEnteredZone, targetLeftZone,
+proximityAlertRaised ni proximityAlertCleared (ni featureEnteredZone /
+featureLeftZone). El estado interno SÍ se actualiza: al cerrar, targetsInZone()
+y proximityAlerts() dicen la verdad, y las alertas siguientes suenan normal.
+Se pueden anidar: cada begin lleva su end.
+
+
+4. SECTORES Y CÍRCULOS CON DUEÑO
+--------------------------------
+    void clearTargets(bool keepOwnedFeatures = false);
+
+- clearTargets()      : como siempre, los sectores/círculos del objetivo se borran.
+- clearTargets(true)  : quedan SUSPENDIDOS. Siguen existiendo (feature(id) los
+  devuelve) pero no se dibujan, no se pueden pinchar ni cuentan como zona vigilada.
+  Cuando vuelve un objetivo con el mismo id, reaparecen sobre él.
+- removeTarget(id)    : borra los sectores de ese objetivo (dejó de existir).
+- Un clearTargets() sin conservar se lleva también lo que estaba suspendido.
+- Los anillos y marcaciones con targetId se conservan solos y vuelven con el objetivo.
+- Requisito: ids de objetivo únicos entre pantallas (confirmado).
+
+
+SECUENCIA RECOMENDADA PARA CAMBIAR DE PANTALLA
+----------------------------------------------
+    // 1) Guardar lo de la pantalla que se va (la app):
+    for (const MapTarget &t : mapa->targets())
+        guardado[t.id] = { t, mapa->targetHistory(t.id) };
+
+    // 2) Cargar la pantalla nueva:
+    mapa->beginTargetLoad();
+    mapa->clearTargets(true);
+    for (const auto &g : pantallaNueva)
+        mapa->addTarget(g.objetivo, g.historia);   // historia vacía = objetivo nuevo
+    mapa->endTargetLoad();
+
+Mientras una pantalla está oculta, la app sigue añadiendo puntos a SU copia de la
+historia; al volver, entrega la historia completa.
+
+
+LO QUE NO HACE (acordado)
+-------------------------
+- Las alertas de zona y proximidad de una pantalla oculta no saltan: sus
+  objetivos no están en la librería.
+- Nada de esto se guarda a disco: tras un reinicio se empieza de cero.
+- No hay reemplazo en bloque (setTargets): con 1000 objetivos y 150 entidades el
+  coste de addTarget uno a uno se estimó despreciable, sin medirlo. Si en la app
+  se nota lento el cambio, avisad y se mide.
+
+
+PENDIENTE (Entrega B)
+---------------------
+5. MapHit con la lista de todas las entidades bajo el cursor.
+6. MapFeature::highlightWhenSelected.
+7. Fondo, borde y halo de los rótulos.

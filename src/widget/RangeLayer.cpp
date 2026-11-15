@@ -1,4 +1,5 @@
 #include "widget/RangeLayer.h"
+#include "widget/LabelPaint.h"
 
 #include "geo/MapDecor.h"
 
@@ -494,11 +495,12 @@ void RangeLayer::drawLabels(QCPPainter *painter) const
             painter->setBrush(Qt::NoBrush);
             painter->drawLine(p.anchor, caja.center());
         }
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(255, 255, 255, suave ? 190 : 235));
-        painter->drawRoundedRect(caja, 3.0, 3.0);
-        painter->setPen(p.color.darker(130));
-        painter->drawText(caja, Qt::AlignCenter, p.text);
+        LabelPaint::caja(painter, caja,
+                         LabelPaint::elegir(m_labelBox.background,
+                                            QColor(255, 255, 255, suave ? 190 : 235)),
+                         m_labelBox.borderColor, m_labelBox.borderWidth, 3.0);
+        LabelPaint::texto(painter, caja, p.text, p.color.darker(130), m_labelBox.haloColor,
+                          m_labelBox.haloWidth);
         if (p.bearingId >= 0)
             m_bearingLabelBoxes.append({p.bearingId, caja});
     }

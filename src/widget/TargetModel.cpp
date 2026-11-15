@@ -126,6 +126,50 @@ bool TargetModel::update(qint64 id, const QGeoCoordinate &position,
     return true;
 }
 
+// Sustituye el historial de un objetivo por el que guardo la app (cambio de pantalla).
+// No pasa por anotarHistoria: esos puntos ya fueron filtrados (o no) por quien los
+// guardo, y la distancia minima los recortaria otra vez. La traza se rehace con el
+// final del historial, para que lo dibujado y lo guardado cuenten lo mismo.
+bool TargetModel::setHistory(qint64 id, const QVector<TargetTrackPoint> &points)
+{
+    auto it = m_targets.find(id);
+    if (it == m_targets.end())
+        return false;
+    Entry &e = *it;
+
+    QVector<HistoryPoint> historia;
+    historia.reserve(points.size() + 1);
+    for (const TargetTrackPoint &p : points) {
+        if (!p.position.isValid() || !p.time.isValid())
+            continue;
+        historia.append({p.position.latitude(), p.position.longitude(),
+                         p.time.toMSecsSinceEpoch()});
+    }
+    // El historial llega hasta donde esta el objetivo AHORA: si el ultimo punto dado
+    // es otro, se cierra con la posicion actual y su hora (nunca anterior al ultimo).
+    const QGeoCoordinate actual = e.target.position;
+    if (historia.isEmpty() || historia.last().lat != actual.latitude()
+        || historia.last().lon != actual.longitude()) {
+        const qint64 ultima = historia.isEmpty() ? 0 : historia.last().msecs;
+        const qint64 hora = e.lastMsecs > 0 ? e.lastMsecs : QDateTime::currentMSecsSinceEpoch();
+        historia.append({actual.latitude(), actual.longitude(), std::max(hora, ultima)});
+    }
+    e.history = historia;
+    aclararHistoria(e);
+    e.lastMsecs = e.history.last().msecs;
+
+    e.trail.clear();
+    if (m_trailMax != 0) {
+        const int n = int(e.history.size());
+        const int desde = m_trailMax > 0 ? std::max(0, n - m_trailMax) : 0;
+        e.trail.reserve(n - desde);
+        for (int i = desde; i < n; ++i)
+            e.trail.append(QGeoCoordinate(e.history.at(i).lat, e.history.at(i).lon));
+    }
+    emit changed();
+    return true;
+}
+
 // Cambia la etiqueta de texto de un objetivo. false si el id no existe.
 bool TargetModel::setLabel(qint64 id, const QString &text)
 {
