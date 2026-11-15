@@ -7697,3 +7697,20 @@ con un paquete declarado hasta zoom 12.
 `probar_instalacion.sh` lo compila y lo ejecuta con los demás. 33 tests, sin cambios en la librería.
 
 **Estado: hecho; el uso con ratón queda para la prueba en Windows.**
+
+## 191. `cambio_pantalla --comprobar` fallaba en el job de Qt 5 del CI
+
+El PR #51 se fusionó con el job «Qt5» en rojo. Causa: `cambio_pantalla --comprobar` exigía que, tras
+quitar la caja del rótulo, `featureLabelAt(centro de la caja)` devolviera **esa** fuente. El paquete de
+prueba de `probar_instalacion.sh` no pasa de zoom 2, así que las tres FUENTES quedan a unos píxeles y
+sus rótulos se solapan; qué rótulo queda encima en ese punto depende de la métrica de la fuente
+tipográfica de cada Qt. En Qt 6 salía la esperada; en el Qt 5.15 del CI, otra.
+
+Es un fallo de la comprobación, no de la librería: el rótulo sin caja se sigue agarrando. Ahora solo
+se exige que salga alguna de las tres fuentes, y la exacta cuando el zoom es de verdad (>= 8), igual
+que ya se hacía con el orden de las entidades bajo el cruce. Comprobado con el paquete de zoom 2 y con
+uno declarado hasta zoom 12; **sin poder reproducir el fallo de Qt 5 aquí** (solo hay Qt 6 en el
+contenedor), así que lo confirmará el CI.
+
+**Estado: corregido; pendiente de que el CI de Qt 5 lo confirme.**
+
