@@ -7697,3 +7697,26 @@ con un paquete declarado hasta zoom 12.
 `probar_instalacion.sh` lo compila y lo ejecuta con los demás. 33 tests, sin cambios en la librería.
 
 **Estado: hecho; el uso con ratón queda para la prueba en Windows.**
+
+## 191. `cambio_pantalla --comprobar` fallaba en el job de Qt 5 del CI
+
+El PR #51 se fusionó con el job «Qt5» en rojo. `cambio_pantalla --comprobar` exigía que, tras quitar
+la caja del rótulo, `featureLabelAt(centro de la caja)` devolviera **esa** fuente. El paquete de prueba
+de `probar_instalacion.sh` no pasa de zoom 2, así que todo el ejemplo cabe en unos píxeles y sobre la
+fuente caen también los rótulos de otras entidades (la línea, las zonas): `labelAt` recorre las capas de
+arriba abajo y gana el primero que contiene el píxel. Cuál cae ahí depende de la métrica de la fuente
+tipográfica de cada Qt: en Qt 6 salía la fuente esperada; en el Qt 5.15 del CI, otra cosa.
+
+**Primer intento (PR #52, insuficiente):** exigir que saliera «alguna de las tres fuentes». Seguía
+fallando, porque lo que ganaba en ese píxel no era una fuente sino el rótulo de otra entidad.
+
+**Arreglo:** lo que se afirma de verdad es que quitar la caja **no cambia** lo que se agarra, así que se
+compara con lo que se agarraba **antes** de quitarla, sea lo que sea; y la fuente exacta solo se exige con
+zoom de verdad (>= 8), como el orden de las entidades bajo el cruce. Es un fallo de la comprobación del
+ejemplo, no de la librería: `labelBoxIsConfigurable` (tests) ya cubre ese agarre y pasa en Qt 5.
+
+Comprobado con el paquete de zoom 2 y con uno declarado hasta zoom 12 (Qt 6). **No he podido reproducir
+el fallo de Qt 5 aquí** (el contenedor solo tiene Qt 6): lo confirmará el CI. La causa descrita arriba es
+la que encaja con los dos fallos, pero es una deducción.
+
+**Estado: corregido; pendiente de que el CI de Qt 5 lo confirme.**

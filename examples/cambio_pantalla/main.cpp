@@ -744,6 +744,7 @@ int comprobar(Ventana &v)
     esperaRepintado(m);
     const QRect caja = m->featureLabelRect(fuente);
     exige(caja.isValid(), "la fuente de ejemplo no tiene rotulo", &fallos);
+    const qint64 agarradoAntes = m->featureLabelAt(caja.center());   // con la caja de siempre
     MapFeature f = *m->feature(fuente);
     exige(f.style.labelBackground == QColor(255, 255, 255, 190),
           "por defecto, el fondo es el blanco de siempre", &fallos);
@@ -752,7 +753,14 @@ int comprobar(Ventana &v)
     exige(m->updateFeature(f), "no se pudo cambiar el estilo del rotulo", &fallos);
     esperaRepintado(m);
     exige(m->featureLabelRect(fuente) == caja, "quitar la caja movio la caja del raton", &fallos);
-    exige(m->featureLabelAt(caja.center()) == fuente, "sin caja, el rotulo ya no se agarra", &fallos);
+    // Quitar la caja no cambia lo que se agarra en ese pixel. Con poco zoom todo el ejemplo
+    // cabe en unos pixeles y sobre la fuente caen tambien los rotulos de la linea o de las
+    // zonas (la capa de arriba gana, y segun la tipografia de cada Qt cae uno u otro), asi que
+    // no se exige QUE rotulo es, sino que sea el mismo que antes; con zoom de verdad, la fuente.
+    const qint64 agarrado = m->featureLabelAt(caja.center());
+    exige(agarrado == agarradoAntes, "quitar la caja cambio el rotulo que se agarra", &fallos);
+    if (m->zoom() >= 8)
+        exige(agarrado == fuente, "sin caja, el rotulo de la fuente ya no se agarra", &fallos);
     LabelBoxStyle global;
     global.background = QColor(13, 71, 161, 255);
     m->setLabelBoxStyle(global);
