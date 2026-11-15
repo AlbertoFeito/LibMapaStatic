@@ -1,0 +1,95 @@
+Emitido: domingo 15-11-2026 11:49 (hora del sistema)
+
+ENTREGA B: VARIAS ENTIDADES BAJO EL CLIC, SELECCIONAR SIN RESALTAR Y RÓTULOS
+============================================================================
+Implementado en la rama ccr-e86ff116-2imngk (PR #51, en borrador). Compilado con
+Qt 6 y con los 33 tests en verde. Pendiente de probar en la app.
+
+Nada cambia por defecto.
+
+
+5. TODAS LAS ENTIDADES BAJO EL CURSOR
+-------------------------------------
+La firma de la señal NO cambia y se emite UNA sola vez por clic:
+
+    void contextMenuRequested(const libmapa::MapHit &hit, const QPoint &globalPos);
+
+MapHit gana una lista (MapTypes.h):
+
+    struct MapHitFeature { qint64 id; int subIndex; };   // subIndex: parte, o -1
+    QVector<MapHitFeature> features;    // todas, de arriba abajo
+
+- Orden: capa más alta primero; dentro de cada capa, la más cercana primero.
+- hit.featureId y hit.subIndex siguen siendo la primera (lo de siempre).
+- Entran las mismas que ya se podían elegir: visibles, seleccionables, de capa
+  seleccionable y dentro de su rango de zoom, a 8 px como mucho.
+- También la lleva elementClicked (clic izquierdo).
+- Sin clic: QVector<MapHitFeature> MapWidget::featuresAt(pixel, tolerancePx = 8).
+
+Ejemplo de menú con un submenú por entidad:
+
+    connect(mapa, &MapWidget::contextMenuRequested, this,
+            [this](const MapHit &hit, const QPoint &global) {
+        QMenu menu;
+        for (const MapHitFeature &e : hit.features) {
+            const auto f = mapa->feature(e.id);
+            QMenu *sub = menu.addMenu(f ? f->name : QString::number(e.id));
+            sub->addAction(tr("Propiedades"), [=] { /* ... e.id ... */ });
+        }
+        menu.exec(global);
+    });
+
+
+6. SELECCIONAR SIN RESALTAR
+---------------------------
+    MapFeature f;
+    f.highlightWhenSelected = false;     // por defecto, true
+
+- El clic izquierdo la SIGUE seleccionando: se emiten featureSelected,
+  featureClicked y elementClicked, y sale en el menú contextual.
+- Pero se dibuja igual que sin seleccionar: sin halo blanco, sin tiradores de
+  vértice y sin rótulos de extremo.
+- No toca selectable (que la haría invisible al ratón).
+- No se guarda en la BD de entidades: la app lo vuelve a poner al crear o cargar.
+- Si una entidad así se va a editar a mano, conviene ponerlo a true mientras
+  tanto: sin tiradores no se ve qué arrastrar.
+
+
+7. FONDO, BORDE Y HALO DE LOS RÓTULOS
+-------------------------------------
+Por entidad, en su estilo (FeatureStyle, MapFeature.h):
+
+    QColor labelBackground = QColor(255, 255, 255, 190);  // el blanco de siempre
+    QColor labelBorderColor;       // inválido = sin borde
+    double labelBorderWidth = 1.0;
+    QColor labelHaloColor;         // inválido = sin halo
+    double labelHaloWidth = 2.0;   // píxeles a cada lado de la letra
+
+- Sin caja:      f.style.labelBackground = QColor(0, 0, 0, 0);
+- Con borde:     f.style.labelBorderColor = Qt::black;
+- Con halo:      f.style.labelHaloColor = QColor(255, 255, 255, 200);
+- El halo se puede combinar con la caja o usarse en su lugar. El color lleva la
+  opacidad en su alfa.
+- La caja que usa el ratón para agarrar el rótulo no cambia.
+
+Para lo que NO es entidad (anillos y marcaciones, cuadrícula, alertas de proximidad):
+
+    LabelBoxStyle s;                 // MapTypes.h
+    s.background  = QColor(0, 0, 0, 0);     // inválido = el de cada capa
+    s.borderColor = QColor();               // inválido = el de cada capa
+    s.borderWidth = 1.0;
+    s.haloColor   = QColor(255, 255, 255, 200);
+    s.haloWidth   = 2.0;
+    mapa->setLabelBoxStyle(s);
+
+    mapa->setLabelBoxStyle(LabelBoxStyle());   // vuelve a lo de siempre
+
+
+LO QUE QUEDA FUERA
+------------------
+- Los campos nuevos del rótulo NO se guardan en la BD de entidades (tampoco se
+  guardaba labelColor): la app los pone al crear o cargar la entidad.
+- Siguen con su caja fija: los rótulos de inicio/fin de ruta, el de la medida en
+  vivo, el del origen del historial y la escala gráfica. Decidme si alguno de
+  estos también os hace falta.
+- Las etiquetas de los objetivos móviles nunca tuvieron caja (solo halo).

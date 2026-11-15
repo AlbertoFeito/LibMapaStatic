@@ -1,4 +1,5 @@
 #include "widget/GraticuleLayer.h"
+#include "widget/LabelPaint.h"
 
 #include "libmapa/Coordinates.h"
 #include "geo/MapDecor.h"
@@ -18,13 +19,15 @@ constexpr int kMaxLineas = 400;
 // Dibuja un rotulo sobre una caja clara semitransparente, para que se lea
 // encima de cualquier tesela (mar, ciudad o satelite).
 void rotulo(QCPPainter *painter, const QPointF &esquina, const QString &txt,
-            const QColor &color)
+            const QColor &color, const LabelBoxStyle &estilo)
 {
     const QFontMetrics fm(painter->font());
     const QRectF caja(esquina, QSizeF(fm.horizontalAdvance(txt) + 6, fm.height() + 2));
-    painter->fillRect(caja, QColor(255, 255, 255, 185));
-    painter->setPen(QColor(color.red(), color.green(), color.blue(), 255));
-    painter->drawText(caja, Qt::AlignCenter, txt);
+    LabelPaint::caja(painter, caja,
+                     LabelPaint::elegir(estilo.background, QColor(255, 255, 255, 185)),
+                     estilo.borderColor, estilo.borderWidth, 0.0);
+    LabelPaint::texto(painter, caja, txt, QColor(color.red(), color.green(), color.blue(), 255),
+                      estilo.haloColor, estilo.haloWidth);
 }
 
 } // namespace
@@ -113,7 +116,7 @@ void GraticuleLayer::drawGeographic(QCPPainter *painter)
         if (x < vp.left() + 72 || x > vp.right() - 20)
             continue;
         rotulo(painter, QPointF(x + 2, vp.top() + 2),
-               MapDecor::formatLongitude(lon, paso), m_color);
+               MapDecor::formatLongitude(lon, paso), m_color, m_labelBox);
     }
     for (long long k = k0y; k <= k1y; ++k) {
         const double lat = double(k) * paso;
@@ -121,7 +124,7 @@ void GraticuleLayer::drawGeographic(QCPPainter *painter)
         if (y < vp.top() + altoFila + 4 || y > vp.bottom() - 50)
             continue;
         rotulo(painter, QPointF(vp.left() + 2, y - altoFila + 2),
-               MapDecor::formatLatitude(lat, paso), m_color);
+               MapDecor::formatLatitude(lat, paso), m_color, m_labelBox);
     }
 
     painter->restore();
@@ -207,7 +210,7 @@ void GraticuleLayer::drawUtm(QCPPainter *painter)
             if (r.adjusted(-3, 0, 3, 0).intersects(caja))
                 return;
         ocupados.append(caja);
-        rotulo(painter, esquina, txt, m_color);
+        rotulo(painter, esquina, txt, m_color, m_labelBox);
     };
 
     // Limites de zona (cada 6°) y su numero.

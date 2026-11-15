@@ -33,6 +33,9 @@ public:
     QColor color() const { return m_color; }
 
     //! Cuadricula geografica (por defecto) o UTM.
+    //! Caja de los rotulos (fondo, borde, halo). Ver LabelBoxStyle.
+    void setLabelBoxStyle(const LabelBoxStyle &s) { m_labelBox = s; }
+
     void setMode(GraticuleMode mode) { m_mode = mode; }
     GraticuleMode mode() const { return m_mode; }
 
@@ -46,6 +49,7 @@ private:
 
     QColor m_color = QColor(20, 40, 60, 150);
     GraticuleMode m_mode = GraticuleMode::Geographic;
+    LabelBoxStyle m_labelBox;
 };
 
 } // namespace libmapa

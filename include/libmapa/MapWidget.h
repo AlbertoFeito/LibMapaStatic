@@ -887,6 +887,11 @@ public:
     //! Igual que \ref featureAt y, ademas, la PARTE de la entidad que cae bajo el pixel
     //! en \a subIndex (-1 si es de una sola parte o no hay entidad).
     qint64 featureAt(const QPoint &pixel, double tolerancePx, int *subIndex) const;
+    //! TODAS las entidades que se pueden elegir bajo un punto de la pantalla, de
+    //! arriba abajo (capa mas alta primero; en cada capa, la mas cercana primero).
+    //! Es la lista que lleva \ref MapHit::features en \ref contextMenuRequested y
+    //! \ref elementClicked. No cambia la seleccion.
+    QVector<MapHitFeature> featuresAt(const QPoint &pixel, double tolerancePx = 8.0) const;
     //! Caja, en pixeles, del rotulo propio de la parte \a part de una entidad
     //! multi-parte (\ref PartInfo::name), o un rectangulo nulo si no lo tiene.
     QRect featurePartLabelRect(qint64 id, int part) const;
@@ -1214,6 +1219,17 @@ public:
     //! Color de lineas y rotulos (p. ej. claro sobre la capa satelital).
     void setGraticuleColor(const QColor &color);
     QColor graticuleColor() const;
+    /*!
+     * \brief Caja de los rotulos que NO son de una entidad: anillos y marcaciones,
+     *        cuadricula y alertas de proximidad.
+     *
+     * Fondo, borde y halo, ver \ref LabelBoxStyle. Por defecto (colores invalidos)
+     * cada capa conserva su caja de siempre. Los rotulos de las entidades se
+     * configuran en su estilo: FeatureStyle::labelBackground, labelBorderColor y
+     * labelHaloColor. La caja que usa el raton para agarrar un rotulo no cambia.
+     */
+    void setLabelBoxStyle(const LabelBoxStyle &style);
+    LabelBoxStyle labelBoxStyle() const;
     //! Cuadricula geografica (por defecto) o UTM: lineas de este/norte
     //! constantes de cada zona visible, cada 100 km .. 100 m segun el zoom,
     //! con los limites de zona marcados. Las conversiones, en Coordinates.h.

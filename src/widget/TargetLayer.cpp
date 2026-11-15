@@ -1,4 +1,5 @@
 #include "widget/TargetLayer.h"
+#include "widget/LabelPaint.h"
 
 #include "geo/MapDecor.h"
 #include "widget/LabelPlacement.h"
@@ -356,11 +357,12 @@ void TargetLayer::drawProximity(QPainter *painter) const
                             [&holgada](const QRectF &r) { return r.intersects(holgada); }))
                 continue;
             ocupadas.append(caja);
-            painter->setPen(QPen(c, 1.0));
-            painter->setBrush(QColor(255, 255, 255, 225));
-            painter->drawRoundedRect(caja, 3.0, 3.0);
-            painter->setPen(c.darker(140));
-            painter->drawText(caja, Qt::AlignCenter, l.label);
+            LabelPaint::caja(painter, caja,
+                             LabelPaint::elegir(m_labelBox.background, QColor(255, 255, 255, 225)),
+                             LabelPaint::elegir(m_labelBox.borderColor, c),
+                             m_labelBox.borderColor.isValid() ? m_labelBox.borderWidth : 1.0, 3.0);
+            LabelPaint::texto(painter, caja, l.label, c.darker(140), m_labelBox.haloColor,
+                              m_labelBox.haloWidth);
         }
     }
     painter->restore();

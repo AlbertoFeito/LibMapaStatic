@@ -230,6 +230,7 @@ if(LIBMAPA_HAVE_QCP)
         src/widget/FeatureLayer.cpp
         src/widget/FeatureLayer.h
         src/widget/LabelPlacement.h
+        src/widget/LabelPaint.h
         src/widget/TargetModel.cpp
         src/widget/TargetModel.h
         src/widget/TargetLayer.cpp

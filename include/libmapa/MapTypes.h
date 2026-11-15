@@ -162,6 +162,32 @@ struct RangeRings {
  * lo que lleva MapWidget::contextMenuRequested para montar un menu segun lo
  * que haya bajo el clic derecho.
  */
+/*!
+ * \brief Aspecto de la caja de los rotulos que NO son de una entidad: anillos y
+ *        marcaciones, cuadricula y alertas de proximidad (MapWidget::setLabelBoxStyle).
+ *
+ * Los de una entidad se configuran en su FeatureStyle (labelBackground, ...). Aqui
+ * un color INVALIDO (el valor por defecto) significa «como siempre»: cada capa
+ * conserva su fondo y su borde de siempre. Un color valido los sustituye en todas;
+ * con alfa 0, quita el fondo (o el borde).
+ */
+struct LabelBoxStyle {
+    QColor background;          //!< Fondo de la caja. Invalido = el de cada capa.
+    QColor borderColor;         //!< Borde. Invalido = el de cada capa (casi todas, ninguno).
+    double borderWidth = 1.0;   //!< Grosor del borde (px), si \a borderColor es valido.
+    QColor haloColor;           //!< Halo de las letras. Invalido = sin halo.
+    double haloWidth = 2.0;     //!< Grosor del halo a cada lado de la letra (px).
+};
+
+//! Una entidad bajo el cursor (MapHit::features): su id y la parte acertada.
+struct MapHitFeature {
+    qint64 id = -1;
+    //! Parte de la entidad bajo el cursor si tiene varias (MapFeature::parts); -1 si no.
+    int subIndex = -1;
+
+    bool operator==(const MapHitFeature &o) const { return id == o.id && subIndex == o.subIndex; }
+};
+
 struct MapHit {
     QPoint pixel;                       //!< En coordenadas del MapWidget.
     QGeoCoordinate coordinate;          //!< Geografica bajo el pixel.
@@ -171,6 +197,16 @@ struct MapHit {
     //! Parte de la entidad (\a featureId) que esta bajo el cursor, si la entidad tiene
     //! varias (MapFeature::parts); -1 si es de una sola parte o no hay entidad.
     int subIndex = -1;
+    /*!
+     * \brief TODAS las entidades bajo el cursor, de arriba abajo.
+     *
+     * Cuando coinciden varias en el mismo punto (una linea que cruza una zona, dos
+     * zonas solapadas): capa mas alta primero y, dentro de cada capa, la mas
+     * cercana primero. La primera es \a featureId / \a subIndex. Sirve para que el
+     * menu contextual ofrezca un submenu por entidad en vez de solo la de arriba:
+     * la señal se emite UNA vez por clic, con la lista entera.
+     */
+    QVector<MapHitFeature> features;
     qint64 rangeMarkId = -1;            //!< Anillos (centro o un anillo) o marcacion.
     //! Tirador de vertice bajo el pixel en la entidad SELECCIONADA (\a vertexFeature),
     //! o -1: sirve para ofrecer «borrar este vertice».

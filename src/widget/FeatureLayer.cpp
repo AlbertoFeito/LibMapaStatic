@@ -1,4 +1,5 @@
 #include "widget/FeatureLayer.h"
+#include "widget/LabelPaint.h"
 #include "widget/LabelPlacement.h"
 
 #include "core/Logging.h"
@@ -241,7 +242,9 @@ void FeatureLayer::draw(QCPPainter *painter)
             if (!f.visible || !m_model->isFeatureShown(f)
                 || !featureInView(f, visible))
                 return true;        // oculta o fuera de pantalla: ni se proyecta
-            drawFeature(&p, f, f.id == m_model->selectedId());
+            // Sin resaltado propio (highlightWhenSelected): se dibuja como una mas,
+            // aunque siga siendo la seleccionada del modelo.
+            drawFeature(&p, f, f.highlightWhenSelected && f.id == m_model->selectedId());
             ++m_lastDrawn;
             return true;
         });
@@ -851,13 +854,12 @@ void FeatureLayer::drawLabel(QPainter *painter, const MapFeature &f,
         painter->drawLine(base, fin);
     }
 
-    // Fondo semitransparente: sobre fotografia aerea el texto suelto no se lee.
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(QBrush(QColor(255, 255, 255, 190)));
-    painter->drawRoundedRect(caja, 3, 3);
-
-    painter->setPen(QPen(f.style.labelColor));
-    painter->drawText(caja, Qt::AlignCenter, f.name);
+    // Fondo semitransparente por defecto: sobre fotografia aerea el texto suelto no
+    // se lee. Fondo, borde y halo los decide el estilo de la entidad.
+    LabelPaint::caja(painter, caja, f.style.labelBackground, f.style.labelBorderColor,
+                     f.style.labelBorderWidth, 3.0);
+    LabelPaint::texto(painter, caja, f.name, f.style.labelColor, f.style.labelHaloColor,
+                      f.style.labelHaloWidth);
     painter->setFont(fuenteBase);
 }
 
@@ -873,11 +875,10 @@ void FeatureLayer::drawPartLabels(QPainter *painter, const MapFeature &f) const
         const QRectF caja = partLabelBox(f, i, fm);
         if (caja.isNull())
             continue;
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QBrush(QColor(255, 255, 255, 190)));
-        painter->drawRoundedRect(caja, 3, 3);
-        painter->setPen(QPen(f.style.labelColor));
-        painter->drawText(caja, Qt::AlignCenter, f.partsInfo.at(i).name);
+        LabelPaint::caja(painter, caja, f.style.labelBackground, f.style.labelBorderColor,
+                         f.style.labelBorderWidth, 3.0);
+        LabelPaint::texto(painter, caja, f.partsInfo.at(i).name, f.style.labelColor,
+                          f.style.labelHaloColor, f.style.labelHaloWidth);
     }
     painter->setFont(fuenteBase);
 }
@@ -939,29 +940,78 @@ double FeatureLayer::distanceToSegment(const QPointF &p, const QPointF &a,
     return std::hypot(p.x() - proy.x(), p.y() - proy.y());
 }
 
-// Entidad "bajo el cursor": id de la entidad seleccionable mas cercana al pixel
-// dentro de la tolerancia, o -1. Recorre de la capa mas alta a la mas baja (lo de
-// arriba gana) y prueba parte a parte; para poligonos, caer DENTRO del area es un
-// acierto directo. En cuanto una capa da un acierto, no baja mas.
-qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
-                               bool incluirNoSeleccionables, int *subIndex) const
+// Distancia en pixeles del punto \a p a una entidad (0 si cae dentro de un area o
+// del icono de un punto), probando parte a parte: en una entidad multi-parte basta
+// que el cursor caiga cerca de cualquiera de sus trazados, y \a parte recibe cual.
+double FeatureLayer::distanciaAEntidad(const MapFeature &f, const QPointF &p, int *parte) const
 {
-    if (subIndex)
-        *subIndex = -1;
+    double d = std::numeric_limits<double>::max();
+    int parteMejor = -1;
+
+    const auto distanciaAParte = [&](const QVector<QGeoCoordinate> &tramo) {
+        if (f.kind == GeometryKind::Point) {
+            if (tramo.isEmpty())
+                return std::numeric_limits<double>::max();
+            const QPointF c = screenPos(tramo.first());
+            if (!f.style.icon.isNull()) {
+                // Con icono, el area sensible es TODO el pixmap (anclado),
+                // no solo la punta: asi se puede agarrar el pin entero.
+                const double dpr = f.style.icon.devicePixelRatio();
+                const double w = f.style.icon.width() / (dpr > 0 ? dpr : 1.0);
+                const double h = f.style.icon.height() / (dpr > 0 ? dpr : 1.0);
+                const QRectF caja(QPointF(c.x() - f.style.iconAnchor.x() * w,
+                                          c.y() - f.style.iconAnchor.y() * h),
+                                  QSizeF(w, h));
+                const double dx = qMax(qMax(caja.left() - p.x(), 0.0), p.x() - caja.right());
+                const double dy = qMax(qMax(caja.top() - p.y(), 0.0), p.y() - caja.bottom());
+                return std::hypot(dx, dy);
+            }
+            return qMax(0.0, std::hypot(p.x() - c.x(), p.y() - c.y())
+                                 - f.style.pointRadiusPx);
+        }
+        const QPolygonF poly = screenPolygonOf(tramo);
+        if (f.isArea() && poly.containsPoint(p, Qt::OddEvenFill))
+            return 0.0;      // dentro del area cuenta como acierto
+        double dp = std::numeric_limits<double>::max();
+        for (int j = 0; j + 1 < static_cast<int>(poly.size()); ++j)
+            dp = qMin(dp, distanceToSegment(p, poly[j], poly[j + 1]));
+        if (f.isArea() && poly.size() > 2)
+            dp = qMin(dp, distanceToSegment(p, poly.last(), poly.first()));
+        return dp;
+    };
+    int indiceParte = 0;
+    for (const QVector<QGeoCoordinate> &tramo : f.outlines()) {
+        const double dp = distanciaAParte(tramo);
+        if (dp < d) {
+            d = dp;
+            parteMejor = indiceParte;
+        }
+        ++indiceParte;
+        if (d <= 0.0)
+            break;                // un acierto directo no se mejora
+    }
+    if (parte)
+        *parte = f.isMultiPart() ? parteMejor : -1;
+    return d;
+}
+
+// TODAS las entidades bajo el pixel dentro de la tolerancia, de arriba abajo: de la
+// capa mas alta a la mas baja y, dentro de cada capa, la mas cercana primero (a igual
+// distancia, la que se dibuja despues, que es la que se ve encima). Con \a soloPrimera
+// se para en la primera capa que acierta: es lo que necesita featureAt.
+QVector<MapHitFeature> FeatureLayer::featuresAt(const QPoint &pixel, double tolerancePx,
+                                                bool incluirNoSeleccionables,
+                                                bool soloPrimera) const
+{
+    QVector<MapHitFeature> todas;
     if (!m_model)
-        return -1;
+        return todas;
 
     const QPointF p(pixel);
-    qint64 mejor = -1;
-    int mejorParte = -1;
-    double mejorDist = tolerancePx;
-
     const MapView *vista = qobject_cast<MapView *>(parentPlot());
     const int zoomActual = vista ? vista->zoom() : -1;
     const QRectF vista_ = visibleAxisRect();      // recorte por viewport
 
-    // Se recorre de la capa mas alta a la mas baja: lo que se ve encima es lo
-    // que se selecciona.
     const auto capas = m_model->layers();
     for (int i = static_cast<int>(capas.size()) - 1; i >= 0; --i) {
         if (!capas[i].visible)
@@ -971,76 +1021,44 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
         if (!capas[i].selectable && !incluirNoSeleccionables)
             continue;               // capa fija del paquete: no se elige con el raton
 
+        QVector<std::pair<double, MapHitFeature>> aciertos;
         m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
             if (!f.visible || !f.selectable || !m_model->isFeatureShown(f))
                 return true;
             if (!featureInView(f, vista_))
                 return true;            // fuera de pantalla: no hace falta probar
-
-            double d = std::numeric_limits<double>::max();
-            int parteMejor = -1;
-
-            // Se prueba parte a parte: en una entidad multi-parte basta que el
-            // cursor caiga cerca de cualquiera de sus trazados, y se recuerda cual.
-            const auto distanciaAParte = [&](const QVector<QGeoCoordinate> &parte) {
-                if (f.kind == GeometryKind::Point) {
-                    if (parte.isEmpty())
-                        return std::numeric_limits<double>::max();
-                    const QPointF c = screenPos(parte.first());
-                    if (!f.style.icon.isNull()) {
-                        // Con icono, el area sensible es TODO el pixmap (anclado),
-                        // no solo la punta: asi se puede agarrar el pin entero.
-                        const double dpr = f.style.icon.devicePixelRatio();
-                        const double w = f.style.icon.width() / (dpr > 0 ? dpr : 1.0);
-                        const double h = f.style.icon.height() / (dpr > 0 ? dpr : 1.0);
-                        const QRectF caja(QPointF(c.x() - f.style.iconAnchor.x() * w,
-                                                  c.y() - f.style.iconAnchor.y() * h),
-                                          QSizeF(w, h));
-                        const double dx = qMax(qMax(caja.left() - p.x(), 0.0), p.x() - caja.right());
-                        const double dy = qMax(qMax(caja.top() - p.y(), 0.0), p.y() - caja.bottom());
-                        return std::hypot(dx, dy);
-                    }
-                    return qMax(0.0, std::hypot(p.x() - c.x(), p.y() - c.y())
-                                         - f.style.pointRadiusPx);
-                }
-                const QPolygonF poly = screenPolygonOf(parte);
-                if (f.isArea() && poly.containsPoint(p, Qt::OddEvenFill))
-                    return 0.0;      // dentro del area cuenta como acierto
-                double dp = std::numeric_limits<double>::max();
-                for (int j = 0; j + 1 < static_cast<int>(poly.size()); ++j)
-                    dp = qMin(dp, distanceToSegment(p, poly[j], poly[j + 1]));
-                if (f.isArea() && poly.size() > 2)
-                    dp = qMin(dp, distanceToSegment(p, poly.last(), poly.first()));
-                return dp;
-            };
-            int indiceParte = 0;
-            for (const QVector<QGeoCoordinate> &parte : f.outlines()) {
-                const double dp = distanciaAParte(parte);
-                if (dp < d) {
-                    d = dp;
-                    parteMejor = indiceParte;
-                }
-                ++indiceParte;
-                if (d <= 0.0)
-                    break;                // un acierto directo no se mejora
-            }
-
-            if (d <= mejorDist) {
-                mejorDist = d;
-                mejor = f.id;
-                mejorParte = f.isMultiPart() ? parteMejor : -1;
-            }
+            int parte = -1;
+            const double d = distanciaAEntidad(f, p, &parte);
+            if (d <= tolerancePx)
+                aciertos.append({d, MapHitFeature{f.id, parte}});
             return true;
         });
-
-        // Si algo se acerto en esta capa, no se sigue bajando.
-        if (mejor >= 0)
+        if (aciertos.isEmpty())
+            continue;
+        // Del ultimo al primero y orden estable por distancia: a igual distancia
+        // queda delante la que se recorrio despues.
+        std::reverse(aciertos.begin(), aciertos.end());
+        std::stable_sort(aciertos.begin(), aciertos.end(),
+                         [](const auto &a, const auto &b) { return a.first < b.first; });
+        for (const auto &a : aciertos)
+            todas.append(a.second);
+        if (soloPrimera)
             break;
     }
+    return todas;
+}
 
+// Entidad "bajo el cursor": id de la entidad seleccionable mas cercana al pixel
+// dentro de la tolerancia, o -1. Recorre de la capa mas alta a la mas baja (lo de
+// arriba gana) y prueba parte a parte; para poligonos, caer DENTRO del area es un
+// acierto directo. En cuanto una capa da un acierto, no baja mas.
+qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
+                               bool incluirNoSeleccionables, int *subIndex) const
+{
+    const QVector<MapHitFeature> v = featuresAt(pixel, tolerancePx, incluirNoSeleccionables, true);
     if (subIndex)
-        *subIndex = mejorParte;
-    return mejor;
+        *subIndex = v.isEmpty() ? -1 : v.first().subIndex;
+    return v.isEmpty() ? -1 : v.first().id;
 }
 
 // Indice del segmento (lado) de una entidad mas cercano al pixel dentro de la

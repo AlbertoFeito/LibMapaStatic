@@ -7631,3 +7631,41 @@ se estimó despreciable, sin medirlo.
 (el cambio de pantalla completo: ida, vuelta, alarmas, sector, anillos, resaltado). 33 tests.
 
 **Estado: hecho y probado en Qt 6; a la espera de la prueba en la app.**
+
+## 189. Varias entidades bajo el clic, seleccionar sin resaltar y caja de los rótulos configurable
+
+Tres peticiones de la misma app, las tres sin cambiar nada por defecto.
+
+**Todas las entidades bajo el cursor (`MapHit::features`).** Con una línea cruzando una zona, o dos
+zonas solapadas, `hitTest` solo daba la de arriba. Se pidió emitir una señal por entidad, pero cada
+`contextMenuRequested` sirve para abrir un menú: N señales serían N menús seguidos. Se emite **una**,
+como siempre, y `MapHit` lleva la lista entera (`QVector<MapHitFeature>`: id y parte), de arriba
+abajo: capa más alta primero y, dentro de cada capa, la más cercana (a igual distancia, la dibujada
+después). `featureId`/`subIndex` siguen siendo la primera. `MapWidget::featuresAt` la da también
+sin clic. `FeatureLayer::featureAt` pasa a ser «la primera de `featuresAt`»: el cálculo de distancia
+se sacó a `distanciaAEntidad` y solo hay una implementación del acierto.
+
+**`MapFeature::highlightWhenSelected`.** Una red de coordenadas o una zona de fondo dibujadas como
+entidades se «encendían» en blanco al tocarlas. `selectable = false` no servía: las hace invisibles
+al ratón (ni menú, ni `elementClicked`). Con `highlightWhenSelected = false` la entidad se
+selecciona igual y se emiten las mismas señales, pero se dibuja como sin seleccionar (sin halo, sin
+tiradores, sin rótulos de extremo). No se persiste, como `draggable`.
+
+**Caja de los rótulos.** El fondo blanco estaba fijo en cada capa. Ahora, por entidad, en
+`FeatureStyle`: `labelBackground` (por defecto el blanco alfa 190 de siempre; alfa 0 = sin fondo),
+`labelBorderColor` + `labelBorderWidth` y `labelHaloColor` + `labelHaloWidth` (sin borde ni halo
+por defecto). Para lo que no es entidad —anillos y marcaciones, cuadrícula, alertas de proximidad—,
+`MapWidget::setLabelBoxStyle(LabelBoxStyle)`, donde un color inválido significa «el de cada capa».
+Todo pasa por `src/widget/LabelPaint.h` (caja + borde + texto con halo). El halo es el contorno del
+texto trazado con un `QPainterPath`, no varias pasadas desplazadas, para que el grosor sea el pedido.
+La caja que usa el ratón (`featureLabelRect`, `labelAt`) no cambia.
+
+**Lo que queda fuera:** los campos nuevos del rótulo **no se guardan** en la BD de entidades (igual
+que `labelColor`, que tampoco se guarda): la app los vuelve a poner al cargar. Siguen con su caja
+fija los rótulos de inicio/fin de ruta, el de la medida en vivo, el del origen del historial y la
+escala gráfica. Las etiquetas de los objetivos móviles ya no tenían caja.
+
+**Tests:** `hitTestListsEveryFeatureUnderTheCursor`, `featureCanBeSelectedWithoutHighlight` y
+`labelBoxIsConfigurable`. 33 tests.
+
+**Estado: hecho y probado en Qt 6; a la espera de la prueba en la app.**

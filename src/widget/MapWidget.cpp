@@ -180,6 +180,8 @@ public:
     //! Cargas de objetivos abiertas (beginTargetLoad): con alguna, las alertas de
     //! zona y de proximidad actualizan su estado pero no se emiten.
     int cargasAbiertas = 0;
+    //! Caja de los rotulos que no son de una entidad (setLabelBoxStyle).
+    LabelBoxStyle cajaRotulos;
     //! Zonas vigiladas cuya entidad esta suspendida (sector de un objetivo que no
     //! esta): no se evaluan mientras tanto y se vuelven a vigilar al reaparecer.
     QSet<qint64> zonasSuspendidas;
@@ -2631,7 +2633,11 @@ MapHit MapWidget::hitTest(const QPoint &pixel) const
     h.clusterTargets = targetClusterAt(pixel);
     // Lo que se puede ELEGIR bajo el cursor (el menu contextual no ofrece acciones
     // sobre una provincia de fondo): sin las capas fijas no seleccionables.
-    h.featureId = d->view ? d->view->featureLayer()->featureAt(pixel, 8.0, false, &h.subIndex) : -1;
+    h.features = d->view->featureLayer()->featuresAt(pixel, 8.0, false);
+    if (!h.features.isEmpty()) {
+        h.featureId = h.features.first().id;
+        h.subIndex = h.features.first().subIndex;
+    }
     if (d->view->rangeLayer())
         h.rangeMarkId = d->view->rangeLayer()->markAt(pixel);
     const qint64 sel = d->view->overlayModel()->selectedId();
@@ -2643,6 +2649,15 @@ MapHit MapWidget::hitTest(const QPoint &pixel) const
         }
     }
     return h;
+}
+
+// Todas las entidades bajo el pixel, de arriba abajo. Como hitTest: solo lo que se
+// puede elegir (sin las capas fijas no seleccionables).
+QVector<MapHitFeature> MapWidget::featuresAt(const QPoint &pixel, double tolerancePx) const
+{
+    d->syncGeometry();
+    return d->view ? d->view->featureLayer()->featuresAt(pixel, tolerancePx, false)
+                   : QVector<MapHitFeature>();
 }
 
 // Como featureAt, y ademas dice que parte de la entidad esta bajo el pixel.
@@ -3499,6 +3514,28 @@ void MapWidget::setGraticuleVisible(bool on)
 bool MapWidget::isGraticuleVisible() const
 {
     return d->view && d->view->graticuleLayer() && d->view->graticuleLayer()->visible();
+}
+
+// Fija la caja (fondo, borde, halo) de los rotulos que no son de una entidad y la
+// reparte a las capas que rotulan: anillos y marcaciones, cuadricula y proximidad.
+void MapWidget::setLabelBoxStyle(const LabelBoxStyle &style)
+{
+    d->cajaRotulos = style;
+    if (!d->view)
+        return;
+    if (d->view->rangeLayer())
+        d->view->rangeLayer()->setLabelBoxStyle(style);
+    if (d->view->graticuleLayer())
+        d->view->graticuleLayer()->setLabelBoxStyle(style);
+    if (d->view->targetLayer())
+        d->view->targetLayer()->setLabelBoxStyle(style);
+    d->view->replot(QCustomPlot::rpQueuedReplot);
+}
+
+// Caja de los rotulos que no son de una entidad.
+LabelBoxStyle MapWidget::labelBoxStyle() const
+{
+    return d->cajaRotulos;
 }
 
 // Color de lineas y rotulos de la cuadricula, y repinta.
