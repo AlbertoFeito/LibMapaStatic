@@ -97,6 +97,16 @@ public:
     void setSelectedTarget(qint64 id);
     qint64 selectedTarget() const { return m_selectedTarget; }
 
+    /*!
+     * \brief Prepara los circulos y sectores con dueno para un borrado de TODOS los
+     *        objetivos (lo llama MapWidget::clearTargets justo antes de vaciar el modelo).
+     *
+     * Con \a conservar true los que cuelgan de un objetivo quedan SUSPENDIDOS (no se
+     * ven ni se pinchan) y reaparecen cuando vuelva un objetivo con ese id. Con false
+     * se levantan las suspensiones que hubiera, para que se quiten como siempre.
+     */
+    void suspenderDuenos(bool conservar);
+
     //! Formulario de objetivo AGARRADO (-1 = ninguno). Independiente del objetivo
     //! resaltado: solo dura lo que dura el boton pulsado sobre el formulario.
     void setTargetLabelSelected(qint64 id);

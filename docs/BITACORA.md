@@ -7578,3 +7578,56 @@ arrastran includes que 5.14 no: por eso `QStringList` y `QDebug` (#186) pasaron 
 primera ejecución real es la del PR. Los comandos son los mismos que se comprobaron a mano en #186.
 
 **Estado: CI y documentación; no cambia código de la librería.**
+
+## 188. Cambio de pantalla de objetivos: historia sembrada, carga silenciosa y sectores suspendidos
+
+Una app muestra varias «informaciones» de objetivos, una cada vez, sobre la misma capa. Al cambiar
+de pantalla borra los objetivos y carga los de la otra. Hecho con `clearTargets()` + `addTarget()`
+tal cual, eso tenía cuatro problemas, y los cuatro se arreglan aquí sin cambiar nada por defecto.
+
+**El resaltado sobrevivía al borrado.** `clearTargets()` y `removeTarget()` no tocaban el objetivo
+resaltado ni el formulario agarrado: si la pantalla nueva reutilizaba ese id, el objetivo nuevo
+aparecía ya con halo, etiqueta forzada e historial. Ahora los dos quitan el resaltado (y emiten
+`targetSelectionChanged` / `targetLabelSelectionChanged`).
+
+**La historia se perdía.** La trayectoria vive en `TargetModel::Entry` y se va con el objetivo. La
+app guarda la suya (`targetHistory`) y la devuelve al volver: `addTarget(target, historia)` o
+`setTargetHistory(id, historia)`, con `QVector<TargetTrackPoint>` (posición **y hora**: sin hora no
+hay marca de origen, ni velocidad estimada, ni GPX con tiempos). La siembra **no pasa por
+`anotarHistoria`**: esos puntos ya los filtró quien los guardó, y la distancia mínima los recortaría
+otra vez. Si superan `setTargetHistoryLimit` se aclaran una sola vez. La traza dibujada se rehace
+con el final de la historia, y si el último punto no es la posición actual, esta la cierra.
+`updateTarget` no cambia: sigue siendo O(1). La firma de `addTarget` de siempre tampoco.
+
+**Las alarmas se repetían.** `clearTargets()` es silencioso, pero cada `addTarget` evalúa zonas y
+proximidad: los objetivos que ya estaban dentro de una zona volvían a emitir `targetEnteredZone` en
+cada cambio de pantalla. `beginTargetLoad()` / `endTargetLoad()` (anidables) abren una **carga
+silenciosa**: el estado se actualiza (quién está en cada zona, pares en alerta, resaltado, líneas
+CPA) pero no se emite ninguna señal de alerta. Al cerrar, `targetsInZone` dice la verdad y las
+transiciones siguientes suenan con normalidad.
+
+**Los sectores y círculos del objetivo se borraban para siempre.** `sincronizaDuenos` quita el que
+se queda sin objetivo. Con `clearTargets(true)` quedan **suspendidos**: siguen en el modelo, pero no
+se dibujan, no se pueden pinchar (`featureAt`, `labelAt`, `hitTest`) y, si eran zona vigilada, dejan
+de evaluarse; cuando vuelve un objetivo con ese id reaparecen sobre él y la zona se vuelve a
+vigilar. La suspensión es un filtro de vista del `OverlayModel` (`setFeatureSuspended`, como
+`setTypeVisible`): no se guarda ni se deshace, y no toca `MapFeature::visible`. `removeTarget(id)`
+sigue borrando los suyos (ese objetivo dejó de existir, no ha cambiado de pantalla), y un
+`clearTargets()` sin conservar se lleva también lo suspendido. Los ids de objetivo deben ser únicos
+entre pantallas. Los anillos y marcaciones con `targetId` ya se conservaban solos (no resuelven
+posición mientras falta el objetivo y vuelven con él); ahora lo comprueba un test.
+
+    mapa->beginTargetLoad();
+    mapa->clearTargets(true);
+    for (...) mapa->addTarget(objetivo, historiaGuardada);
+    mapa->endTargetLoad();
+
+**Lo que NO hace:** mientras una pantalla está oculta sus objetivos no están en la librería, así
+que no se vigilan sus zonas ni su proximidad (decisión aceptada). Tampoco se añadió un reemplazo en
+bloque (`setTargets`): con hasta 1000 objetivos y 150 entidades el coste de `addTarget` uno a uno
+se estimó despreciable, sin medirlo.
+
+**Tests:** `seededHistoryReplacesAndFeedsTrail` (modelo) y `screenSwitchReloadsTargetsSilently`
+(el cambio de pantalla completo: ida, vuelta, alarmas, sector, anillos, resaltado). 33 tests.
+
+**Estado: hecho y probado en Qt 6; a la espera de la prueba en la app.**

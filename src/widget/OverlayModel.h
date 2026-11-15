@@ -86,6 +86,23 @@ public:
     QStringList hiddenTypes() const { return QStringList(m_tiposOcultos.constBegin(), m_tiposOcultos.constEnd()); }
     void clear();
 
+    /*!
+     * \brief Suspende una entidad (o la devuelve): sigue en el modelo pero no se ve.
+     *
+     * Es un FILTRO DE VISTA, como \ref setTypeVisible: no se guarda ni se deshace, y
+     * no toca MapFeature::visible. Lo usa el cambio de pantalla de objetivos para
+     * conservar los circulos y sectores cuyo objetivo no esta (MapView::sincronizaDuenos).
+     * Si estaba seleccionada, deja de estarlo. false si no existe o ya estaba asi.
+     */
+    bool setFeatureSuspended(qint64 id, bool suspended);
+    bool isFeatureSuspended(qint64 id) const { return m_suspendidas.contains(id); }
+    //! ¿Se muestra? Ni su tipo esta oculto ni ella suspendida. NO mira
+    //! MapFeature::visible ni la capa: eso lo comprueba quien dibuja.
+    bool isFeatureShown(const MapFeature &f) const
+    {
+        return !m_tiposOcultos.contains(f.type) && !m_suspendidas.contains(f.id);
+    }
+
     std::optional<MapFeature> feature(qint64 id) const;
     QVector<MapFeature> features() const;
     QVector<MapFeature> featuresInLayer(const QString &layerId) const;
@@ -180,6 +197,8 @@ signals:
     void featureRemoved(qint64 id);
     void selectionChanged(qint64 id);
     void layersChanged();
+    //! Una entidad paso a estar suspendida o dejo de estarlo (\ref setFeatureSuspended).
+    void featureSuspendedChanged(qint64 id, bool suspended);
 
 private:
     QHash<qint64, MapFeature> m_features;
@@ -211,6 +230,7 @@ private:
     int m_maxUndo = 50;
     QSet<QString> m_sinDeshacer;   //!< Capas fuera de deshacer/rehacer.
     QSet<QString> m_tiposOcultos;  //!< Tipos ocultos por el filtro de vista.
+    QSet<qint64> m_suspendidas;    //!< Entidades suspendidas (existen, no se ven).
 };
 
 } // namespace libmapa

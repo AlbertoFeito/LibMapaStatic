@@ -238,7 +238,7 @@ void FeatureLayer::draw(QCPPainter *painter)
         if (zoomActual >= 0 && !capaVisibleAZoom(capa, zoomActual))
             continue;               // capa de detalle fuera de su rango de zoom
         m_model->forEachInLayer(capa.id, [&](const MapFeature &f) {
-            if (!f.visible || !m_model->isTypeVisible(f.type)
+            if (!f.visible || !m_model->isFeatureShown(f)
                 || !featureInView(f, visible))
                 return true;        // oculta o fuera de pantalla: ni se proyecta
             drawFeature(&p, f, f.id == m_model->selectedId());
@@ -755,7 +755,7 @@ QRectF FeatureLayer::partLabelRectOf(qint64 id, int part) const
     if (!m_model || !m_toAxis || !parentPlot())
         return QRectF();
     const std::optional<MapFeature> f = m_model->feature(id);
-    if (!f || !f->style.labelVisible || !m_model->isTypeVisible(f->type))
+    if (!f || !f->style.labelVisible || !m_model->isFeatureShown(*f))
         return QRectF();
     const QFontMetricsF fm(labelFontFor(*f, parentPlot()->font()));
     return partLabelBox(*f, part, fm);
@@ -804,7 +804,7 @@ void FeatureLayer::drawLabels(QPainter *painter) const
             continue;
         m_model->forEachInLayer(capa.id, [&](const MapFeature &f) {
             if (!f.style.labelVisible || !f.visible
-                || !m_model->isTypeVisible(f.type) || !featureInView(f, visible))
+                || !m_model->isFeatureShown(f) || !featureInView(f, visible))
                 return true;
             if (!f.name.isEmpty()) {
                 const QPointF base = labelAnchorScreen(f);
@@ -904,7 +904,7 @@ qint64 FeatureLayer::labelAt(const QPoint &pixel) const
         qint64 acierto = -1;
         m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
             if (!f.visible || !f.selectable || !f.style.labelVisible || f.name.isEmpty()
-                || !m_model->isTypeVisible(f.type))
+                || !m_model->isFeatureShown(f))
                 return true;
             const QPointF base = labelAnchorScreen(f);
             if (base.isNull())
@@ -972,7 +972,7 @@ qint64 FeatureLayer::featureAt(const QPoint &pixel, double tolerancePx,
             continue;               // capa fija del paquete: no se elige con el raton
 
         m_model->forEachInLayer(capas[i].id, [&](const MapFeature &f) {
-            if (!f.visible || !f.selectable || !m_model->isTypeVisible(f.type))
+            if (!f.visible || !f.selectable || !m_model->isFeatureShown(f))
                 return true;
             if (!featureInView(f, vista_))
                 return true;            // fuera de pantalla: no hace falta probar

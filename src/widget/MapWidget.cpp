@@ -177,6 +177,12 @@ public:
     // Alertas de proximidad (CPA/TCPA). La logica vive en ProximityMonitor; solo
     // se le pasan objetivos mientras las alertas esten activas (coste cero si no).
     ProximityMonitor proximity;
+    //! Cargas de objetivos abiertas (beginTargetLoad): con alguna, las alertas de
+    //! zona y de proximidad actualizan su estado pero no se emiten.
+    int cargasAbiertas = 0;
+    //! Zonas vigiladas cuya entidad esta suspendida (sector de un objetivo que no
+    //! esta): no se evaluan mientras tanto y se vuelven a vigilar al reaparecer.
+    QSet<qint64> zonasSuspendidas;
     // Velocidad (m/s) y rumbo dados por la app; mandan sobre la estima por traza.
     QHash<qint64, QPair<double, double>> reportedVelocity;
     bool proximityLines = true;
@@ -329,6 +335,8 @@ public:
     void emitProximityTransitions(const QVector<ProximityMonitor::Transition> &cambios)
     {
         refreshProximityLines();
+        if (cargasAbiertas > 0)
+            return;                 // carga silenciosa: estado al dia, sin senales
         for (const ProximityMonitor::Transition &t : cambios) {
             if (t.raised)
                 emit q->proximityAlertRaised(t.a, t.b, t.cpa.distanceMeters, t.cpa.timeSeconds);
@@ -380,6 +388,8 @@ public:
         if (hayFiltro && filtro.onlyInWatchedZones)
             for (const ZoneMonitor::Transition &t : cambios)
                 syncFiltro(t.targetId);
+        if (cargasAbiertas > 0)
+            return;                 // carga silenciosa: estado al dia, sin senales
         for (const ZoneMonitor::Transition &t : cambios) {
             if (t.entered)
                 emit q->targetEnteredZone(t.targetId, t.zoneId);
@@ -393,6 +403,8 @@ public:
     {
         if (!cambios.isEmpty())
             refreshAlerts();
+        if (cargasAbiertas > 0)
+            return;                 // carga silenciosa (una zona que reaparece)
         for (const ZoneMonitor::Transition &t : cambios) {
             if (t.entered)
                 emit q->featureEnteredZone(t.targetId, t.zoneId);
@@ -736,7 +748,19 @@ MapWidget::MapWidget(const MapConfig &config, QWidget *parent)
         d->syncPoint(id);
         d->syncZone(id);
     });
+    // Una entidad suspendida (sector cuyo objetivo no esta) no es zona mientras no
+    // se ve: se deja de vigilar en silencio y se repone al volver.
+    connect(modelo, &OverlayModel::featureSuspendedChanged, this,
+            [this](qint64 id, bool suspendida) {
+        if (suspendida) {
+            if (d->dropZone(id))
+                d->zonasSuspendidas.insert(id);
+        } else if (d->zonasSuspendidas.remove(id)) {
+            watchZone(id);
+        }
+    });
     connect(modelo, &OverlayModel::featureRemoved, this, [this](qint64 id) {
+        d->zonasSuspendidas.remove(id);
         d->dropZone(id);
         d->pointZones.removeTarget(id);
         d->refreshAlerts();
@@ -1926,6 +1950,51 @@ qint64 MapWidget::addTarget(const MapTarget &target, const QDateTime &time)
     return id;
 }
 
+// Alta de un objetivo con su trayectoria ya recorrida: el alta de siempre (con la
+// hora del ultimo punto, para que la ultima actualizacion sea esa y no "ahora") y
+// despues el historial que guardo la app.
+qint64 MapWidget::addTarget(const MapTarget &target, const QVector<TargetTrackPoint> &history)
+{
+    QDateTime hora;
+    for (auto it = history.crbegin(); it != history.crend() && !hora.isValid(); ++it)
+        if (it->isValid() && it->time.isValid())
+            hora = it->time;
+    const qint64 id = addTarget(target, hora);
+    if (id >= 0 && !history.isEmpty())
+        setTargetHistory(id, history);
+    return id;
+}
+
+// Sustituye el historial de un objetivo. La velocidad estimada sale del historial,
+// asi que se vuelven a evaluar la proximidad y el filtro.
+bool MapWidget::setTargetHistory(qint64 id, const QVector<TargetTrackPoint> &history)
+{
+    if (!d->view || !d->view->targetModel()->setHistory(id, history))
+        return false;
+    d->syncProximity(id);
+    d->syncFiltro(id);
+    return true;
+}
+
+// Abre una carga de objetivos: las alertas de zona y proximidad dejan de emitirse.
+void MapWidget::beginTargetLoad()
+{
+    ++d->cargasAbiertas;
+}
+
+// Cierra una carga de objetivos; con la ultima, las alertas vuelven a emitirse.
+void MapWidget::endTargetLoad()
+{
+    if (d->cargasAbiertas > 0)
+        --d->cargasAbiertas;
+}
+
+// Dice si hay una carga de objetivos abierta.
+bool MapWidget::isLoadingTargets() const
+{
+    return d->cargasAbiertas > 0;
+}
+
 // Mueve un objetivo a una nueva posicion/rumbo (camino rapido de refresco).
 bool MapWidget::updateTarget(qint64 id, const QGeoCoordinate &position,
                              double headingDeg, const QDateTime &time)
@@ -2103,11 +2172,21 @@ bool MapWidget::removeTarget(qint64 id)
     d->refreshProximityLines();
     if (d->fueraDeFiltro.remove(id) && d->view)
         d->view->targetLayer()->setFilteredOut(d->fueraDeFiltro, d->filtro.dim);
-    return d->view && d->view->targetModel()->remove(id);
+    if (!d->view)
+        return false;
+    // El resaltado y el formulario agarrado no sobreviven a su objetivo: si no, un
+    // objetivo nuevo con el mismo id apareceria ya resaltado.
+    if (d->view->selectedTarget() == id)
+        d->view->setSelectedTarget(-1);
+    if (d->view->targetLabelSelected() == id)
+        d->view->setTargetLabelSelected(-1);
+    return d->view->targetModel()->remove(id);
 }
 
-// Elimina todos los objetivos (las zonas vigiladas quedan vacias, sin salidas).
-void MapWidget::clearTargets()
+// Elimina todos los objetivos (las zonas vigiladas quedan vacias, sin salidas) y
+// quita el resaltado. Con keepOwnedFeatures los circulos y sectores con dueno en un
+// objetivo quedan suspendidos en vez de borrarse (ver MapView::sincronizaDuenos).
+void MapWidget::clearTargets(bool keepOwnedFeatures)
 {
     d->zones.clearTargets();
     d->refreshAlerts();
@@ -2115,10 +2194,13 @@ void MapWidget::clearTargets()
     d->reportedVelocity.clear();
     d->refreshProximityLines();
     d->fueraDeFiltro.clear();
-    if (d->view)
-        d->view->targetLayer()->setFilteredOut(d->fueraDeFiltro, d->filtro.dim);
-    if (d->view)
-        d->view->targetModel()->clear();
+    if (!d->view)
+        return;
+    d->view->targetLayer()->setFilteredOut(d->fueraDeFiltro, d->filtro.dim);
+    d->view->setSelectedTarget(-1);
+    d->view->setTargetLabelSelected(-1);
+    d->view->suspenderDuenos(keepOwnedFeatures);
+    d->view->targetModel()->clear();
 }
 
 // Un objetivo por id (nullopt si no existe).

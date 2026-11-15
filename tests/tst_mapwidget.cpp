@@ -180,6 +180,9 @@ private slots:
     void rangeLabelsAreSoftHighlightOnHoverAndHideable();
     //! Un sector con dueno sigue a su objetivo, se va con el y sigue a una entidad que se mueve.
     void sectorFollowsItsOwner();
+    //! Cambio de pantalla: limpiar quita el resaltado, la carga es silenciosa, la
+    //! historia vuelve con sus horas y los sectores y anillos del objetivo reaparecen.
+    void screenSwitchReloadsTargetsSilently();
     //! Un «area objetivo» (polígono con labelAnchorVertex=0) cuelga la etiqueta
     //! del PRIMER vértice, no del centro.
     void areaLabelHangsFromFirstVertex();
@@ -6448,6 +6451,123 @@ void TstMapWidget::sectorFollowsItsOwner()
     QVERIFY(w.feature(idC)->geometry.first().distanceTo(QGeoCoordinate(21.5, -79.5)) < 1.0);
     QVERIFY(w.removeFeature(idP));
     QVERIFY(!w.feature(idC).has_value());
+}
+
+// Cambio de pantalla de objetivos, de principio a fin: la app guarda la historia, limpia
+// conservando lo que cuelga de los objetivos, carga otra informacion y vuelve.
+void TstMapWidget::screenSwitchReloadsTargetsSilently()
+{
+    MapWidget w(baseConfig(m_jsonPath));
+    QVERIFY(w.isReady());
+    w.resize(800, 600);
+    w.setCenter(QGeoCoordinate(22.0, -80.0));
+
+    MapFeature zona;
+    zona.kind = GeometryKind::Polygon;
+    zona.geometry = { QGeoCoordinate(21.5, -80.5), QGeoCoordinate(22.5, -80.5),
+                      QGeoCoordinate(22.5, -79.5), QGeoCoordinate(21.5, -79.5) };
+    const qint64 zonaId = w.addFeature(zona);
+    QVERIFY(w.watchZone(zonaId));
+
+    QSignalSpy entra(&w, &MapWidget::targetEnteredZone);
+    QSignalSpy sale(&w, &MapWidget::targetLeftZone);
+    QSignalSpy seleccion(&w, &MapWidget::targetSelectionChanged);
+
+    const QDateTime t0 = QDateTime::fromMSecsSinceEpoch(1700000000000LL).toUTC();
+    MapTarget t;
+    t.id = 500;
+    t.position = QGeoCoordinate(22.0, -80.0);            // dentro de la zona
+    QCOMPARE(w.addTarget(t, t0), qint64(500));
+    QVERIFY(w.updateTarget(500, QGeoCoordinate(22.01, -80.0), 0.0, t0.addSecs(60)));
+    QVERIFY(w.updateTarget(500, QGeoCoordinate(22.02, -80.0), 0.0, t0.addSecs(120)));
+    QCOMPARE(entra.count(), 1);
+
+    MapFeature s;
+    s.kind = GeometryKind::Arc;
+    s.geometry = { QGeoCoordinate(0.0, 0.0) };
+    s.radiusMeters = 20000.0;
+    s.arcEndDeg = 90.0;
+    s.arcSector = true;
+    s.originTargetId = 500;
+    const qint64 idS = w.addFeature(s);
+    QVERIFY(idS > 0);
+    RangeRings r;
+    r.targetId = 500;
+    r.spacingMeters = 1852.0;
+    r.count = 3;
+    const qint64 anillos = w.addRangeRings(r);
+    QVERIFY(anillos > 0);
+
+    w.setSelectedTarget(500);
+    QCOMPARE(w.selectedTarget(), qint64(500));
+
+    // La app guarda lo suyo antes de cambiar de pantalla.
+    const MapTarget guardado = *w.target(500);
+    const QVector<TargetTrackPoint> historia = w.targetHistory(500);
+    QCOMPARE(historia.size(), 3);
+
+    // --- Pantalla B ----------------------------------------------------------
+    w.beginTargetLoad();
+    QVERIFY(w.isLoadingTargets());
+    w.clearTargets(true);
+    QCOMPARE(w.targetCount(), 0);
+    QCOMPARE(w.selectedTarget(), qint64(-1));            // el resaltado no sobrevive
+    QCOMPARE(seleccion.last().at(0).toLongLong(), qint64(-1));
+    QVERIFY2(w.feature(idS).has_value(), "el sector queda suspendido, no borrado");
+    // Suspendido no se puede pinchar: en su sitio solo queda la zona.
+    const QPoint centro(400, 300);
+    QCOMPARE(w.hitTest(centro).featureId, zonaId);
+
+    MapTarget otro;
+    otro.id = 900;
+    otro.position = QGeoCoordinate(22.2, -80.2);         // tambien dentro de la zona
+    QCOMPARE(w.addTarget(otro), qint64(900));
+    w.endTargetLoad();
+    QCOMPARE(entra.count(), 1);                          // la carga no dio la alarma...
+    QCOMPARE(w.targetsInZone(zonaId), QVector<qint64>({900}));   // ...pero el estado es cierto
+    QVERIFY(w.feature(idS).has_value());
+
+    // --- Vuelta a la pantalla A ----------------------------------------------
+    w.beginTargetLoad();
+    w.clearTargets(true);
+    QCOMPARE(w.addTarget(guardado, historia), qint64(500));
+    w.endTargetLoad();
+    QCOMPARE(entra.count(), 1);
+    QCOMPARE(sale.count(), 0);
+    QCOMPARE(w.targetsInZone(zonaId), QVector<qint64>({500}));
+
+    const QVector<TargetTrackPoint> vuelta = w.targetHistory(500);
+    QCOMPARE(vuelta.size(), 3);
+    QCOMPARE(vuelta.first().time, t0);
+    QCOMPARE(w.targetOrigin(500).time, t0);
+    QCOMPARE(vuelta.last().time, t0.addSecs(120));
+
+    // El sector reaparece sobre su objetivo y vuelve a poderse pinchar; los anillos siguen.
+    QVERIFY(w.feature(idS).has_value());
+    QVERIFY(w.feature(idS)->geometry.first().distanceTo(guardado.position) < 1.0);
+    w.setCenter(guardado.position.atDistanceAndAzimuth(8000.0, 45.0));   // dentro de la cuna
+    QCOMPARE(w.hitTest(centro).featureId, idS);
+    QVERIFY(w.rangeRings(anillos).has_value());
+    QCOMPARE(w.rangeRings(anillos)->targetId, qint64(500));
+
+    // Fuera de la carga, las alertas vuelven a sonar.
+    QVERIFY(w.updateTarget(500, QGeoCoordinate(25.0, -80.0)));
+    QCOMPARE(sale.count(), 1);
+
+    // Quitar el objetivo resaltado quita tambien el resaltado y su sector.
+    w.setSelectedTarget(500);
+    QVERIFY(w.removeTarget(500));
+    QCOMPARE(w.selectedTarget(), qint64(-1));
+    QVERIFY(!w.feature(idS).has_value());
+
+    // Limpiar SIN conservar se lleva tambien lo que estaba suspendido.
+    QCOMPARE(w.addTarget(guardado), qint64(500));
+    s.originTargetId = 500;
+    const qint64 idS2 = w.addFeature(s);
+    w.clearTargets(true);
+    QVERIFY(w.feature(idS2).has_value());
+    w.clearTargets();
+    QVERIFY(!w.feature(idS2).has_value());
 }
 
 QTEST_MAIN(TstMapWidget)
