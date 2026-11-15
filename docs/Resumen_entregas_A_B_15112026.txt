@@ -143,3 +143,25 @@ cabecera nueva (src/widget/LabelPaint.h), así que hay que recompilar todo:
      (con C:/Qt/6.11.2/mingw_64/bin y C:/Qt/Tools/mingw1310_64/bin en el PATH).
 
 QCustomPlot no cambia: la copia de third_party/qcustomplot sigue sirviendo.
+
+
+EJEMPLO PARA PROBARLO A OJO: examples/cambio_pantalla
+-----------------------------------------------------
+(añadido el 15-11-2026, después de emitir este resumen)
+
+Una ventana con el mapa y un panel para tocar todo lo de las dos entregas, sin
+usar la app real. Qué probar, paso a paso: examples/cambio_pantalla/README.md
+
+Se compila contra la librería INSTALADA, como los demás ejemplos:
+
+  1. Instalar la librería (desde su carpeta de build):
+       cmake --install . --prefix C:/libmapa
+  2. Compilar los ejemplos:
+       cmake -S examples -B build-examples -DCMAKE_PREFIX_PATH="C:/libmapa;C:/Qt/6.11.2/mingw_64"
+       cmake --build build-examples
+     (o abrir examples/cambio_pantalla/cambio_pantalla.pro en Qt Creator)
+  3. Lanzarlo con vuestro paquete de datos:
+       cambio_pantalla.exe <carpeta del paquete de datos>
+     Sin ventana, solo para comprobar (sale con 0 si todo está bien):
+       cambio_pantalla.exe <carpeta del paquete de datos> --comprobar
+

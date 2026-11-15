@@ -7669,3 +7669,31 @@ escala gráfica. Las etiquetas de los objetivos móviles ya no tenían caja.
 `labelBoxIsConfigurable`. 33 tests.
 
 **Estado: hecho y probado en Qt 6; a la espera de la prueba en la app.**
+
+## 190. Ejemplo `cambio_pantalla`: probar a ojo el cambio de pantalla, el clic y los rótulos
+
+Lo de #188 y #189 tenía tests, pero nada donde verlo y tocarlo sin la app real. `examples/cambio_pantalla`
+es ese banco de pruebas, con el patrón de los otros laboratorios (contra la librería instalada,
+`--comprobar` y `--captura=`).
+
+**Hace de app, no de demo.** Guarda dos informaciones de objetivos (A y B) en su propio almacén
+—posición e historia con hora— y las mueve **las dos** con un reloj simulado, se vea la que se vea;
+al mapa solo va la visible. Cambiar de pantalla es la secuencia recomendada, y tres casillas quitan
+cada pieza (carga silenciosa, conservar sectores, devolver la historia) para ver en el contador de
+alarmas y en el registro qué arregla cada una. Así se comprueba también lo que el test no cubría: la
+historia vuelve con lo recorrido **mientras la pantalla estaba oculta**.
+
+El resto del panel: el menú del clic derecho con un submenú por entidad de `MapHit::features`, una
+red de líneas con `highlightWhenSelected` conmutable y los controles de fondo, borde y halo.
+
+**`--comprobar`** hace el viaje de ida y vuelta y verifica historia, origen, alarmas (cero con carga
+silenciosa, más de cero sin ella), sector, anillos y resaltado; las tres entidades del cruce; la
+selección sin resaltado y que quitar la caja del rótulo no mueve la que usa el ratón. Como el API
+público no da el píxel de una coordenada, lo interpola con `hitTest` entre dos puntos de la vista: el
+paquete de prueba de `probar_instalacion.sh` no pasa de zoom 2 y la vista no se centra donde se pide.
+Con ese paquete no se exige el orden exacto del cruce (todo cabe en unos píxeles); se comprobó aparte
+con un paquete declarado hasta zoom 12.
+
+`probar_instalacion.sh` lo compila y lo ejecuta con los demás. 33 tests, sin cambios en la librería.
+
+**Estado: hecho; el uso con ratón queda para la prueba en Windows.**
